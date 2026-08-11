@@ -292,8 +292,17 @@ def load_properties(root: str, max_files: int = 200) -> dict:
     return props
 
 
+# Languages the code-assisted lane can analyse. THE GATE IS THE CAPABILITY: this walker used to
+# read `if not fn.endswith(".java"): continue`, which meant the detector behind it -- measured at
+# 100% TPR / 0% FPR on crypto, hash and weakrand -- contributed exactly nothing to a Python
+# codebase, where the same three classes are 41.8% of the OWASP Benchmark Python suite and scored
+# 0.0%. A language gate on a language-independent analysis is a capability thrown away by an
+# extension check. Adding a language is a row here plus its rules in codereview.
+_SOURCE_EXTS = (".java", ".py", ".pyw")
+
+
 def review_source_tree(root: str, max_file_bytes: int = 2_000_000) -> dict:
-    """CODE-ASSISTED (SAST) review of an operator-supplied Java source tree.
+    """CODE-ASSISTED (SAST) review of an operator-supplied source tree (Java and Python).
 
     Returns findings that are all `provenance: source-derived`. THIS IS NOT A DAST RESULT and the
     number it produces may never be folded into one or compared against a published DAST score.
@@ -311,7 +320,7 @@ def review_source_tree(root: str, max_file_bytes: int = 2_000_000) -> dict:
     for dirpath, dirnames, filenames in os.walk(root):
         dirnames[:] = [d for d in dirnames if d not in _SKIP_DIRS]
         for fn in filenames:
-            if not fn.endswith(".java"):
+            if not fn.endswith(_SOURCE_EXTS):
                 continue
             fp = os.path.join(dirpath, fn)
             rel = os.path.relpath(fp, root).replace("\\", "/")
@@ -323,7 +332,7 @@ def review_source_tree(root: str, max_file_bytes: int = 2_000_000) -> dict:
             except Exception:
                 continue
             files.append(rel)
-            for f in cr.review_java(text, rel, props):
+            for f in cr.review_source(text, rel, props):
                 f["file"] = rel
                 findings.append(f)
     by_cwe, by_file = {}, {}

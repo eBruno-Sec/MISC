@@ -276,7 +276,25 @@ _IDENT = re.compile(r"[A-Za-z_$][A-Za-z0-9_$]*")
 _GETPROP = re.compile(r"\.\s*get(?:Property|String)\s*\(")
 
 
-def _expr_values(text: str, skel: str, lits: dict, s: int, e: int, props, depth: int = 0) -> list:
+class _Dialect(object):
+    """The two things value-resolution needs from a language, and the only two.
+
+    Everything else in this section — masking, argument spans, literal recovery — is already shared,
+    because the DISCIPLINE is shared: match structure against a skeleton, read a literal back only
+    from an argument position. What differs per language is where externalized configuration is
+    fetched from and where a statement ends (`;` in Java, a newline in Python).
+    """
+    __slots__ = ("getprop", "stmt_end")
+
+    def __init__(self, getprop, stmt_end):
+        self.getprop, self.stmt_end = getprop, stmt_end
+
+
+_JAVA_DIALECT = _Dialect(_GETPROP, _stmt_end)
+
+
+def _expr_values(text: str, skel: str, lits: dict, s: int, e: int, props, depth: int = 0,
+                 dialect=None) -> list:
     """Strings an expression can evaluate to, as [(value, origin)].
 
     Three shapes, in order of authority:
@@ -286,7 +304,8 @@ def _expr_values(text: str, skel: str, lits: dict, s: int, e: int, props, depth:
     """
     if depth > 3:
         return []
-    gp = _GETPROP.search(skel, s, e)
+    dialect = dialect or _JAVA_DIALECT
+    gp = dialect.getprop.search(skel, s, e)
     if gp:
         gs, ge = _arg_span(skel, gp.end() - 1)
         parts = _split_args(skel, gs, ge)
@@ -304,21 +323,23 @@ def _expr_values(text: str, skel: str, lits: dict, s: int, e: int, props, depth:
         return inline
     name = skel[s:e].strip()
     if _IDENT.fullmatch(name):
-        return _var_values(name, text, skel, lits, props, depth + 1)
+        return _var_values(name, text, skel, lits, props, depth + 1, dialect)
     return []
 
 
-def _var_values(name: str, text: str, skel: str, lits: dict, props, depth: int = 0) -> list:
+def _var_values(name: str, text: str, skel: str, lits: dict, props, depth: int = 0,
+                dialect=None) -> list:
     """Values assigned to a local anywhere in the file. Flow-insensitive on purpose: a single
     analysis pass over one file, no CFG. Every assignment is a candidate, which is the conservative
     reading and the one that does not miss."""
     if depth > 3:
         return []
+    dialect = dialect or _JAVA_DIALECT
     out = []
     rx = re.compile(r"(?<![\w.$])" + re.escape(name) + r"\s*=(?!=)")
     for m in rx.finditer(skel):
         st = m.end()
-        out += _expr_values(text, skel, lits, st, _stmt_end(skel, st), props, depth)
+        out += _expr_values(text, skel, lits, st, dialect.stmt_end(skel, st), props, depth, dialect)
     seen, uniq = set(), []
     for v, origin in out:
         if v not in seen:
@@ -615,6 +636,557 @@ def review_java(text: str, source: str, props: dict = None) -> list:
     return out
 
 
+# ══════════════════════════════════════════════════════════════════════════════════════════════
+# PYTHON — the same call-site discipline, a different set of traps
+# ══════════════════════════════════════════════════════════════════════════════════════════════
+# The rules above are Java's. NOTHING here changes them: they measure 100% TPR / 0% FPR on the
+# suite's crypto, hash and weakrand categories and the whole point of this section is that a
+# second language costs the first one nothing.
+#
+# Python moves every trap. `//` is FLOOR DIVISION, not a comment, and carrying the C-family masker
+# over blanks the rest of any line containing an integer division — then reports a clean file. `#`
+# starts a comment. A docstring is a multi-line string literal. An f-string is half literal and
+# half CODE, so blanking it whole hides real call sites and keeping it whole reads prose as code.
+#
+# And the single most important discriminator in the Python suite is a RECEIVER, not a name:
+#
+#     random.getrandbits(32)                  <- predictable, CWE-330
+#     random.SystemRandom().getrandbits(32)   <- reads os.urandom, a CSPRNG
+#
+# Same module, same method name, opposite verdict. 113 of the suite's 326 weakrand cases are the
+# second line; a rule that matches on the METHOD reports every one of them as vulnerable. That is
+# the Python twin of `java.util.Random numGen = SecureRandom.getInstance("SHA1PRNG")`, and it is
+# why this lane matches a qualified call and not an identifier.
+
+_PY_STR_PREFIX = set("rbufRBUF")
+
+
+def _py_unescape(raw: str, is_raw: bool) -> str:
+    """Python escapes inside a literal. A raw string has none: `r"\\d"` is two characters."""
+    if is_raw or "\\" not in raw:
+        return raw
+    out, i, n = [], 0, len(raw)
+    while i < n:
+        if raw[i] != "\\" or i + 1 >= n:
+            out.append(raw[i]); i += 1; continue
+        c = raw[i + 1]
+        if c in ("x", "u", "U"):
+            width = {"x": 2, "u": 4, "U": 8}[c]
+            hexs = raw[i + 2:i + 2 + width]
+            if len(hexs) == width and all(h in "0123456789abcdefABCDEF" for h in hexs):
+                try:
+                    out.append(chr(int(hexs, 16)))
+                except ValueError:
+                    out.append(c)
+                i += 2 + width
+                continue
+        out.append(_ESC.get(c, c)); i += 2
+    return "".join(out)
+
+
+def _py_prefix(src: str, i: int) -> str:
+    """The string prefix immediately before the quote at `i` (`r`, `f`, `b`, `rb`, ...), or ""."""
+    k = i
+    while k > 0 and src[k - 1].isalpha():
+        k -= 1
+    pre = src[k:i]
+    if not pre or len(pre) > 2 or any(ch not in _PY_STR_PREFIX for ch in pre):
+        return ""
+    if k > 0 and (src[k - 1].isdigit() or src[k - 1] == "_"):
+        return ""                                    # part of a longer identifier, not a prefix
+    return pre
+
+
+def _py_str_end(src: str, i: int, quote: str, triple: bool, is_f: bool):
+    """(index of the closing quote, index just past it) for the literal opening at `i`.
+
+    A newline ends a single-quoted literal even when the quote never closes — an unterminated
+    string must cost one line, never the rest of the file.
+    """
+    n = len(src)
+    j = i + (3 if triple else 1)
+    depth = 0
+    while j < n:
+        ch = src[j]
+        if ch == "\\" and j + 1 < n:
+            j += 2
+            continue
+        if is_f:
+            if ch == "{":
+                if j + 1 < n and src[j + 1] == "{":
+                    j += 2; continue                 # `{{` is a literal brace
+                depth += 1; j += 1; continue
+            if ch == "}":
+                if depth == 0:
+                    j += 2 if (j + 1 < n and src[j + 1] == "}") else 1
+                    continue
+                depth -= 1; j += 1; continue
+        if depth == 0:
+            if triple:
+                if src.startswith(quote * 3, j):
+                    return j, j + 3
+            else:
+                if ch == quote:
+                    return j, j + 1
+                if ch == "\n":
+                    return j, j
+        j += 1
+    return n, n
+
+
+def _py_brace_end(src: str, k: int, limit: int) -> int:
+    """Index of the `}` closing the f-string interpolation whose `{` is at `k`."""
+    depth, j = 0, k
+    while j < limit:
+        ch = src[j]
+        if ch == "\\":
+            j += 2; continue
+        if ch in ('"', "'"):
+            trip = src.startswith(ch * 3, j)
+            _, j = _py_str_end(src, j, ch, trip, False)
+            continue
+        if ch == "{":
+            depth += 1
+        elif ch == "}":
+            depth -= 1
+            if depth == 0:
+                return j
+        j += 1
+    return limit
+
+
+def mask_python_source(text: str):
+    """Blank comment bodies and string-literal bodies, preserving LENGTH and newlines.
+
+    Same contract as `mask_source`: `(skeleton, literals)`, the skeleton character-for-character
+    the same size as the input so any offset maps straight back to a real line, and `literals`
+    keyed by the index of the opening quote.
+
+    Three Python-specific rules:
+      - `#` starts a comment; `//` does NOT (it is floor division);
+      - `'''`/`\"\"\"` literals span lines, and prefixes (`r`, `b`, `f`, `rb`, ...) are honoured;
+      - inside an f-string, `{...}` is CODE and stays in the skeleton (masked recursively, so a
+        nested literal in there is still a literal), while the prose around it is blanked.
+
+    Pure.
+    """
+    src = text or ""
+    n = len(src)
+    out = list(src)
+    lits: dict = {}
+    i = 0
+    while i < n:
+        c = src[i]
+        if c == "#":
+            j = src.find("\n", i)
+            j = n if j < 0 else j
+            for k in range(i, j):
+                out[k] = " "
+            i = j
+        elif c in ('"', "'"):
+            pre = _py_prefix(src, i)
+            is_raw, is_f = "r" in pre.lower(), "f" in pre.lower()
+            triple = src.startswith(c * 3, i)
+            bstart = i + (3 if triple else 1)
+            bend, after = _py_str_end(src, i, c, triple, is_f)
+            bend = max(bstart, bend)
+            lits[i] = _py_mask_body(src, out, lits, bstart, bend, is_raw, is_f)
+            i = max(after, i + 1)
+        else:
+            i += 1
+    return "".join(out), lits
+
+
+def _py_mask_body(src: str, out: list, lits: dict, bstart: int, bend: int, is_raw: bool,
+                  is_f: bool) -> str:
+    """Blank a literal body in place; return its decoded content. For an f-string, the `{...}`
+    interpolations are left in the skeleton AS CODE (masked recursively) — a weak call written
+    inside an f-string is still a call."""
+    if not is_f:
+        for k in range(bstart, bend):
+            if out[k] != "\n":
+                out[k] = _FILL
+        return _py_unescape(src[bstart:bend], is_raw)
+    parts, k = [], bstart
+    while k < bend:
+        ch = src[k]
+        if ch in "{}" and k + 1 < bend and src[k + 1] == ch:
+            out[k] = out[k + 1] = _FILL
+            parts.append(ch); k += 2; continue
+        if ch == "{":
+            end = _py_brace_end(src, k, bend)
+            sub_skel, sub_lits = mask_python_source(src[k + 1:end])
+            for off, ch2 in enumerate(sub_skel):
+                out[k + 1 + off] = ch2
+            for key, val in sub_lits.items():
+                lits[k + 1 + key] = val
+            k = end + 1 if end < bend else bend
+            continue
+        if ch != "\n":
+            out[k] = _FILL
+        parts.append(ch)
+        k += 1
+    return _py_unescape("".join(parts), is_raw)
+
+
+# Externalized configuration, Python edition. `os.environ.get(key, default)` is what `getProperty`
+# is in Java, and the default is a FALLBACK, not the answer.
+_PY_GETENV = re.compile(r"(?:os\s*\.\s*environ\s*\.\s*get|os\s*\.\s*getenv)\s*\(")
+
+
+def _py_stmt_end(skel: str, start: int) -> int:
+    """A Python statement ends at a newline outside brackets (or at a `;`)."""
+    depth = 0
+    for k in range(start, len(skel)):
+        ch = skel[k]
+        if ch in "([{":
+            depth += 1
+        elif ch in ")]}":
+            depth -= 1
+            if depth < 0:
+                return k
+        elif ch in ("\n", ";") and depth <= 0:
+            return k
+    return len(skel)
+
+
+_PY_DIALECT = _Dialect(_PY_GETENV, _py_stmt_end)
+
+_PY_IMPORT = re.compile(r"(?m)^[ \t]*import[ \t]+([^\n]+)")
+_PY_FROM = re.compile(r"(?m)^[ \t]*from[ \t]+([\w.]+)[ \t]+import[ \t]+([^\n]+)")
+
+
+def _py_imports(skel: str):
+    """What each name in this module is BOUND to.
+
+    Returns `(modules, symbols)`:
+      modules  {local name -> dotted module path}     from `import X` / `import X as Y`
+      symbols  {local name -> (module, original)}     from `from X import Y [as Z]`
+
+    This is what separates `import random` from `from numpy import random`. Both make the name
+    `random` callable; only one of them is the predictable stdlib generator, and a rule that reads
+    the name without reading the binding reports numpy as CWE-330.
+    """
+    modules, symbols = {}, {}
+    for m in _PY_IMPORT.finditer(skel):
+        for part in m.group(1).split(","):
+            bits = part.split()
+            if not bits:
+                continue
+            if len(bits) >= 3 and bits[1] == "as":
+                modules[bits[2]] = bits[0]
+            else:
+                modules[bits[0]] = bits[0]
+                modules.setdefault(bits[0].split(".")[0], bits[0].split(".")[0])
+    for m in _PY_FROM.finditer(skel):
+        module = m.group(1)
+        for part in m.group(2).replace("(", " ").replace(")", " ").split(","):
+            bits = part.split()
+            if not bits or bits[0] == "*":
+                continue
+            local = bits[2] if len(bits) >= 3 and bits[1] == "as" else bits[0]
+            symbols[local] = (module, bits[0])
+    return modules, symbols
+
+
+def _py_binds_module(modules: dict, symbols: dict, name: str) -> bool:
+    """False when `name` is demonstrably bound to something OTHER than the stdlib module of that
+    name. Absent any import at all this returns True: a qualified `random.random()` that executes
+    at all must have `random` bound in the module, and being permissive there costs no precision."""
+    if name in symbols:
+        return False
+    return modules.get(name, name) == name
+
+
+def _py_shadowed(skel: str, name: str) -> bool:
+    """A local `def`/`class` of the same name shadows the import — `md5` is then the operator's
+    own function and calling it is not a call to hashlib."""
+    return bool(re.search(r"(?m)^[ \t]*(?:def|class)[ \t]+%s[ \t]*[(:]" % re.escape(name), skel))
+
+
+# ── Python weak hash (CWE-328) ───────────────────────────────────
+# `usedforsecurity=False` is the caller stating, in the API's own vocabulary, that this digest is a
+# cache key or a bucket index. Flagging it is a false positive the language explicitly ruled out.
+_PY_USEDFORSEC = re.compile(r"(?<![\w.])usedforsecurity\s*=\s*False\b")
+_PY_HASHLIB_CALL = re.compile(r"(?<![\w.])hashlib\s*\.\s*([A-Za-z0-9_]+)\s*\(")
+_PY_HMAC_CALL = re.compile(r"(?<![\w.])hmac\s*\.\s*(?:new|HMAC)\s*\(")
+_PY_CRYPTO_HASH = re.compile(r"(?<![\w.])(?:Crypto|Cryptodome)\s*\.\s*Hash\s*\.\s*"
+                             r"([A-Za-z0-9_]+)\s*\.\s*new\s*\(")
+_PY_HASH_MODULES = ("Crypto.Hash", "Cryptodome.Hash")
+
+
+def scan_python_hash(text: str, props: dict = None) -> list:
+    """Broken message digest selected at a real Python call site (CWE-328).
+
+    Call-site only, and BINDING-aware. `md5(...)` is only the stdlib digest when `md5` was imported
+    from hashlib and not shadowed by a local `def md5`; otherwise it is the operator's own function
+    and has nothing to do with cryptography.
+    """
+    src = text or ""
+    skel, lits = mask_python_source(src)
+    _modules, symbols = _py_imports(skel)
+    out, seen = [], set()
+
+    def _add(alg, why, api, idx, spec, origin):
+        line = _line_of(src, idx)
+        if (alg, line, api) in seen:
+            return
+        seen.add((alg, line, api))
+        out.append({"algorithm": alg, "why": why, "api": api, "line": line, "spec": spec,
+                    "resolved_from": origin, "cwe": "CWE-328"})
+
+    def _digest_call(name, api, idx, s, e, origin="method-name"):
+        if _PY_USEDFORSEC.search(skel, s, e):
+            return                                   # explicitly a non-security digest
+        if name == "new":
+            args = _split_args(skel, s, e)
+            for value, origin2 in _expr_values(src, skel, lits, args[0][0], args[0][1], props,
+                                               0, _PY_DIALECT):
+                weak = _digest_weakness(value)
+                if weak:
+                    _add(weak[0], weak[1], api, idx, value, origin2)
+            return
+        weak = _digest_weakness(name)
+        if weak:
+            _add(weak[0], weak[1], api, idx, name, origin)
+
+    for m in _PY_HASHLIB_CALL.finditer(skel):
+        s, e = _arg_span(skel, m.end() - 1)
+        _digest_call(m.group(1), "hashlib.%s" % m.group(1), m.start(), s, e)
+
+    for local, (module, orig) in symbols.items():
+        if _py_shadowed(skel, local):
+            continue
+        if module == "hashlib":
+            for m in re.finditer(r"(?<![\w.])%s\s*\(" % re.escape(local), skel):
+                s, e = _arg_span(skel, m.end() - 1)
+                _digest_call(orig, "hashlib.%s" % orig, m.start(), s, e, "import-alias")
+        elif module.startswith(_PY_HASH_MODULES):
+            weak = _digest_weakness(orig)
+            if not weak:
+                continue
+            for m in re.finditer(r"(?<![\w.])%s\s*\.\s*new\s*\(" % re.escape(local), skel):
+                _add(weak[0], weak[1], "%s.%s.new" % (module, orig), m.start(), orig, "import-alias")
+
+    for m in _PY_CRYPTO_HASH.finditer(skel):
+        weak = _digest_weakness(m.group(1))
+        if weak:
+            _add(weak[0], weak[1], "Crypto.Hash.%s.new" % m.group(1), m.start(), m.group(1),
+                 "module-name")
+
+    # A MAC is judged by the PREIMAGE-class breaks only, exactly as the Java side judges
+    # Mac.getInstance: HMAC-SHA1 has no practical attack and calling it broken would be a false
+    # positive wearing a security costume.
+    for m in _PY_HMAC_CALL.finditer(skel):
+        s, e = _arg_span(skel, m.end() - 1)
+        for a0, a1 in _split_args(skel, s, e):
+            frag = skel[a0:a1].strip()
+            if frag.startswith("digestmod"):
+                frag = frag.split("=", 1)[-1].strip()
+            named = re.fullmatch(r"(?:hashlib\s*\.\s*)?([A-Za-z0-9_]+)", frag)
+            cands = [named.group(1)] if named else []
+            cands += [v for k, v in sorted(lits.items()) if a0 <= k < a1]
+            for cand in cands:
+                weak = _digest_weakness(cand, mac=True)
+                if weak:
+                    _add(weak[0], weak[1], "hmac.new", m.start(), cand, "literal")
+    return out
+
+
+# ── Python weak randomness (CWE-330) ─────────────────────────────
+# The `random` module is a Mersenne Twister: observing 624 outputs recovers the whole state, and
+# for the values these functions are actually used for (tokens, session ids, coupon codes) far
+# fewer are needed. `secrets`, `os.urandom` and `random.SystemRandom` read the OS CSPRNG and are
+# never flagged — they are the fix, not the bug.
+_PY_RANDOM_METHODS = ("random|randint|randrange|randbytes|choices|choice|sample|shuffle|uniform|"
+                      "triangular|getrandbits|seed|normalvariate|gauss|lognormvariate|"
+                      "expovariate|vonmisesvariate|gammavariate|betavariate|paretovariate|"
+                      "weibullvariate")
+_PY_RANDOM_SET = set(_PY_RANDOM_METHODS.split("|")) | {"Random"}
+_PY_RANDOM_CALL = re.compile(r"(?<![\w.])random\s*\.\s*(%s)\s*\(" % _PY_RANDOM_METHODS)
+_PY_RANDOM_CTOR = re.compile(r"(?<![\w.])random\s*\.\s*Random\s*\(")
+_PY_CLOCK = (r"(?:time\s*\.\s*(?:time|time_ns|monotonic|perf_counter)\s*\(\s*\)"
+             r"|datetime\s*\.\s*(?:datetime\s*\.\s*)?now\s*\(|os\s*\.\s*getpid\s*\(\s*\))")
+_PY_CLOCK_SEED = re.compile(r"(?<![\w.])(?:random\s*\.\s*seed|\.\s*seed|Random)\s*\(\s*%s" % _PY_CLOCK)
+_PY_CLOCK_TOKEN = re.compile(
+    r"(?<![\w.])(\w*(?:token|session|nonce|otp|secret|salt|apikey|password|guid|uuid)\w*)"
+    r"\s*=[^\n]{0,90}?" + _PY_CLOCK, re.I)
+_PY_RANDOM_WHY = ("the `random` module is a Mersenne Twister, not a cryptographic generator; its "
+                  "output is reproducible from a short run of observed values")
+
+
+def scan_python_random(text: str) -> list:
+    """Predictable randomness reaching a security value (CWE-330/CWE-337).
+
+    The receiver decides the verdict, not the method name: `random.getrandbits(32)` is a Mersenne
+    Twister and `random.SystemRandom().getrandbits(32)` is os.urandom behind the same method name.
+    """
+    src = text or ""
+    skel, _lits = mask_python_source(src)
+    modules, symbols = _py_imports(skel)
+    out, seen, clock_lines = [], set(), set()
+
+    def _add(construct, why, idx, cwe="CWE-330"):
+        line = _line_of(src, idx)
+        if (construct, line) in seen:
+            return
+        seen.add((construct, line))
+        out.append({"construct": construct, "why": why, "api": construct, "line": line,
+                    "spec": construct, "resolved_from": "literal", "cwe": cwe})
+
+    for m in _PY_CLOCK_SEED.finditer(skel):
+        clock_lines.add(_line_of(src, m.start()))
+        _add("random.seed(<clock>)",
+             "seeded from the wall clock — the seed is guessable to within a few thousand values",
+             m.start(), "CWE-337")
+    stdlib = _py_binds_module(modules, symbols, "random")
+    if stdlib:
+        for m in _PY_RANDOM_CALL.finditer(skel):
+            if m.group(1) == "seed" and _line_of(src, m.start()) in clock_lines:
+                continue                             # already reported as the stronger CWE-337
+            _add("random.%s()" % m.group(1), _PY_RANDOM_WHY, m.start())
+        for m in _PY_RANDOM_CTOR.finditer(skel):
+            _add("random.Random()", _PY_RANDOM_WHY, m.start())
+    for local, (module, orig) in symbols.items():
+        if module != "random" or orig not in _PY_RANDOM_SET or _py_shadowed(skel, local):
+            continue
+        for m in re.finditer(r"(?<![\w.])%s\s*\(" % re.escape(local), skel):
+            if orig == "seed" and _line_of(src, m.start()) in clock_lines:
+                continue
+            _add("random.%s()" % orig, _PY_RANDOM_WHY, m.start())
+    for m in _PY_CLOCK_TOKEN.finditer(skel):
+        _add("clock -> %s" % m.group(1),
+             "a security value derived from the clock is derivable by anyone who knows when it "
+             "was issued", m.start(), "CWE-337")
+    return out
+
+
+# ── Python weak crypto (CWE-327) ─────────────────────────────────
+# pycryptodome and `cryptography` name the primitive in the MODULE, not in a transformation string,
+# so the call site is `DES.new(...)` / `algorithms.TripleDES(...)` rather than a literal to resolve.
+_PY_CIPHER_ALIAS = {"DES3": "DESEDE", "TRIPLEDES": "DESEDE", "ARC4": "RC4", "ARC2": "RC2"}
+_PY_CIPHER_MODULES = ("Crypto.Cipher", "Cryptodome.Cipher")
+_PY_CIPHER_DIRECT = re.compile(r"(?<![\w.])(?:Crypto|Cryptodome)\s*\.\s*Cipher\s*\.\s*"
+                               r"([A-Za-z0-9_]+)\s*\.\s*new\s*\(")
+_PY_CRYPTOGRAPHY_ALG = re.compile(r"(?<![\w.])algorithms\s*\.\s*([A-Za-z0-9_]+)\s*\(")
+# `MODE_ECB` is normally reached through the cipher module (`AES.MODE_ECB`), so the qualifier dot
+# must NOT be excluded here the way it is for a call receiver.
+_PY_MODE_ECB = re.compile(r"(?<!\w)MODE_ECB\b|(?<![\w.])modes\s*\.\s*ECB\s*\(")
+_PY_ECB_WHY = "ECB mode — equal plaintext blocks yield equal ciphertext blocks"
+
+
+def _py_cipher_weakness(alg: str):
+    n = _norm_alg(alg)
+    n = _PY_CIPHER_ALIAS.get(n, n)
+    return (n, _WEAK_CIPHERS[n]) if n in _WEAK_CIPHERS else None
+
+
+def scan_python_crypto(text: str, props: dict = None) -> list:
+    """Weak or broken CIPHER selected at a real Python call site (CWE-327)."""
+    src = text or ""
+    skel, _lits = mask_python_source(src)
+    _modules, symbols = _py_imports(skel)
+    out, seen = [], set()
+
+    def _add(alg, why, api, idx, spec):
+        line = _line_of(src, idx)
+        if (alg, line) in seen:
+            return
+        seen.add((alg, line))
+        out.append({"algorithm": alg, "why": why, "api": api, "line": line, "spec": spec,
+                    "resolved_from": "module-name", "cwe": "CWE-327"})
+
+    def _cipher_new(alg, api, idx, s, e):
+        weak = _py_cipher_weakness(alg)
+        if weak:
+            _add(weak[0], weak[1], api, idx, alg)
+        elif _PY_MODE_ECB.search(skel, s, e):
+            _add("%s/ECB" % _norm_alg(alg), _PY_ECB_WHY, api, idx, alg)
+
+    for m in _PY_CIPHER_DIRECT.finditer(skel):
+        s, e = _arg_span(skel, m.end() - 1)
+        _cipher_new(m.group(1), "Crypto.Cipher.%s.new" % m.group(1), m.start(), s, e)
+    for local, (module, orig) in symbols.items():
+        if not module.startswith(_PY_CIPHER_MODULES):
+            continue
+        for m in re.finditer(r"(?<![\w.])%s\s*\.\s*new\s*\(" % re.escape(local), skel):
+            s, e = _arg_span(skel, m.end() - 1)
+            _cipher_new(orig, "%s.%s.new" % (module, orig), m.start(), s, e)
+    for m in _PY_CRYPTOGRAPHY_ALG.finditer(skel):
+        weak = _py_cipher_weakness(m.group(1))
+        if weak:
+            _add(weak[0], weak[1], "algorithms.%s" % m.group(1), m.start(), m.group(1))
+    for m in _PY_MODE_ECB.finditer(skel):
+        if m.group(0).startswith("modes"):
+            _add("ECB", _PY_ECB_WHY, "modes.ECB", m.start(), "ECB")
+    return out
+
+
+# ── assemble the code-assisted findings for one PYTHON source file ──
+_PY_MARKER = re.compile(
+    r"(?m)^#!.*python"
+    r"|^[ \t]*def[ \t]+\w+[ \t]*\("
+    r"|^[ \t]*class[ \t]+\w+[ \t]*[(:]"
+    r"|^[ \t]*from[ \t]+[\w.]+[ \t]+import[ \t]"
+    r"|^[ \t]*import[ \t]+[\w.]+[ \t]*(?:,[ \t]*[\w.]+[ \t]*)*$"
+    r"|^[ \t]*(?:elif|except)\b"
+    r"|^[ \t]*if[ \t]+__name__[ \t]*==")
+
+
+def looks_like_python(text: str, source: str = "") -> bool:
+    if str(source or "").lower().endswith((".py", ".pyw", ".pyi")):
+        return True
+    return bool(_PY_MARKER.search(text or ""))
+
+
+def review_python(text: str, source: str, props: dict = None) -> list:
+    """CODE-ASSISTED (SAST) review of one Python source file. Findings are SOURCE-DERIVED.
+
+    Deliberately the same three families and the same finding shape as `review_java`: a consumer of
+    this lane must not be able to tell which language produced a finding, only which lane did.
+    """
+    out = []
+    for h in scan_python_crypto(text, props):
+        out.append(_source_finding(
+            source, "weak_crypto", "CWE-327", "Weak cryptographic algorithm: %s" % h["algorithm"], h,
+            "Data encrypted with this algorithm does not have the confidentiality it appears to have.",
+            "Use AES-256 in an AEAD mode (GCM) via `cryptography`, with a random per-message nonce.",
+            "the source selects the algorithm %r at a %s call site — definitionally CWE-327, no "
+            "runtime behaviour is in question" % (h.get("spec"), h.get("api")),
+            ["crypto"]))
+    for h in scan_python_hash(text, props):
+        out.append(_source_finding(
+            source, "weak_hash", "CWE-328", "Broken hash function: %s" % h["algorithm"], h,
+            "A digest with practical collisions cannot support integrity, signatures or password "
+            "storage.",
+            "Use hashlib.sha256 or SHA-3 for integrity; use bcrypt, scrypt or Argon2 for passwords. "
+            "If the digest is not security-relevant, say so with usedforsecurity=False.",
+            "the source selects the digest %r at a %s call site — definitionally CWE-328"
+            % (h.get("spec"), h.get("api")),
+            ["crypto", "hash"]))
+    for h in scan_python_random(text):
+        out.append(_source_finding(
+            source, "weak_random", h["cwe"], "Predictable randomness: %s" % h["construct"], h,
+            "Any token, key, session id or nonce from this generator is reproducible by an attacker "
+            "who observes a few outputs.",
+            "Use the `secrets` module (or random.SystemRandom) for every security-relevant value.",
+            "the source calls %s on the stdlib `random` module — a Mersenne Twister, observed at "
+            "the call site and not merely named" % h["construct"],
+            ["randomness"]))
+    return out
+
+
+# LANGUAGE DISPATCH. One entry point, so a caller never has to know which analyzer to reach for --
+# and so adding the next language is a row here rather than a second walk of the tree.
+def review_source(text: str, source: str, props: dict = None) -> list:
+    """CODE-ASSISTED (SAST) review of one source file, whatever language it is written in."""
+    if looks_like_java(text, source):
+        return review_java(text, source, props)
+    if looks_like_python(text, source):
+        return review_python(text, source, props)
+    return []
+
+
 # ── Revealing developer comments ─────────────────────────────────
 _COMMENT = re.compile(r"(?m)(?://|#|/\*|<!--)\s*(.*?(?:todo|fixme|hack|xxx|bug|insecure|not secure|"
                       r"vuln|hardcoded|backdoor|do not ship|remove this|temporary|debug|csrf|"
@@ -815,10 +1387,10 @@ def review(text: str, source: str) -> dict:
             "tags": ["secrets", "comment", "source-disclosure"],
         })
 
-    # CODE-ASSISTED lane. Only fires on Java source, so a mined JS bundle behaves exactly as before;
-    # these rules are call-site analyses of Java APIs and have nothing to say about anything else.
-    if looks_like_java(text, source):
-        findings.extend(review_java(text, source))
+    # CODE-ASSISTED lane. Fires on Java and Python source, so a mined JS bundle behaves exactly as
+    # before; these rules are call-site analyses of specific stdlib APIs and have nothing to say
+    # about a language whose APIs they do not name.
+    findings.extend(review_source(text, source))
 
     comments = scan_comments(text)
     if comments:

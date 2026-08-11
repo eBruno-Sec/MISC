@@ -335,3 +335,304 @@ def test_dast_reports_are_unchanged_by_the_lane_labelling():
     run = {"target": "java", "results": [_row("T1", "sqli", "sqli", lane="dast")]}
     text = ob.report(ob.score(run, {"T1": ("sqli", True)}))
     assert "CODE-ASSISTED" not in text
+
+
+# ══════════════════════════════════════════════════════════════════════════════════
+# PYTHON — the same lane, dispatched by language rather than gated to *.java
+# ══════════════════════════════════════════════════════════════════════════════════
+# The Java rules above measure 100/100/100 and are untouched. What follows is the SAME
+# discipline applied to Python call sites: mask the comments and literal bodies first, then
+# match structure against the skeleton and only read a literal back when it sits in an argument
+# position of a call the skeleton actually contains.
+#
+# Python moves the traps around. `#` starts a comment where `//` is FLOOR DIVISION; a docstring
+# is a string literal that spans lines; an f-string is part literal and part CODE; and the single
+# most important discriminator in the whole suite is a RECEIVER, not a name --
+# `random.getrandbits(32)` is predictable while `random.SystemRandom().getrandbits(32)` is a
+# CSPRNG, and a rule that greps for `getrandbits` reports 113 clean twins as vulnerable.
+
+
+# ── masking: the Python primitive every Python rule depends on ───
+def test_python_mask_blanks_hash_comments_and_literal_bodies_but_keeps_offsets():
+    src = "x = 1  # hashlib.md5(b'')\ns = 'md5'\nh = hashlib.sha1(b)\n"
+    skel, lits = cr.mask_python_source(src)
+    assert len(skel) == len(src)                    # offsets survive, so line numbers stay true
+    assert skel.count("\n") == src.count("\n")
+    assert "hashlib.md5" not in skel                # the comment is gone
+    assert "'" in skel and "md5" not in skel        # the literal's quotes stay, its body does not
+    assert "md5" in lits.values()                   # ...but the body is recoverable as an argument
+    assert "hashlib.sha1(" in skel                  # and real code is untouched
+
+
+def test_python_mask_does_not_treat_floor_division_as_a_comment():
+    """`//` is a COMMENT in Java and an OPERATOR in Python. A masker that carries the Java rule
+    over blanks the rest of every line containing an integer division -- and then reports a clean
+    result for the weak call sitting after it."""
+    src = "half = n // 2\nh = hashlib.md5(b'x')\n"
+    skel, _ = cr.mask_python_source(src)
+    assert "n // 2" in skel
+    assert cr.scan_python_hash(src)
+
+
+def test_python_mask_blanks_a_docstring_without_swallowing_the_module():
+    src = ('"""Module doc: we used to call hashlib.md5() here."""\n'
+           "import hashlib\n"
+           "def f(b):\n"
+           "    return hashlib.sha1(b)\n")
+    skel, _ = cr.mask_python_source(src)
+    assert "hashlib.md5" not in skel and "hashlib.sha1(b)" in skel
+    hits = cr.scan_python_hash(src)
+    assert [h["algorithm"] for h in hits] == ["SHA1"] and hits[0]["line"] == 4
+
+
+def test_python_mask_keeps_f_string_interpolations_as_code():
+    """An f-string is half literal and half expression. Blanking the whole thing hides a real call
+    site; leaving the whole thing hides nothing but reads the prose as code. Only `{...}` is code."""
+    src = "import hashlib\nmsg = f'digest md5 = {hashlib.md5(b).hexdigest()}'\n"
+    skel, _ = cr.mask_python_source(src)
+    assert "digest md5 =" not in skel               # the prose half is a literal
+    assert "hashlib.md5(b)" in skel                 # the interpolated half is code
+    assert cr.scan_python_hash(src)
+
+
+# ── hash: broken digest at a real Python call site (CWE-328) ─────
+def test_python_hashlib_md5_and_sha1_are_flagged():
+    for src, alg in (("import hashlib\nh = hashlib.md5(data)\n", "MD5"),
+                     ("import hashlib\nh = hashlib.sha1(data)\n", "SHA1")):
+        hits = cr.scan_python_hash(src)
+        assert hits and hits[0]["cwe"] == "CWE-328" and hits[0]["algorithm"] == alg, src
+        assert hits[0]["line"] == 2
+
+
+def test_python_hashlib_new_with_a_literal_is_flagged():
+    for spec in ("'md5'", '"MD5"', "'sha1'", '"SHA-1"'):
+        assert cr.scan_python_hash("import hashlib\nh = hashlib.new(%s)\n" % spec), spec
+
+
+def test_python_hashlib_new_resolves_a_variable():
+    src = "import hashlib\nalg = 'md5'\nh = hashlib.new(alg)\n"
+    hits = cr.scan_python_hash(src)
+    assert hits and hits[0]["algorithm"] == "MD5"
+
+
+def test_python_hashlib_new_resolves_an_environment_default():
+    src = ("import hashlib, os\n"
+           "alg = os.environ.get('HASH_ALG', 'md5')\n"
+           "h = hashlib.new(alg)\n")
+    hits = cr.scan_python_hash(src)
+    assert hits and hits[0]["resolved_from"] == "default-literal"
+
+
+def test_python_from_hashlib_import_md5_is_flagged():
+    assert cr.scan_python_hash("from hashlib import md5\nd = md5(b'x').hexdigest()\n")
+    assert cr.scan_python_hash("from hashlib import sha1 as h\nd = h(b'x')\n")
+
+
+def test_python_pycryptodome_md5_is_flagged():
+    assert cr.scan_python_hash("from Crypto.Hash import MD5\nh = MD5.new(data)\n")
+    assert cr.scan_python_hash("import Crypto\nh = Crypto.Hash.MD5.new(data)\n")
+    assert cr.scan_python_hash("from Crypto.Hash import SHA256\nh = SHA256.new(data)\n") == []
+
+
+def test_python_hmac_with_md5_is_flagged_but_hmac_sha1_is_not():
+    # same precision the Java side keeps: HMAC-SHA1 has no practical break and calling it broken
+    # would be a false positive wearing a security costume
+    assert cr.scan_python_hash("import hmac, hashlib\nm = hmac.new(k, msg, hashlib.md5)\n")
+    assert cr.scan_python_hash("import hmac, hashlib\nm = hmac.new(k, msg, hashlib.sha1)\n") == []
+
+
+# NEGATIVE CONTROL 1 — modern SHA-2 must not be flagged
+def test_python_sha256_and_sha512_are_not_flagged():
+    assert cr.scan_python_hash("import hashlib\nh = hashlib.sha256(data)\n") == []
+    assert cr.scan_python_hash("import hashlib\nh = hashlib.sha512(data)\n") == []
+    assert cr.scan_python_hash("import hashlib\nh = hashlib.sha3_256(data)\n") == []
+    assert cr.scan_python_hash("import hashlib\nh = hashlib.new('sha384')\n") == []
+    assert cr.scan_python_hash("import hashlib\nh = hashlib.blake2b(data)\n") == []
+
+
+# NEGATIVE CONTROL 2 — usedforsecurity=False is an explicit non-security use
+def test_python_usedforsecurity_false_is_not_flagged():
+    assert cr.scan_python_hash("import hashlib\nh = hashlib.md5(data, usedforsecurity=False)\n") == []
+    assert cr.scan_python_hash("import hashlib\nh = hashlib.new('md5', usedforsecurity=False)\n") == []
+    # ...and the kwarg only exculpates when it is actually False
+    assert cr.scan_python_hash("import hashlib\nh = hashlib.md5(data, usedforsecurity=True)\n")
+
+
+# NEGATIVE CONTROL 4 — a comment or a string containing "md5" is not a call site
+def test_python_md5_named_only_in_a_comment_or_string_is_not_flagged():
+    assert cr.scan_python_hash("import hashlib\n# TODO: hashlib.md5(x) was removed in 2019\n") == []
+    assert cr.scan_python_hash("import hashlib\nADVICE = 'md5 and sha1 are broken, use sha256'\n") == []
+    assert cr.scan_python_hash("import hashlib\nprint('never call hashlib.md5() again')\n") == []
+    assert cr.scan_python_hash('"""Runbook:\n  hashlib.new("md5")\n"""\n') == []
+    assert cr.scan_python_hash("import hashlib\nAPI = 'hashlib.new'\nALG = 'md5'\n") == []
+
+
+# NEGATIVE CONTROL 5 — a user-defined md5() is not the stdlib call
+def test_python_a_user_defined_md5_is_not_the_stdlib_call():
+    assert cr.scan_python_hash("def md5(x):\n    return x\n\nd = md5(payload)\n") == []
+    assert cr.scan_python_hash("d = self.md5(payload)\n") == []
+    assert cr.scan_python_hash("d = crypto_registry.md5(payload)\n") == []
+    # even WITH the import present, a local definition shadows it
+    assert cr.scan_python_hash("from hashlib import md5\n\ndef md5(x):\n    return x\n"
+                               "d = md5(payload)\n") == []
+
+
+# ── weakrand: predictable generator at a real Python call site (CWE-330) ──
+def test_python_random_module_calls_are_flagged():
+    for call in ("random.random()", "random.randint(0, 2**32)", "random.getrandbits(32)",
+                 "random.randbytes(32)", "random.normalvariate()", "random.choice(seq)",
+                 "random.Random().random()", "random.seed(1)"):
+        src = "import random\nvalue = %s\n" % call
+        hits = cr.scan_python_random(src)
+        assert hits and hits[0]["cwe"] in ("CWE-330", "CWE-337"), call
+
+
+def test_python_random_seeded_from_the_clock_is_flagged():
+    hits = cr.scan_python_random("import random, time\nrandom.seed(time.time())\n")
+    assert hits and any(h["cwe"] == "CWE-337" for h in hits)
+
+
+def test_python_from_random_import_randint_is_flagged():
+    assert cr.scan_python_random("from random import randint\nv = randint(0, 99)\n")
+    assert cr.scan_python_random("from random import choice as pick\nv = pick(seq)\n")
+
+
+# NEGATIVE CONTROL 3 — the CSPRNGs must not be flagged
+def test_python_secrets_and_os_urandom_are_not_flagged():
+    assert cr.scan_python_random("import secrets\nv = secrets.token_bytes(32)\n") == []
+    assert cr.scan_python_random("import secrets\nv = secrets.token_urlsafe(32)\n") == []
+    assert cr.scan_python_random("import secrets\nv = secrets.randbelow(2**32)\n") == []
+    assert cr.scan_python_random("import secrets\nv = secrets.randbits(32)\n") == []
+    assert cr.scan_python_random("import os\nv = os.urandom(32)\n") == []
+    assert cr.scan_python_random("import uuid\nv = uuid.uuid4().hex\n") == []
+
+
+def test_python_system_random_is_a_csprng_not_a_weak_generator():
+    """THE discriminator. `random.SystemRandom` reads from os.urandom; it lives in the `random`
+    module and its methods have the same names as the weak ones. 113 of the suite's weakrand cases
+    are exactly this line, and a rule that matches on the METHOD reports every one of them."""
+    for call in ("random.SystemRandom().getrandbits(32)", "random.SystemRandom().random()",
+                 "random.SystemRandom().randint(0, 99)", "random.SystemRandom().choice(seq)"):
+        assert cr.scan_python_random("import random\nvalue = %s\n" % call) == [], call
+    assert cr.scan_python_random("from random import SystemRandom\nv = SystemRandom().random()\n") == []
+
+
+def test_python_a_foreign_random_module_is_not_the_stdlib_one():
+    """`numpy.random.random()` contains the substring `random.random(`, and `from numpy import
+    random` rebinds the name entirely. Neither is `import random`."""
+    assert cr.scan_python_random("import numpy\nv = numpy.random.random()\n") == []
+    assert cr.scan_python_random("from numpy import random\nv = random.random()\n") == []
+    assert cr.scan_python_random("v = self.random.randint(0, 9)\n") == []
+
+
+def test_python_random_named_only_in_a_comment_or_string_is_not_flagged():
+    assert cr.scan_python_random("import random\n# replaced random.random() with secrets\n") == []
+    assert cr.scan_python_random("import random\nNOTE = 'random.randint() is banned here'\n") == []
+    assert cr.scan_python_random("import random\nprint('do not use random.random() for tokens')\n") == []
+
+
+# ── crypto: broken cipher at a real Python call site (CWE-327) ───
+def test_python_weak_ciphers_and_ecb_are_flagged():
+    assert cr.scan_python_crypto("from Crypto.Cipher import DES\nc = DES.new(key, DES.MODE_CBC)\n")
+    assert cr.scan_python_crypto("from Crypto.Cipher import ARC4\nc = ARC4.new(key)\n")
+    assert cr.scan_python_crypto("from Crypto.Cipher import AES\nc = AES.new(key, AES.MODE_ECB)\n")
+    assert cr.scan_python_crypto(
+        "from cryptography.hazmat.primitives.ciphers import algorithms\n"
+        "a = algorithms.TripleDES(key)\n")
+
+
+def test_python_aes_gcm_is_not_flagged():
+    assert cr.scan_python_crypto("from Crypto.Cipher import AES\nc = AES.new(key, AES.MODE_GCM)\n") == []
+    assert cr.scan_python_crypto("from Crypto.Cipher import ChaCha20\nc = ChaCha20.new(key=k)\n") == []
+    assert cr.scan_python_crypto("# we removed DES.new(key, DES.MODE_ECB) in 2019\n") == []
+    assert cr.scan_python_crypto("BANNED = 'DES/ECB'\n") == []
+
+
+# ── dispatch: the lane is language-general, and Java is unchanged ─
+def test_review_routes_python_source_into_the_code_assisted_lane():
+    res = cr.review("import hashlib\n\ndef f(b):\n    return hashlib.md5(b).digest()\n", "app.py")
+    assert any(f.get("lane") == "code-assisted" and f["cwe"] == "CWE-328"
+               for f in res["findings"])
+
+
+def test_review_still_leaves_javascript_out_of_the_python_lane():
+    res = cr.review("import x from 'y';\nvar r = Math.random();\nel.innerHTML = r;\n", "app.js")
+    assert not any(f.get("lane") == "code-assisted" for f in res["findings"])
+
+
+def test_every_python_source_finding_is_marked_source_derived():
+    out = cr.review_python("import hashlib, random\nh = hashlib.md5(b)\nv = random.random()\n",
+                           "svc.py")
+    assert out and all(f["provenance"] == "source-derived" for f in out)
+    assert all(f["lane"] == "code-assisted" and f["analysis"] == "static-call-site" for f in out)
+    assert {f["family"] for f in out} == {"weak_hash", "weak_random"}
+
+
+PY_WEAK = '''"""Legacy billing helpers. We dropped hashlib.md5 from the token path in 2019."""
+import hashlib
+import random
+
+
+def fingerprint(pan: str) -> str:
+    # historical note: hashlib.new("md5") used to live here
+    return hashlib.sha1(pan.encode()).hexdigest()
+
+
+def remember_me_cookie() -> str:
+    return str(random.getrandbits(32))
+'''
+
+PY_SAFE = '''"""Matched clean twin of the module above. Every construct is the strong one."""
+import hashlib
+import random
+import secrets
+
+
+def fingerprint(pan: str) -> str:
+    # historical note: hashlib.new("md5") used to live here
+    return hashlib.sha512(pan.encode()).hexdigest()
+
+
+def checksum(blob: bytes) -> str:
+    return hashlib.md5(blob, usedforsecurity=False).hexdigest()
+
+
+def remember_me_cookie() -> str:
+    return str(random.SystemRandom().getrandbits(32))
+
+
+def api_key() -> str:
+    return secrets.token_urlsafe(32)
+'''
+
+
+def test_tree_scans_python_as_well_as_java(tmp_path):
+    root = _tree(tmp_path, {"svc/Legacy.java": 'class L { void f() throws Exception {'
+                                               ' javax.crypto.Cipher.getInstance("DES"); } }\n',
+                            "svc/billing.py": PY_WEAK})
+    res = codeintel.review_source_tree(root)
+    assert res["files_scanned"] == 2
+    assert {os.path.basename(p) for p in res["files"]} == {"Legacy.java", "billing.py"}
+    cwes = {f["cwe"] for f in res["findings"]}
+    assert cwes == {"CWE-327", "CWE-328", "CWE-330"}, cwes
+    assert all(f["provenance"] == "source-derived" for f in res["findings"])
+
+
+def test_tree_keeps_the_python_clean_twin_clean(tmp_path):
+    root = _tree(tmp_path, {"svc/safe.py": PY_SAFE})
+    res = codeintel.review_source_tree(root)
+    assert res["files_scanned"] == 1
+    assert res["findings"] == []
+
+
+def test_python_dispatch_does_not_disturb_the_java_lane(tmp_path):
+    """Java measures 100/100/100. Adding a second language must change nothing about it."""
+    java = ('package x;\nimport java.security.MessageDigest;\n'
+            'class App { void f() throws Exception {\n'
+            '  MessageDigest.getInstance("MD5");\n'
+            '  javax.crypto.Cipher.getInstance("AES/GCM/NoPadding");\n'
+            '  java.util.Random g = java.security.SecureRandom.getInstance("SHA1PRNG");\n} }\n')
+    root = _tree(tmp_path, {"src/App.java": java, "src/other.py": PY_SAFE})
+    res = codeintel.review_source_tree(root)
+    assert [(f["cwe"], os.path.basename(f["file"])) for f in res["findings"]] \
+        == [("CWE-328", "App.java")]
