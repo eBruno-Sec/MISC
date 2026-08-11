@@ -69,6 +69,17 @@ FAMILIES = {
     "cmdi": {"command_injection", "cmdi"},
     "weakrand": {"weak_random"},
     "securecookie": {"insecure_cookie"},
+    # CODE-ASSISTED (SAST) LANE ONLY. No HTTP response distinguishes AES/GCM from DES, so these three
+    # are unreachable by the DAST lane and score 0 there -- which is the honest result, not a gap to
+    # paper over. They are reachable by reading the source the operator supplies.
+    #
+    # `trustbound` is deliberately ABSENT. Its clean twins launder the tainted value through a
+    # collection (`map.get("keyA-")`), a StringBuilder, or a ternary whose branch is decided by
+    # constant folding -- distinguishing them needs real dataflow, not a call-site match. A
+    # conservative approximation flags the clean twins, and a category mapped to a detector that
+    # cannot separate them is a fabricated score. Leaving it unmapped scores an honest 0.
+    "crypto": {"weak_crypto"},
+    "hash": {"weak_hash"},
     "xxe": {"xxe"},
     "deserialization": {"deserialization"},
     "redirect": {"open_redirect"},
@@ -187,6 +198,50 @@ async def scan(per_category: int, categories: list, seed: int, base: str = "",
     return {"seed": seed, "per_category": per_category, "results": results}
 
 
+def scan_source(source_root: str, categories: list, base: str = "") -> dict:
+    """CODE-ASSISTED (SAST) LANE. Grade the operator-supplied SOURCE, not the served application.
+
+    Still blind by construction, and blind in the same two ways the DAST lane is. Case membership
+    comes from the category index the app already serves over HTTP, exactly as `case_urls` gets it;
+    the answer key stays inside the container and is never read here. Nothing in this path can see
+    which cases are vulnerable.
+
+    What it is NOT: a DAST result. Every row is stamped `lane: code-assisted` and the report refuses
+    to present the number as anything else. Source is an explicit argument -- if a case has no file
+    in the tree, that case is reported as "no source provided" and dropped from the denominator
+    rather than counted as a miss.
+    """
+    import httpx
+    import codeintel
+
+    tree = codeintel.review_source_tree(source_root)
+    by_stem: dict = {}
+    for f in tree.get("findings") or []:
+        stem = os.path.splitext(os.path.basename(f["file"]))[0]
+        by_stem.setdefault(stem, []).append(f)
+    have = {os.path.splitext(os.path.basename(p))[0] for p in (tree.get("files") or [])}
+
+    results = []
+    client = httpx.Client(verify=False, timeout=30, follow_redirects=True)
+    for cat in categories:
+        for name, url in case_urls(client, cat, base):
+            fs = by_stem.get(name) or []
+            row = {"test": name, "category": cat, "url": url,
+                   "engine": "codeintel.review_source_tree", "lane": "code-assisted",
+                   "provenance": "source-derived",
+                   "families": [f["family"] for f in fs],
+                   "conf": [f.get("confidence") or "confirmed" for f in fs],
+                   "error": "" if name in have else "no source provided"}
+            results.append(row)
+            print("  %-10s %-18s %s" % (cat, name, row["families"] or row["error"] or "-"),
+                  file=sys.stderr, flush=True)
+    client.close()
+    return {"lane": "code-assisted", "provenance": "source-derived", "source_root": source_root,
+            "files_scanned": tree.get("files_scanned", 0),
+            "properties_resolved": tree.get("properties_resolved", 0),
+            "source_error": tree.get("error") or "", "results": results}
+
+
 def load_key(path: str) -> dict:
     """test name -> (category, is_real_vulnerability)."""
     key = {}
@@ -240,12 +295,18 @@ def score(run: dict, key: dict) -> dict:
     key does not cover, or where no engine is mapped, are reported separately and never folded into a
     rate -- an unmeasured case is not a miss.
     """
-    per, unscored = {}, []
+    per, unscored, lanes = {}, [], set()
     for r in run.get("results", []):
         entry = key.get(r["test"])
-        if entry is None or r.get("error") == "no engine mapped":
+        # A case the tool was never actually given is UNSCORED, not a miss. "no source provided" is
+        # the code-assisted lane's version of "no engine mapped": the analysis did not run, so its
+        # result is unknown -- and silently booking an unknown as a false negative understates the
+        # tool exactly as booking it as a pass would overstate it.
+        if entry is None or str(r.get("error") or "").startswith(("no engine mapped",
+                                                                  "no source provided")):
             unscored.append(r["test"])
             continue
+        lanes.add(str(r.get("lane") or "dast"))
         _cat_in_key, is_vuln = entry
         cat = r["category"]
         b = per.setdefault(cat, {"tp": 0, "fn": 0, "fp": 0, "tn": 0, "errors": 0,
@@ -301,7 +362,7 @@ def score(run: dict, key: dict) -> dict:
             # official ones only when comparing against a published Benchmark score, and say which.
             "product_macro": macro_product, "suite_macro_product": suite_macro_product,
             "cross_family_fp": sum(b.get("cross_family_fp", 0) for b in cats.values()),
-            "unscored": unscored}
+            "lanes": sorted(lanes), "unscored": unscored}
 
 
 def _rates(b: dict) -> dict:
@@ -324,8 +385,32 @@ def _fmt(v):
     return "  n/a" if v is None else "%5.1f%%" % (100 * v)
 
 
+def _lane_banner(lanes: list) -> list:
+    """State the lane before the numbers, every time.
+
+    A percentage travels; the sentence explaining what produced it does not. The only defence that
+    survives a copy/paste into a report is a label printed above the table it belongs to.
+    """
+    if not lanes or lanes == ["dast"]:
+        return []
+    out = []
+    if len(lanes) > 1:
+        out += ["!! MIXED LANES IN ONE RUN: %s" % ", ".join(lanes),
+                "   These do not average. A source-derived detection and an HTTP-proven one are not",
+                "   the same evidence; score them separately or the combined figure means nothing.",
+                ""]
+    if "code-assisted" in lanes:
+        out += ["CODE-ASSISTED (SAST) LANE — findings are SOURCE-DERIVED from operator-supplied code.",
+                "   This is not a DAST result. Do NOT fold it into a DAST figure and do NOT compare it",
+                "   against a published DAST score (ZAP 17.99%, best-published 26%) — those tools were",
+                "   never given the source. Quote it as what it is: a code-assisted number.",
+                ""]
+    return out
+
+
 def report(s: dict) -> str:
-    lines = ["%-13s %5s %5s %5s %5s   %7s %7s %8s" % (
+    lines = _lane_banner(s.get("lanes") or [])
+    lines += ["%-13s %5s %5s %5s %5s   %7s %7s %8s" % (
         "category", "TP", "FN", "FP", "TN", "TPR", "FPR", "score")]
     for cat, b in s["per_category"].items():
         lines.append("%-13s %5d %5d %5d %5d   %s %s %s"
@@ -368,6 +453,10 @@ def main(argv=None) -> int:
     sc.add_argument("--base", default="java", choices=sorted(BASES))
     sc.add_argument("--checkpoint", default="", help="append one JSON row per case; resumes if it exists")
     sc.add_argument("--categories", default="sqli,xss,pathtraver,ldapi,xpathi")
+    ss = sub.add_parser("scan-source", help="CODE-ASSISTED (SAST) lane: grade operator-supplied source")
+    ss.add_argument("--source", required=True, help="path to the source tree; explicit, never inferred")
+    ss.add_argument("--base", default="java", choices=sorted(BASES))
+    ss.add_argument("--categories", default="crypto,hash,weakrand")
     so = sub.add_parser("score")
     so.add_argument("--run", required=True)
     so.add_argument("--key", required=True)
@@ -377,6 +466,13 @@ def main(argv=None) -> int:
         out = asyncio.run(scan(a.per_category, [c for c in a.categories.split(",") if c],
                               a.seed, BASES[a.base], a.checkpoint))
         out["target"] = a.base
+        print(json.dumps(out, indent=1))
+        return 0
+    if a.cmd == "scan-source":
+        out = scan_source(a.source, [c for c in a.categories.split(",") if c], BASES[a.base])
+        out["target"] = a.base
+        if out.get("source_error"):
+            print("SOURCE NOT USABLE: %s" % out["source_error"], file=sys.stderr)
         print(json.dumps(out, indent=1))
         return 0
     with open(a.run, encoding="utf8") as fh:

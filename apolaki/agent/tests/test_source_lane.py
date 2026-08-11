@@ -23,6 +23,7 @@ import os
 
 import codeintel
 import codereview as cr
+import owasp_bench as ob
 
 
 # ── masking: the primitive every rule depends on ─────────────────
@@ -86,6 +87,16 @@ def test_algorithm_named_only_inside_a_string_literal_is_not_flagged():
            'javax.crypto.Cipher.getInstance(java.lang.String,java.security.Provider) Test Case");')
     assert cr.scan_java_crypto(src) == []
     assert cr.scan_java_crypto('String note = "DES is banned in this codebase";') == []
+    # a log line quoting a whole call, weak literal and all, is still one string
+    assert cr.scan_java_crypto(r'log.info("never call Cipher.getInstance(\"DES\") again");') == []
+
+
+def test_a_user_defined_factory_is_not_a_jca_call_site():
+    """`getInstance` is not a keyword. Widening the site match to any `X.getInstance("...")` turns
+    every registry lookup whose key happens to name an algorithm into a finding."""
+    assert cr.scan_java_crypto('AlgorithmRegistry.getInstance("DES");') == []
+    assert cr.scan_java_hash('AlgorithmRegistry.getInstance("MD5");') == []
+    assert cr.scan_java_hash('ConfigCache.getInstance("SHA1");') == []
 
 
 # ── externalized configuration: resolve the variable, not the default ──
@@ -192,6 +203,9 @@ def test_a_variable_merely_typed_as_random_is_not_flagged():
 def test_random_named_only_in_a_comment_is_not_flagged():
     assert cr.scan_java_random("// replaced new java.util.Random() with SecureRandom") == []
     assert cr.scan_java_random('println("Problem executing SecureRandom.nextDouble() - TestCase");') == []
+    # a weak construct spelled out INSIDE a string is still a string
+    assert cr.scan_java_random('println("we replaced Math.random() with SecureRandom");') == []
+    assert cr.scan_java_random('String s = "new java.util.Random() is banned";') == []
 
 
 # ── provenance: this lane is never mistakable for DAST ───────────
@@ -268,3 +282,56 @@ def test_tree_lists_every_file_it_read_so_a_missing_case_is_visible(tmp_path):
     root = _tree(tmp_path, {"a/One.java": "class One {}", "b/Two.java": "class Two {}"})
     res = codeintel.review_source_tree(root)
     assert {os.path.basename(p) for p in res["files"]} == {"One.java", "Two.java"}
+
+
+# ── benchmark wiring: the lane must be impossible to misread ─────
+def _row(test, cat, fam, lane="code-assisted", error=""):
+    return {"test": test, "category": cat, "families": [fam] if fam else [],
+            "conf": ["confirmed"] if fam else [], "lane": lane, "error": error}
+
+
+def test_the_source_categories_have_a_family_mapping():
+    for cat, fam in (("crypto", "weak_crypto"), ("hash", "weak_hash"), ("weakrand", "weak_random")):
+        assert fam in ob.FAMILIES[cat]
+
+
+def test_trustbound_stays_unmapped_because_no_detector_ships_for_it():
+    """A mapping with no detector behind it is a claim. This category scores an honest 0."""
+    assert not ob.FAMILIES.get("trustbound")
+
+
+def test_a_code_assisted_run_is_scored_and_labelled_as_such():
+    run = {"target": "java", "results": [_row("T1", "crypto", "weak_crypto"),
+                                         _row("T2", "crypto", None)]}
+    key = {"T1": ("crypto", True), "T2": ("crypto", False)}
+    s = ob.score(run, key)
+    assert s["per_category"]["crypto"]["tp"] == 1 and s["per_category"]["crypto"]["tn"] == 1
+    assert s["lanes"] == ["code-assisted"]
+    text = ob.report(s)
+    assert "CODE-ASSISTED" in text and "SOURCE-DERIVED" in text
+    assert "not a dast" in text.lower()
+
+
+def test_a_mixed_lane_run_is_called_out_rather_than_averaged_quietly():
+    """Two lanes in one number is the mislabelling the ledger already carries a retraction for."""
+    run = {"target": "java", "results": [_row("T1", "crypto", "weak_crypto"),
+                                         _row("T2", "sqli", "sqli", lane="dast")]}
+    key = {"T1": ("crypto", True), "T2": ("sqli", True)}
+    text = ob.report(ob.score(run, key))
+    assert "MIXED" in text
+
+
+def test_a_case_with_no_source_is_unscored_not_counted_as_a_miss():
+    run = {"target": "java",
+           "results": [_row("T1", "crypto", None, error="no source provided"),
+                       _row("T2", "crypto", "weak_crypto")]}
+    key = {"T1": ("crypto", True), "T2": ("crypto", True)}
+    s = ob.score(run, key)
+    assert "T1" in s["unscored"]
+    assert s["per_category"]["crypto"]["tp"] == 1 and s["per_category"]["crypto"]["fn"] == 0
+
+
+def test_dast_reports_are_unchanged_by_the_lane_labelling():
+    run = {"target": "java", "results": [_row("T1", "sqli", "sqli", lane="dast")]}
+    text = ob.report(ob.score(run, {"T1": ("sqli", True)}))
+    assert "CODE-ASSISTED" not in text
