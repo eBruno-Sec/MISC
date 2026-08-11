@@ -29,6 +29,12 @@ ANON = "anonymous"
 USER_A = "user_a"
 USER_B = "user_b"
 ADMIN = "admin"
+# The SACRIFICIAL identity. Session-lifecycle testing (CWE-613) has to actually END a session, and a
+# session the engagement is still testing with must never be the one that ends. A persona minted under
+# this role is marked `sacrificial` and is deliberately invisible to every consumer that would keep
+# using it — the matrix pair, the authenticated re-crawl, the registry session store. It exists so the
+# destructive test has something of its own to destroy.
+SESSION_PROBE = "session_probe"
 
 
 @dataclass
@@ -45,9 +51,17 @@ class Persona:
     verified: bool = False         # a session was actually captured
     proven_privilege: bool = False # rank was proven by app behavior, not guessed
     blocked: list = field(default_factory=list)   # manual-step walls hit (captcha/mfa/email/invite)
+    sacrificial: bool = False      # minted to be DESTROYED (session-lifecycle); never reused for testing
 
     def has_session(self) -> bool:
         return bool(self.headers) and self.rank != RANK_ANON
+
+    def usable(self) -> bool:
+        """Holds a session the engagement may keep TESTING WITH. A sacrificial persona has a real
+        session and is deliberately excluded here: the whole point of it is that something is about to
+        end it, and a matrix built on a session that dies mid-run reports authorization failures that
+        are really just a dead cookie."""
+        return self.has_session() and not self.sacrificial
 
     def safe(self) -> dict:
         """Model/report-safe view — no secrets."""
@@ -55,7 +69,7 @@ class Persona:
                 "tenant": self.tenant or None, "method": self.method or None,
                 "has_session": self.has_session(), "verified": self.verified,
                 "proven_privilege": self.proven_privilege, "objects": len(self.objects),
-                "blocked": list(self.blocked)}
+                "blocked": list(self.blocked), "sacrificial": self.sacrificial}
 
 
 class PersonaManager:
@@ -67,15 +81,22 @@ class PersonaManager:
     # ── mutation ──
     def add(self, role: str, *, rank: int = RANK_USER, identity: str = "", tenant: str = "",
             method: str = "", headers: dict = None, account: dict = None, recipe: dict = None,
-            blocked: list = None) -> Persona:
+            blocked: list = None, sacrificial: bool = None) -> Persona:
         """Create/replace a persona. Anonymous rank is protected. Rank is capped at USER unless
-        prove_privileged() is later called — a caller cannot mint a rank-2 admin by assertion."""
+        prove_privileged() is later called — a caller cannot mint a rank-2 admin by assertion.
+
+        The SESSION_PROBE role is always sacrificial, whatever the caller passes: the carve-out must not
+        depend on every call site remembering to ask for it."""
         if role == ANON:
             rank = RANK_ANON
         elif rank >= RANK_PRIV:
             rank = RANK_USER  # privilege must be PROVEN, not declared at creation
         p = self._personas.get(role) or Persona(role=role)
         p.rank = rank
+        if sacrificial is not None:
+            p.sacrificial = bool(sacrificial)
+        if role == SESSION_PROBE:
+            p.sacrificial = True
         if identity:
             p.identity = identity
         if tenant:
@@ -122,17 +143,27 @@ class PersonaManager:
         return list(self._personas.keys())
 
     def session_roles(self) -> list:
-        """Roles that actually hold a session (excludes anonymous)."""
-        return [r for r, p in self._personas.items() if p.has_session()]
+        """Roles holding a session the engagement may keep testing with (excludes anonymous AND any
+        sacrificial persona, whose session is about to be deliberately destroyed)."""
+        return [r for r, p in self._personas.items() if p.usable()]
+
+    def sacrificial_roles(self) -> list:
+        """Roles minted to be DESTROYED — the set `bind()` has to keep out of the live registry.
+
+        Deliberately not filtered on `has_session()`. The role is what makes a persona sacrificial, and
+        the session that has to be pruned is frequently one the MANAGER never held: `acquire_session`
+        and `browser_login`'s promote_session write straight into `registry._sessions` under whatever
+        role name they are given. Filtering on our own copy of the headers would skip exactly those."""
+        return [r for r, p in self._personas.items() if p.sacrificial]
 
     def same_privilege_pair(self):
         """A pair of DISTINCT same-privilege personas with sessions (for horizontal testing), or None.
         Prefers user_a/user_b; falls back to any two rank-equal session-holders."""
         by_rank: dict = {}
         for p in self._personas.values():
-            if p.has_session():
+            if p.usable():
                 by_rank.setdefault(p.rank, []).append(p.role)
-        if self.get(USER_A) and self.get(USER_B) and self.get(USER_A).has_session() and self.get(USER_B).has_session() \
+        if self.get(USER_A) and self.get(USER_B) and self.get(USER_A).usable() and self.get(USER_B).usable() \
                 and self.get(USER_A).rank == self.get(USER_B).rank:
             return (USER_A, USER_B)
         for rank, roles in by_rank.items():
@@ -142,7 +173,7 @@ class PersonaManager:
 
     def privileged_role(self):
         for r, p in self._personas.items():
-            if p.rank >= RANK_PRIV and p.has_session():
+            if p.rank >= RANK_PRIV and p.usable():
                 return r
         return None
 
@@ -150,7 +181,7 @@ class PersonaManager:
         """Two session personas in DIFFERENT tenants (for cross-tenant testing), or None."""
         seen = {}
         for p in self._personas.values():
-            if p.has_session() and p.tenant:
+            if p.usable() and p.tenant:
                 if p.tenant in seen:
                     continue
                 seen[p.tenant] = p.role
@@ -178,9 +209,13 @@ class PersonaManager:
 
     def matrix_roles(self) -> list:
         """Roles shaped for authz.run_matrix / build_matrix: {role, rank, headers, tenant}. Always
-        includes anonymous so a public baseline exists (prevents public endpoints reading as IDOR)."""
+        includes anonymous so a public baseline exists (prevents public endpoints reading as IDOR), and
+        never includes a sacrificial persona — a matrix row whose session is destroyed mid-run would
+        report every endpoint as denied and read exactly like correct authorization."""
         out = []
         for p in self._personas.values():
+            if p.sacrificial:
+                continue
             out.append({"role": p.role, "rank": p.rank,
                         "headers": dict(p.headers), "tenant": p.tenant or None})
         return out
@@ -189,10 +224,25 @@ class PersonaManager:
     def bind(self, registry) -> None:
         """Write persona sessions THROUGH to the live ToolRegistry so existing tools (confirm_idor,
         http_read with session=role, the matrix driver) resolve them, and mirror identities into the
-        InvestigationState. Single source of truth stays here; this projects it onto the registry."""
+        InvestigationState. Single source of truth stays here; this projects it onto the registry.
+
+        A SACRIFICIAL persona is never projected, and any session already sitting under its role is
+        REMOVED. `_sessions` is what every other engine reaches into, and `tools._session_kill_is_safe`
+        reads it to decide whether a logout is safe to send — a sacrificial session in there makes the
+        safety check refuse its own subject, and the engine then reports inconclusive on every target
+        while nothing looks broken.
+
+        Both halves are needed. Skipping the write alone would be a one-sided carve-out, because
+        `bind()` is not the only writer: `_run_acquire_session` and `browser_login`'s `promote_session`
+        both write `registry._sessions[role]` directly under whatever role name the caller passes."""
         sessions = getattr(registry, "_sessions", None)
         state = getattr(registry, "state", None)
+        if sessions is not None:
+            for role in self.sacrificial_roles():
+                sessions.pop(role, None)
         for role, p in self._personas.items():
+            if p.sacrificial:
+                continue
             if p.has_session() and sessions is not None:
                 sessions[role] = dict(p.headers)
             if state is not None and hasattr(state, "add_identity") and p.rank != RANK_ANON:

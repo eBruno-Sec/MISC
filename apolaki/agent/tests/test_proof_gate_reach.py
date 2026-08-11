@@ -37,7 +37,10 @@ _RAW_IS_CORRECT = {
 # kind of invented baseline that makes a ratchet meaningless. Two consumers (the AI wrap-up prompt and the
 # coverage counts) are already migrated; the rest are tracked in tasks #50/#51 and are recorded here
 # rather than silently tolerated. Lower this as each is moved to get_findings_gated().
-_KNOWN_UNGATED = 15
+# RATCHETED 15 -> 14 when the SARIF export was gated. A ceiling that is never lowered lets a real leak
+# hide under the allowance: SARIF sat raw while its sibling poc_bundle_export was gated, and the count
+# stayed under 15 so nothing failed. Lower this every time a reader is migrated.
+_KNOWN_UNGATED = 14
 
 
 def _raw_call_count():

@@ -88,6 +88,13 @@ PRECONDITIONS = {
     "permissive_crossdomain":  ["serves_js"],          # origin may serve crossdomain.xml
     "username_enumeration":    ["has_login"],          # a login form + a known account to differential against
     "session_fixation":        ["has_login", "authenticated"],  # a login + a working credential to drive it
+    # Same gate as fixation, and for the same reason: it needs a login boundary to cross and it only runs
+    # on an authenticated scan, because minting the sacrificial account through the target's own signup is
+    # state-changing. NOT given an `invalidates: ["authenticated"]` effect, deliberately — it is the one
+    # engine that ends a session, but the session it ends is its own, so the engagement's `authenticated`
+    # observation still holds afterwards. Declaring the effect would teach the planner to reorder around a
+    # conflict that the mission-safety carve-out (tools._session_kill_is_safe) exists to make impossible.
+    "session_lifecycle":       ["has_login", "authenticated"],
     "default_credentials":     ["has_sensitive_route"],       # a discovered admin/management interface
     "saml_signature_bypass":   ["saml_sso_detected"],         # a captured SAMLResponse / SAML ACS on the surface
 }

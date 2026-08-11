@@ -70,7 +70,10 @@ def test_orchestration_audit_still_reports_no_islands():
     # findings — the blind benchmark was even scoring them as true positives — while having no registry
     # record at all: no taxonomy entry, no coverage credit, no planner reachability, no remediation
     # mapping. The count rising is the gap closing, not new engines appearing.
-    assert len(a["gated"]) == 41 and len(a["always_on"]) == 45, (len(a["gated"]), len(a["always_on"]))
+    # gated 41 -> 42 (session_lifecycle, Q-001): a genuinely NEW engine this time, not a backfill —
+    # CWE-613 had no coverage at all and WSTG-SESS-06/-07/-11 were all `none`. Gated rather than
+    # always-on because it mints an account through the target's own signup, which is state-changing.
+    assert len(a["gated"]) == 42 and len(a["always_on"]) == 45, (len(a["gated"]), len(a["always_on"]))
 
 
 def test_planning_from_evidence_produces_the_same_selection():
@@ -93,5 +96,9 @@ def test_snapshot_covers_every_table_the_planner_exposes():
     """Guard against the snapshot silently going out of date by omission rather than by mismatch."""
     snap = _snap()
     assert set(snap) == {"OBSERVATIONS", "PRECONDITIONS", "ALWAYS_ON"}
-    assert len(snap["PRECONDITIONS"]) == 41 and len(snap["ALWAYS_ON"]) == 45   # +enip_exposed, +4 DOM/encoding families
+    # +enip_exposed, +4 DOM/encoding families, +session_lifecycle (Q-001, CWE-613).
+    # The sibling assertion in test_orchestration_audit_still_reports_no_islands was bumped to 42 in the
+    # same change; this one was missed, which is exactly the "guard goes out of date by omission" this
+    # test exists to catch — it caught itself.
+    assert len(snap["PRECONDITIONS"]) == 42 and len(snap["ALWAYS_ON"]) == 45
     assert len(snap["OBSERVATIONS"]) == 17

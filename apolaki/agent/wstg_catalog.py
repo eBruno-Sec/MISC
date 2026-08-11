@@ -105,6 +105,9 @@ FULL = {
     "WSTG-SESS-01": "run_session_token (predictability/meaningful analyzer)",
     "WSTG-SESS-02": "cookie/header analysis", "WSTG-SESS-05": "run_csrf", "WSTG-SESS-10": "run_jwt (+ key confusion)",
     "WSTG-SESS-03": "run_session_fixation (token-rotation-on-login oracle)",
+    "WSTG-SESS-06": "run_session_lifecycle (replay after a PROVEN-processed logout, invented-cookie control)",
+    "WSTG-SESS-07": "run_session_lifecycle (replay after the server's own declared Max-Age has elapsed)",
+    "WSTG-SESS-11": "run_session_lifecycle (a concurrent session replayed after a proven credential rotation)",
 }
 
 # `partial` = a related tool touches it but does not confirm the specific WSTG scenario.

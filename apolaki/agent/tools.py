@@ -120,6 +120,7 @@ TOOL_PERMISSIONS = {
     "run_session_token": PermissionLevel.ACTIVE,
     "run_username_enum": PermissionLevel.ACTIVE,
     "run_session_fixation": PermissionLevel.ACTIVE,
+    "run_session_lifecycle": PermissionLevel.ACTIVE,
     "run_default_creds": PermissionLevel.ACTIVE,
     "run_ssh_audit": PermissionLevel.ACTIVE,
     "run_ldap_enum": PermissionLevel.ACTIVE,
@@ -1010,6 +1011,10 @@ class ToolRegistry:
             "http": {}, "nmap": {"open_ports": []},
         }
         self.urls: list = []
+        # Session-DESTROYING endpoints discovered anywhere on the surface (logout / signout / deauth).
+        # Quarantined rather than discarded: they must never be probed by the general sweep, and the
+        # session-lifecycle engine cannot test CWE-613 without knowing where they are. See `_add_urls`.
+        self.session_kill_urls: list = []
         # LIVE canonical asset/intelligence graph — grown as observations arrive (see _graph_add_url),
         # so the planner reads a current world model instead of a graph rebuilt only at finalize.
         import asset_graph as _asset_graph
@@ -3071,9 +3076,16 @@ class ToolRegistry:
             u = _collapse_dup_host(u)   # never let a duplicated-host URL into the surface
             if u in self.urls:
                 continue
-            # never let a session-destroying endpoint into the surface (self-logout)
+            # A session-destroying endpoint still never enters the probe surface — crawling or probing it
+            # on an authenticated scan logs the scanner out and silently kills the rest of its coverage.
+            # But DROPPING it also meant nothing remembered where it was, and the session-lifecycle class
+            # (CWE-613: logout that does not invalidate) cannot be tested without it. So it is QUARANTINED
+            # instead: out of `self.urls`, into a list only `_run_session_lifecycle` reads, and only ever
+            # with a sacrificial session that engine minted itself.
             p = urlparse(u)
             if _SESSION_KILL_RE.search((p.path or "") + ("?" + p.query if p.query else "")):
+                if u not in self.session_kill_urls and self.scope.validate(u)[0]:
+                    self.session_kill_urls.append(u)
                 continue
             if _RECURSIVE_LEAK_RE.search(p.path or ""):        # recursive _debug/_debug junk
                 continue
@@ -3670,7 +3682,11 @@ class ToolRegistry:
         for k, v in (self.session_headers or {}).items():
             if str(v).strip():
                 auth_h += ["-H", f"{k}: {v}"]
-        # never crawl a logout/session-kill URL — on an authed scan it would end the session
+        # Never CRAWL a logout/session-kill URL — on an authed scan katana would end the session and every
+        # later request would be anonymous. This exclusion stays. Katana drops out-of-scope URLs from its
+        # OUTPUT too, so it cannot feed the session-kill quarantine; the HTTP crawler can and does (every
+        # other discovery path funnels through `_add_urls`, which quarantines instead of discarding), and
+        # `session_lifecycle_tool.logout_candidates` falls back to bounded endpoint discovery.
         no_logout = ["-cos", "logout|log-?out|signout|sign-?out|logoff|deauth"]
         # Intensity scales the crawl: deeper (-d), and at deep/insane also extract
         # endpoints from JS with jsluice (-jsl) and pull known files (-kf all:
@@ -7487,6 +7503,375 @@ class ToolRegistry:
         except Exception:
             pass
         return ToolResult("session_fixation", url, True, "%d session-fixation finding(s)" % len(findings), findings)
+
+    # ── session LIFECYCLE (CWE-613): the mirror of session fixation ────────────────────────────
+    #
+    # `_run_session_fixation` asks whether the identifier is regenerated when a session is CREATED.
+    # Nothing asked whether it is destroyed when the session ENDS. These three engines do, and every one
+    # of them needs an endpoint the platform had deliberately blinded itself to (see `_add_urls`).
+    #
+    # MISSION-SAFETY CARVE-OUT — read this before changing anything below. The engine sends a real
+    # logout. If that logout ever carried the mission's own session it would end the authenticated scan
+    # and silently destroy the rest of the engagement's coverage. Three independent guarantees, in order
+    # of how much they are trusted:
+    #   1. the session is one Apolaki MINTED for this test, through the target's own signup, under a
+    #      dedicated persona label — never an operator-supplied or scan-discovered session;
+    #   2. every request here goes through `_sl_req`, a private client that does NOT merge
+    #      `self.session_headers` (the shared `_http` does, so it must never be used for this engine);
+    #   3. `_session_kill_is_safe` re-checks the FACT before the destructive step: the credential about
+    #      to be logged out must be value-disjoint from `session_headers` and from every stored persona
+    #      session. A guard that trusted rule 1 would be checking a declaration.
+    _SL_MARKER_LIMIT = 6            # candidate endpoints probed for an authenticated marker
+    _SL_MAX_WAIT = 25               # seconds this engine will ever wait for a declared expiry
+
+    def _sl_req(self, client, method: str, url: str, headers: dict = None, json_body=None,
+                data=None):
+        """One request for the session-lifecycle engine. DELIBERATELY NOT `_http`: `_http` merges
+        `self.session_headers` into every request, which would put the MISSION's cookie on the logout
+        we are about to send. This carries only the headers it is given."""
+        h = {"User-Agent": _UA, **(headers or {})}
+        return client.request(method.upper(), url, headers=h, json=json_body, data=data)
+
+    def _session_kill_is_safe(self, headers: dict) -> tuple:
+        """(safe, why). May we end the session these headers carry? Checks the FACT — that no secret in
+        them is shared with the mission session or with any persona the engagement is testing as — rather
+        than the declaration that we minted it. Pure over the registry's own state."""
+        import session_lifecycle_tool as sl
+        mine = set()
+        for v in (headers or {}).values():
+            s = str(v or "").strip()
+            if s:
+                mine.add(s)
+                mine |= {x for x in sl.parse_cookie_header(s).values() if x}
+                mine.add(s.partition(" ")[2].strip())
+        mine.discard("")
+        live = {"__scan__": self.session_headers or {}}
+        live.update({r: (h or {}) for r, h in (self._sessions or {}).items()})
+        for role, hdrs in live.items():
+            for v in (hdrs or {}).values():
+                s = str(v or "").strip()
+                if not s:
+                    continue
+                theirs = {s, s.partition(" ")[2].strip()} | {x for x in sl.parse_cookie_header(s).values() if x}
+                shared = mine & {t for t in theirs if t}
+                if shared:
+                    return False, ("refusing to end this session: its credential is shared with the live "
+                                   "'%s' session — logging it out would kill the running scan" % role)
+        return True, "the sacrificial session is value-disjoint from every live mission session"
+
+    async def _sl_mint(self, client, base: str, inp: dict):
+        """Create the SACRIFICIAL account through the target's own signup and return
+        (account, register_url) or (None, why). Bounded; one account per mission."""
+        import register as _reg
+        import session_lifecycle_tool as sl
+        cands = [u for u in (inp.get("register_urls") or []) if self.scope.validate(u)[0]]
+        if not cands:
+            b = base.rstrip("/")
+            disc = [str(u) for u in (self.urls or [])
+                    if re.search(r"/(register|signup|sign-up|join|create-account|users)\b", str(u), re.I)]
+            cands = sl._dedup(disc + [b + p for p in ("/api/Users", "/api/register", "/api/auth/register",
+                                                      "/api/signup", "/register", "/signup", "/users")])
+            cands = [u for u in cands if self.scope.validate(u)[0]][:8]
+        for cand in cands:
+            try:
+                r = await _reg.register(cand, label="session_probe")
+            except Exception as e:
+                self._swallow(e, "session_lifecycle.register", cand)
+                continue
+            if r.get("blocked"):
+                return None, ("signup needs a manual step (%s) — no sacrificial account can be minted"
+                              % ", ".join(r["blocked"]))
+            if r.get("created") and (r.get("account") or {}).get("password"):
+                return {**r["account"], "register_url": cand, "headers": r.get("headers") or {}}, cand
+        return None, "the target offers no autonomous signup, so no sacrificial session can be created"
+
+    async def _sl_login(self, client, base: str, acct: dict, password: str, inp: dict):
+        """Log the sacrificial account in ONCE and return (headers, set_cookie, status). One known
+        credential per attempt — never a password list. Uses the private client, so nothing this engine
+        obtains is ever written into `self._sessions`."""
+        import session_lifecycle_tool as sl
+        b = base.rstrip("/")
+        cands = [u for u in (inp.get("login_urls") or []) if self.scope.validate(u)[0]]
+        if not cands:
+            disc = [str(u) for u in (self.urls or [])
+                    if re.search(r"/(login|signin|sign-in|session)\b", str(u), re.I)]
+            cands = sl._dedup([b + p for p in ("/rest/user/login", "/api/login", "/api/auth/login",
+                                               "/auth/login", "/login")] + disc)
+            cands = [u for u in cands if self.scope.validate(u)[0]][:8]
+        idents = [x for x in (acct.get("email"), acct.get("username")) if x]
+        for lu in cands:
+            for ident in idents:
+                for body in ({"email": ident, "password": password}, {"username": ident, "password": password}):
+                    try:
+                        r = await self._sl_req(client, "POST", lu, json_body=body)
+                    except Exception as e:
+                        self._swallow(e, "session_lifecycle.login", lu)
+                        continue
+                    if not (200 <= r.status_code < 300):
+                        continue
+                    jar = {c.name: c.value for c in r.cookies.jar} if hasattr(r, "cookies") else {}
+                    hdrs = {}
+                    if jar:
+                        hdrs["Cookie"] = sl.build_cookie_header(jar)
+                    if not hdrs:
+                        try:
+                            j = r.json()
+                            tok = ((j.get("authentication") or {}).get("token") or j.get("token")
+                                   or j.get("access_token") or j.get("jwt"))
+                        except Exception:
+                            tok = None
+                        if tok:
+                            hdrs["Authorization"] = "Bearer " + str(tok)
+                    if hdrs:
+                        return hdrs, r.headers.get("set-cookie", ""), lu
+        return None, "", None
+
+    async def _sl_marker(self, client, base: str, real: dict, identity_markers: list):
+        """Find an endpoint that PROVABLY distinguishes the real session from an invented one.
+
+        Baseline first: the authenticated request is measured before the control, and an endpoint is only
+        accepted when the invented cookie is REJECTED there. Returns (url, discriminator, why)."""
+        import session_lifecycle_tool as sl
+        fake = sl.invented_headers(real)
+        if not fake:
+            return None, None, "the session carries no credential we can invent a control for"
+        last = "no candidate endpoint witnessed the session"
+        for u in sl.marker_candidates(base, self.urls)[:self._SL_MARKER_LIMIT]:
+            if not self.scope.validate(u)[0]:
+                continue
+            try:
+                a = await self._sl_req(client, "GET", u, headers=real)
+                c = await self._sl_req(client, "GET", u, headers=fake)
+            except Exception as e:
+                self._swallow(e, "session_lifecycle.marker", u)
+                continue
+            disc, why = sl.build_discriminator(
+                {"status": a.status_code, "body": a.text},
+                {"status": c.status_code, "body": c.text}, identity_markers)
+            if disc:
+                return u, disc, why
+            last = "%s: %s" % (u, why)
+        return None, None, last
+
+    async def _sl_probe(self, client, url: str, real: dict, disc: dict):
+        """(replay_response, still_authed, control_evidence). Replays the ORIGINAL credential and
+        RE-RUNS the negative control, because an endpoint that quietly became public after our state
+        change would otherwise read exactly like the bug."""
+        import session_lifecycle_tool as sl
+        fake = sl.invented_headers(real)
+        r = await self._sl_req(client, "GET", url, headers=real)
+        c = await self._sl_req(client, "GET", url, headers=fake)
+        rejected = not sl.still_authenticated({"status": c.status_code, "body": c.text}, disc)
+        ev = ("an invented cookie is still rejected (HTTP %d)" % c.status_code if rejected else
+              "WARNING: the invented cookie is now ACCEPTED (HTTP %d) — the endpoint stopped "
+              "discriminating, so the replay proves nothing" % c.status_code)
+        return r, sl.still_authenticated({"status": r.status_code, "body": r.text}, disc), (rejected, ev)
+
+    async def _run_session_lifecycle(self, inp: dict) -> ToolResult:
+        """ACTIVE: session-lifecycle invalidation (CWE-613 — WSTG-SESS-06 / -07 / -11).
+
+        Mints a SACRIFICIAL account through the target's own signup, proves its cookie reaches an
+        authenticated marker that REJECTS a freshly invented cookie of the same name, then tests three
+        ways a session is supposed to end and is not:
+
+            logout           the app's own sign-out leaves the token usable          (WSTG-SESS-06)
+            password change  a concurrent session survives credential rotation       (WSTG-SESS-11)
+            declared expiry  the cookie outlives the Max-Age the server declared     (WSTG-SESS-07)
+
+        Every destructive step acts ONLY on a session this engine created, is preceded by a fact-check
+        that the credential is disjoint from every live mission session, and is only counted once the
+        application is observed to have PROCESSED it (a cleared cookie / a redirect / a proven credential
+        rotation). One sacrificial account per mission."""
+        import httpx
+        import session_lifecycle_tool as sl
+        base = (inp.get("base_url") or inp.get("url") or "").strip()
+        if not base:
+            return ToolResult("session_lifecycle", "", False, "", [], "no base url")
+        if not self.scope.validate(base)[0]:
+            return ToolResult("session_lifecycle", base, False, "", [], "SCOPE BLOCK")
+        if getattr(self, "_sesslife_done", False):
+            return ToolResult("session_lifecycle", base, True, "already tested this mission", [])
+        self._sesslife_done = True
+        notes, findings = [], []
+        async with httpx.AsyncClient(verify=False, follow_redirects=False, timeout=20) as client:
+            acct, why = await self._sl_mint(client, base, inp)
+            if not acct:
+                return ToolResult("session_lifecycle", base, True, sl.inconclusive(why), [])
+            pw = acct["password"]
+            ids = [x for x in (acct.get("email"), acct.get("username")) if x]
+            # the identity (never the secret) so the engagement can SEE which account it sacrificed
+            self._sesslife_identity = acct.get("email") or acct.get("username") or ""
+            # A signup that auto-logs-in already hands us a session, but not the Set-Cookie header the
+            # expiry variant needs to read, so prefer a real login when the target offers one.
+            real, set_cookie, login_url = acct.get("headers") or {}, "", None
+            h2, sc2, lu2 = await self._sl_login(client, base, acct, pw, inp)
+            if h2:
+                real, set_cookie, login_url = h2, sc2, lu2
+            if not real:
+                return ToolResult("session_lifecycle", base, True, sl.inconclusive(
+                    "the sacrificial account was created but no session could be obtained for it"), [])
+            marker, disc, why = await self._sl_marker(client, base, real, ids)
+            if not disc:
+                return ToolResult("session_lifecycle", base, True, sl.inconclusive(
+                    "no endpoint witnessed the session — %s" % why), [])
+            control_ev = why
+            notes.append("authenticated marker %s (%s)" % (marker, why))
+
+            safe, safe_why = self._session_kill_is_safe(real)
+            if not safe:
+                return ToolResult("session_lifecycle", base, True, sl.inconclusive(safe_why), [])
+
+            f = await self._sl_logout_variant(client, base, marker, disc, real, control_ev, inp)
+            findings += f[0]
+            notes += f[1]
+            f = await self._sl_expiry_variant(client, base, marker, disc, acct, pw, set_cookie, inp)
+            findings += f[0]
+            notes += f[1]
+            f = await self._sl_pwchange_variant(client, base, marker, disc, acct, pw, control_ev, inp)
+            findings += f[0]
+            notes += f[1]
+        return ToolResult("session_lifecycle", base, True,
+                          "%d session-lifecycle finding(s); %s" % (len(findings), " | ".join(notes)),
+                          findings)
+
+    async def _sl_logout_variant(self, client, base, marker, disc, real, control_ev, inp):
+        """WSTG-SESS-06: the app's own logout leaves the token usable."""
+        import session_lifecycle_tool as sl
+        notes, findings = [], []
+        page = ""
+        try:
+            page = (await self._sl_req(client, "GET", marker, headers=real)).text
+        except Exception as e:
+            self._swallow(e, "session_lifecycle.page", marker)
+        cands = [u for u in sl.logout_candidates(base, self.session_kill_urls, page)
+                 if self.scope.validate(u)[0]]
+        names = sl.session_credential_names(real)
+        for lo in cands:
+            for method in ("POST", "GET"):
+                try:
+                    r = await self._sl_req(client, method, lo, headers=real)
+                except Exception as e:
+                    self._swallow(e, "session_lifecycle.logout", lo)
+                    continue
+                ok, accept_ev = sl.logout_accepted(r.status_code, dict(r.headers), r.text, names)
+                if not ok:
+                    continue
+                replay, still, (rejected, recheck) = await self._sl_probe(client, marker, real, disc)
+                if not still:
+                    notes.append("logout at %s correctly invalidated the session (replay HTTP %d)"
+                                 % (lo, replay.status_code))
+                    return findings, notes
+                f = sl.logout_finding(marker, lo, disc, control_ev, accept_ev, replay.status_code, recheck)
+                if not rejected:
+                    f["confidence"] = "lead"
+                    f["tags"] = list(f["tags"]) + ["control-degraded"]
+                findings.append(self._attach_poc(f, marker, replay, "GET"))
+                return findings, notes
+        notes.append("no logout endpoint on this target could be shown to have been processed "
+                     "(%d candidate(s) tried)" % len(cands))
+        return findings, notes
+
+    async def _sl_expiry_variant(self, client, base, marker, disc, acct, pw, set_cookie, inp):
+        """WSTG-SESS-07: the server declares a session lifetime it does not enforce."""
+        import asyncio as _aio
+        import session_lifecycle_tool as sl
+        notes, findings = [], []
+        fresh, sc, _lu = await self._sl_login(client, base, acct, pw, inp)
+        if not fresh:
+            notes.append("expiry variant skipped: could not open a fresh session to time")
+            return findings, notes
+        declared = sl.declared_lifetime(sc or set_cookie, sl.session_credential_names(fresh))
+        if not declared:
+            notes.append("expiry variant skipped: the server declares no Max-Age for its session cookie, "
+                         "so there is no stated window to hold it to")
+            return findings, notes
+        wait = declared + 2
+        if wait > self._SL_MAX_WAIT:
+            notes.append("expiry variant skipped: the declared lifetime is %ds, beyond the %ds a scan "
+                         "will ever wait" % (declared, self._SL_MAX_WAIT))
+            return findings, notes
+        await _aio.sleep(wait)
+        replay, still, (rejected, recheck) = await self._sl_probe(client, marker, fresh, disc)
+        if not still:
+            notes.append("the declared %ds session lifetime IS enforced server-side (replay HTTP %d)"
+                         % (declared, replay.status_code))
+            return findings, notes
+        f = sl.timeout_finding(marker, declared, wait, disc,
+                               "an invented cookie of the same name was rejected at this endpoint",
+                               replay.status_code, recheck)
+        if not rejected:
+            f["confidence"] = "lead"
+            f["tags"] = list(f["tags"]) + ["control-degraded"]
+        findings.append(self._attach_poc(f, marker, replay, "GET"))
+        return findings, notes
+
+    async def _sl_pwchange_variant(self, client, base, marker, disc, acct, pw, control_ev, inp):
+        """WSTG-SESS-11: a concurrent session survives the account's credential rotation.
+
+        The rotation itself is proven by the application's own login endpoint — the old password must
+        stop working and the new one start. A 200 from a change-password route is a declaration; the
+        login differential is the fact."""
+        import register as _reg
+        import session_lifecycle_tool as sl
+        notes, findings = [], []
+        s1, _sc1, login_url = await self._sl_login(client, base, acct, pw, inp)
+        s2, _sc2, _lu2 = await self._sl_login(client, base, acct, pw, inp)
+        if not (s1 and s2):
+            notes.append("password-change variant skipped: could not open two concurrent sessions")
+            return findings, notes
+        if not login_url:
+            notes.append("password-change variant skipped: no login endpoint to verify the rotation with")
+            return findings, notes
+        new_pw = _reg.adapt_password()
+        page = ""
+        try:
+            page = (await self._sl_req(client, "GET", marker, headers=s1)).text
+        except Exception as e:
+            self._swallow(e, "session_lifecycle.page", marker)
+        bodies = [{"current": pw, "new": new_pw, "repeat": new_pw},
+                  {"currentPassword": pw, "newPassword": new_pw, "passwordRepeat": new_pw},
+                  {"old_password": pw, "new_password": new_pw, "confirm_password": new_pw},
+                  {"password": new_pw, "passwordRepeat": new_pw, "currentPassword": pw}]
+        changed, change_url = False, None
+        for cu in [u for u in sl.password_change_candidates(base, self.urls, page)
+                   if self.scope.validate(u)[0]]:
+            for body in bodies:
+                for method in ("POST", "PUT"):
+                    try:
+                        r = await self._sl_req(client, method, cu, headers=s1, json_body=body)
+                    except Exception as e:
+                        self._swallow(e, "session_lifecycle.pwchange", cu)
+                        continue
+                    if not (200 <= r.status_code < 400):
+                        continue
+                    old = await self._sl_req(client, "POST", login_url,
+                                             json_body={"email": acct.get("email"), "password": pw})
+                    new = await self._sl_req(client, "POST", login_url,
+                                             json_body={"email": acct.get("email"), "password": new_pw})
+                    changed, accept_ev = sl.password_change_accepted(old.status_code, new.status_code)
+                    if changed:
+                        change_url = cu
+                        break
+                if changed:
+                    break
+            if changed:
+                break
+        if not changed:
+            notes.append("password-change variant skipped: no endpoint on this target was observed to "
+                         "actually rotate the credential")
+            return findings, notes
+        replay, still, (rejected, recheck) = await self._sl_probe(client, marker, s2, disc)
+        if not still:
+            notes.append("the credential change correctly terminated the other session (replay HTTP %d)"
+                         % replay.status_code)
+            return findings, notes
+        f = sl.password_change_finding(marker, change_url, disc, control_ev, accept_ev,
+                                       replay.status_code, recheck)
+        if not rejected:
+            f["confidence"] = "lead"
+            f["tags"] = list(f["tags"]) + ["control-degraded"]
+        findings.append(self._attach_poc(f, marker, replay, "GET"))
+        return findings, notes
 
     async def _run_default_creds(self, inp: dict) -> ToolResult:
         """ACTIVE: default-credentials check on a recognised admin interface (WAHH ch18, CWE-1392 / WSTG-ATHN-02).

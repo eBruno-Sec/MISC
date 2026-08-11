@@ -122,6 +122,28 @@ def _step(tool: str, inp: dict, key: str) -> dict:
     return {"tool": tool, "input": inp, "key": key}
 
 
+def _addressable(step: dict) -> bool:
+    """False when a step carries a `url`/`base_url` that is not an absolute http(s) URL with a host.
+
+    Q-019's single chokepoint. Every URL a step targets is built here from a host plus a path, and a
+    host that turns out to be empty used to yield `https:///path` — scheme present, netloc empty —
+    which the scope engine refused ten times per mission while nothing named the planner as the
+    producer. The planner must not emit a target it cannot address; scope is the authorization gate,
+    not the spell-checker.
+    """
+    inp = step.get("input") or {}
+    for k in ("url", "base_url"):
+        if k not in inp:
+            continue
+        v = inp.get(k)
+        if not isinstance(v, str) or not v:
+            return False
+        p = urlparse(v)
+        if p.scheme not in ("http", "https") or not p.netloc:
+            return False
+    return True
+
+
 def estimate(mode: str, roots: list) -> dict:
     """A rough, pre-run estimate of the deterministic workload for the UI."""
     roots = [r for r in (roots or []) if r]
@@ -158,8 +180,15 @@ def next_batch(state: dict) -> list:
         # inventory / crawl) often carry a :port. Strip it for the lookup so a
         # non-standard target (e.g. an IP or host on :42002) resolves to its real
         # scheme+port base instead of falling back to https:// on a plaintext port.
+        #
+        # AN EMPTY HOST RETURNS "" (Q-019). It used to return f"https://{h}" == "https://", so
+        # `_b(_host(u)) + _path(u)` on a host-less input produced `https:///benchmark/x.html` —
+        # scheme, empty netloc — which scope correctly refused, ten times per mission, against
+        # exactly the index pages that link the whole corpus. `x or DEFAULT` where the empty value
+        # is a REAL input is the recorded falsy-default failure mode; the honest answer is that
+        # there is no base URL for a host that does not exist. Callers must skip a "" base.
         if not h:
-            return f"https://{h}"
+            return ""
         return bases.get(h) or bases.get(h.split(":")[0]) or f"https://{h}"
 
     def _b_url(u):
@@ -174,17 +203,31 @@ def next_batch(state: dict) -> list:
         if not u:
             return u
         p = urlparse(u)
-        base = urlparse(_b(p.netloc))
+        b = _b(p.netloc)
+        if not b:                       # host-less input: there is no base to rebuild against
+            return ""
+        base = urlparse(b)
         return urlunparse((base.scheme, base.netloc, p.path, p.params, p.query, p.fragment))
+
+    def _abs(u):
+        """A discovered URL normalized onto the scope's KNOWN base for its host, or "" when it
+        carries no host. Q-019: `_b(_host(u)) + _path(u)` written inline at five call sites was what
+        turned a host-less graph label into `https:///path`. One helper, one rule: no host, no URL."""
+        b = _b(_host(u))
+        return (b + _path(u)) if b else ""
 
     def fresh(steps):
         # dedup against `done` AND within this freshly built batch (a step's key can
         # be generated twice in one phase, e.g. run_graphql from a URL hint and from
-        # a host root) — so the same call never fires twice.
+        # a host root) — so the same call never fires twice. A step whose target could not be
+        # resolved to an absolute URL (empty string) is dropped here rather than scheduled: it is
+        # not a target, and handing scope a `https:///x` to refuse only hides the producer.
         out, seen = [], set()
         for s in steps:
             k = s["key"]
             if k in done or k in seen or not _allowed(s["tool"], mode):
+                continue
+            if not _addressable(s):
                 continue
             seen.add(k)
             out.append(s)
@@ -245,7 +288,9 @@ def next_batch(state: dict) -> list:
         # normalize to the scope's known base — a discovered URL can carry a stale/
         # wrong scheme (e.g. https:// left over from before a non-standard-port
         # base was known), which fails outright on a plaintext-only port.
-        nu = _b(_host(u)) + _path(u)
+        nu = _abs(u)
+        if not nu:
+            continue
         if any(k in low for k in ("swagger", "openapi", "api-docs", "/v2/api-docs", "openapi.json")) and nu not in openapi_seen:
             openapi_seen.add(nu)
             d.append(_step("fetch_openapi", {"url": nu}, f"fetch_openapi:{nu}"))
@@ -275,8 +320,8 @@ def next_batch(state: dict) -> list:
         raw = u.split("?")[0]
         if _is_static(raw):
             continue
-        pg = _b(_host(u)) + _path(u)            # normalize to the scope's real base
-        if pg in seen_pg:
+        pg = _abs(u)                            # normalize to the scope's real base
+        if not pg or pg in seen_pg:
             continue
         seen_pg.add(pg)
         page_urls.append(pg)
@@ -431,8 +476,8 @@ def next_batch(state: dict) -> list:
             continue
         # normalize back to the scope's known base so a wrong-scheme/no-port junk URL
         # (https://host/path with the app really on http://host:port) is corrected
-        pg = _b(_host(u)) + _path(u)
-        if pg in seen_page or pg in form_seen:
+        pg = _abs(u)
+        if not pg or pg in seen_page or pg in form_seen:
             continue
         seen_page.add(pg)
         if len(seen_page) > CAP_FORM_PAGES:
@@ -446,8 +491,8 @@ def next_batch(state: dict) -> list:
     chat_seen = set()
     for u in urls:
         if _CHAT_SINK.search(_path(u)):
-            base = _b(_host(u)) + _path(u)      # normalize scheme+port to the known base
-            if base not in chat_seen:
+            base = _abs(u)                      # normalize scheme+port to the known base
+            if base and base not in chat_seen:
                 chat_seen.add(base)
                 e_steps.append(_step("run_llm_probe", {"url": base}, f"run_llm_probe:{base}"))
     for ep in inv:
@@ -509,8 +554,8 @@ def next_batch(state: dict) -> list:
                 e_steps.append(_step("run_oauth", {"url": ou}, f"run_oauth:{h}{pth}"))
     for u in urls:
         if _re.search(r"(?:oauth|/authorize|openid|/sso)", _path(u), _re.I):
-            base = _b(_host(u)) + _path(u)
-            if base not in oauth_seen:
+            base = _abs(u)
+            if base and base not in oauth_seen:
                 oauth_seen.add(base)
                 e_steps.append(_step("run_oauth", {"url": base}, f"run_oauth:{base}"))
     # JWT weakness analysis (alg-confusion / weak-secret / kid) — only when the scan

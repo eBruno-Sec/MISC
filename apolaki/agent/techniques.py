@@ -126,6 +126,26 @@ TECHNIQUES: dict[str, dict] = {t["id"]: t for t in [
               "cookie is byte-for-byte identical after a SUCCESSFUL login (no rotation).",
        exploit="Fix a known token in a victim's browser; inherit their authenticated session when they log in.",
        oracle="A session-ish cookie held before login is unchanged after a confirmed-successful login."),
+    # WAHH ch7 / WSTG-SESS-06,-07,-11 — the MIRROR of session fixation. Fixation asks whether the id is
+    # regenerated when a session is CREATED; this asks whether it is destroyed when the session ENDS.
+    # Non-destructive by construction: the only session it ever ends is one it minted itself through the
+    # target's own signup, and `tools._session_kill_is_safe` re-checks that as a fact before acting.
+    _t(id="session_lifecycle", vuln_class="session", cwe="CWE-613", owasp="A07:2021", wstg="WSTG-SESS-06",
+       permission=ACTIVE, transferable=True, validated_on=["sessionlife"],
+       maps_to={"sessionlife": ["logout does not invalidate", "session survives password change",
+                                "declared Max-Age not enforced"]},
+       summary="A session that is supposed to have ended still works — logout, credential rotation and the "
+               "server's own declared expiry are enforced on the client only.",
+       detect="Mint a sacrificial account through the target's signup, capture cookie C, and find an endpoint "
+              "that PROVABLY discriminates: C reaches an authenticated view there AND a freshly invented "
+              "cookie of the same name is rejected. Then end the session three ways — the app's own logout, "
+              "a password change made from a second session, and waiting out the declared Max-Age.",
+       exploit="Replay a token captured from a log, proxy, backup or shared browser after the user believes "
+               "they signed out; revoking access becomes impossible without changing the credential — and "
+               "where the change-password variant also confirms, not even that evicts the holder.",
+       oracle="C still returns the authenticated view after the app was OBSERVED to process the state change "
+              "(cleared Set-Cookie / redirect / proven credential rotation), while the invented cookie is "
+              "still rejected at that same endpoint on the post-change re-check."),
     # distilled from WAHH ch18 — a dropped-in admin interface still on its documented vendor default login.
     _t(id="default_credentials", vuln_class="authentication", cwe="CWE-1392", owasp="A07:2021", wstg="WSTG-ATHN-02",
        permission=ACTIVE, transferable=True,
