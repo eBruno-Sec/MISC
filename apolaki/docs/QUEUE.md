@@ -834,9 +834,694 @@ padding oracle (excluded, no clean general oracle).
 
 ---
 
-## Rank 3d â€” new tickets from today's measurements (Distillation, 2026-08-10). All `proposed`.
+# Codex claim verification — pass 2 (Analyst, 2026-08-10)
 
-### Q-022 Â· "How this was confirmed" is a template, not a record â€” 626 of 660 findings Â· **CRITICAL** Â· `proposed`
+The five claims already settled in [CODEX_AUDIT_VERDICTS.md](CODEX_AUDIT_VERDICTS.md) are **not**
+re-verified here. What follows is the remaining eight, each with the command output that settles it.
+Environment: `apolaki-agent-1` healthy, **no mission running**, 151 stored missions / 29,109
+`tool_call` rows / 64,513 log rows in `/app/data/bbh.db` (read-only `mode=ro` connections throughout).
+
+| # | Codex claim | verdict |
+|---|---|---|
+| 1 | `run_whatweb` is an isolated island | **CONFIRMED-WITH-CORRECTION** — reachable, never scheduled, output never normalized |
+| 2 | `browser_engine.to_observations()` drops `framework` | **CONFIRMED** |
+| 3 | `codeintel.versions` is ignored by mission code | **CONFIRMED** |
+| 4 | NVD/GHSA/CVE-v5 end in an in-memory registry with no consumer | **CONFIRMED, and worse than stated** |
+| 5 | `asset_graph.build_from_engagement()` never projects recon technology | **CONFIRMED, and worse than stated** |
+| 6 | No `vulnerable_component` route in `candidate_pipeline._ROUTES` | **CONFIRMED, but unreachable until Q-021A** |
+| 7 | `report.proof_and_retest()` asserts a control it never checked ran | **CONFIRMED — 626 of 660 stored findings** |
+| 8 | `test_asset_graph.py:106` injects a synthetic version | **CONFIRMED** |
+
+### 1 · `run_whatweb` — CONFIRMED-WITH-CORRECTION. Two of Codex's sub-claims are wrong.
+
+Both emitter tables were checked, per the standing "wrong by nine" rule.
+
+```
+tools.py:72    TOOL_PERMISSIONS["run_whatweb"] = PermissionLevel.ACTIVE     <- table 1: present
+tools.py:396   CLAUDE_TOOLS  {"name": "run_whatweb", ...}                   <- table 2: present
+tools.py:3493  async def _run_whatweb(...)                                  <- getattr("_" + name) resolves
+agent.py:76    PHASE_OF["run_whatweb"] = "enum"                             <- UI phase mapping
+$ docker exec apolaki-agent-1 which whatweb
+/usr/bin/whatweb                                                            <- the binary IS installed
+$ grep -n whatweb agent/planner.py
+(no output)                                                                 <- never scheduled
+```
+
+- **WRONG**: "isolated island". It is in *both* dispatch tables with a real `_run_whatweb` method, so
+  an agentic model can call it. It is not unreachable.
+- **WRONG**: the implied "the binary is missing". `/usr/bin/whatweb` exists in the image.
+- **RIGHT, and this is the real defect**: nothing deterministic ever calls it, and its output goes
+  nowhere. `_run_whatweb` returns `ToolResult("whatweb", ..., findings=[raw JSON])` and, unlike
+  `_run_fingerprint` which at least writes `lh["tech"]`, **writes nothing into `self.recon`**. It is
+  absent from `_AUTO_STORE_TOOLS`, from `asvs_model`, and from `wstg_catalog`.
+- **MEASURED consequence**: `run_whatweb` calls across 151 missions and 29,109 `tool_call` rows = **0**
+  (`run_fingerprint` = 2,641 over the same corpus).
+
+**Correct one-line statement**: *`run_whatweb` is a model-only tool with no normalizer, so in 151
+deterministic missions it has never run and could not have contributed if it had.*
+
+### 2 · `browser_engine` drops `framework` — CONFIRMED
+
+`browser_engine.py:53` computes it in-page (`window.angular` / React roots / `window.Vue`), `:56`
+returns it, `:89` declares it in the empty-result shape. `grep -n framework agent/browser_engine.py`
+returns lines **8, 53, 56, 89 only** — `to_observations()` (`:177`) never mentions it, and neither
+does `agent.py:_browser_harvest_surface`. `grep framework agent/technique_planner.py
+agent/asset_graph.py agent/planner.py` returns **no output**. The sensor detects the SPA framework and
+no consumer exists.
+
+### 3 · `codeintel.versions` ignored — CONFIRMED
+
+`codeintel.py:236` `out["versions"] = sorted(versions)[:50]` (mined at `:166` by an `name@x.y.z` regex
+over served JS). Consumers:
+
+```
+$ grep -rn '["versions"] | get("versions")' agent/*.py | grep -v test
+agent/codeintel.py:236        <- the write
+agent/intel_connectors.py:182 <- unrelated (GHSA advisory.affected[].versions)
+```
+
+`agent._recon_code_intelligence` (`agent.py:1034-1094`) reads `endpoints`, `sensitive_routes` and
+`logic` and nothing else; `technique_planner.derive_observations` reads `ci["endpoints"]`,
+`ci["sensitive_routes"]`, `ci["bundles"]`, `ci["counts"]`. **A component+version harvested from the
+target's own JS is computed on every non-passive mission and discarded** — the same stage-2 loss the
+baseline recorded for `fingerprint`, in a second producer.
+
+### 4 · Intel connectors terminate in an in-memory registry — CONFIRMED, and the island is deeper
+
+`intel_connectors._PARSERS` normalizes `epss / nvd / ghsa / cve_v5 / cisa_kev` (`:134-204`). The only
+consumer chain in the repo:
+
+```
+$ grep -rn "intel_connectors / intel_registry" agent/*.py  (excluding the modules themselves)
+agent/main.py:2785  /intel/audit
+agent/main.py:2790  /intel/registry        (stats only)
+agent/main.py:2803  /intel/fetch/{source}  -> _ir.ingest(...)
+```
+
+Three read-only HTTP endpoints. No scan, planner, report, SARIF or graph consumer. Three additional
+facts Codex did not state, each of which makes the ticket smaller and more honest:
+
+```
+$ docker exec apolaki-agent-1 python -c "intel_sources.allowlist(); intel_registry.stats()"
+allowlist: all 18 sources -> enabled=False   (cve_v5, nvd, cisa_kev, epss, ghsa, cert_cc, ... all off)
+registry stats: {'total': 0, 'by_state': {}}   production: 0
+```
+
+- Every source is **disabled by default**, and `fetch()` hard-gates before any network I/O.
+- `intel_registry._STORE` is a module-level dict — **not persisted**; a container restart erases it.
+- `intel_registry.advance()` is called **only from `agent/tests/test_intel_registry.py`**. There is no
+  endpoint and no code path that promotes a record. So `production()` — documented as "the only
+  trusted knowledge safe to drive engines" — is **structurally always empty**. Even a fully wired
+  consumer would read `[]`. **Q-021D must therefore ship the promotion path, not just a consumer.**
+
+### 5 · `asset_graph` never projects recon technology — CONFIRMED, and `recon=` is a dead parameter
+
+Every occurrence of the name `recon` inside `build_from_engagement`, dumped from the live module:
+
+```
+$ docker exec apolaki-agent-1 python -c "inspect.getsource(asset_graph.build_from_engagement)"
+  1 def build_from_engagement(mission_id, *, recon: dict = None, ...)   <- the parameter
+ 12 recon, urls, findings = recon or {}, urls or [], findings or []      <- the default coercion
+ 24 25 28 30 32 34 35 79   source="recon"                                <- string literals only
+```
+
+The `recon` argument is accepted, defaulted, and **never read**. It is not merely that technology goes
+unprojected — no part of `tools.recon` reaches the canonical graph through this function.
+
+Warm start, same claim, also CONFIRMED — but note what already works, because Q-021B must not rebuild
+it: `memory.py:112-119,173,185,211` **does** collect and persist `tech` across missions.
+
+```
+sqlite> select kind, count(*) from memory_assets group by kind
+endpoints 3156 | tech 13 | hosts 10 | subdomains 8
+```
+
+`main.py:_warm_start` (`:199-238`) reads `assets["subdomains"]`, `assets["hosts"]`,
+`assets["endpoints"]` and `db.get_prior_snapshot` — **never `assets["tech"]`**. Technology is written
+to cross-mission memory and never read back.
+
+**NEW DEFECT, not in the Codex audit — the persisted `tech` is partly garbage prose.** 6 of the 13
+stored rows are English sentence fragments:
+
+```
+sqlite> select target_key, value from memory_assets where kind='tech'
+('js-bench:3000',   'a MultiJuicer Kubernetes cluste')
+('js-bench:3000',   'in safety mode')
+('js-bench:3000',   'on.')
+('juice-shop:3000', 'a MultiJuicer Kubernetes cluste')   ...
+```
+
+Producer identified and reproduced byte-for-byte offline:
+
+```
+fingerprint.py:71   _POWERED = re.compile(r"(?:powered by|built with|running)\s+([A-Za-z][\w .\-]{2,30})", re.I)
+fingerprint.py:108  out.append({"name": m.group(1).strip(), ..., "category": "generic"})
+
+>>> fp.fingerprint({}, '', "<p>You are running a MultiJuicer Kubernetes cluster instance.</p>"
+...                        "<p>The application is running in safety mode.</p><p>Continue running on.</p>")
+[{'name': 'a MultiJuicer Kubernetes cluste', 'source': 'powered-by text', 'category': 'generic'},
+ {'name': 'in safety mode.', ...},
+ {'name': 'on.', ...}]
+```
+
+The `{2,30}` bound truncates mid-word at exactly 31 characters, which is why the stored value ends
+`...cluste`. **This is a hard input-quality gate for Q-021B/C/D**: a TechnologyFact keyed on
+`a MultiJuicer Kubernetes cluste` would be sent to NVD/OSV as a product name.
+
+### 6 · No `vulnerable_component` route — CONFIRMED, but it is unreachable today
+
+`candidate_pipeline._ROUTES` (`:59-72`) has 12 keys; `vulnerable_component` is in neither `_ROUTES`
+nor `PRIMARY_HANDLED` (`:77-86`), so such a lead terminates `UNSUPPORTED`.
+**Scoping correction Codex could not have made without running anything**: `dependency_intel` emits
+SCA at `confidence: CONFIRMED` (audit claim 1), and the candidate pipeline only ever sees *leads*.
+**A `_ROUTES` entry added today would never execute.** Q-021A (demote SCA to lead) is a hard
+prerequisite for the route, not a parallel item — this reverses the dependency arrow Codex drew.
+
+### 7 · `report.proof_and_retest()` — CONFIRMED. **The priority item, and the largest of the eight.**
+
+`report.py:1204-1219` builds a **fresh synthetic record** from the finding's family alone and never
+looks at the finding's evidence:
+
+```python
+nc = _tm.proof_contract({"vuln_class": fam or str(finding.get("cwe") or ""), "oracle": ""}).get("negative_control")
+```
+
+`technique_model.proof_contract` → `_neg_control_for(vc)` → a canned per-class string
+(`technique_model.py:161-166`). Rendered verbatim, present-indicative, under **"How this was confirmed
+(false-positive safety)"** at `report.py:2128-2131` (HTML) and `report.py:459-461` (Markdown).
+
+MEASURED on a finding carrying **no evidence, no controls, no request and no response**:
+
+```
+>>> report.proof_and_retest({'family':'sqli','confidence':'confirmed','target':'http://x/?id=1'})
+{'negative_control': "An inert control of the same shape but without SQL metacharacters does NOT
+                      reproduce the error/boolean/time differential; the unmodified baseline behaves
+                      normally.", ...}
+>>> report.proof_and_retest({'family':'idor', ...})       # no controls either
+{'negative_control': "A negative-control request WITHOUT the trigger does NOT reproduce the confirming
+                      signal (differential measured over a stable baseline)."}
+```
+
+Scale, across every stored finding in all 151 missions:
+
+```
+confirmed findings stored                                     : 660
+carry ANY recorded control artifact                           :  34   (dom_link_manipulation 32, bola 2)
+carry NONE, yet the report prints a declarative control claim : 626   (94.8%)
+top families with no artifact: sqli 89 · backup_exposure 84 · vulnerable_component 56 · csti 56 ·
+                               prototype_pollution 50 · crlf 46 · dom_data_manipulation 46 ...
+```
+
+A representative confirmed `sqli` row's entire evidence is one request and one response —
+`evidence: 'SQLite error triggered by "\')"'` — **no baseline, no inert control**. The report
+nonetheless tells the client the inert control was run and did not reproduce.
+
+**Be precise about what is wrong.** Several engines DO run a differential internally (boolean-blind
+compares true against false; error-recovery compares against a recovery baseline). The claim is
+therefore often *true* — but it is **never checked and never evidenced**, so it is unfalsifiable from
+the report, and for any engine that does not run a control it is simply false. Same defect family as
+the badge bug fixed in `707b3b9`: **a surface asserting a property the gate never verified.**
+Filed as **Q-022** below.
+
+### 8 · `test_asset_graph.py:106` proves ingest, not wiring — CONFIRMED
+
+`test_ingest_intel_gives_graph_the_full_planner_vocabulary` constructs the dict literal
+`intel = {"candidates": {..., "version": ["angular@1.7.7"], ...}}`, hands it to `g.ingest_intel()`,
+and asserts `has_versions` in `to_observations()`. It exercises `asset_graph.py:215`
+(`for v in cands.get("version", [])`). The only production caller is `agent.py:1202`
+(`_g.ingest_intel(self.tools.intel.to_dict() ...)`) and the test never touches it. The test is green
+whether or not any producer ever populates `candidates["version"]` — precisely the recorded
+**"guards that check declarations, not facts"** shape. Any Q-021 ticket adding a producer must add the
+paired **producer-side** assertion, not extend this one.
+
+---
+
+## Rank 3c — Q-021 family, implementation-ready (Distillation, 2026-08-10). All `proposed`.
+
+**Read this preamble before any of B–F.** Three constraints apply to every ticket in the family.
+
+1. **Q-021A has LANDED** — six slices, `177cb5c`/`77ae1de`/`5c1ee66`/`2f071a8`/`fb64d7b`/`30006f4`.
+   MEASURED consequences that change the scoping Codex assumed:
+   - `dependency_intel.vulnerable_component_finding` now emits `"confidence": CONFIRMED if ok else
+     "lead"` (`dependency_intel.py:334`) where `ok` requires a CVE-specific behaviour differential
+     through `behaviour_proof_ok`.
+   - `proof_schema._DEFAULT_ENFORCE` now contains `"vulnerable_component"` (`proof_schema.py:160-161`).
+   - So **every SCA finding is a LEAD by default today**, and leads flow into `candidate_pipeline`.
+     Q-021's remaining job is to make that lead *resolvable*, not to demote it again.
+2. **PRESERVE, do not rebuild.** Fingerprinting exists and RUNS — `planner.py:277` schedules
+   `run_fingerprint` for every live host, and 2,641 calls are recorded across 151 missions.
+   `dependency_intel` already owns the `CONFIRMED / HIGH / LOW` ladder with
+   `CVE_ELIGIBLE = {CONFIRMED, HIGH}` (`dependency_intel.py:20-23`) and `cve_eligible()` (`:205`) is
+   already the enforcement point for *unknown version ⇒ POTENTIALLY_AFFECTED*. Four tier-A feeds
+   already exist in `intel_feeds.py`. A new `tech_intel.py` beside any of these is rejected in advance.
+3. **The reusable proof-safe shape is the cloud one**, and it is three named files, not a slogan:
+   `cloud_intel.analyze()` (`cloud_intel.py:65`, pure detection from headers/CNAME/URL) →
+   `agent._cloud_exposure_probe` (`agent.py:1588-1610`, orchestration that calls the gated
+   `_exec_internal("run_cloud_probe", ...)`) → `tools._run_cloud_probe` (`tools.py:2606`, ACTIVE,
+   scope-gated, read-only GET whose verdict comes from `cloud_intel.storage_exposure(status, body)` —
+   a **content-signature** oracle, never a status-code heuristic). Q-021E copies this shape.
+
+---
+
+### Q-021B · Stop discarding the version — persist a canonical TechnologyFact · **HIGH** · `proposed`
+
+**Repository-proven gap.** The version is computed and thrown away one line later, in three separate
+producers, and the one place it is persisted is polluted with English prose.
+
+| producer | computes | what survives |
+|---|---|---|
+| `fingerprint.fingerprint()` → `tools._run_fingerprint` (`tools.py:3521`) | `{name, version, source, category}` | `lh["tech"] = [name, ...]` — **bare strings**; `version`, `source`, `category` dropped |
+| `codeintel.harvest()` (`codeintel.py:236`) | `out["versions"]` (`name@x.y.z` from served JS) | **nothing** — no reader in the repo |
+| `browser_engine.observe()` (`browser_engine.py:53-56`) | `framework` (angular/react/vue) | **nothing** — `to_observations()` never reads it |
+| `memory.py:112-119,173` | persists `tech` across missions (13 rows live) | written, **never read back** — `main.py:_warm_start` skips `assets["tech"]` |
+
+**Root cause.** There is no technology *record type*. Every producer emits an ad-hoc shape and every
+consumer reads the lowest common denominator, which is a display string. `dependency_intel` has the
+right record (`make_component`, `dependency_intel.py:117`) but is scoped to JavaScript libraries only.
+
+**MEASURED input-quality defect that must be fixed in the same ticket** (see verification §5): 6 of 13
+persisted `tech` values are sentence fragments produced by `fingerprint._POWERED`
+(`fingerprint.py:71`, `{2,30}` truncating at 31 chars). Reproduced offline byte-for-byte:
+`fp.fingerprint({}, '', "...running a MultiJuicer Kubernetes cluster...")` →
+`[{'name': 'a MultiJuicer Kubernetes cluste', 'source': 'powered-by text'}, {'name': 'in safety mode.'},
+{'name': 'on.'}]`. **Persisting these as TechnologyFacts would send them to NVD/OSV as product names.**
+
+**Producer/consumer contracts.**
+- *Producer*: `fingerprint`, `codeintel`, `browser_engine` and `dependency_intel` all emit a
+  `TechnologyFact` through **one** constructor. Extend `dependency_intel.make_component` rather than
+  writing a new one — it already carries `name / version / source / confidence / evidence / location`.
+  Add: `vendor`, `category`, `component` (plugin/theme/module), `authenticated` (bool), `first_seen`,
+  `last_seen`, `detector`.
+- *Contract A*: **a TechnologyFact with no version is legal**; it carries `confidence: LOW` and is
+  therefore never CVE-eligible (`cve_eligible()` already enforces this). Do not synthesise a version.
+- *Contract B*: **a fact whose `name` fails the identity gate is not admitted.** Gate = the name must
+  match a known-product table or a conservative token shape (no spaces-plus-articles, no trailing `.`,
+  not truncated at exactly the regex bound). `_POWERED` hits become `evidence`, never `name`.
+- *Consumer*: `tools.recon["technology"]` (a list of facts, alongside the existing
+  `live_hosts[i]["tech"]` display list, which is **kept** so nothing that renders it breaks);
+  `asset_graph.build_from_engagement` projects them as `component` nodes; `_warm_start` re-seeds them.
+
+**Dependencies.** Q-019 (a technology fact is worth little at 36 probed URLs) — but B is otherwise
+independent and can be built in parallel with Q-019's verification.
+
+**Likely files.** `agent/fingerprint.py` · `agent/dependency_intel.py` · `agent/tools.py`
+(`_run_fingerprint` only) · `agent/asset_graph.py` · `agent/memory.py` · `agent/main.py`
+(`_warm_start`) · `agent/browser_engine.py`. **`tools.py` is owned by the engine-lane Builder this
+cycle — the `_run_fingerprint` change is a hand-off note, not a direct edit.**
+
+**Deterministic oracle.** Against a standing lab with a known banner (`apolaki-testbox`, or
+`owaspbench` for `Server:`):
+1. `recon["technology"]` contains a fact with `name`, a non-empty `version`, `confidence in
+   CVE_ELIGIBLE`, and an `evidence` string quoting the exact header/byte that proved it.
+2. `asset_graph.build_from_engagement(...)` produces ≥ 1 `component` node for that fact.
+3. A second mission on the same target warm-starts with that fact already present
+   (`_warm_start()["technology"] >= 1`).
+
+**Negative control (three, all mandatory).**
+- **(a) Prose is refused.** Feed the exact MultiJuicer body above; `recon["technology"]` must gain
+  **zero** facts and the run must record *why* (a `_swallow`-style rejection naming the detector), not
+  silently drop them. A fix that merely stops *storing* them without recording the rejection has moved
+  the blindness, not removed it.
+- **(b) A versionless detection stays LOW.** A `Server: nginx` with no version must produce a fact
+  with `version: ""`, `confidence: LOW`, and `cve_eligible(fact) is False`.
+- **(c) Empty means empty.** A target that serves no identifying header, cookie, generator or script
+  must produce **zero** facts and **no error** — the same "tell a real zero from a broken detector"
+  requirement Q-016 exists for.
+
+**Mutation tests.**
+- Re-widen `_POWERED` to accept prose → control (a) must fail.
+- Drop `version` from the fact constructor → oracle assertion 1 must fail.
+- Point `_warm_start` back at the three original kinds → oracle assertion 3 must fail.
+- Make `cve_eligible` return True for LOW → control (b) must fail. *(This mutation also guards
+  Q-021C/D, so it belongs in a shared test module.)*
+
+**Regression tests.** `live_hosts[i]["tech"]` keeps its current string-list shape (the UI and
+`report.py:1422,2585` delta section read it); `agent/tests/test_fingerprint*.py` stay green;
+`memory_assets` gains no new `kind` value that existing readers would choke on.
+
+**False-positive risks.** Spoofed `Server:`/`X-Powered-By` banners (a fact is an *observation*, so
+record the header verbatim as evidence and never call it proof); CDN-injected headers attributed to
+the origin; the same product detected under two aliases (`dependency_intel._FLEX_ALIAS` /
+`_CDN_NAME_FIX` already exist — reuse, do not re-implement).
+
+**Definition of done.** All three oracle assertions and all three negative controls in the suite; a
+`liveness.py` CHECKS entry (hand-off to the Coordinator) that fails when `recon["technology"]` is
+empty on a target with a known banner; the 6 prose rows purged from `memory_assets` by the identity
+gate on next write; **no new module created**.
+
+**Expected benefit.** Unblocks C, D, E and F — none of them can be built on a bare string. Also
+retires the 6 garbage rows currently poisoning cross-mission memory.
+
+---
+
+### Q-021C · Canonical identity, version ranges, and applicability · **HIGH** · `proposed`
+
+**Repository-proven gap.** Nothing in `agent/` computes a CPE or a PURL, and nothing evaluates a
+version *range*. `dependency_intel._ver_tuple` / `_vlt` (`:187-203`) implement a numeric-tuple
+comparison — enough for `< 3.5.0`, wrong for `>= 1.2, < 1.4 || >= 2.0, < 2.1`, wrong for ecosystem
+semantics (npm `^`/`~`, Python PEP 440 `rc`/`post`, Debian epochs and `-1ubuntu2` revisions).
+Applicability validation does not exist at all (baseline stage 4).
+
+**Root cause.** Identity and comparison were both solved *just enough* for a single ecosystem
+(JavaScript CDN filenames) and were never generalised, so every other product has no way to be matched
+against an advisory at all.
+
+**Producer/consumer contracts.**
+- *Producer*: a TechnologyFact (Q-021B) gains `purl` and/or `cpe` **when they can be derived
+  confidently**, and `identity_confidence` when they cannot. A guessed CPE is worse than none.
+- *Consumer*: a range evaluator `applies(fact, advisory) -> (verdict, reason)` returning exactly one
+  of `AFFECTED / NOT_AFFECTED / UNKNOWN`, where **`UNKNOWN` is the default**, not `AFFECTED`.
+- *Contract*: `applies()` must return `UNKNOWN` — never `AFFECTED` — when the ecosystem is unknown,
+  the range syntax is unparsed, or the version is `LOW` confidence.
+
+**Backported patches are the single largest FP source in this class and must be handled explicitly.**
+Debian/RHEL ship a patched `1.2.3` that every naive range check calls vulnerable. Contract: when the
+fact's `source` indicates a distro-packaged product (a distro revision suffix, a distro-specific
+banner), the verdict is capped at `UNKNOWN` with `reason: "distro backport possible"` unless a
+behaviour probe (Q-021E) resolves it.
+
+**Dependencies.** Q-021B (needs the record). **Blocks** Q-021D and Q-021E.
+
+**Likely files.** `agent/dependency_intel.py` (extend `_ver_tuple`/`_vlt`, add the range evaluator) ·
+a small pure `agent/version_ranges.py` **is acceptable here** — it is a new *algorithm*, not a second
+copy of an existing capability — provided `dependency_intel` is its only caller.
+
+**Deterministic oracle.** A table-driven test over fixtures per ecosystem, each row
+`(ecosystem, version, range, expected)`, including: `npm ^1.2.3` vs `1.2.4` → AFFECTED;
+`PEP 440 2.0rc1` vs `< 2.0` → AFFECTED (rc precedes release); `1:1.2.3-1ubuntu2` vs `< 1.2.4` →
+UNKNOWN (backport); an unparseable range → UNKNOWN.
+
+**Negative control.** **(a)** A **patched** version of a detected product yields zero AFFECTED
+verdicts against the same advisory set. **(b)** A spoofed `Server:` banner claiming an ancient version
+while the real behaviour is current must not reach AFFECTED — with Q-021E absent it must sit at
+UNKNOWN, which is the correct answer, not a failure. **(c) Non-vacuity**: the table must assert
+`len(rows_evaluated) > 0`; a range test over an empty fixture set passes for free, which is exactly
+the vacuous pass Q-012 recorded.
+
+**Mutation tests.** Flip the `UNKNOWN` default to `AFFECTED` → control (a) and (b) must fail. Strip
+the distro-suffix branch → the `1ubuntu2` row must fail. Make `applies()` ignore
+`identity_confidence` → a LOW-confidence fact must wrongly reach AFFECTED and a test must catch it.
+
+**Regression tests.** Every existing `dependency_intel` assertion stays green; `cve_eligible()`
+semantics are unchanged (this ticket adds a *second* gate, it does not relax the first).
+
+**False-positive risks.** Ambiguous product names across ecosystems (`jquery` the npm package vs
+`jquery` the CDN bundle); a range expressed against a fork; duplicate CVEs arriving from two feeds
+with different ranges — record both, take the **narrower** verdict, never the union.
+
+**Definition of done.** The fixture table green with the non-vacuity assertion; all three negative
+controls; `applies()` is the only place a version is compared to a range anywhere in `agent/`.
+
+**Expected benefit.** Converts "a feed returned 40 CVEs for jquery" into a defensible per-CVE verdict,
+and is the only thing standing between Q-021D and a report full of theoretical CVEs.
+
+---
+
+### Q-021D · Connect governed feeds to components — and ship the missing promotion path · **MEDIUM** · `proposed`
+
+**Repository-proven gap, and it is two gaps, not one.**
+
+*Gap 1 — no product→advisory resolution.* `intel_feeds.py` (406 lines) carries exactly four tier-A
+sources — KEV, CAPEC, ATT&CK, ExploitDB — and matches by **exact CVE** or an exact product-version
+key (`exploits_for_finding`, `exploitdb_for_product`). There is no NVD/CPE, OSV, GHSA or WPScan
+resolution, so `nginx 1.18.0` cannot be turned into a CVE list at all.
+
+*Gap 2 — the governed connectors that DO parse NVD/GHSA/CVE-v5 terminate in an unreachable store.*
+MEASURED (verification §4): `intel_connectors._PARSERS` handles `epss / nvd / ghsa / cve_v5 /
+cisa_kev`; the only consumers are three read-only endpoints (`main.py:2785, 2790, 2803`);
+`intel_registry._STORE` is a module-level dict wiped on restart; and **`intel_registry.advance()` is
+called only from `agent/tests/test_intel_registry.py`** — no endpoint, no code path. Live check:
+
+```
+allowlist: all 18 sources -> enabled=False
+registry stats: {'total': 0, 'by_state': {}}   production: 0
+```
+
+`production()` is documented as "the only trusted knowledge safe to drive engines" and is
+**structurally always empty**. **A consumer wired to it today would read `[]` forever.** Any ticket
+that only adds a consumer is a null change against a green test — this is the same shape as Q-019
+refinement #1.
+
+**Root cause.** `#114` built the *governance* half of the connector story (allowlist, rate limit,
+audit log, provenance, staged trust) and stopped before the *promotion* half, so the trust ladder has
+a top rung nothing can climb to.
+
+**Producer/consumer contracts.**
+- *Producer*: a resolver `advisories_for(fact) -> [advisory]` that consults, in order, the local
+  feed snapshots then the governed connectors, and **always records which source and which snapshot
+  timestamp** produced each advisory.
+- *Consumer*: `applies()` from Q-021C decides `AFFECTED / NOT_AFFECTED / UNKNOWN` per advisory. The
+  resolver never decides applicability itself.
+- *Promotion contract*: `intel_registry.advance()` gains a caller — an explicit, evidence-carrying
+  step. **Do not auto-promote to `production`**; the existing rule (a human `reviewed_by`) is correct
+  and stays. What must be built is the path to `validated` / `fixture_backed`, and a consumer that
+  reads `validated`-and-above rather than `production`-only, with the confidence weight carried
+  through (`_CONF`, `intel_registry.py:15-16`) so a `candidate` advisory can never outrank a
+  `fixture_backed` one.
+- *Persistence contract*: `_STORE` must survive a restart, or the registry must be documented as
+  per-process and the consumer must tolerate a cold empty store without failing open.
+
+**ANTI-SPAM, hard requirement, restated because it is the failure mode this ticket most invites.**
+An unknown or LOW-confidence version yields **at most one** `POTENTIALLY_AFFECTED` row per product —
+never one per CVE. The row names the count (`"jquery 2.1.4 — 41 advisories match this version range,
+none applicability-verified"`), it does not enumerate them into the findings list.
+
+**Dependencies.** Q-021B (the fact) and Q-021C (the range evaluator). Also the **Watcher's feed-quality
+review** — licence, update cadence, machine-readable format, provenance. Feeds rejected in advance and
+the reason, so they are not re-proposed:
+
+| feed | verdict |
+|---|---|
+| NVD 2.0 API | accept — already parsed (`_parse_nvd`), allowlisted, tier A |
+| OSV.dev | accept — the only source with real per-ecosystem range semantics; it is what Q-021C needs |
+| GHSA | accept — already parsed (`_parse_ghsa`), carries `first_patched_version` |
+| CVE Program v5 | accept — already parsed (`_parse_cve_v5`) |
+| CISA KEV | already loaded twice (`intel_feeds` snapshot + `_parse_kev`) — **de-duplicate, do not add a third** |
+| WPScan | **defer** — key-gated, non-commercial licence terms, and Apolaki has no WordPress plugin/theme detector yet (Q-021B does not add one). Revisit only after a CMS detector exists |
+| scraped vendor advisory pages | **reject** — no machine-readable format, no provenance, unmaintained parse surface |
+| "CVE aggregator" blogs / GitHub CVE-list mirrors | **reject** — no provenance, stale, duplicate |
+
+**Likely files.** `agent/intel_feeds.py` · `agent/intel_connectors.py` · `agent/intel_registry.py` ·
+`agent/intel_sources.py` · `agent/dependency_intel.py`. *(No `agent/` file in this list is held by
+either Builder this cycle.)*
+
+**Deterministic oracle.** Fully offline, using recorded feed fixtures and the injectable `http=`
+hook `intel_connectors.fetch` already exposes:
+1. A fact for a product with a known CVE resolves to ≥ 1 advisory carrying `source` and
+   `snapshot_at`.
+2. That advisory reaches the consumer at `validation_state >= validated` after an explicit advance
+   with evidence, and **not** before.
+3. One product with 40 matching CVEs at LOW version confidence produces exactly **1** row.
+
+**Negative control.** **(a)** With every source disabled (the default), the resolver performs **zero**
+network I/O and returns an empty result *labelled* `disabled` — not an empty result labelled clean.
+**(b)** A record that was never advanced must **not** be visible to the consumer — this is the
+mutation that proves the ladder is load-bearing. **(c) Non-vacuity**: assert the fixture set is
+non-empty before asserting "no spam", or the anti-spam test passes over zero advisories.
+
+**Mutation tests.** Make the consumer read `by_state("candidate")` → control (b) must fail.
+Remove the per-product collapse → oracle 3 must fail with 40 rows. Delete the `snapshot_at` stamp →
+oracle 1 must fail. Re-enable a source in the test env without a credential → the hard gate must still
+refuse and control (a) must stay green.
+
+**Regression tests.** `exploits_for_finding` / `exploitdb_for_product` behaviour unchanged; KEV
+matching stays **exact-CVE-only, never inferred from CWE** (a preserved capability); the
+`/intel/audit` log still records every outward request.
+
+**False-positive risks.** The same CVE arriving from NVD and GHSA with different ranges (take the
+narrower, per Q-021C); a stale snapshot presenting a since-withdrawn advisory (hence `snapshot_at`);
+ExploitDB product-version matches being read as proof rather than as a lead (the existing distinction
+is a preserved capability — do not flatten it).
+
+**Definition of done.** All three oracle assertions plus all three negative controls; at least one
+record demonstrably reaching `validated` through product code rather than through a test; the
+`/intel/registry` endpoint showing a non-zero `by_state` after a governed fetch in the demo path.
+
+**Expected benefit.** The first time a detected non-JavaScript product can be resolved to an advisory
+at all — and the first time `#114`'s trust ladder has a rung above `candidate` that product code uses.
+
+---
+
+### Q-021E · Technology drives safe orchestration — copy the cloud pattern · **MEDIUM** · `proposed`
+
+**Repository-proven gap, with the architecture corrected.** Codex and the baseline both frame this as
+"`derive_observations` has no `recon` parameter". That framing invites the wrong fix. The module
+itself says so:
+
+```
+technique_planner.py:144-146
+  This entry point takes NO surface/harvest argument, so flat recon CANNOT independently drive it —
+  an empty graph yields an empty plan no matter what recon found elsewhere. That is the proof the
+  graph is the brain: facts must be projected INTO the graph to influence the plan.
+```
+
+**So adding a `recon=` parameter to `derive_observations` is REJECTED in advance** — it would feed the
+compatibility path while the graph-authoritative path (`plan_graph_authoritative`, the one the mission
+actually leads with) stayed blind. The correct wiring is Q-021B projecting TechnologyFacts into the
+graph as `component` nodes; `asset_graph.to_observations()` already maps `component` → `has_versions`
+(`asset_graph.py:234-235`).
+
+**And here is the measured catch that makes this ticket necessary rather than free:**
+
+```
+$ grep -n has_versions agent/engine_descriptor.py
+43:    ... "has_versions", ...        <- present in the OBSERVATIONS vocabulary
+$ grep -n has_versions <PRECONDITIONS body>
+(no match)                            <- gates ZERO techniques
+```
+
+`has_versions` is a **declared observation with no consumer**. Projecting facts into the graph
+therefore changes nothing on its own. Q-021E's real work is (i) product-conditioned observations and
+(ii) a probe that can act on them.
+
+**Producer/consumer contracts.**
+- *Producer*: `asset_graph.to_observations()` emits product-conditioned observations derived from
+  `component` nodes — e.g. `wordpress_detected`, `nginx_detected`, `component_advisory_matched` —
+  added to `engine_descriptor.OBSERVATIONS` (the single vocabulary) and to `PRECONDITIONS` for the
+  techniques they gate.
+- *Consumer*: one new engine following the cloud triplet **exactly**:
+  - `dependency_intel.probe_plan(fact, advisory) -> {trigger, control, signature} | None` — pure,
+    the analogue of `cloud_intel.analyze()`. Returns `None` when no safe deterministic probe exists,
+    which must be the **common** answer.
+  - `agent._technology_probe(session_id)` — the analogue of `agent._cloud_exposure_probe`
+    (`agent.py:1588-1610`): iterates candidate facts, calls the gated
+    `_exec_internal("run_tech_probe", ...)`, skipped in passive mode.
+  - `tools._run_tech_probe` — the analogue of `tools._run_cloud_probe` (`tools.py:2606`):
+    scope-gated, read-only, one bounded request, verdict from a **content signature**, never a status
+    code.
+- *Contract, non-negotiable*: `probe_plan` returning `None` leaves the finding at
+  `POTENTIALLY_AFFECTED`. **Detection plus a database match is never a confirmation.** This is already
+  enforced downstream by `behaviour_proof_ok` (`dependency_intel.py:223`) which Q-021A shipped — route
+  through it, do not add a second gate.
+
+**Dependencies.** Q-019 · Q-021B · Q-021C · Q-021D.
+
+**Also in scope, because Q-021A made it live.** `candidate_pipeline._ROUTES` has no
+`vulnerable_component` entry. MEASURED today:
+
+```
+>>> cp.canonical_family(sca_lead)  -> 'vulnerable_component'   (classifies correctly)
+>>> 'vulnerable_component' in cp._ROUTES        -> False
+>>> 'vulnerable_component' in cp.PRIMARY_HANDLED -> False
+>>> cp.normalize(sca_lead)['validator'] -> None
+    cp.normalize(sca_lead)['oracle']    -> 'no validator implemented yet'
+```
+
+Before Q-021A this was unreachable (SCA emitted `confirmed`, and only leads enter the pipeline).
+**It is reachable now, and every SCA lead terminates `UNSUPPORTED` — 56 stored `vulnerable_component`
+findings would take that path.** The `_ROUTES` entry is
+`("run_tech_probe", "<CVE> behaviour differential reproduced; trigger-absent control did not", None)`
+and it must land in this ticket, not a later one.
+
+**Likely files.** `agent/dependency_intel.py` · `agent/asset_graph.py` · `agent/engine_descriptor.py`
+· `agent/technique_planner.py` · `agent/candidate_pipeline.py` · `agent/agent.py` ·
+`agent/tools.py`. **Both `tools.py` and `candidate_pipeline.py` are Builder-owned this cycle — those
+two edits are hand-off notes.**
+
+**Deterministic oracle.** On a lab running a product with a *behaviourally observable* CVE:
+detection → advisory match → `probe_plan` returns a plan → the probe runs → the content signature is
+present → the finding is `confirmed` / `AFFECTED`, carrying the trigger, the observed signature, the
+control, and the control's observed value (the fields `dependency_intel.py:290-296` already
+formats).
+
+**Negative control (four).** **(a)** Structurally identical request with the trigger **absent** must
+not produce the signature — this is already the shape `behaviour_proof_ok` demands, so the test is an
+assertion, not new machinery. **(b)** A **patched** version of the same product on the same URL must
+NOT stay `OPEN` on retest (Q-021A slice 3 fixed the retest oracle — this control proves it holds for
+the new engine too). **(c)** A product detected with `LOW` version confidence produces
+`POTENTIALLY_AFFECTED` and **zero** confirmed findings however many CVEs the feed returns.
+**(d)** A spoofed `Server:` banner claiming an ancient version, with current behaviour, must not
+confirm — the probe is the arbiter, not the banner.
+
+**Mutation tests.** Make `probe_plan` return a plan for every advisory → control (d) must fail.
+Let the probe judge on status code instead of the content signature → control (a) must fail (the
+control request usually returns the same status). Remove the `_ROUTES` entry → the SCA lead must go
+back to `UNSUPPORTED` and a test must catch it. **Non-vacuity**: assert the probe actually executed
+(a `run_tech_probe` `tool_call` row exists), because a no-op engine passes every control above for
+free — this is the Q-020/`verify_always_on` lesson and the ZAP lesson in Q-023.
+
+**Regression tests.** Zero new confirmed findings on a clean paired lab; the mission's finding count
+on `owaspbench` does not change (no product there has a behaviourally observable CVE, so the correct
+outcome is *no new findings* — a ticket that "improves" that number is misbehaving).
+
+**False-positive risks.** WAF or CDN responses matching the content signature; a probe that mutates
+state (forbidden — read-only only, and `probe_plan` must return `None` for any CVE whose trigger is
+not idempotent); a signature so loose it matches the patched build.
+
+**Definition of done.** All four negative controls plus the non-vacuity assertion; the `_ROUTES`
+entry; a `liveness.py` CHECKS entry; **a `run_tech_probe` `tool_call` row observed in a real mission**
+— the declaration that the engine is registered is not evidence that it ran (Q-023 is the same lesson
+measured at scale).
+
+**Expected benefit.** The first path in the platform from *"we detected nginx 1.18.0"* to a defensible
+confirmed-or-rejected verdict, and it closes the `UNSUPPORTED` terminal state Q-021A opened.
+
+---
+
+### Q-021F · Expose the technology lifecycle honestly · **LOW** · `proposed`
+
+**Repository-proven gap.** `report.py:1422,2585` surface `("tech", "New Technology")` in the **delta**
+section only — technology appears in a report only when it *changes* between scans. There is no
+technology inventory, no version-confidence column, no advisory-match column, no proof-status column,
+in the report or the UI. `asvs_model.py:151` maps an ASVS objective to
+`("run_fingerprint", "dependency_intel")`, which is the only place the two are named together.
+
+**Root cause.** Stage 8 was built for *findings*, and technology never became a first-class object, so
+there was nothing to render.
+
+**Producer/consumer contracts.**
+- *Producer*: the TechnologyFact list (Q-021B) plus each fact's advisory verdicts (Q-021C/D) and probe
+  outcome (Q-021E).
+- *Consumer*: one shared projection used by **all four** surfaces — HTML report, Markdown report,
+  `GET /missions/{sid}` (UI coverage view), SARIF and the PoC bundle. **One projection, not four
+  private copies** — the four-copies-of-`is_confirmed` history (Q-015, `707b3b9`) is why this is
+  stated as a contract rather than a suggestion.
+- *Contract*: every row states its **proof status** in the six-state ladder
+  `DETECTED_TECHNOLOGY → VERSION_SUSPECTED → ADVISORY_MATCHED → APPLICABILITY_CONFIRMED →
+  SAFELY_PROBED → ORACLE_CONFIRMED`, and the rendered badge is computed from the stored state, never
+  hardcoded. **A row above `ADVISORY_MATCHED` that carries no probe evidence must render as
+  unproven** — the badge bug (`707b3b9`) and Q-022 are both instances of getting this wrong.
+
+**Dependencies.** Q-021B through Q-021E.
+
+**Likely files.** `agent/report.py` · `agent/sarif_io.py` · `agent/poc_bundle.py` · `agent/main.py`
+(the coverage view) · `ui/`. **`report.py`, `sarif_io.py` and `poc_bundle.py` are Builder-owned this
+cycle** — sequence after that lane releases them.
+
+**Deterministic oracle.** For a mission with ≥ 1 TechnologyFact: the HTML report, the Markdown report,
+the mission JSON and the SARIF export all show the **same** count of facts and the **same** proof
+state per fact. A cross-surface equality assertion, not four independent ones.
+
+**Negative control.** **(a)** A mission with zero technology facts renders the section as an explicit
+"no technology identified" rather than omitting it — an omitted section is indistinguishable from a
+broken renderer. **(b)** A fact at `ADVISORY_MATCHED` with no probe must render **unproven** on every
+surface; mutate one surface to hardcode "confirmed" and the cross-surface equality assertion must
+fail. **(c)** The existing delta section keeps working — a genuinely new technology between two scans
+still appears there.
+
+**Mutation tests.** Hardcode a badge on the HTML surface → oracle equality must fail. Point one
+surface at a private copy of the projection → the same. Drop the "no technology identified" branch →
+control (a) must fail.
+
+**Regression tests.** Existing report snapshot tests; `full_pct` / `verified_pct` unchanged (this
+ticket adds a view, it must not move a coverage number); SARIF schema validation still passes.
+
+**False-positive risks.** A reader mistaking an inventory row for a finding — hence the mandatory
+proof-status column and a visually distinct section. Do not let technology rows enter
+`finding_counts()` or the severity tally.
+
+**Definition of done.** Cross-surface equality assertion green; all three negative controls; the UI
+coverage view shows technology, version confidence, advisory match and proof status; **no coverage
+percentage changes**.
+
+**Expected benefit.** Makes the whole Q-021 family auditable from the outside — which is the only way
+a client can tell Apolaki's technology intelligence from a scanner's version-table guess.
+
+---
+
+## Rank 3d — new tickets from today's measurements (Distillation, 2026-08-10). All `proposed`.
+
+### Q-022 · "How this was confirmed" is a template, not a record — 626 of 660 findings · **CRITICAL** · `proposed`
 
 *The platform's differentiator is that its proofs are real. This is the one place the report says a
 proof happened without checking that it did.*
@@ -848,13 +1533,13 @@ record from the finding's **family alone** and asks the technique model to descr
 nc = _tm.proof_contract({"vuln_class": fam or str(finding.get("cwe") or ""), "oracle": ""}).get("negative_control")
 ```
 
-`technique_model.proof_contract` (`:169`) â†’ `_neg_control_for(vc)` (`:161-166`) â†’ a canned per-class
+`technique_model.proof_contract` (`:169`) → `_neg_control_for(vc)` (`:161-166`) → a canned per-class
 string. The finding's `evidence`, `browser_evidence`, `request`, `response`, `negative_control` and
 `proof_gap` fields are **never read**. The result is rendered verbatim under
 **"How this was confirmed (false-positive safety)"** at `report.py:2128-2131` (HTML) and
 `report.py:459-461` (Markdown).
 
-**MEASURED** â€” a finding with no evidence at all still gets a confident sentence:
+**MEASURED** — a finding with no evidence at all still gets a confident sentence:
 
 ```
 >>> report.proof_and_retest({'family':'sqli','confidence':'confirmed','target':'http://x/?id=1'})
@@ -872,8 +1557,8 @@ negative_control: "A negative-control request WITHOUT the trigger does NOT repro
 confirmed findings stored                                     : 660
 carry ANY recorded control artifact                           :  34   (dom_link_manipulation 32, bola 2)
 carry NONE, yet the report prints a declarative control claim : 626   (94.8%)
-sqli 89 Â· backup_exposure 84 Â· vulnerable_component 56 Â· csti 56 Â· prototype_pollution 50 Â·
-crlf 46 Â· dom_data_manipulation 46 Â· broken_auth 33 Â· dom_xss 28 Â· security_misconfig 24 ...
+sqli 89 · backup_exposure 84 · vulnerable_component 56 · csti 56 · prototype_pollution 50 ·
+crlf 46 · dom_data_manipulation 46 · broken_auth 33 · dom_xss 28 · security_misconfig 24 ...
 ```
 
 A representative confirmed `sqli` row's whole evidence is one request and one response:
@@ -882,7 +1567,7 @@ A representative confirmed `sqli` row's whole evidence is one request and one re
 client the inert control was run.
 
 **Root cause.** Exactly the same as `707b3b9`: a **rendering surface asserting a property the gate
-never verified**. `proof_contract` is a *specification* of what a technique's control ought to be â€”
+never verified**. `proof_contract` is a *specification* of what a technique's control ought to be —
 correct for the technique registry, wrong as a per-finding statement of what happened. The two were
 never distinguished, and `proof_and_retest` uses the specification as if it were a record.
 
@@ -891,29 +1576,29 @@ compares a true-condition against a false-condition response; error-recovery com
 recovery baseline). For those, the sentence is *true but unevidenced and unfalsifiable from the
 report*. For engines that run no control, it is *false*. Both are unacceptable in the section whose
 entire purpose is false-positive safety, and the report cannot tell them apart. **The ticket is not
-"delete the sentence" â€” it is "make the sentence a function of what was recorded."**
+"delete the sentence" — it is "make the sentence a function of what was recorded."**
 
 **Producer/consumer contracts.**
 - *Producer*: an engine that runs a control **records it** on the finding, in one canonical shape.
-  The shape already exists in two places â€” pick one and make it the contract: `browser_evidence.
+  The shape already exists in two places — pick one and make it the contract: `browser_evidence.
   negative_controls` (a dict of `{label: {url, status, len}}`, rendered by `report.py:1157-1164`) or
   `dependency_intel`'s Q-021A fields (`control`, `control_observed`). The BIE dict is the more
   general of the two.
 - *Consumer*: `proof_and_retest` reads the finding and returns one of three shapes:
-  - a control **was recorded** â†’ describe the recorded control, quoting its actual values;
-  - a control **was not recorded** â†’ *"Negative control not recorded for this finding"* plus the
+  - a control **was recorded** → describe the recorded control, quoting its actual values;
+  - a control **was not recorded** → *"Negative control not recorded for this finding"* plus the
     technique-registry expectation clearly labelled as **expected**, not **performed**;
-  - the family is in `proof_schema._DEFAULT_ENFORCE` and no control was recorded â†’ the finding should
+  - the family is in `proof_schema._DEFAULT_ENFORCE` and no control was recorded → the finding should
     already have been demoted by `demote_unproven`; assert that, and surface the `proof_gap`.
 - *Contract*: **no string in this section may be in the past or present indicative unless it is
   derived from a stored artifact.** Everything else is phrased as an expectation.
 
-**Dependencies.** None â€” this is a truth-containment fix with no prerequisites, exactly like Q-021A.
+**Dependencies.** None — this is a truth-containment fix with no prerequisites, exactly like Q-021A.
 It should be ranked with Q-021A's urgency for the same reason: everything else in the queue is a
 missing capability; this is a **wrong answer already shipping to clients**.
 
-**Likely files.** `agent/report.py` (owned by the Coordinator this cycle) Â· `agent/technique_model.py`
-Â· `agent/proof_schema.py` (Builder-owned â€” the `proof_gap` read is a hand-off note) Â·
+**Likely files.** `agent/report.py` (owned by the Coordinator this cycle) · `agent/technique_model.py`
+· `agent/proof_schema.py` (Builder-owned — the `proof_gap` read is a hand-off note) ·
 `agent/tests/test_report*.py`.
 
 **Deterministic oracle.**
@@ -921,22 +1606,22 @@ missing capability; this is a **wrong answer already shipping to clients**.
    values appear in the output.
 2. A finding with no recorded control renders the not-recorded wording, and the string
    `"does NOT reproduce"` (or any indicative claim) does **not** appear.
-3. HTML and Markdown produce the same verdict for the same finding â€” one projection, two renderers.
+3. HTML and Markdown produce the same verdict for the same finding — one projection, two renderers.
 
 **Negative control (three, all mandatory).**
 - **(a) The honest case must not regress**: the 34 findings that *do* carry a control must still show
   a full control description. A fix that renders "not recorded" for everything has deleted the section
   rather than repaired it.
-- **(b) A demoted finding must not display a confirmation narrative at all** â€” it is a lead.
-- **(c) Non-vacuity**: assert the test corpus contains â‰¥ 1 finding of each kind (control recorded /
+- **(b) A demoted finding must not display a confirmation narrative at all** — it is a lead.
+- **(c) Non-vacuity**: assert the test corpus contains ≥ 1 finding of each kind (control recorded /
   control absent), because a test over a single-kind corpus passes for free.
 
-**Mutation tests.** Restore the family-only `proof_contract` call â†’ oracle 2 must fail. Strip the
-recorded-control branch â†’ control (a) must fail. Make the Markdown renderer use its own copy of the
-projection and change it â†’ oracle 3 must fail.
+**Mutation tests.** Restore the family-only `proof_contract` call → oracle 2 must fail. Strip the
+recorded-control branch → control (a) must fail. Make the Markdown renderer use its own copy of the
+projection and change it → oracle 3 must fail.
 
 **Regression tests.** `technique_model.proof_contract` keeps its current behaviour for the **technique
-registry** and its guard test (`every proven technique declares its FP-safety differential`) â€” that
+registry** and its guard test (`every proven technique declares its FP-safety differential`) — that
 use is correct and must not change. Report snapshot tests updated with the reason stated in the commit
 message, because "the test changed" is what weakening looks like from the outside.
 
@@ -944,7 +1629,7 @@ message, because "the test changed" is what weakening looks like from the outsid
 the reader does not recognise would render "not recorded" on an honest finding. Mitigation: enumerate
 the recorded-control shapes in one table and add a test per producer that actually records one.
 
-**Secondary observation, UNVERIFIED â€” do not queue as fact.** The same function's retest string reads
+**Secondary observation, UNVERIFIED — do not queue as fact.** The same function's retest string reads
 *"(Apolaki auto-retests this)"*. `/retest` (`main.py:2561`) is an operator-invoked endpoint; I found
 no scheduler that calls it. Whether "auto" is accurate needs a UI/behaviour check I did not run.
 
@@ -953,17 +1638,17 @@ a re-render of an existing stored mission's report showing "not recorded" on the
 no control; and the count of findings displaying an unbacked control claim measured before and after.
 
 **Expected benefit.** Removes 626 unbacked proof claims from client-facing output and creates the
-back-pressure that makes engines record their controls â€” which is the only route to the 34/660 figure
+back-pressure that makes engines record their controls — which is the only route to the 34/660 figure
 improving for real.
 
 ---
 
-### Q-023 Â· ZAP has never executed in any mission, and three flags do not explain it Â· **HIGH** Â· `proposed`
+### Q-023 · ZAP has never executed in any mission, and three flags do not explain it · **HIGH** · `proposed`
 
 **MEASURED, whole corpus.** `run_zap` tool calls across 151 missions and **29,109** `tool_call` rows:
-**0**. (`run_fingerprint` 2,641 Â· `http_probe` 4,542 over the same corpus, so the counter works.)
+**0**. (`run_fingerprint` 2,641 · `http_probe` 4,542 over the same corpus, so the counter works.)
 
-**Three independent gates, each sufficient on its own** â€” all three confirmed by reading:
+**Three independent gates, each sufficient on its own** — all three confirmed by reading:
 
 ```
 main.py:81    enable_zap: bool = False                     <- default off
@@ -972,7 +1657,7 @@ tools.py:138  "run_zap": PermissionLevel.INTRUSIVE         <- outside the active
                                                               planner.fresh() -> _allowed() drops it
 ```
 
-**The planner branch is LIVE â€” measured, not assumed.** Driving `planner.next_batch` directly with
+**The planner branch is LIVE — measured, not assumed.** Driving `planner.next_batch` directly with
 `mode=full, zap=True`:
 
 ```
@@ -985,7 +1670,7 @@ Note the third row: phase E is internally capped, so **phase F is reachable in a
 steps regardless of surface size**. "The mission never gets that far on a big target" is therefore
 **DISPROVED** as an explanation.
 
-**THE RESIDUE THAT DEFINES THIS TICKET â€” flipping the flag is NOT a sufficient fix.** Four missions
+**THE RESIDUE THAT DEFINES THIS TICKET — flipping the flag is NOT a sufficient fix.** Four missions
 carried `enable_zap` truthy in their stored context and fired **zero** `run_zap` calls:
 
 ```
@@ -1001,15 +1686,15 @@ Full mode. `run_nuclei` (phase F1, immediately before ZAP) is also absent from a
 fifth cause and it is unidentified.** It is `CANNOT_VERIFY_STATICALLY` today because those missions ran
 on 2026-07-26 code and the plan loop has since moved to the graph-authoritative path
 (`agent.py:2820-2841`, `_graph_primary_state`). Candidate hypotheses for the implementer, in order:
-`self.enable_zap` not propagating from `EngageRequest` into the agent Â· `_zap_configured()` false at
-the time (today it is `True`: `ZAP_ADDR=http://zap:8090`, `zap_client.configured() -> True`) Â·
+`self.enable_zap` not propagating from `EngageRequest` into the agent · `_zap_configured()` false at
+the time (today it is `True`: `ZAP_ADDR=http://zap:8090`, `zap_client.configured() -> True`) ·
 `_graph_primary_state` returning a `g_roots`/`g_urls` pair that ends the loop before phase F.
 
 **Root cause (of the ticket's existence).** Nobody ever asserted that ZAP *ran*. `docs` and the report
-describe a "ZAP Executed â€” Safe Active" state; no test and no liveness check requires a `run_zap` row
+describe a "ZAP Executed — Safe Active" state; no test and no liveness check requires a `run_zap` row
 to exist. This is the **"guards that check declarations, not facts"** shape at the orchestration layer.
 
-**Also in scope â€” three confirmed sub-defects.**
+**Also in scope — three confirmed sub-defects.**
 
 1. **`recon["zap"]` is a dead write.** `tools.py:8470`
    `self.recon.setdefault("zap", []).extend(findings)` is the sole occurrence. Repo-wide search for
@@ -1018,7 +1703,7 @@ to exist. This is the **"guards that check declarations, not facts"** shape at t
    `_AUTO_STORE_TOOLS` path, never via recon.
 2. **Targeted rescan is NOT WIRED.** The planner key is `f"run_zap:{h}"` (`planner.py:601`) and
    `fresh()` (`planner.py:219-234`) drops any step whose key is in `done`. **One ZAP call per host per
-   mission, ever** â€” a second, narrower ZAP pass against a newly discovered path is unrepresentable.
+   mission, ever** — a second, narrower ZAP pass against a newly discovered path is unrepresentable.
 3. **The AJAX spider fails silently.** `tools.py:8413-8416`:
    ```python
    try:
@@ -1031,7 +1716,7 @@ to exist. This is the **"guards that check declarations, not facts"** shape at t
    idiom is 50 lines below in the same function**: the active scan's `except Exception as _ae:
    ascan_err = ...` is surfaced in the ToolResult note. Mirror it.
 
-**MEASURED CORRECTION to the intake brief â€” do not use `numberOfMessages` as the oracle.** The brief
+**MEASURED CORRECTION to the intake brief — do not use `numberOfMessages` as the oracle.** The brief
 records `numberOfMessages: 0` after 10h up. Today:
 
 ```
@@ -1050,33 +1735,33 @@ note. Consumer = the report's "ZAP Executed" state, which must be computed from 
 
 **Dependencies.** None. Independent of Q-019 and the Q-021 family.
 
-**Likely files.** `agent/tools.py` (`_run_zap`) and `agent/planner.py` â€” **`tools.py` is Builder-owned
+**Likely files.** `agent/tools.py` (`_run_zap`) and `agent/planner.py` — **`tools.py` is Builder-owned
 this cycle; write the patch as a hand-off note.** Plus `agent/agent.py` (flag propagation),
-`agent/liveness.py` (Coordinator-owned â€” hand-off), `agent/tests/`.
+`agent/liveness.py` (Coordinator-owned — hand-off), `agent/tests/`.
 
-**Deterministic oracle â€” end-to-end, and nothing less counts.** Run one real mission in Full mode with
+**Deterministic oracle — end-to-end, and nothing less counts.** Run one real mission in Full mode with
 `enable_zap=True` against a standing lab, then assert **from the persisted event log**:
-1. â‰¥ 1 `tool_call` row with `tool == "run_zap"`;
+1. ≥ 1 `tool_call` row with `tool == "run_zap"`;
 2. its paired `tool_result` is `success=True` with a note beginning with a policy token;
 3. the mission's ZAP state in the report is derived from (1), not from the request flag.
 
 **Negative control (four).** **(a)** The same mission with `enable_zap=False` produces **zero**
 `run_zap` rows and a report that does not claim ZAP ran. **(b)** With the ZAP daemon **stopped**, an
-`enable_zap=True` mission must degrade *visibly* â€” a recorded unreachable-daemon error, not a silent
+`enable_zap=True` mission must degrade *visibly* — a recorded unreachable-daemon error, not a silent
 skip and not a crash. **(c)** With the AJAX spider forced to raise, the ToolResult note must say so
 while the passive alerts survive (mirroring the existing `ascan_err` behaviour). **(d) Non-vacuity**:
 assert the mission actually completed and produced > 0 tool calls, so an aborted mission cannot pass
 control (a) for free.
 
-**Mutation tests.** Set `enable_zap=False` in the e2e fixture â†’ oracle 1 must fail. Re-introduce the
-bare `except: pass` around the AJAX spider â†’ control (c) must fail. Remove the `run_zap:{host}` key
-uniqueness change (if targeted rescan is implemented) â†’ the second, narrower pass must be dropped and
+**Mutation tests.** Set `enable_zap=False` in the e2e fixture → oracle 1 must fail. Re-introduce the
+bare `except: pass` around the AJAX spider → control (c) must fail. Remove the `run_zap:{host}` key
+uniqueness change (if targeted rescan is implemented) → the second, narrower pass must be dropped and
 a test must catch it.
 
 **Regression tests.** Missions in `active`/`passive` mode still never schedule ZAP; the 422 for
 `enable_zap` outside Full mode is preserved; `require_zap` still blocks when the daemon is absent.
 
-**False-positive risks.** ZAP's own alerts are `_CONFIRMED_BY_TOOL` (`agent.py:117`) â€” confirmed by
+**False-positive risks.** ZAP's own alerts are `_CONFIRMED_BY_TOOL` (`agent.py:117`) — confirmed by
 construction. Turning ZAP on for the first time in 151 missions will introduce a **new false-positive
 source into the report that has never been measured.** The DoD must include an FPR check on a clean
 paired lab before ZAP is enabled by default anywhere, and this ticket must **not** change the default.
@@ -1086,6 +1771,6 @@ controls; the dead write and the bare swallow fixed; a `liveness.py` CHECKS entr
 ZAP-enabled mission produces zero `run_zap` rows; **and the fifth cause named, with the measurement
 that identified it.** Closing this ticket by flipping `enable_zap` is explicitly not acceptable.
 
-**Expected benefit.** Either a whole DAST capability the platform ships and has never run, or â€”
-equally valuable â€” a measured decision to remove the claim. Both beat the current state, where the
+**Expected benefit.** Either a whole DAST capability the platform ships and has never run, or —
+equally valuable — a measured decision to remove the claim. Both beat the current state, where the
 product describes a capability that has executed zero times in 151 missions.

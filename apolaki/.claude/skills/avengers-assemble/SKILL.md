@@ -56,13 +56,39 @@ For the Builder the equivalent is: **commit small, commit often.** A Builder tha
 slice per commit leaves a commit when it dies. A Builder that plans one big commit leaves wreckage.
 Say this explicitly in the prompt: *"land each green slice as its own commit; do not batch."*
 
+## Rule 3b — Commit-per-slice is PROVEN. Insist on it.
+
+Not a theory any more. In the cycle that established it, three agents were killed by one session
+limit and still landed **seven Q-021A slices plus a rewritten traversal oracle**, suite green at
+1786 passed. The same rule, absent, is what made the earlier Builder's death cost a dirty tree.
+Put the sentence *"land each green slice as its own commit; do not batch — assume you may be killed
+at any moment"* in every Builder prompt, verbatim.
+
 ## Rule 4 — Disjoint write sets, declared before anyone spawns.
 
 Write the ownership table into `docs/QUEUE.md` **first**, then spawn. Every agent gets the list of
-files it may write **and** the list it must not touch, with the reason. Cross-lane needs are written
-as **hand-off notes in the queue, never applied across an ownership line.**
+files it may write **and** the list it must not touch, with the reason.
+
+**Docs are files too, and this is where it went wrong.** Hand-off notes were routed into
+`docs/QUEUE.md` while another agent owned that same file, so two lanes wrote it concurrently and one
+had to "restore the other lane's block that I set aside". Cross-lane needs go to a **per-lane file**
+— `docs/handoff/<lane>.md` — never into the shared queue. The Coordinator folds them in afterwards.
+Exactly one agent may write any given file, including markdown.
 
 Without this, four agents edit four modules, one dies, and the tree state is unattributable.
+
+## Rule 4b — ASCII-only when an agent writes a shared document.
+
+An agent appending em dashes and middle dots to `docs/QUEUE.md` through the Windows shell
+double-encoded the UTF-8 and corrupted **189 lines**. The agent noticed and died mid-repair.
+
+- Agents write shared markdown with the **Write/Edit tools**, never via shell redirection, here-docs
+  or PowerShell `Out-File`/`Set-Content`.
+- If a shell write is unavoidable, restrict the content to **ASCII** — `-` not `—`, `*` not `·`.
+- The repair, if it happens again: the mis-decode is **cp1252**, not latin-1 (`â€"` contains U+20AC,
+  which latin-1 cannot encode, so a latin-1 round-trip silently skips every damaged line and reports
+  success). Reverse per line, keep the result only when it round-trips cleanly, and diff against a
+  backup before trusting it.
 
 ## Rule 5 — Factor the house rules into every prompt, but keep them short.
 
@@ -73,11 +99,17 @@ taken**, so the agent does not re-derive them, and **the wrong turns already rul
 not take them. Telling a Builder "the crawl is already proven clean, do not fix it" is worth more
 than a page of process.
 
-## Rule 6 — Stagger, don't stampede.
+## Rule 6 — Stagger, don't stampede — and expect death anyway.
 
 Six simultaneous spawns exhausted the session limit and killed everything at once, including work
 already in flight. Spawn the highest-value lane first, confirm it launched, then the rest. If a
 spawn fails on a limit, work solo on the main thread rather than retrying in a loop — and say so.
+
+**Staggering helps; it does not save you.** Three staggered agents were still killed by one limit.
+So design every lane on the assumption that it ends mid-sentence: write-as-you-go, commit per slice,
+and never let an agent hold the only copy of a decision. Agent death is the normal case, not the
+failure case. Budget for the Coordinator to spend real time on **recovery** — reading what landed,
+repairing what half-landed, and committing what was left green but uncommitted.
 
 ## Rule 7 — The main thread never just waits.
 
@@ -172,7 +204,11 @@ variants before marking a fix generally proven. See `benchmark-score`.
   that file is your entire contribution. (Builders: land each green slice as its own commit; do not
   batch — a killed Builder that batched leaves wreckage, not work.)
 - You may WRITE only: <FILES>. Do NOT touch <OFF-LIMITS> — owned by another agent with uncommitted
-  work. If you need a change there, write the exact patch into docs/QUEUE.md as a hand-off note.
+  work. If you need a change there, write the exact patch into docs/handoff/<YOUR-LANE>.md — your own
+  file, NOT the shared queue, which another agent is writing right now.
+- Write shared markdown with the Write/Edit tools, never shell redirection or PowerShell
+  Out-File/Set-Content, and keep it ASCII (`-` not `—`). A shell append of em dashes double-encoded
+  the UTF-8 and corrupted 189 lines of the queue.
 - Every claim tagged MEASURED (with the command and its real output) or UNVERIFIED. A disproved
   hypothesis is a result — record it as disproved, never drop it quietly.
 - Never weaken a test or a gate to make it pass. SKIPPED is never a pass. Never fake a result.
