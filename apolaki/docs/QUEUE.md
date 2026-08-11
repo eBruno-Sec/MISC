@@ -61,7 +61,7 @@ the baked image.
 | 1 | `dependency_intel` — split version-certainty from exploitability-certainty | **done** |
 | 2 | `proof_schema` — the proof gate must inspect `vulnerable_component` | **done** |
 | 3 | `retest` — a patched component must CLOSE, not stay OPEN | **done** |
-| 4 | structured `cves` on the SCA finding so KEV can match it | todo |
+| 4 | structured `cves` on the SCA finding so KEV can match it | **done** |
 | 5 | `success_oracle` vs `oracle` — one canonical key, normalised at one chokepoint | todo |
 | 6 | SARIF still un-demotes proof-gate-demoted rows (bonus) | todo |
 
@@ -123,6 +123,26 @@ is `inconclusive` — a false OPEN is the remediation lie this slice exists to r
 CLOSED is the failure the module was written to avoid.
 
 Mutation test: restoring `"reachable"` makes the patched replacement report `open` again.
+
+### Slice 4 — SCA findings reach KEV, and the KEV table stops overstating them
+The finding's CVE ids lived only in `title` and `description`. `report.py`'s KEV blob is built from
+`cve` / `cves` / `evidence`, so the ids were invisible to it. Fixed at the PRODUCER: the finding now
+emits `cves` as a structured list of exactly the ids whose ranges the version matched. The KEV
+consumer's regex was deliberately **not** widened to scrape titles — that would make every prose
+mention of a CVE a KEV candidate.
+
+Honest note: slice 1 already rewrote the evidence string to name the matched CVEs, so the KEV
+*match* was incidentally working before this slice. The structured field is still the right fix —
+it survives any future rewording of the prose — and the test that failed first is the one asserting
+the structure, not the rendering.
+
+Second, smaller lie fixed in the same place: the KEV table's column header read `Confirmed finding`
+and every row landed under it regardless of proof state. It now reads `Finding` + `Our proof state`,
+filled from the shared `_confirmed()` helper and the new `component_status`, so a potentially-
+affected lead cannot read as a confirmation just because its CVE is in the catalog.
+
+Mutation test: drop `cves` and restore the pre-slice-1 presence-only evidence -> the SCA finding
+misses KEV again.
 
 ---
 

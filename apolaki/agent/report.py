@@ -2359,16 +2359,26 @@ def generate_html_report(program: str, findings: list, scope: dict,
             _checked += 1
             _hit = sorted(c for c in _cves if c in _kevset)
             if _hit:
-                _kev_hits.append((", ".join(_hit), f.get("title", "finding")))
+                # A KEV hit says the CVE is exploited in the wild. It says NOTHING about whether we
+                # proved this target is exploitable, so the row carries the finding's own proof
+                # state beside it — a potentially-affected lead must never read as a confirmation
+                # just because it reached this table (Q-021A).
+                _st = ("confirmed" if _confirmed(f)
+                       else str(f.get("component_status") or f.get("confidence") or "lead").replace("_", " "))
+                _kev_hits.append((", ".join(_hit), f.get("title", "finding"), _st))
         if _kev_hits:
-            _krows = "".join("<tr><td><b>%s</b></td><td class='sub'>%s</td></tr>" % (e(c), e(t)) for c, t in _kev_hits)
+            _krows = "".join("<tr><td><b>%s</b></td><td class='sub'>%s</td><td class='sub'>%s</td></tr>"
+                             % (e(c), e(t), e(st)) for c, t, st in _kev_hits)
             kev_html = ("<h2 id='kev'>Known-Exploited in the Wild (CISA KEV)</h2>"
                         "<p class='sub'>%d finding(s) carry a CVE that appears by EXACT id in CISA's KEV catalog "
-                        "(under active exploitation in the wild). Matched by exact CVE only, never by CWE class.</p>"
-                        "<table class='tbl'><tr><th>CVE</th><th>Confirmed finding</th></tr>%s</table>" % (len(_kev_hits), _krows))
+                        "(under active exploitation in the wild). Matched by exact CVE only, never by CWE class. "
+                        "KEV describes the CVE, not our proof of it — the status column states what Apolaki "
+                        "actually established on this target.</p>"
+                        "<table class='tbl'><tr><th>CVE</th><th>Finding</th><th>Our proof state</th></tr>%s</table>"
+                        % (len(_kev_hits), _krows))
         else:
             kev_html = ("<h2 id='kev'>Known-Exploited in the Wild (CISA KEV)</h2>"
-                        "<p class='sub'>Not identified in KEV: no confirmed finding carries a CVE present in CISA's "
+                        "<p class='sub'>Not identified in KEV: no finding carries a CVE present in CISA's "
                         "Known Exploited Vulnerabilities catalog (%d finding(s) had a CVE checked by exact id; %d "
                         "carry no CVE and cannot be KEV-listed). KEV status is matched by exact CVE only, never "
                         "inferred from CWE class.</p>" % (_checked, _no_cve))

@@ -324,6 +324,12 @@ def vulnerable_component_finding(component, vulns, behaviour_proof=None):
         "evidence": evidence,
         "reproduction_steps": steps,
         "cwe": "CWE-1104", "family": "vulnerable_component", "tags": ["sca", "dependency", comp],
+        # STRUCTURED identifiers, not prose. KEV/ExploitDB matching reads `cve`/`cves`; these ids
+        # used to exist only inside the title and description, so an SCA finding silently missed the
+        # KEV catalog. Emitting the list here is the fix — never a consumer-side regex over titles.
+        # Exactly the ids of the ranges this version MATCHED (a grouped range it fell outside is
+        # not listed).
+        "cves": list(dict.fromkeys(ids)),
         # the two questions, answered separately
         "confidence": CONFIRMED if ok else "lead",
         "version_confidence": ver_conf,

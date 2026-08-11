@@ -226,3 +226,48 @@ def test_retest_without_structured_component_fields_is_inconclusive_not_open():
     legacy = {"family": "vulnerable_component", "target": "https://t/assets/jquery-3.4.0.js",
               "title": "Vulnerable component: jquery@3.4.0", "confidence": "lead"}
     assert retest.evaluate(legacy, 200, _JQ_340)["verdict"] == "inconclusive"
+
+
+# ── slice 4: SCA findings carry structured CVEs, so KEV can match them ───────
+import report
+
+
+def test_sca_finding_emits_a_structured_cve_list():
+    """KEV matching builds its blob from `cve` / `cves` / `evidence`. The SCA finding's CVE ids lived
+    only in the title and description, so it silently missed KEV. The fix is a structured `cves`
+    list from the PRODUCER — never a wider regex that scrapes titles."""
+    comp = dep.make_component("jquery", "3.4.0", "js-content-banner", dep.CONFIRMED, "jQuery v3.4.0",
+                              "https://t/a.js")
+    f = dep.vulnerable_component_finding(comp, dep.assess_component(comp))
+    assert isinstance(f["cves"], list)
+    assert f["cves"] == ["CVE-2020-11022", "CVE-2020-11023"]
+    # exactly the ids of the ranges this version MATCHED — 3.4.0 is not < 3.4.0
+    assert "CVE-2019-11358" not in f["cves"]
+
+
+def test_kev_section_matches_an_sca_finding_and_labels_its_status_honestly():
+    comp = dep.make_component("jquery", "3.4.0", "js-content-banner", dep.CONFIRMED, "jQuery v3.4.0",
+                              "https://t/a.js")
+    f = dep.vulnerable_component_finding(comp, dep.assess_component(comp))
+    html = report.generate_html_report("P", [f], {"in_scope": ["t"]}, kev_cves={"CVE-2020-11022"})
+    assert "Known-Exploited in the Wild" in html and "CVE-2020-11022" in html
+    # the row must not be presented as a confirmed finding — it is a potentially-affected lead
+    assert "Confirmed finding</th>" not in html
+
+
+def test_kev_does_not_scrape_cve_ids_out_of_a_title():
+    """NEGATIVE CONTROL for slice 4 — the fix must be the producer emitting structure, NOT the
+    consumer regexing prose. A CVE that appears only in a title stays unmatched."""
+    title_only = {"title": "Something about CVE-2020-11022", "family": "misc", "severity": "low",
+                  "confidence": "lead", "evidence": "no identifiers here", "target": "https://t/x"}
+    html = report.generate_html_report("P", [title_only], {"in_scope": ["t"]},
+                                       kev_cves={"CVE-2020-11022"})
+    assert "Not identified in KEV" in html
+
+
+def test_kev_stays_silent_when_the_sca_cve_is_not_in_the_catalog():
+    comp = dep.make_component("jquery", "3.4.0", "js-content-banner", dep.CONFIRMED, "jQuery v3.4.0",
+                              "https://t/a.js")
+    f = dep.vulnerable_component_finding(comp, dep.assess_component(comp))
+    html = report.generate_html_report("P", [f], {"in_scope": ["t"]}, kev_cves={"CVE-1999-0001"})
+    assert "Not identified in KEV" in html
