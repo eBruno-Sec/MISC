@@ -125,6 +125,496 @@ def scan_weak_crypto(text: str) -> list:
     return out
 
 
+# ══════════════════════════════════════════════════════════════════════════════════════════════
+# CODE-ASSISTED (SAST) LANE — call-site analysis of operator-supplied source
+# ══════════════════════════════════════════════════════════════════════════════════════════════
+# The scanners above are LEAD generators: a substring hit is a place to go look. That is the right
+# trade for a mined JS bundle and the wrong one here, because these rules are asked to produce a
+# SCORE. `scan_weak_crypto` would report MD5 on a comment that merely says "we dropped MD5", and on
+# the line `println("... MessageDigest.getInstance(java.lang.String) ...")`. Both are text. Neither
+# is a call.
+#
+# So this section works on a MASKED SKELETON: comment bodies and string-literal bodies are blanked
+# out at the same offsets, structure is matched against the skeleton, and a literal is only ever
+# read back when it sits in an ARGUMENT POSITION of a call the skeleton actually contains. That one
+# discipline is what separates a detector from a signature.
+#
+# The oracle here is definitional rather than behavioural — `Cipher.getInstance("DES")` IS weak
+# crypto, there is nothing to observe at runtime — which is exactly why this lane can be
+# deterministic where HTTP cannot. It is still SAST, and every finding says so: `provenance:
+# source-derived`, `lane: code-assisted`. It must never be folded into a DAST figure.
+
+_FILL = "\x01"          # stands in for a masked literal body; matches nothing a rule looks for
+_ESC = {"n": "\n", "t": "\t", "r": "\r", "b": "\b", "f": "\f", "0": "\0",
+        "\\": "\\", "'": "'", '"': '"'}
+
+
+def _unescape(raw: str) -> str:
+    """Java escapes inside a literal. `"DE\\u0053"` is the string DES, and a rule that cannot see
+    that is trivially evaded."""
+    if "\\" not in raw:
+        return raw
+    out, i, n = [], 0, len(raw)
+    while i < n:
+        if raw[i] != "\\" or i + 1 >= n:
+            out.append(raw[i]); i += 1; continue
+        c = raw[i + 1]
+        if c == "u":
+            j = i + 2
+            while j < n and raw[j] == "u":
+                j += 1
+            hexs = raw[j:j + 4]
+            if len(hexs) == 4 and all(h in "0123456789abcdefABCDEF" for h in hexs):
+                out.append(chr(int(hexs, 16))); i = j + 4; continue
+        out.append(_ESC.get(c, c)); i += 2
+    return "".join(out)
+
+
+def mask_source(text: str):
+    """Blank comment bodies and string/char literal bodies, preserving LENGTH and newlines.
+
+    Returns `(skeleton, literals)`. The skeleton is character-for-character the same size as the
+    input, so any offset found in it maps straight back to a real line number. `literals` maps the
+    index of an opening quote to that literal's decoded content, which is how a rule reads an
+    argument after matching the call around it.
+
+    Pure. Language-agnostic enough for the C family (Java/JS/C#/Go): `//`, `/* */`, `"..."`,
+    `'...'`, and Java text blocks.
+    """
+    src = text or ""
+    n = len(src)
+    out = list(src)
+    lits: dict = {}
+    i = 0
+    while i < n:
+        c = src[i]
+        if c == "/" and i + 1 < n and src[i + 1] == "/":
+            j = src.find("\n", i)
+            j = n if j < 0 else j
+            for k in range(i, j):
+                out[k] = " "
+            i = j
+        elif c == "/" and i + 1 < n and src[i + 1] == "*":
+            j = src.find("*/", i + 2)
+            j = n if j < 0 else j + 2
+            for k in range(i, j):
+                if out[k] != "\n":
+                    out[k] = " "
+            i = j
+        elif src.startswith('"""', i):                      # Java text block
+            j = src.find('"""', i + 3)
+            j = n if j < 0 else j + 3
+            lits[i] = _unescape(src[i + 3:max(i + 3, j - 3)])
+            for k in range(i + 3, max(i + 3, j - 3)):
+                if out[k] != "\n":
+                    out[k] = _FILL
+            i = j
+        elif c in ('"', "'"):
+            j, buf = i + 1, []
+            while j < n:
+                if src[j] == "\\" and j + 1 < n:
+                    buf.append(src[j:j + 2]); j += 2; continue
+                if src[j] == c or src[j] == "\n":
+                    break                                    # a newline ends it: never swallow the file
+                buf.append(src[j]); j += 1
+            end = min(j, n)
+            for k in range(i + 1, end):
+                out[k] = _FILL
+            lits[i] = _unescape("".join(buf))
+            i = end + 1 if end < n and src[end] == c else end
+        else:
+            i += 1
+    return "".join(out), lits
+
+
+def _arg_span(skel: str, open_idx: int):
+    """(start, end) of the argument list whose `(` is at `open_idx`. Parentheses inside literals and
+    comments are already masked away, so the depth count is trustworthy."""
+    depth = 0
+    for k in range(open_idx, len(skel)):
+        if skel[k] == "(":
+            depth += 1
+        elif skel[k] == ")":
+            depth -= 1
+            if depth == 0:
+                return open_idx + 1, k
+    return open_idx + 1, len(skel)
+
+
+def _split_args(skel: str, s: int, e: int) -> list:
+    """Top-level comma split of an argument list."""
+    out, depth, start = [], 0, s
+    for k in range(s, e):
+        ch = skel[k]
+        if ch in "([{":
+            depth += 1
+        elif ch in ")]}":
+            depth -= 1
+        elif ch == "," and depth == 0:
+            out.append((start, k)); start = k + 1
+    out.append((start, e))
+    return out
+
+
+def _stmt_end(skel: str, start: int) -> int:
+    depth = 0
+    for k in range(start, len(skel)):
+        ch = skel[k]
+        if ch in "([{":
+            depth += 1
+        elif ch in ")]}":
+            depth -= 1
+        elif ch == ";" and depth <= 0:
+            return k
+    return len(skel)
+
+
+_IDENT = re.compile(r"[A-Za-z_$][A-Za-z0-9_$]*")
+# Externalized configuration. `getProperty(key, default)` is the single most common way a Java
+# codebase names an algorithm, and the DEFAULT IS A FALLBACK, NOT THE ANSWER — reading it as the
+# answer is how a reviewer gets the verdict exactly backwards on a config-driven codebase.
+_GETPROP = re.compile(r"\.\s*get(?:Property|String)\s*\(")
+
+
+def _expr_values(text: str, skel: str, lits: dict, s: int, e: int, props, depth: int = 0) -> list:
+    """Strings an expression can evaluate to, as [(value, origin)].
+
+    Three shapes, in order of authority:
+      1. a config lookup -> the DEPLOYED value from the properties file, else the default literal;
+      2. literals appearing in the expression;
+      3. a bare identifier -> resolved from its assignments in the same file.
+    """
+    if depth > 3:
+        return []
+    gp = _GETPROP.search(skel, s, e)
+    if gp:
+        gs, ge = _arg_span(skel, gp.end() - 1)
+        parts = _split_args(skel, gs, ge)
+        keys = [v for k, v in sorted(lits.items()) if parts[0][0] <= k < parts[0][1]]
+        key = keys[0] if keys else None
+        if props and key is not None and key in props:
+            return [(props[key], "properties-file")]
+        if len(parts) > 1:
+            dflt = [v for k, v in sorted(lits.items()) if parts[1][0] <= k < parts[1][1]]
+            if dflt:
+                return [(dflt[0], "default-literal")]
+        return []
+    inline = [(v, "literal") for k, v in sorted(lits.items()) if s <= k < e]
+    if inline:
+        return inline
+    name = skel[s:e].strip()
+    if _IDENT.fullmatch(name):
+        return _var_values(name, text, skel, lits, props, depth + 1)
+    return []
+
+
+def _var_values(name: str, text: str, skel: str, lits: dict, props, depth: int = 0) -> list:
+    """Values assigned to a local anywhere in the file. Flow-insensitive on purpose: a single
+    analysis pass over one file, no CFG. Every assignment is a candidate, which is the conservative
+    reading and the one that does not miss."""
+    if depth > 3:
+        return []
+    out = []
+    rx = re.compile(r"(?<![\w.$])" + re.escape(name) + r"\s*=(?!=)")
+    for m in rx.finditer(skel):
+        st = m.end()
+        out += _expr_values(text, skel, lits, st, _stmt_end(skel, st), props, depth)
+    seen, uniq = set(), []
+    for v, origin in out:
+        if v not in seen:
+            seen.add(v); uniq.append((v, origin))
+    return uniq
+
+
+def _norm_alg(s: str) -> str:
+    return re.sub(r"[^A-Za-z0-9]", "", s or "").upper()
+
+
+# Ciphers that are broken or deprecated as a matter of record, not of opinion. Each is a published
+# break or a key/block size below any current floor -- there is no configuration that rescues them.
+_WEAK_CIPHERS = {
+    "DES": "DES — 56-bit key, exhaustively breakable",
+    "DESEDE": "Triple DES — 64-bit block, SWEET32 birthday attack",
+    "TRIPLEDES": "Triple DES — 64-bit block, SWEET32 birthday attack",
+    "3DES": "Triple DES — 64-bit block, SWEET32 birthday attack",
+    "RC2": "RC2 — related-key and differential attacks",
+    "RC4": "RC4 — biased keystream, prohibited by RFC 7465",
+    "ARCFOUR": "RC4 — biased keystream, prohibited by RFC 7465",
+    "ARC4": "RC4 — biased keystream, prohibited by RFC 7465",
+    "BLOWFISH": "Blowfish — 64-bit block, SWEET32 birthday attack",
+    "IDEA": "IDEA — 64-bit block, superseded",
+    "SKIPJACK": "SKIPJACK — 80-bit key, withdrawn",
+    "TEA": "TEA — equivalent-key weakness",
+    "XTEA": "XTEA — superseded, not a modern primitive",
+}
+# Block ciphers whose Java transformation defaults to ECB when no mode is written. `Cipher
+# .getInstance("AES")` is AES/ECB/PKCS5Padding on SunJCE -- the omission IS the weakness.
+_BLOCK_CIPHERS = {"AES", "DES", "DESEDE", "BLOWFISH", "RC2", "IDEA", "CAMELLIA", "SEED", "ARIA"}
+_TRANSFORM_OK = re.compile(r"[A-Za-z0-9/_+.-]{1,80}")
+
+
+def _cipher_weakness(spec: str, needs_mode: bool):
+    """(label, why) when this transformation string is weak, else None."""
+    if not spec or not _TRANSFORM_OK.fullmatch(spec):
+        return None                                   # prose, not a transformation
+    parts = spec.split("/")
+    alg, mode = _norm_alg(parts[0]), _norm_alg(parts[1]) if len(parts) > 1 else ""
+    if alg in _WEAK_CIPHERS:
+        return (alg if not mode else "%s/%s" % (alg, mode), _WEAK_CIPHERS[alg])
+    if mode == "ECB":
+        return ("%s/ECB" % alg, "ECB mode — equal plaintext blocks yield equal ciphertext blocks")
+    if needs_mode and not mode and alg in _BLOCK_CIPHERS:
+        return ("%s (no mode)" % alg,
+                "no mode specified — the JCE default is ECB, which leaks plaintext structure")
+    return None
+
+
+# site regex -> (which argument names the algorithm, whether an omitted mode means ECB)
+_CRYPTO_SITES = [
+    (re.compile(r"(?<![\w.$])(?:javax\.crypto\.)?Cipher\s*\.\s*getInstance\s*\("), 0, True,
+     "Cipher.getInstance"),
+    (re.compile(r"(?<![\w.$])(?:javax\.crypto\.)?(?:KeyGenerator|KeyPairGenerator|SecretKeyFactory|"
+                r"AlgorithmParameters)\s*\.\s*getInstance\s*\("), 0, False, "KeyGenerator.getInstance"),
+    (re.compile(r"(?<![\w.$])new\s+(?:javax\.crypto\.spec\.)?SecretKeySpec\s*\("), -1, False,
+     "new SecretKeySpec"),
+]
+
+
+def scan_java_crypto(text: str, props: dict = None) -> list:
+    """Weak or broken CIPHER selected at a real call site (CWE-327).
+
+    Call-site only. A comment naming DES, a log line quoting `Cipher.getInstance(java.lang.String)`,
+    and a variable merely TYPED as a weak class are all text, and none of them is a call.
+    """
+    src = text or ""
+    skel, lits = mask_source(src)
+    out, seen = [], set()
+    for rx, argno, needs_mode, api in _CRYPTO_SITES:
+        for m in rx.finditer(skel):
+            s, e = _arg_span(skel, m.end() - 1)
+            args = _split_args(skel, s, e)
+            if not args:
+                continue
+            span = args[argno] if -len(args) <= argno < len(args) else args[0]
+            for value, origin in _expr_values(src, skel, lits, span[0], span[1], props):
+                weak = _cipher_weakness(value, needs_mode)
+                if not weak:
+                    continue
+                line = _line_of(src, m.start())
+                key = (weak[0], line, api)
+                if key in seen:
+                    continue
+                seen.add(key)
+                out.append({"algorithm": weak[0], "why": weak[1], "api": api, "line": line,
+                            "spec": value, "resolved_from": origin, "cwe": "CWE-327"})
+    return out
+
+
+# Digests with a published collision or preimage break. SHA-1 is here on the strength of SHAttered
+# (2017) and the SHA-1 is a Shambles chosen-prefix collision (2020).
+_WEAK_DIGESTS = {
+    "MD2": "MD2 — preimage attack, withdrawn",
+    "MD4": "MD4 — collisions found in seconds",
+    "MD5": "MD5 — practical chosen-prefix collisions",
+    "SHA0": "SHA-0 — withdrawn, collisions found",
+    "SHA1": "SHA-1 — practical chosen-prefix collisions (SHAttered / Shambles)",
+    "RIPEMD": "RIPEMD (original) — collisions found",
+    "RIPEMD128": "RIPEMD-128 — below any current collision-resistance floor",
+}
+# For a MAC, only the digests with a PREIMAGE-class break matter. HMAC-SHA1 has no practical attack
+# and calling it broken would be a false positive wearing a security costume.
+_WEAK_MAC_DIGESTS = {"MD2", "MD4", "MD5"}
+
+
+def _digest_weakness(spec: str, mac: bool = False):
+    n = _norm_alg(spec)
+    if not n or len(n) > 40:
+        return None
+    if n.startswith("HMAC"):
+        n, mac = n[4:], True
+    n = n.split("WITH")[0] if "WITH" in n else n         # "MD5withRSA" -> MD5
+    if mac:
+        return (n, _WEAK_DIGESTS[n]) if n in _WEAK_MAC_DIGESTS else None
+    return (n, _WEAK_DIGESTS[n]) if n in _WEAK_DIGESTS else None
+
+
+# (site, argument naming the digest, is-a-MAC, api label)
+_HASH_SITES = [
+    (re.compile(r"(?<![\w.$])(?:java\.security\.)?MessageDigest\s*\.\s*getInstance\s*\("), 0, False,
+     "MessageDigest.getInstance"),
+    (re.compile(r"(?<![\w.$])(?:javax\.crypto\.)?Mac\s*\.\s*getInstance\s*\("), 0, True,
+     "Mac.getInstance"),
+    (re.compile(r"(?<![\w.$])(?:java\.security\.)?Signature\s*\.\s*getInstance\s*\("), 0, False,
+     "Signature.getInstance"),
+]
+# Convenience wrappers name the algorithm in the METHOD, not in an argument.
+_HASH_METHODS = re.compile(
+    r"(?<![\w.$])(?:DigestUtils|Hashing|MessageDigestAlgorithms)\s*\.\s*"
+    r"(md2|md4|md5|sha1|sha)\s*(?:Hex|Crypt)?\s*\(", re.I)
+
+
+def scan_java_hash(text: str, props: dict = None) -> list:
+    """Broken message digest selected at a real call site (CWE-328).
+
+    Deliberately narrow about WHERE it looks. `SecureRandom.getInstance("SHA1PRNG")` names SHA-1 and
+    is a CSPRNG, not a digest — 275 of the suite's weakrand cases are exactly that line, and a rule
+    that greps for "SHA1" instead of for a digest call site reports every one of them.
+    """
+    src = text or ""
+    skel, lits = mask_source(src)
+    out, seen = [], set()
+    for rx, argno, mac, api in _HASH_SITES:
+        for m in rx.finditer(skel):
+            s, e = _arg_span(skel, m.end() - 1)
+            args = _split_args(skel, s, e)
+            if not args:
+                continue
+            for value, origin in _expr_values(src, skel, lits, args[argno][0], args[argno][1], props):
+                weak = _digest_weakness(value, mac)
+                if not weak:
+                    continue
+                line = _line_of(src, m.start())
+                if (weak[0], line) in seen:
+                    continue
+                seen.add((weak[0], line))
+                out.append({"algorithm": weak[0], "why": weak[1], "api": api, "line": line,
+                            "spec": value, "resolved_from": origin, "cwe": "CWE-328"})
+    for m in _HASH_METHODS.finditer(skel):
+        weak = _digest_weakness(m.group(1))
+        if not weak:
+            continue
+        line = _line_of(src, m.start())
+        if (weak[0], line) in seen:
+            continue
+        seen.add((weak[0], line))
+        out.append({"algorithm": weak[0], "why": weak[1], "api": m.group(0).strip("( "),
+                    "line": line, "spec": m.group(1), "resolved_from": "method-name",
+                    "cwe": "CWE-328"})
+    return out
+
+
+# ── weak randomness (CWE-330) ────────────────────────────────────
+# INSTANTIATION, not declaration. `java.util.Random numGen = SecureRandom.getInstance("SHA1PRNG")`
+# is a CSPRNG behind a supertype reference, and `void f(java.util.Random g)` is a parameter type.
+# Both contain the weak class name; neither creates a weak generator.
+_RANDOM_SITES = [
+    (re.compile(r"(?<![\w.$])new\s+(?:java\.util\.)?Random\s*\("),
+     "new java.util.Random()", "java.util.Random is a linear congruential generator; its output is "
+                               "reproducible from ~2 observed values"),
+    (re.compile(r"(?<![\w.$])(?:java\.lang\.)?Math\s*\.\s*random\s*\(\s*\)"),
+     "Math.random()", "Math.random() delegates to a shared java.util.Random — same predictability"),
+    (re.compile(r"(?<![\w.$])(?:java\.util\.concurrent\.)?ThreadLocalRandom\s*\.\s*current\s*\(\s*\)"),
+     "ThreadLocalRandom.current()", "ThreadLocalRandom is not a cryptographic generator"),
+    (re.compile(r"(?<![\w.$])(?:org\.apache\.commons\.lang3?\.)?RandomStringUtils\s*\.\s*random"
+                r"(?:Alphanumeric|Alphabetic|Ascii|Numeric|Graph|Print)?\s*\("),
+     "RandomStringUtils.random*()", "RandomStringUtils uses java.util.Random unless a SecureRandom "
+                                    "is passed explicitly"),
+]
+# The clock is public knowledge. Seeding from it, or minting a security value out of it, makes the
+# result derivable by anyone who knows roughly when it happened.
+_CLOCK = r"(?:java\.lang\.)?System\s*\.\s*(?:currentTimeMillis|nanoTime)\s*\(\s*\)"
+_CLOCK_SEED = re.compile(r"(?<![\w.$])(?:new\s+(?:java\.util\.)?Random\s*\(\s*%s|\.\s*setSeed\s*\(\s*%s)"
+                         % (_CLOCK, _CLOCK))
+_CLOCK_TOKEN = re.compile(
+    r"(?<![\w.$])(\w*(?:token|session|nonce|otp|secret|salt|apikey|password|guid|uuid)\w*)"
+    r"\s*=[^;\n]{0,90}?" + _CLOCK, re.I)
+
+
+def scan_java_random(text: str) -> list:
+    """Predictable randomness reaching a security value (CWE-330/CWE-338)."""
+    src = text or ""
+    skel, _ = mask_source(src)
+    out, seen = [], set()
+
+    def _add(construct, why, idx, cwe="CWE-330"):
+        line = _line_of(src, idx)
+        if (construct, line) in seen:
+            return
+        seen.add((construct, line))
+        out.append({"construct": construct, "why": why, "api": construct, "line": line,
+                    "spec": construct, "resolved_from": "literal", "cwe": cwe})
+
+    for m in _CLOCK_SEED.finditer(skel):
+        _add("Random(System.currentTimeMillis())",
+             "seeded from the wall clock — the seed is guessable to within a few thousand values",
+             m.start(), "CWE-337")
+    for rx, construct, why in _RANDOM_SITES:
+        for m in rx.finditer(skel):
+            _add(construct, why, m.start())
+    for m in _CLOCK_TOKEN.finditer(skel):
+        _add("System.currentTimeMillis() -> %s" % m.group(1),
+             "a security value derived from the clock is derivable by anyone who knows when it was "
+             "issued", m.start(), "CWE-337")
+    return out
+
+
+# ── assemble the code-assisted findings for one source file ──────
+_JAVA_MARKER = re.compile(r"(?m)^\s*(?:package\s+[\w.]+\s*;|import\s+(?:static\s+)?(?:java|javax)\.)")
+
+
+def looks_like_java(text: str, source: str = "") -> bool:
+    return str(source or "").lower().endswith(".java") or bool(_JAVA_MARKER.search(text or ""))
+
+
+def _source_finding(source: str, family: str, cwe: str, title: str, hit: dict,
+                    impact: str, remediation: str, oracle: str, tags: list) -> dict:
+    """One finding from the CODE-ASSISTED lane.
+
+    `provenance` and `lane` are not decoration. This number cannot be quoted next to a DAST figure,
+    and a marker that travels with the finding is the only thing that survives a copy/paste into a
+    report. The ledger already carries one retraction for a mislabelled number.
+    """
+    return {
+        "title": title, "severity": "medium", "target": source, "confidence": "confirmed",
+        "family": family, "cwe": cwe, "line": hit["line"],
+        "provenance": "source-derived", "lane": "code-assisted", "analysis": "static-call-site",
+        "description": "%s at %s line %s: %s" % (hit.get("api") or "call site", source,
+                                                 hit["line"], hit.get("why") or ""),
+        "impact": impact,
+        "evidence": "%s:%s  %s(%s)%s" % (
+            source, hit["line"], hit.get("api") or "", hit.get("spec") or hit.get("construct") or "",
+            "" if hit.get("resolved_from") in (None, "literal")
+            else "  [value resolved from %s]" % hit["resolved_from"]),
+        "oracle": oracle,
+        "remediation": remediation,
+        "reproduction_steps": ["Open %s at line %s" % (source, hit["line"]),
+                               "Read the call site — no runtime observation is required"],
+        "tags": ["sast", "code-assisted"] + list(tags),
+    }
+
+
+def review_java(text: str, source: str, props: dict = None) -> list:
+    """CODE-ASSISTED (SAST) review of one Java source file. Findings are SOURCE-DERIVED."""
+    out = []
+    for h in scan_java_crypto(text, props):
+        out.append(_source_finding(
+            source, "weak_crypto", "CWE-327", "Weak cryptographic algorithm: %s" % h["algorithm"], h,
+            "Data encrypted with this algorithm does not have the confidentiality it appears to have.",
+            "Use AES-256 in an AEAD mode (GCM or CCM) with a random per-message IV.",
+            "the source selects the algorithm %r at a %s call site — definitionally CWE-327, no "
+            "runtime behaviour is in question" % (h.get("spec"), h.get("api")),
+            ["crypto"]))
+    for h in scan_java_hash(text, props):
+        out.append(_source_finding(
+            source, "weak_hash", "CWE-328", "Broken hash function: %s" % h["algorithm"], h,
+            "A digest with practical collisions cannot support integrity, signatures or password "
+            "storage.",
+            "Use SHA-256 or SHA-3 for integrity; use bcrypt, scrypt or Argon2 for passwords.",
+            "the source selects the digest %r at a %s call site — definitionally CWE-328"
+            % (h.get("spec"), h.get("api")),
+            ["crypto", "hash"]))
+    for h in scan_java_random(text):
+        out.append(_source_finding(
+            source, "weak_random", h["cwe"], "Predictable randomness: %s" % h["construct"], h,
+            "Any token, key, session id or nonce from this generator is reproducible by an attacker "
+            "who observes a few outputs.",
+            "Use java.security.SecureRandom for every security-relevant value.",
+            "the source instantiates %s — a non-cryptographic generator, observed at the call site "
+            "and not merely named in a declaration" % h["construct"],
+            ["randomness"]))
+    return out
+
+
 # ── Revealing developer comments ─────────────────────────────────
 _COMMENT = re.compile(r"(?m)(?://|#|/\*|<!--)\s*(.*?(?:todo|fixme|hack|xxx|bug|insecure|not secure|"
                       r"vuln|hardcoded|backdoor|do not ship|remove this|temporary|debug|csrf|"
@@ -324,6 +814,11 @@ def review(text: str, source: str) -> dict:
             "remediation": "Remove the credential from the source and rotate it.",
             "tags": ["secrets", "comment", "source-disclosure"],
         })
+
+    # CODE-ASSISTED lane. Only fires on Java source, so a mined JS bundle behaves exactly as before;
+    # these rules are call-site analyses of Java APIs and have nothing to say about anything else.
+    if looks_like_java(text, source):
+        findings.extend(review_java(text, source))
 
     comments = scan_comments(text)
     if comments:
