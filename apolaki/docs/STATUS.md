@@ -12,7 +12,7 @@ ledger wins and this file is stale.
 | OWASP Benchmark Java v1.2 — **product claim** | **34.9%** | 11-cat macro, cross-family FPs counted | **2.1%** |
 | OWASP Benchmark Java v1.2 — harness, official CWE-matching convention | 41.3% | 11-category macro, 2132 cases | 0.0% |
 | OWASP Benchmark Python v0.1 — harness | 34.8% | 14-category macro, 54 cases | 0.0% |
-| **Whole-product mission** (the real number) | **2 findings** | owaspbench, 1415 vulnerable cases | — |
+| **Whole-product mission — SCORED** | **precision 95.7%** · **recall 1.6%** | 22 TP / 1 FP / 1415 vulnerable | 1 cross-family FP |
 
 **The gap is the story.** Mission `90cee81c` completed in 3720s with 2 findings — a credential in a
 source comment and jquery@2.1.4 — **neither of them a benchmark case**. The count reached 2 at the
@@ -119,6 +119,20 @@ per host per mission, ever), and the AJAX spider is wrapped in a bare `except: p
 ## Regressions / rollbacks
 
 None this cycle.
+
+## What actually bounds the score now
+
+Recall is **1.6%**, and it is bounded by **wall-clock, not by detection**. The funnel discovers 2756
+URLs; probing costs ~100 s/URL; covering 2740 cases therefore needs ~76 hours. Every engine
+improvement is capped by that until concurrency lands. Precision is already 95.7%, so the shape of
+the problem has inverted: Apolaki is now *accurate and nearly silent*, where a month ago the risk was
+the opposite.
+
+Order that follows from the measurement:
+1. **Throughput** — diagnose the 8.5 s/tool-call cost, then concurrency. Unlocks everything else.
+2. **The two bad oracles** — path-traversal (confirms on reflection; whole 69.2% rests on it) and
+   whatever let sqli fire on the clean `cmdi` case `BenchmarkTest00494`.
+3. **Q-021A** SCA proof overclaim — in flight, slice 1 landed.
 
 ## Next highest-value task
 

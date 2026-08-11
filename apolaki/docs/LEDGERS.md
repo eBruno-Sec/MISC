@@ -115,12 +115,42 @@ Two things make this different from the previous 2:
    pathtraver oracle confirms on mere reflection. A funnel that probes ~10× more URLs would have
    multiplied that false positive if it were firing. It is not in this result.
 
-**NOT YET VERIFIED, and it is the whole question:** whether those 21 sqli hits land on *vulnerable*
-cases or *clean* ones. The finding count is not the score. The oracles involved are two-sided
-(`boolean-blind` compares a true-condition against a false-condition response; `error-recovery`
-compares against a recovery baseline), which is a reason for optimism and not evidence. **Do not
-quote 25 as an improvement in accuracy until it is scored against the answer key with the blind-seal
-discipline** — and score it with cross-family false positives counted, per the retraction above.
+**SCORED, 08-11 — the first honest whole-product benchmark measurement this project has ever taken.**
+
+Blind discipline held: the mission's claims were extracted and **sealed before the key was fetched**.
+
+```
+SEAL sha256: a95670f9c7560b227a234ebeb23c0fba0872cb3100f87e52d0c4d878988660f5
+distinct cases claimed: 23
+key entries: 2740   (expectedresults-1.2.csv, copied from the lab container AFTER sealing)
+
+TRUE  POSITIVES: 22
+FALSE POSITIVES:  1
+unknown cases  :  0
+by (key category, is_vulnerable): {('sqli', True): 20, ('cmdi', True): 1,
+                                   ('ldapi', True): 1, ('cmdi', False): 1}
+```
+
+| metric | value | how to read it |
+|---|---:|---|
+| **Precision** | **22/23 = 95.7%** | when the product speaks, it is almost always right |
+| **Recall** | **22/1415 = 1.6%** | it almost never speaks |
+
+**This is the real product number, and both halves matter.** The previous mission scored 0 benchmark
+cases; this one scores 22 with one false positive. That is a genuine step and it is nowhere near
+100%. Anyone quoting the harness's 41.3% as what Apolaki does to a real target is quoting the wrong
+measurement by a factor of ~25 in recall.
+
+**The single false positive is worth more attention than the 22 hits.** `BenchmarkTest00494` is a
+**clean `cmdi`** case and Apolaki reported **`sqli`** on it — a cross-family false positive, i.e.
+exactly the class the official CWE-matching convention forgives and scores as a true negative. The new
+product scorer (`3d41f9a`) counts it. It is also a live defect: an sqli oracle fired on a case with no
+sqli, so that oracle has a weakness of the same shape as the path-traversal one, just rarer. Chase it.
+
+**Where the recall goes.** 1415 vulnerable cases, 22 found. The funnel now discovers 2756 URLs, but
+throughput is ~100 s/URL, so a run that actually probes everything needs ~76 hours. Recall is
+currently bounded by wall-clock, not by the engines. That is the next constraint, and it is a
+concurrency problem, not a detection problem.
 
 **MEASURED, 08-10 — the most important negative result in this ledger.** Mission `90cee81c`
 (`owaspbench-clean`, active mode) ran **3720 seconds** against `https://owaspbench:8443/benchmark/`
