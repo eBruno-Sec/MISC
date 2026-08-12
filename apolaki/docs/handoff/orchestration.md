@@ -414,3 +414,60 @@ callers, and `_close_autonomy_loop` runs after the loop finishes. So all three t
 the ranked output still only reaches the report. **Arming the producer was steps 1-3 of the build
 order; U1 is what makes it act.** Worth stating plainly so the next reader does not mistake "the tier
 fires" for "the scan does the work".
+
+---
+
+## U1 -- execute the ranked actions (`92e678b` = code only, measurement NOT taken)
+
+`agent/agent.py` + `agent/asset_graph.py`. **Code is green and committed; U1 is NOT done.** The
+capability claim is unproven until the measurement below exists, and the commit says so.
+
+### The routing catch -- why the first number was thrown away
+
+The first paired run on VAmPI produced what looked like the right shape:
+
+```
+BEFORE  ranked actions produced: 4   dispatched: 0
+AFTER   ranked actions produced: 4   dispatched: 4   (2 of them reported findings=1)
+```
+
+That `findings=1` is **not a finding.** `_run_tool` yields `count` straight off the ToolResult, and
+`run_bfla` IS in `_AUTO_STORE_TOOLS`, so `_auto_store` ran and graded the results -- and graded
+results without `confidence == "confirmed"` are routed to `self.leads`, not `self.findings`. The
+mission's `findings` total was `0` in both runs. So the number I was about to report measured the
+**routing of a tool result**, not a capability the scan gained.
+
+This is the same class of error as the per-process latch found earlier this cycle: a count that
+depends on where in the pipeline it is sampled rather than on what the scan actually achieved. A
+tool-level `count` is sampled before the grader; a capability claim has to be sampled after it.
+
+Recorded BEFORE re-running, so the correction is not something the next number quietly absorbs.
+
+### The only question U1 has to answer
+
+Not "did the tier fire" and not "how many actions dispatched" -- both were already true of a producer
+that fed a report. The question is:
+
+> does a ranked action, once dispatched, produce a finding **the scan would not otherwise have made**?
+
+So the measurement is a SET DIFF of the graded outcome (findings AND leads, each identified by
+title+target) between an unranked run and a ranked run on the same target with the same seed -- not a
+count of dispatches.
+
+Two constraints held while measuring:
+
+- **Determinism.** Two ranked runs, finding sets diffed. `decayed_confidence` moves with wall-clock
+  for untested nodes, so ranked ORDER can drift; the executor therefore DRAINS the ranked set rather
+  than taking the top item, making order a preference and membership stable. That design claim is
+  exactly what the repeat run tests.
+- **Bounded.** `CAP_GRAPH_ACTIONS = 24` per mission, ranked order preserved so a budget cut-off drops
+  the least valuable first. Graph steps run through the same `done` dedup, the same hostless guard,
+  the same `MAX_STEPS`, and the same `_run_tool` passive/HITL gates as planner steps.
+
+An honest "+0 -- the ranked actions dispatched and found nothing the unranked run did not" is a
+complete result: it would mean the ranking is correct but the surface is already covered, which is a
+different ticket from wiring it. Same standard as the cmdi +0 reported against a predicted +5.
+
+### Status
+
+Measurement in progress. No capability claim until the set diff is recorded here.
