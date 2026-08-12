@@ -20,7 +20,7 @@ so this module never bypasses scope or the approval gate — it only chooses ord
 """
 from __future__ import annotations
 
-from urllib.parse import urlparse, urlunparse
+from urllib.parse import parse_qsl, urlencode, urlparse, urlunparse
 
 import dns_recon
 import surface as surface_mod
@@ -111,6 +111,65 @@ def _path(u: str) -> str:
         return urlparse(u).path or "/"
     except Exception:
         return ""
+
+
+def observed_param_values(urls) -> dict:
+    """{(netloc, path): {param: first observed value}} over the discovered URL set.
+
+    D3. `surface.build_inventory` unions the parameter NAMES per endpoint but keeps a single
+    `example` URL, and that URL carries only the parameters that happened to ride on it. This
+    recovers the VALUE each of the other parameters was actually observed with, so the merged
+    probe URL below is built from OBSERVED values only, never invented ones.
+    """
+    out = {}
+    for u in urls or []:
+        if not isinstance(u, str) or not u:
+            continue
+        try:
+            p = urlparse(u)
+        except Exception:
+            continue
+        if not p.netloc:
+            continue
+        seen = out.setdefault((p.netloc, p.path or "/"), {})
+        for k, v in parse_qsl(p.query, keep_blank_values=True):
+            # first observation wins, but a real value beats a blank one
+            if k not in seen or (not seen[k] and v):
+                seen[k] = v
+    return out
+
+
+def merge_observed_params(url: str, values: dict) -> str:
+    """`url` carrying EVERY parameter observed on its endpoint, not just the ones on this URL.
+
+    D3, and the reason the obvious fix does not work. The planner already knows the full
+    parameter set (`ep["params"]`), so the tempting patch is to pass `params=` into the step and
+    let the engine iterate it. MEASURED: that patch is inert. `_run_sqli`, `_run_nosqli`,
+    `_run_cmdi` and `_run_xss` all build their probe target with `xss_tool.set_param(url, p, v)`,
+    which REPLACES an existing parameter and silently returns the url unchanged when the
+    parameter is absent -- so probing a known-but-absent parameter sends the baseline URL, the
+    baseline and the probe fail identically, and the endpoint is reported clean. (`ssrf_tool`'s
+    set_param does append; the two disagree.) Carrying the parameters on the URL instead fixes
+    every engine at once, including `run_injection_probes`, `run_web_probes`, `run_sqlmap`,
+    `run_dalfox` and `run_xxe`, which never read `inp["params"]` at all, and it leaves
+    `_run_xss`'s hidden-parameter discovery (which only runs when `params` is NOT supplied)
+    intact.
+
+    Parameters already present keep their own value. Missing ones are appended in sorted order
+    so the URL is deterministic across runs.
+    """
+    if not url or not values:
+        return url
+    try:
+        p = urlparse(url)
+    except Exception:
+        return url
+    pairs = parse_qsl(p.query, keep_blank_values=True)
+    have = {k for k, _ in pairs}
+    extra = [(k, values[k]) for k in sorted(values) if k not in have]
+    if not extra:
+        return url
+    return urlunparse(p._replace(query=urlencode(pairs + extra, doseq=True)))
 
 
 def _allowed(tool: str, mode: str) -> bool:
@@ -215,6 +274,25 @@ def next_batch(state: dict) -> list:
         turned a host-less graph label into `https:///path`. One helper, one rule: no host, no URL."""
         b = _b(_host(u))
         return (b + _path(u)) if b else ""
+
+    # D3: the observed value of every parameter, per endpoint, so `_ex` can rebuild an example URL
+    # that carries the endpoint's whole parameter set instead of the one parameter that happened to
+    # be on the inventory's `example`.
+    _obs = observed_param_values(urls)
+
+    def _ex(ep):
+        """An inventory entry's probe URL: the scope's base + path + EVERY observed parameter.
+
+        Replaces `_b_url(ep["example"]) or (_b(ep["host"]) + ep["path"])`, which delivered only the
+        parameters carried by the single example URL. MEASURED before the change, on a 7-URL
+        surface: 16 (parameter, engine) pairs the planner knew about were never delivered -- e.g.
+        /search?term=x was the example, so `lang` and `url` were never probed by ANY engine, and
+        run_ssrf on /fetch was scheduled BECAUSE the inventory saw `target` and was then handed a
+        URL containing only `cmd`."""
+        merged = merge_observed_params(
+            ep.get("example") or "",
+            _obs.get((ep.get("host") or "", ep.get("path") or "")) or {})
+        return _b_url(merged) or (_b(ep.get("host") or "") + (ep.get("path") or ""))
 
     def fresh(steps):
         # dedup against `done` AND within this freshly built batch (a step's key can
@@ -359,8 +437,7 @@ def next_batch(state: dict) -> list:
     # DOM audit (headless browser, client-side confirmation) — bounded because it
     # is slow: the live-host roots + a few HTML pages, skipping static assets.
     dom_pages, dom_seen = [], set()
-    for u in [_b(h) for h in host_bases] + [
-            _b_url(e.get("example")) or (_b(e['host']) + e['path']) for e in param_eps]:
+    for u in [_b(h) for h in host_bases] + [_ex(e) for e in param_eps]:
         low = u.split("?")[0].lower()
         if any(low.endswith(ext) for ext in (".js", ".css", ".png", ".jpg", ".svg", ".woff", ".ttf", ".gif", ".mp4")):
             continue
@@ -375,7 +452,7 @@ def next_batch(state: dict) -> list:
     if intensity in ("deep", "insane"):
         pm_targets = list(dict.fromkeys(
             [_b(h) for h in host_bases]
-            + [(_b_url(e.get("example")) or (_b(e['host']) + e['path'])) for e in param_eps]))[:CAP_SQLMAP]
+            + [_ex(e) for e in param_eps]))[:CAP_SQLMAP]
         for u in pm_targets:
             e_steps.append(_step("run_param_mine", {"url": u}, f"run_param_mine:{u}"))
     # anomaly hunting (intuition leads) on app roots + key endpoints — a cheap active GET
@@ -383,7 +460,7 @@ def next_batch(state: dict) -> list:
     # advisory 'dig here' leads (candidate, never confirmed).
     anom_targets = list(dict.fromkeys(
         [_b(h) for h in host_bases]
-        + [(_b_url(e.get("example")) or (_b(e['host']) + e['path'])) for e in param_eps[:8]]))[:12]
+        + [_ex(e) for e in param_eps[:8]]))[:12]
     for u in anom_targets:
         e_steps.append(_step("run_anomaly_scan", {"url": u}, f"run_anomaly_scan:{u}"))
     # heavy sqlmap is expensive; at deep, target only the most injection-prone endpoints
@@ -407,7 +484,7 @@ def next_batch(state: dict) -> list:
     # single run now surfaces the confirmations fast, and sqlmap corroborates afterwards.
     sqlmap_steps = []
     for ep in param_eps:
-        u = _b_url(ep.get("example")) or (_b(ep['host']) + ep['path'])
+        u = _ex(ep)
         tag = f"{ep['host']}{ep['path']}"
         params_l = [str(p).lower() for p in (ep.get("params") or [])]
         e_steps.append(_step("run_xss", {"url": u}, f"run_xss:{tag}"))
@@ -437,7 +514,7 @@ def next_batch(state: dict) -> list:
                                              "fields": fm.get("fields", [])}, f"run_xxe:{act}"))
     xml_eps = [e for e in inv if e.get("body_sink") or _XML_SINK.search(e.get("path") or "")][:CAP_HOSTS]
     for ep in xml_eps:
-        u = _b_url(ep.get("example")) or (_b(ep['host']) + ep['path'])
+        u = _ex(ep)
         if u not in xxe_seen:
             e_steps.append(_step("run_xxe", {"url": u}, f"run_xxe:{ep['host']}{ep['path']}"))
     # heavy sqlmap corroboration LAST — the slowest injection tool, so it never blocks the
@@ -522,7 +599,7 @@ def next_batch(state: dict) -> list:
     # ones are gated to Full mode by fresh()/_allowed(). They run after the fast native
     # probes + sqlmap, so they never starve the confirmations that complete the report.
     for ep in param_eps:
-        u = _b_url(ep.get("example")) or (_b(ep['host']) + ep['path'])
+        u = _ex(ep)
         tag = f"{ep['host']}{ep['path']}"
         e_steps.append(_step("run_deserialization", {"url": u}, f"run_deserialization:{tag}"))
         # object/function-level authz sweep — SAFE methods only (never DELETE).
@@ -532,7 +609,7 @@ def next_batch(state: dict) -> list:
     dalfox_eps = (sorted(param_eps, key=_sqli_score, reverse=True)[:CAP_SQLMAP]
                   if intensity in ("deep", "insane") else param_eps[:3])
     for ep in dalfox_eps:
-        u = _b_url(ep.get("example")) or (_b(ep['host']) + ep['path'])
+        u = _ex(ep)
         e_steps.append(_step("run_dalfox", {"url": u}, f"run_dalfox:{ep['host']}{ep['path']}"))
     # CSRF token check + race/rate-limit on state-changing POST forms.
     sc_seen = set()
