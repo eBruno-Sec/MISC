@@ -176,6 +176,121 @@ def is_confirmed(finding: dict) -> bool:
     return str(finding.get("confidence") or "confirmed").strip().lower() not in UNPROVEN_CONFIDENCE
 
 
+# ══════════════════════════════════════════════════════════════════════════════════════════════
+# PROOF KIND — the SHAPE of evidence a finding class can have (#123, Breaker item 1)
+# ══════════════════════════════════════════════════════════════════════════════════════════════
+# The evidence contract assumed ONE shape for every finding: baseline + mutation + differential +
+# replay. `837b1f0` fixed the case where that experiment was AVAILABLE and not run — the claim was
+# unproven. This is the other case, and it is a different error: for a source-derived finding the
+# experiment CANNOT EXIST. `Cipher.getInstance("DES")` at a known file and line has no request, no
+# baseline and no mutation. Demanding a request differential of it is a category error, and
+# answering "not recorded" is wrong too — that says the experiment was available and skipped.
+#
+# So the contract is per proof kind, and the control question gets a THIRD answer. Same move
+# `dependency_intel` already makes with `version_confidence` (how sure of the version) vs
+# `component_status` (was the CVE's own behaviour seen): two questions, two named fields, rather
+# than one overloaded word. This lives here, beside `is_confirmed`, because every surface that
+# renders a proof claim must read the SAME predicate — three private copies of "confirmed" is how
+# the HTML report came to stamp CONFIRMED on rows the proof gate had already demoted.
+
+BEHAVIOURAL = "behavioural"          # DAST: a request/response differential over a stable baseline
+SOURCE_DERIVED = "source-derived"    # SAST: a static call site; no request exists, even in principle
+
+#: Answers "was the benign explanation ruled out?" — and the third value is the point.
+CONTROL_RECORDED = "recorded"                # an artifact from a control that actually ran
+CONTROL_NOT_RECORDED = "not_recorded"        # the experiment applies to this kind and was not run
+CONTROL_NOT_APPLICABLE = "not_applicable"    # no request-differential can exist for this proof kind
+
+#: Keys under which a producer records that a negative control ACTUALLY RAN. `report.control_ran`
+#: reads this list through `control_status` so the set has ONE definition; a finding carrying none of
+#: these has no control artifact, whatever its family's contract says such a control would look like.
+CONTROL_KEYS = ("negative_controls", "controls", "control", "control_evidence", "control_response")
+
+#: The sibling clean call site a source rule must NOT match — the counter-example that would falsify
+#: the finding. This is a real negative control; it is simply not a request. It is the same discipline
+#: `agent/tests/test_codeassisted_negative_controls.py` enforces on the code-assisted lane: a rule
+#: that fires on the clean sibling is a signature, not a detector.
+#:
+#: The authority on what is weak is `codereview`, so this table is a FALLBACK, not the design — a
+#: producer that states its own `counter_example` on the finding wins (see docs/handoff/evidence.md
+#: patch 6b). An unknown family yields None and the prose degrades to the generic shape; it must
+#: never invent a specific sibling it cannot name, which is the exact failure being fixed here.
+COUNTER_EXAMPLE = {
+    "weak_crypto": 'Cipher.getInstance("AES/GCM/NoPadding") — the same receiver, one different '
+                   'argument, and the rule must not fire',
+    "weak_hash": 'MessageDigest.getInstance("SHA-256") — the same receiver, one different argument, '
+                 'and the rule must not fire',
+    "weak_random": "SecureRandom() / random.SystemRandom() — the same method name behind a CSPRNG "
+                   "receiver, and the rule must not fire",
+}
+_COUNTER_EXAMPLE_BY_CWE = {"CWE-327": "weak_crypto", "CWE-328": "weak_hash",
+                           "CWE-330": "weak_random", "CWE-338": "weak_random",
+                           "CWE-337": "weak_random"}
+
+#: Markers a producer stamps on a source-derived finding. `codereview._source_finding` writes all
+#: three; matching any one of them is deliberate, so a lane that adopts only part of the vocabulary
+#: is still classified honestly rather than defaulting to "behavioural" and inheriting a request
+#: contract it cannot satisfy.
+_SOURCE_MARKERS = (("provenance", "source-derived"), ("lane", "code-assisted"),
+                   ("analysis", "static-call-site"))
+
+
+def proof_kind(finding: dict) -> str:
+    """The SHAPE of evidence this finding can have: BEHAVIOURAL or SOURCE_DERIVED. Pure.
+
+    Defaults to BEHAVIOURAL: every HTTP probe emits a finding with no lane marker at all, and the
+    request-differential contract is the right one for them. Only an explicit source-derived marker
+    moves a finding out of it — a default that silently declared findings exempt from the request
+    contract would be a way to lose the control requirement, not to state it honestly."""
+    if not isinstance(finding, dict):
+        return BEHAVIOURAL
+    for key, want in _SOURCE_MARKERS:
+        if str(finding.get(key) or "").strip().lower() == want:
+            return SOURCE_DERIVED
+    return BEHAVIOURAL
+
+
+def control_status(finding: dict) -> str:
+    """Was the benign explanation ruled out, and could it have been? Three-valued. Pure.
+
+    THE ARTIFACT IS CHECKED FIRST, ON PURPOSE. Deciding NOT_APPLICABLE from the lane label before
+    looking would be a guard that checks a DECLARATION instead of a fact: a finding that is
+    source-derived AND carries a recorded control (a SAST lead later confirmed by a probe) would
+    have had its real artifact suppressed by its own label. If an experiment was actually recorded,
+    it was evidently applicable. No producer emits that shape today, so this is latent rather than
+    live -- which is exactly when it is cheap to get right, and it is what keeps `report.control_ran`
+    byte-for-byte unchanged for EVERY input rather than only for the ones in the fixtures.
+
+    Deliberately strict on the artifact: an empty list or a blank string is a producer recording
+    that it ran NO control, not that it ran some."""
+    if not isinstance(finding, dict):
+        return CONTROL_NOT_RECORDED
+    for k in CONTROL_KEYS:
+        v = finding.get(k)
+        if isinstance(v, (list, tuple, dict)) and len(v):
+            return CONTROL_RECORDED
+        if isinstance(v, str) and v.strip():
+            return CONTROL_RECORDED
+    if proof_kind(finding) == SOURCE_DERIVED:
+        return CONTROL_NOT_APPLICABLE
+    return CONTROL_NOT_RECORDED
+
+
+def counter_example(finding: dict):
+    """The sibling clean call site that would falsify this source rule, or None when unknown. Pure.
+    A producer-supplied `counter_example` beats the table; an unknown family returns None so the
+    caller can say "the sibling clean call site" instead of naming one that may not exist."""
+    if not isinstance(finding, dict):
+        return None
+    own = str(finding.get("counter_example") or "").strip()
+    if own:
+        return own
+    fam = str(finding.get("family") or "").strip().lower()
+    if fam not in COUNTER_EXAMPLE:
+        fam = _COUNTER_EXAMPLE_BY_CWE.get(str(finding.get("cwe") or "").upper().strip(), "")
+    return COUNTER_EXAMPLE.get(fam)
+
+
 #: The CANONICAL key for a finding's machine-checkable success oracle. Measured across the platform:
 #: 38 modules mention `success_oracle` and 87 sites write a plain `oracle`, and the two CONSUMERS
 #: disagreed with each other — `poc_bundle` read only `oracle` (so every family whose producer chose

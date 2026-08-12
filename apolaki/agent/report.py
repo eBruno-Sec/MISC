@@ -472,9 +472,11 @@ def generate_report(program: str, findings: list, scope: dict,
                       f"- _Confidence:_ {_g['confidence']} — {_g['assumptions']}", ""]
         _pr = proof_and_retest(f)
         # The HEADING is a claim too. "How this was confirmed" over a control that never ran is the
-        # same lie as the body text, just harder to notice.
-        _pr_head = ("**How this was confirmed (false-positive safety)**" if control_ran(f)
-                    else "**False-positive safety: NOT ESTABLISHED for this finding**")
+        # same lie as the body text, just harder to notice. It is now three-way for the same reason
+        # the body is: "NOT ESTABLISHED" over a source-derived finding is also false -- its
+        # false-positive safety IS established, by a rule-level counter-example rather than by a
+        # request. A two-valued heading over a three-valued fact has to be wrong somewhere.
+        _pr_head = "**%s**" % negative_control_claim(f)["heading"]
         lines += [_pr_head, "", _pr["negative_control"], "",
                   "**Retest / closure**", "", _pr["retest"], ""]
         if str(f.get("false_positive_check") or "").strip():
@@ -1221,13 +1223,25 @@ def browser_evidence_html(finding: dict, e) -> str:
 
 #: Keys under which a producer records that a negative control ACTUALLY RAN. A finding carrying none
 #: of these has no control artifact, whatever its family's contract says such a control would look like.
+#: The list itself now lives in `proof_schema.CONTROL_KEYS` — same reason `_confirmed` and `_oracle_of`
+#: import through it: the report is one of four surfaces that must agree about the same fact.
 _CONTROL_KEYS = ("negative_controls", "controls", "control", "control_evidence", "control_response")
 
 
 def control_ran(finding: dict) -> bool:
-    """Did a negative control actually run for THIS finding? Pure, and deliberately strict."""
+    """Did a REQUEST-BASED negative control actually run for THIS finding? Pure, deliberately strict.
+
+    Unchanged in meaning and in return values. A source-derived finding still answers False, because
+    it genuinely holds no request-based artifact — what changed is that False is no longer the whole
+    answer. `negative_control_claim` reads the three-valued `proof_schema.control_status` to tell
+    "the experiment was not run" apart from "the experiment cannot exist for this proof kind"."""
     if not isinstance(finding, dict):
         return False
+    try:
+        import proof_schema as _ps
+        return _ps.control_status(finding) == _ps.CONTROL_RECORDED
+    except Exception:
+        pass
     for k in _CONTROL_KEYS:
         v = finding.get(k)
         if isinstance(v, (list, tuple, dict)) and len(v):
@@ -1235,6 +1249,55 @@ def control_ran(finding: dict) -> bool:
         if isinstance(v, str) and v.strip():
             return True
     return False
+
+
+def negative_control_claim(finding: dict) -> dict:
+    """The false-positive-safety claim for ONE finding, composed PER PROOF KIND. Pure.
+
+    ONE implementation for every surface that states it — the report's markdown and HTML sections and
+    the downloadable PoC bundle. They previously composed it separately and disagreed: `837b1f0`
+    gated the report and not the bundle, so the same finding read "NOT ESTABLISHED" in the report and
+    "an inert control does NOT reproduce the differential" in its own dossier (breaker.md, session 2
+    target 3b and session 3 target 3a — REJECTED twice).
+
+    Returns {"status", "heading", "text", "counter_example"}. `status` is the three-valued
+    `proof_schema.control_status`; the caller renders, it does not decide.
+    """
+    import proof_schema as _ps
+    import technique_model as _tm
+    f = finding if isinstance(finding, dict) else {}
+    status = _ps.control_status(f)
+    fam = str(f.get("family") or "").strip().lower()
+    contract = _tm.proof_contract({"vuln_class": fam or str(f.get("cwe") or ""), "oracle": ""})
+    nc = str(contract.get("negative_control") or "").strip()
+
+    if status == _ps.CONTROL_NOT_APPLICABLE:
+        # The distinction that makes this different from the bug 837b1f0 fixed: there, the
+        # experiment could have been run and was not. Here it cannot exist. A static call site has
+        # no request, no baseline and no mutation — so the honest control is the rule-level
+        # counter-example, and saying "not recorded" would still be a false claim about what was
+        # available.
+        ce = _ps.counter_example(f)
+        return {"status": status,
+                "heading": "False-positive safety: rule-level counter-example (no request applies)",
+                "counter_example": ce,
+                "text": ("NOT APPLICABLE to this proof kind: a source-derived (static call-site) "
+                         "finding has no request, no baseline and no mutation, so a request "
+                         "differential cannot exist for it. The control that DOES apply is the "
+                         "rule-level counter-example: "
+                         + (ce or "the sibling clean call site the same rule must NOT match")
+                         + ". If the same rule fired on that too, this would be a signature, not a "
+                           "detector.")}
+    if status == _ps.CONTROL_RECORDED:
+        return {"status": status, "counter_example": None,
+                "heading": "How this was confirmed (false-positive safety)", "text": nc}
+    return {"status": status, "counter_example": None,
+            "heading": "False-positive safety: NOT ESTABLISHED for this finding",
+            "text": ("NO NEGATIVE CONTROL WAS RECORDED for this finding. The control that would "
+                     "settle it: "
+                     + (nc or "an otherwise identical request with the trigger removed must not "
+                              "reproduce the confirming signal")
+                     + " -- run it before treating this as false-positive-safe.")}
 
 
 def proof_and_retest(finding: dict) -> dict:
@@ -1254,16 +1317,14 @@ def proof_and_retest(finding: dict) -> dict:
     The contract text is still worth showing -- it tells a reviewer what would settle the question --
     but it is a PRESCRIPTION, not a report of something that happened. The two are now grammatically
     and structurally distinct, and `control_ran` decides which one you get.
+
+    A THIRD answer since: for a source-derived finding the prescription itself was a false claim, so
+    the composition moved to `negative_control_claim`, which is per proof kind and shared with the
+    PoC bundle. Behavioural findings -- with or without an artifact -- get exactly the text they got
+    before; the routing lives in one function so the surfaces cannot drift apart again.
     """
-    import technique_model as _tm
     import retest as _rt
-    fam = str(finding.get("family") or "").strip().lower()
-    nc = _tm.proof_contract({"vuln_class": fam or str(finding.get("cwe") or ""), "oracle": ""}).get("negative_control")
-    if not control_ran(finding):
-        nc = ("NO NEGATIVE CONTROL WAS RECORDED for this finding. The control that would settle it: "
-              + (str(nc).strip() or "an otherwise identical request with the trigger removed must not "
-                                     "reproduce the confirming signal")
-              + " -- run it before treating this as false-positive-safe.")
+    nc = negative_control_claim(finding)["text"]
     rp = _rt.plan(finding)
     if rp.get("retestable"):
         how = {"reachable": "the resource is still served with content",
@@ -2184,8 +2245,7 @@ def generate_html_report(program: str, findings: list, scope: dict,
                            f"<p><b>Unverified worst case:</b> {e(_g['unverified'])}</p>"
                            f"<p class='sub'>Confidence: {e(str(_g['confidence']))} — {e(_g['assumptions'])}</p></div>")
         _pr = proof_and_retest(f)
-        _pr_head = ("How this was confirmed (false-positive safety)" if control_ran(f)
-                    else "False-positive safety: NOT ESTABLISHED for this finding")
+        _pr_head = negative_control_claim(f)["heading"]      # three-way; see the markdown renderer
         pr_html = (f"<div class='biz'><h4>{e(_pr_head)}</h4>"
                    f"<p>{e(_pr['negative_control'])}</p>"
                    f"<h4>Retest / closure</h4><p>{e(_pr['retest'])}</p></div>")
