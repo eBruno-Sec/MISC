@@ -2854,6 +2854,144 @@ class BBHAgent:
                  "target": self.tools.recon.get("target"), "domain": self.tools.recon.get("domain")}
         return hosts, eps, recon
 
+    # U1 (architecture.md 6.3): the graph's ranked action -> a concrete tool.
+    #
+    # `AssetGraph.next_best_actions` was complete, deterministic and tested, and NOTHING executed it:
+    # `plan_next()` and `apply_result()` had no non-test callers, and `_close_autonomy_loop` — which
+    # reads the ranking — runs AFTER the execution loop finishes. The producer existed; the consumer
+    # did not. This map is the consumer, and it is deliberately small: one tool per action, each one
+    # already registered, already scoped, already permission-tiered. A capability with no entry
+    # produces no step and is RECORDED as unmapped rather than silently dropped.
+    # Each value is (tool, url_arg). The ARG IS PART OF THE MAPPING, not an assumption: `run_exposure`
+    # reads `inp["base_url"]` while every other tool here reads `inp["url"]`, and a map that named the
+    # right tool with the wrong key raised KeyError mid-scan on the first real run. A tool named is not
+    # a tool invocable. `base_url` also means the origin, not the endpoint — an exposure sweep is a
+    # host-level probe — so the arg selects the target shape too.
+    _GRAPH_ACTION_TOOLS = {
+        "cross_user_test": ("run_bfla", "url"),   # object endpoint, never compared across personas
+        "run_service_pack": ("run_service_pack", None),
+    }
+    # chase_capability dispatches on the capability, not the action name
+    _GRAPH_CAPABILITY_TOOLS = {
+        "database_read": ("run_sqlmap", "url"),   # INTRUSIVE — _run_tool's HITL gate still applies
+        "foreign_object_read": ("run_bfla", "url"),
+        "internal_request": ("run_ssrf", "url"),
+        "arbitrary_file_read": ("run_web_probes", "url"),
+        "file_upload": ("run_upload_test", "url"),
+        "credential_material": ("run_exposure", "base_url"),
+    }
+    # Per-mission ceiling on graph-directed dispatches. The point of U1 is to USE the ranking, not to
+    # remove the ceiling: the list is ranked, so a budget cut-off drops the least valuable actions
+    # first. Same spirit as planner.CAP_* — do not invent a second cap vocabulary.
+    CAP_GRAPH_ACTIONS = 24
+
+    def _graph_action_target(self, g, act: dict, bases: dict) -> str:
+        """The absolute URL a ranked action should be aimed at, or "" when the graph cannot address it.
+
+        Resolves from the emitting node's KEY (which carries the host), never from `target`, which is
+        a LABEL — reading a label is exactly what produced `https:///benchmark/...` in Q-019. For a
+        finding there is no URL on the node at all, so this walks the `found_on` edge D13 added back
+        to the endpoint it was found on. That edge is why chase_capability is addressable.
+        """
+        n = g.node(act.get("node") or "")
+        if not n:
+            return ""
+        if n["kind"] in ("endpoint", "object"):
+            return self._endpoint_url(n["key"], bases)
+        if n["kind"] == "finding":
+            for nb in g.neighbors(n["id"], "found_on"):
+                other = g.node(nb)
+                if other and other["kind"] in ("endpoint", "object"):
+                    u = self._endpoint_url(other["key"], bases)
+                    if u:
+                        return u
+            for nb in g.neighbors(n["id"], "found_on"):
+                other = g.node(nb)
+                if other and other["kind"] == "host":
+                    return self._endpoint_url(other["key"] + "/", bases)
+        return ""
+
+    def _graph_action_step(self, g, act: dict, bases: dict):
+        """One ranked action -> one executable step dict, or None when it is not addressable.
+
+        The step's KEY is deliberately in the PLANNER's namespace (`run_bfla:{host}{path}`) wherever a
+        planner step could have covered the same ground, so `done` dedups a graph action against work
+        the tool planner already did instead of re-probing it. That is the D2 lesson applied forward:
+        a second producer with its own key namespace is how 8 probes got scheduled for 5 URLs.
+        """
+        from urllib.parse import urlparse as _up
+        action = act.get("action")
+        if action == "run_service_pack":
+            n = g.node(act.get("node") or "")
+            if not n:
+                return None
+            host, _, port = str(n["key"]).rpartition(":")
+            if not host or not port.isdigit():
+                return None
+            return {"tool": "run_service_pack",
+                    "input": {"host": host, "port": int(port),
+                              "service": n.get("props", {}).get("service") or n["label"]},
+                    "key": "run_service_pack:%s" % n["key"], "_action": act}
+        if action == "chase_capability":
+            entry = self._GRAPH_CAPABILITY_TOOLS.get(act.get("capability") or "")
+            if not entry:
+                try:
+                    self.tools._swallow(
+                        ValueError("graph ranked chase_capability for %r with no tool mapping; the "
+                                   "action was produced and could not be executed"
+                                   % act.get("capability")),
+                        "graph_action.unmapped_capability", act.get("target") or "")
+                except Exception:
+                    pass
+                return None
+        else:
+            entry = self._GRAPH_ACTION_TOOLS.get(action or "")
+        if not entry:
+            return None
+        tool, arg = entry
+        url = self._graph_action_target(g, act, bases)
+        if not url:
+            return None
+        p = _up(url)
+        if arg == "base_url":
+            # a host-level sweep: the origin, never the endpoint path
+            inp = {"base_url": "%s://%s" % (p.scheme, p.netloc)}
+            key = "%s:%s" % (tool, p.netloc)
+        else:
+            inp = {"url": url}
+            key = "%s:%s%s" % (tool, p.netloc, p.path)
+        if tool == "run_bfla":
+            inp["allow_delete"] = False          # SAFE methods only, as the planner schedules it
+        if tool == "run_sqlmap":
+            inp["intensity"] = getattr(self.tools, "intensity", "standard")
+        return {"tool": tool, "input": inp, "key": key, "_action": act}
+
+    def _graph_action_steps(self, g, done) -> list:
+        """The ranked actions the graph recommends, as executable steps, bounded and deduped.
+
+        Ranked order is preserved so a budget cut-off loses the least valuable actions — but the loop
+        DRAINS the set rather than taking the top one, so the finding set does not depend on the
+        ranking being stable to the millisecond (`decayed_confidence` moves with wall-clock for
+        untested nodes). Order is a preference here; membership is not.
+        """
+        try:
+            bases = self.scope.base_map() or {}
+        except Exception:
+            bases = {}
+        budget = self.CAP_GRAPH_ACTIONS - getattr(self, "_graph_actions_run", 0)
+        if budget <= 0:
+            return []
+        out, seen = [], set()
+        for act in g.next_best_actions(limit=self.CAP_GRAPH_ACTIONS):
+            step = self._graph_action_step(g, act, bases)
+            if not step or step["key"] in done or step["key"] in seen:
+                continue
+            seen.add(step["key"])
+            out.append(step)
+            if len(out) >= budget:
+                break
+        return out
+
     def _reject_hostless_step(self, step: dict) -> bool:
         """Ingress guard on the planner→executor boundary: refuse a step whose target carries a scheme
         but an EMPTY netloc (`https:///x`), and RECORD it naming the producing tool.
@@ -2949,7 +3087,21 @@ class BBHAgent:
                          "intensity": getattr(self.tools, "intensity", "standard")}
                 batch = planner.next_batch(state)
                 if not batch:
-                    break
+                    # U1: the TOOL planner is at its fixpoint. Before ending the cycle, ask the GRAPH
+                    # what it recommends and execute the ranked actions through this same executor.
+                    # Until now `next_best_actions()` was computed and discarded — a complete,
+                    # deterministic, tested producer with no consumer, and `_close_autonomy_loop`
+                    # reads it only AFTER the loop has finished. Graph steps run through the identical
+                    # dedup (`done`), hostless guard, budget (MAX_STEPS) and gates (`_run_tool`'s
+                    # passive/HITL checks) as planner steps; nothing here bypasses a control.
+                    batch = self._graph_action_steps(g, done)
+                    if not batch:
+                        break
+                    yield {"type": "info",
+                           "content": "Graph-directed execution — the world model ranked %d action(s) "
+                                      "the tool planner does not schedule: %s."
+                                      % (len(batch), ", ".join(
+                                          "%s->%s" % (s["_action"]["action"], s["tool"]) for s in batch[:4]))}
                 for step in batch:
                     if self.stop_event.is_set():
                         self._plan_steps = steps
@@ -2958,9 +3110,32 @@ class BBHAgent:
                     if self._reject_hostless_step(step):
                         continue
                     steps += 1
+                    _act, _found = step.get("_action"), 0
                     async for ev in self._run_tool(step["tool"], step["input"], session_id):
+                        if ev.get("type") == "tool_result":
+                            _found = ev.get("count") or 0
                         if "_content" not in ev:      # no model to feed; drop the tool-result payload
                             yield ev
+                    if _act is not None:
+                        # CLOSE THE LOOP: fold the result back so the next plan_next() reflects it.
+                        # `apply_result` had no non-test caller either; this is that caller. A gained
+                        # capability is recorded ONLY on evidence (the tool actually confirmed
+                        # something) — claiming it on a dispatch would make the graph assert a
+                        # capability the run never demonstrated.
+                        self._graph_actions_run = getattr(self, "_graph_actions_run", 0) + 1
+                        try:
+                            g.apply_result(_act, tested_ok=bool(_found),
+                                           gained_capability=(_act.get("capability") if _found else None))
+                        except Exception as _e:
+                            self.tools._swallow(_e, "graph_action.apply_result", step["key"])
+                        yield {"type": "graph_action", "action": _act["action"], "tool": step["tool"],
+                               "target": step["input"].get("url") or step["input"].get("host") or "",
+                               "capability": _act.get("capability"), "utility": _act.get("utility"),
+                               "findings": _found,
+                               "content": "Graph-directed %s -> %s on %s: %d finding(s)."
+                                          % (_act["action"], step["tool"],
+                                             step["input"].get("url") or step["input"].get("host") or "",
+                                             _found)}
             # stop early once a cycle stops finding new surface
             if cyc < cycles and self._surface_size() <= before:
                 yield {"type": "info", "content": f"Recon cycle {cyc} found no new in-scope assets — "

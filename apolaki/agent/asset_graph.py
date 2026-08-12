@@ -286,24 +286,28 @@ class AssetGraph:
             out.append({"score": base_score, "action": action,
                         "utility": utility_score(**fac), "utility_factors": fac, **extra})
 
+        # `node` is the emitting node's ID on every action (U1). An executor that has to act on one of
+        # these needs the node's KEY, which carries the host; `target` is a LABEL, and a label is what
+        # produced Q-019 (`https:///benchmark/...`, ten scope_blocks a mission) when a consumer treated
+        # one as addressable. Carrying the id costs nothing and means no consumer has to guess.
         for f in self.nodes("finding"):
             fconf = self.decayed_confidence(f, now)
             for cap in (f.get("enables") or []):
                 if cap not in have:
                     # a CONFIRMED finding already enables this — high odds the chain completes
                     _emit(8, "chase_capability", fconf, 0.8, _IMPACT.get(cap, _DEFAULT_IMPACT), 1.0, 1.0,
-                          capability=cap, target=f["label"],
+                          capability=cap, target=f["label"], node=f["id"],
                           rationale="a confirmed finding enables '%s' — chase it" % cap)
         for s in self.untested("service"):
             enables = s.get("enables", []) or []
             impact = max([_IMPACT.get(e, _DEFAULT_IMPACT) for e in enables] or [0.5])
             # beyond-web probe: service exists (medium prob its pack confirms), slightly higher risk/cost
             _emit(6, "run_service_pack", self.decayed_confidence(s, now), 0.5, impact, 1.5, 1.2,
-                  service=s["label"], target=s["key"], enables=enables,
+                  service=s["label"], target=s["key"], enables=enables, node=s["id"],
                   rationale="a %s service was discovered but its technique pack has not run" % s["label"])
         for o in self.untested("object"):
             _emit(4, "cross_user_test", self.decayed_confidence(o, now), 0.5, _IMPACT["foreign_object_read"],
-                  1.8, 1.0, target=o["label"],
+                  1.8, 1.0, target=o["label"], node=o["id"],
                   rationale="object endpoint not yet compared across personas (IDOR/BOLA)")
 
         seen, uniq = set(), []
