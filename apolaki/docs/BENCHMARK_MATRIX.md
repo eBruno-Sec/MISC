@@ -57,11 +57,25 @@ class:
 | NONDETERMINISTIC | establish the noise floor |
 | CONFIRMED EXPLOIT CONDITION | deterministic oracle confirms |
 
-**Tier 3 is the highest-value tier and it is already half-built, scattered.** Every negative control
-written this week — `test_proof_gate_surfaces`, `test_bench_product_fpr`,
-`test_proof_claim_matches_artifact`, `test_codeassisted_negative_controls`,
-`test_sqli_oracle_negative_controls`, `test_liveness_hostless_negative_control` — is a Tier 3 entry
-that has no home. **First task of this programme is to give them one**, not to add new targets.
+**Tier 3 is the highest-value tier and it is already half-built, scattered.** Eleven files now, and
+the count keeps rising because every lane produces them as a by-product:
+
+`test_proof_gate_surfaces` · `test_bench_product_fpr` · `test_proof_claim_matches_artifact` ·
+`test_codeassisted_negative_controls` · `test_sqli_oracle_negative_controls` ·
+`test_liveness_hostless_negative_control` · `test_bie_errored_control` · `test_technique_contract` ·
+`test_evidence_contract_by_proof_kind` · `test_set_param_contract` · `test_cmdi_shapes`
+
+None of them has a home, a runner, or per-class coverage reporting. **The first task of this
+programme is B-001 — give them one — not adding a new target.** The corpus is growing faster than it
+is being organised, which is the good problem, but only until someone assumes coverage exists because
+a file does.
+
+Two of these carry lessons the corpus format must preserve, or it will lose the most valuable part:
+- `test_cmdi_shapes` asserts the probe **was sent** before asserting nothing was reported, so a
+  control cannot pass vacuously by never firing.
+- `test_set_param_contract` exists because two modules disagreed about a missing parameter and one
+  silently returned the baseline URL — a false negative shaped exactly like a correct non-detection.
+A Tier 3 entry must record *what it would fail to catch if written naively*, not just its assertions.
 
 The question Tier 3 answers is the only one that matters:
 **can Apolaki reliably distinguish a real security condition from noise?** Not "can it find a lot".
