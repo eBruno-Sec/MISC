@@ -1104,4 +1104,27 @@ you have to derive rather than read.
 My own delta is the only thing I can be accountable for and it is exact: **+16 tests, +0 failures,
 +0 xpasses.**
 
+## PROCESS INCIDENT for the Coordinator - another lane committed my staged files
+
+While this section was being staged, `6c9582f` ("Apolaki probe lane slice 4: the request-header
+carrier for XSS") landed and swept up BOTH of my files:
+
+```
+6c9582f  apolaki/agent/tests/test_cmdi_shapes.py           <- probe lane's own
+         apolaki/agent/tests/test_source_lane_breaker.py   <- MINE
+         apolaki/agent/tools.py                            <- probe lane's own
+         apolaki/docs/handoff/breaker.md                   <- MINE
+         apolaki/docs/handoff/probes.md                    <- probe lane's own
+```
+
+**No content was lost** - `git diff HEAD` for both files is empty, so what is committed is exactly
+what I wrote. What was lost is the commit message, which carried the reasoning for the four strict
+xfails and the M2 blast-radius argument for the twelve passing tests. It is reproduced in this
+section instead, which is why this file is the durable record and the commit log is not.
+
+The real issue is not my message. That lane staged files it does not own, which means it is running
+`git add -A` or `git commit -a` - the one git rule this project has written down. The next time it
+fires it will commit another lane's half-finished working tree under a message that does not
+describe it, and a bisect across that commit will be meaningless. Worth a word to that lane.
+
 
