@@ -2617,12 +2617,77 @@ class BBHAgent:
             yield ev
 
     # ── deterministic executor (planner-driven, no AI) ───────────
+    @staticmethod
+    def _graph_host_node(g, url: str) -> str:
+        """The id of the host node serving `url`, or "" — WITHOUT creating one.
+
+        Three host identities coexist in this graph (D12): `tools._graph_add_url` and
+        `asset_graph.build_from_engagement` key a host by netloc (WITH port), while this projector
+        keys it by BARE hostname (scope entries and recon subdomains are stored that way). Try the
+        most specific first, fall back to the bare name, and observe NOTHING when neither exists —
+        minting a fourth identity here to make an edge attach would make D12 worse, not better.
+        """
+        import asset_graph as _ag
+        from urllib.parse import urlparse as _up
+        try:
+            netloc = (_up(str(url or "")).netloc or "").lower()
+        except Exception:
+            return ""
+        if not netloc:
+            return ""
+        for key in (netloc, netloc.split(":")[0]):
+            if g.node(_ag._nid("host", key)):
+                return _ag._nid("host", key)
+        return ""
+
+    @classmethod
+    def _graph_finding_anchor(cls, g, target: str) -> str:
+        """The endpoint (preferred) or host node a finding was found on, or "" — never creating one.
+
+        Same three-identity problem as `_graph_host_node`, one layer down: this projector keys an
+        endpoint by the WHOLE URL, `_graph_add_url` keys it by `netloc+path`. A finding's `target`
+        may also carry the probe's query string rather than the discovered one, so the bare
+        scheme+netloc+path form is tried last before falling back to the host.
+        """
+        import asset_graph as _ag
+        from urllib.parse import urlparse as _up, urlunparse as _uup
+        s = str(target or "").strip()
+        if not s:
+            return ""
+        cands = [s]
+        try:
+            p = _up(s)
+            if p.netloc:
+                cands.append(p.netloc + (p.path or "/"))
+                cands.append(_uup((p.scheme, p.netloc, p.path, "", "", "")))
+        except Exception:
+            pass
+        for k in cands:
+            if g.node(_ag._nid("endpoint", k)):
+                return _ag._nid("endpoint", k)
+        return cls._graph_host_node(g, s)
+
     def _seed_and_project_graph(self, g) -> None:
         """Project ALL current engagement state into the mission graph so the graph is the single
         source the primary planner reads (CHAD: graph-authoritative execution). Seeds the in-scope
         roots as host nodes (bootstrap) and folds recon subdomains/live-hosts, discovered URLs, and
-        findings into the graph. Idempotent (observe merges); best-effort."""
+        findings into the graph. Idempotent (observe merges); best-effort.
+
+        D5 + D13 (architecture.md 6.1). This function used to observe findings with `family=` and NO
+        `enables=`, and to call `g.link` nowhere at all. MEASURED on two confirmed findings (a SQLi
+        and a credential leak): `finding.enables: [[], []]`, `edges: 0`, and
+        `next_best_actions(): []` — the graph recommended NOTHING, because `next_best_actions`
+        (`asset_graph.py:288`) iterates `f["enables"]`, so the `chase_capability` tier had an empty
+        candidate list BY CONSTRUCTION. The capability was written, registered and dead.
+
+        The mapping already existed and was already tested — `_FINDING_ENABLES` + `_content_enables`
+        (`asset_graph.py:420-441`), used by the report-time `build_from_engagement`. Only the LIVE
+        path skipped it, so the planner reasoned over a strictly poorer world model than the report
+        rendered. Both paths now compute `enables` from the same two helpers and use the same
+        `serves` / `found_on` edge vocabulary.
+        """
         try:
+            import asset_graph as _ag
             for e in self.scope.in_scope:
                 v = (getattr(e, "value", "") or "").lower().lstrip("*.")
                 if v:
@@ -2631,16 +2696,34 @@ class BBHAgent:
                 s = str(s).lower()
                 if s:
                     g.observe("host", s, label=s, source="recon")
+            eps = {}
             for h in (self.tools.recon.get("live_hosts") or []):
                 u = h.get("url") if isinstance(h, dict) else str(h)
                 if u:
-                    g.observe("endpoint", u, label=u, source="recon")
+                    eps[str(u)] = g.observe("endpoint", u, label=u, source="recon")
             for u in (self.tools.urls or []):
                 if u:
-                    g.observe("endpoint", str(u), label=str(u), source="recon")
+                    eps[str(u)] = g.observe("endpoint", str(u), label=str(u), source="recon")
+            # D13: hosts and endpoints are observed above and used to be left unconnected, so nothing
+            # downstream could walk from an asset to what it serves. Same `serves` relation
+            # build_from_engagement uses, so the two projections agree.
+            for u, eid in eps.items():
+                hid = self._graph_host_node(g, u)
+                if hid:
+                    g.link(hid, eid, "serves", source="recon")
             for f in (self.findings or []):
-                g.observe("finding", str(f.get("id") or (f.get("title", "")[:40])),
-                          label=f.get("title", "finding"), source="scan", family=(f.get("family") or ""))
+                fam = (f.get("family") or "")
+                # D5: the capability a confirmed finding unlocks — the input the chase_capability
+                # tier reads and never received. Same computation as build_from_engagement.
+                enables = sorted(set(_ag._FINDING_ENABLES.get(fam.lower(), []))
+                                 | set(_ag._content_enables(f)))
+                fid = g.observe("finding", str(f.get("id") or (f.get("title", "")[:40])),
+                                label=f.get("title", "finding"), source="scan", family=fam,
+                                enables=enables)
+                # D13: attach the finding to the asset it was found on.
+                anchor = self._graph_finding_anchor(g, f.get("target") or "")
+                if anchor:
+                    g.link(anchor, fid, "found_on", source="scan")
             self._graph_projection_error = None
         except Exception as e:
             # do NOT swallow silently (CHAD): a projection failure means the graph is stale, which

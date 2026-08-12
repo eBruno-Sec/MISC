@@ -14,11 +14,14 @@ Iteration method: `docker cp <f> apolaki-agent-1:/app/<f>` -- the image was NOT 
 are live in the container; `curl -s http://localhost:8000/missions` showed no running mission (all
 `complete` / `interrupted`) before any file was copied in.
 
+Rule 8b, in force here: **this file records what HAPPENED, never what is expected to happen.** An
+unmeasured row says `in progress`, never a number. A commit hash is copied from `git log` or omitted.
+
 | defect | status |
 |---|---|
-| D3 -- planner delivers one parameter per endpoint | **FIXED** |
-| D5 -- `chase_capability` dead: findings projected without `enables` | in progress |
-| D13 -- `_seed_and_project_graph` writes no edges | in progress |
+| D3 -- planner delivers one parameter per endpoint | **FIXED** -- `141669f` |
+| D5 -- `chase_capability` dead: findings projected without `enables` | **FIXED** |
+| D13 -- `_seed_and_project_graph` writes no edges | **FIXED** (same function, same slice as D5) |
 | D6 -- `run_service_pack` dead: service node never exists untested | in progress -- see the ownership note below, it turned out to be fixable IN LANE |
 
 ---
@@ -179,6 +182,121 @@ Zero failures.
    ever needs to travel out-of-band (body params, headers), those three need the read added.
 3. `M3` in architecture.md 6.2 (how many endpoints per real mission lose parameters to D3) is still
    UNVERIFIED -- the numbers above are a synthetic 7-URL surface, not a mission.
+
+---
+
+## D5 + D13 -- the live graph projected findings that recommended nothing
+
+`agent/agent.py:_seed_and_project_graph`. Both FIXED in one slice: they are the same function, and
+D13's edges are what make D5's finding reachable from the asset it was found on.
+
+### The measurement, before
+
+Driving the REAL `BBHAgent._seed_and_project_graph` (not the audit's hand copy) over two CONFIRMED
+findings -- a SQL injection and a leaked AWS secret:
+
+```
+$ MSYS_NO_PATHCONV=1 docker exec apolaki-agent-1 python /tmp/d5_measure.py
+projection error : None
+stats            : {'nodes': 6, 'edges': 0}
+by_kind          : {'host': 1, 'endpoint': 3, 'finding': 2}
+finding.enables  : [[], []]
+chase candidates : 0
+next_best_actions: []
+edges            : []
+```
+
+**Two confirmed findings, zero recommended actions.** `next_best_actions` (`asset_graph.py:288`)
+builds the `chase_capability` tier by iterating `f["enables"]`; the live projector observed findings
+with `family=` and no `enables=`, so the candidate list was empty **by construction** and the
+highest-utility tier could never fire during a scan. `edges: 0` is D13 -- host, endpoint and finding
+landed unconnected, so nothing downstream could walk from a finding to its asset.
+
+Note this is *worse* than the audit recorded: architecture.md 2.2 shows `next_best_actions:
+['cross_user_test ...']`, but only because its `m5.py` hand-added an `object` node that
+`_seed_and_project_graph` never writes. Driving the real function, the list is empty outright.
+
+The mapping the tier needed already existed and was already tested -- `_FINDING_ENABLES` +
+`_content_enables` (`asset_graph.py:420-441`) -- and the report-time `build_from_engagement` already
+used it. Only the live path skipped it, so the planner reasoned over a strictly poorer world model
+than the report rendered.
+
+### What was implemented
+
+In `_seed_and_project_graph`:
+
+- **D5** -- `enables=sorted(set(_FINDING_ENABLES[family]) | set(_content_enables(f)))` passed into the
+  existing `g.observe("finding", ...)` call. Same two helpers `build_from_engagement` calls, so the
+  live graph and the report agree; a test asserts that equality directly.
+- **D13** -- `host -serves-> endpoint` for every projected endpoint, and
+  `endpoint|host -found_on-> finding` for every projected finding. Same relation names
+  `build_from_engagement` uses (one step toward D12's convergence, which stays out of scope here).
+- Two new resolver helpers, `_graph_host_node` and `_graph_finding_anchor`, which look a node up under
+  each of the three identity conventions that already coexist in this graph (D12: whole-URL,
+  `netloc+path`, bare hostname) and return `""` rather than creating anything. Minting a fourth
+  identity just so an edge had somewhere to land would have made D12 worse; there is a test for that.
+
+Deliberately unchanged: the live finding key rule (`id` or `title[:40]`), which differs from
+`build_from_engagement`'s (`title[:40] + "@" + target`). That divergence is D12 and is a separate
+ticket -- changing it here would move node identities under the report.
+
+### The measurement, after
+
+```
+projection error : None
+stats            : {'nodes': 6, 'edges': 5}
+finding.enables  : [['database_read'], ['credential_material']]
+chase candidates : 2
+next_best_actions: ['chase_capability', 'chase_capability']
+edges            : [('serves', 'host:t.local', '->', 'endpoint:http://t.local:3000'),
+                    ('serves', 'host:t.local', '->', 'endpoint:http://t.local:3000/rest/basket/1'),
+                    ('serves', 'host:t.local', '->', 'endpoint:http://t.local:3000/x?id=1'),
+                    ('found_on', 'endpoint:http://t.local:3000/x?id=1', '->', 'finding:f1'),
+                    ('found_on', 'endpoint:http://t.local:3000/rest/basket/1', '->', 'finding:f2')]
+```
+
+- `finding.enables`: `[[], []]` -> `[['database_read'], ['credential_material']]`
+- `chase_capability` candidates: **0 -> 2**
+- `next_best_actions`: **`[]` -> 2 entries**
+- `edges`: **0 -> 5** (3 `serves`, 2 `found_on`), node count unchanged at 6
+
+### Negative controls
+
+`agent/tests/test_live_graph_projection.py`, 10 tests. The two that carry the defect:
+
+- `test_the_chase_capability_candidate_list_is_no_longer_empty_by_construction` -- asserts the
+  always-`[]` state is gone AND that `chase_capability` is actually **emitted**. The first assertion
+  alone is not enough: a finding can carry `enables` and still produce no action if the capability is
+  already held, so a test that only checks the node property would pass while the tier stayed dead.
+- `test_projected_nodes_are_no_longer_unconnected` -- asserts `edges > 0` AND walks the specific
+  `host -serves-> endpoint -found_on-> finding` path, so no unrelated edge can satisfy it.
+
+Both drive the real `_seed_and_project_graph` through a real `BBHAgent` and a real `ScopeEngine`.
+
+Pre-fix run (fixed `agent.py` stashed, old file `docker cp`'d back): **8 failed, 2 passed.** The 2 that
+pass pre-fix are the guards (no fourth host identity, idempotence) -- correct, they are invariants.
+
+### Mutation check -- 5 mutants, 5 killed by the intended assertion
+
+| mutant | result |
+|---|---|
+| `enables` computed then passed as `[]` (D5 restored exactly) | 5 failed |
+| the `found_on` link dropped | 2 failed |
+| the `serves` link dropped | 2 failed |
+| only `_FINDING_ENABLES`, `_content_enables` dropped | 1 failed -- `test_the_content_signal_is_wired_not_only_the_family_table` |
+| `_graph_host_node` mints a host node instead of returning `""` | 1 failed -- `test_linking_mints_no_fourth_host_identity` |
+
+### Regression
+
+`2006 passed, 9 skipped, 1 xfailed, 0 failed in 396s`. Baseline 1993 + 10 new here; the container also
+carries other lanes' uncommitted tests.
+
+### Follow-up this uncovered
+
+`architecture.md` 2.2's `next_best_actions: ['cross_user_test ...']` overstates what the live graph
+produces, because `m5.py` seeds an `object` node by hand that no live producer in
+`_seed_and_project_graph` writes. Objects reach the live graph only via `tools._graph_add_url`. Worth
+correcting in the audit so the next reader does not assume `cross_user_test` is armed by projection.
 
 ---
 
