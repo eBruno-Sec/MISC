@@ -1026,4 +1026,82 @@ One capability gap noticed in passing, MEASURED: `agent.py:1661` reads `_got["ur
 reads `_got["sitemaps"]`, so a `Sitemap:` directive in robots.txt is parsed and discarded. Only
 `/sitemap.xml` at the root is ever fetched.
 
+---
+
+# WHAT I ADDED: `agent/tests/test_source_lane_breaker.py` (16 tests, the only file I wrote)
+
+Prose in a hand-off document is not a regression guard. The three defects are now executable.
+
+**4 strict xfails**, one per defect spelling. Strict means that when the owner fixes the rule the
+test XPASSes, the suite goes red, and the marker has to be removed deliberately - the defect cannot
+be quietly re-introduced later:
+
+```
+test_an_aliased_random_module_import_is_still_the_stdlib_generator   xfail  (Defect 1)
+test_an_aliased_hashlib_import_is_still_the_stdlib_digest            xfail  (Defect 1, hash half)
+test_a_timestamp_named_after_a_session_is_not_weak_randomness        xfail  (Defect 2)
+test_a_token_expiry_timestamp_is_not_weak_randomness                 xfail  (Defect 2, expiry)
+```
+
+**12 passing tests**, and these are the ones that actually earn their place. The lane's own suite
+proves the receiver claim for exactly ONE spelling, `random.SystemRandom().getrandbits(32)`. The
+four INDIRECT spellings are untested and all four are one careless improvement away from breaking:
+
+```
+test_a_system_random_instance_bound_to_a_name_is_still_a_csprng
+test_a_class_attribute_holding_a_system_random_is_still_a_csprng
+test_a_factory_returning_a_system_random_is_still_a_csprng
+test_system_random_reached_through_an_aliased_module_is_still_a_csprng
+test_a_csprng_aliased_to_the_name_of_the_weak_class_is_not_flagged
+test_an_attribute_named_random_is_not_the_random_module
+```
+
+**This is the guard rail for the fix to Defect 1.** The obvious way to resolve `import random as r`
+is to treat any name bound to the `random` module as a receiver. Done without care, that fix starts
+reporting `_RNG = random.SystemRandom()` call sites - which IS the M2 mutant, 113 false positives,
+weakrand 100.0% -> 50.2%. Nothing in the existing suite would have caught it. Now something does.
+
+Each of those is paired with its own mirror so the rule cannot be satisfied by going silent:
+
+```
+test_the_inverse_alias_is_still_caught                          from random import Random as SystemRandom -> flagged
+test_indirect_weak_generators_are_still_reported_at_their_construction_site   the three shapes on random.Random()
+test_a_bare_from_import_of_a_weak_method_is_reported
+test_a_security_value_actually_derived_from_the_clock_is_still_reported       Defect 2 must be narrowed, not deleted
+test_usedforsecurity_false_is_honoured_on_hashlib_new_and_across_lines
+test_usedforsecurity_false_does_not_excuse_a_second_call_on_the_same_line
+```
+
+Measured: `tests/test_source_lane_breaker.py` = **12 passed, 4 xfailed, 0 failed**.
+
+## Regression, and a correction to the stated baseline
+
+Run on a writable COPY of the working tree (the repo itself was never written to). The
+read-only-mount run reported three failures in `tests/test_mutation_gate.py`
+(`test_the_gate_restores_every_file_it_touches` and two siblings) - that is my mount, not a
+regression: the gate writes files to restore them and a `:ro` mount forbids it. On a writable copy
+those three pass. **Recorded so nobody inherits a phantom failure from this session.**
+
+```
+full suite, writable copy, --network none, my file included:
+  2000 passed, 9 skipped, 5 xfailed, 0 failed, 0 XPASSED
+```
+
+Counted from the progress characters because this tree's pytest configuration does not print a
+summary count line - worth someone's attention on its own, since "0 failed" is currently something
+you have to derive rather than read.
+
+**Two corrections to the brief's stated baseline of 1993/9/1/0:**
+
+1. `agent/tests/test_dom_audit_concurrency.py` is described as "uncommitted and known-broken by its
+   own author". Both halves are stale. It IS committed (`128c8cd`), and MEASURED today it is
+   **18 passed, 0 failed**. Excluding it from the baseline is no longer justified, and doing so
+   understates the suite by 18 tests.
+2. The working tree carries two other lanes' in-flight test files that any full-suite run picks up:
+   `test_cmdi_shapes.py` (modified, probe lane) and `test_service_discovery_graph.py` (untracked).
+   Any absolute total quoted from this tree includes them.
+
+My own delta is the only thing I can be accountable for and it is exact: **+16 tests, +0 failures,
++0 xpasses.**
+
 

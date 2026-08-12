@@ -4133,6 +4133,39 @@ class ToolRegistry:
                             xt.reflection_finding(url, p, ctx, evidence=ev_snip), bu, rb)))
                         break
 
+        # 1b) CUSTOM REQUEST HEADERS. The loop above rewrites the query string and nothing else, so a
+        # value the app takes from a request header and writes into the page is unreachable by it: the
+        # canary never arrives, the response never changes, and the endpoint reads clean. Same delivery
+        # gap `_run_form_cmdi` already closes for command injection, same discovery module, and the
+        # ORACLE IS UNCHANGED -- xss_tool's breakout analysis decides exploitability exactly as it does
+        # for a query parameter, so a correctly-encoded reflection still cannot confirm.
+        try:
+            import header_vector as _hv
+            _pg = await self._http(url, "GET", capture=False)
+            _hnames = _hv.discover_header_names(_pg.get("body", "") or "")[:self._ni(2, 4, 6)]
+            async with httpx.AsyncClient(verify=False, follow_redirects=True, timeout=15) as c:
+                for _hn in _hnames:
+                    if not self.scope.validate(url)[0]:
+                        break
+                    try:
+                        r = await c.get(url, headers={**headers, _hn: xt.CANARY})
+                    except Exception:
+                        continue
+                    for ctx in xt.contexts_of(r.text):
+                        try:
+                            rb = await c.get(url, headers={**headers, _hn: xt.BREAKOUTS[ctx]})
+                        except Exception:
+                            continue
+                        idx = xt.breakout_index(rb.text, ctx)
+                        if idx == -1:
+                            continue
+                        _ev = xt._evidence_snippet(rb.text, idx, xt.BREAKOUTS[ctx])
+                        reflected.append(("header:" + _hn, xt.reflection_finding(
+                            url, "header:" + _hn, ctx, where="request header", evidence=_ev)))
+                        break
+        except Exception:
+            pass
+
         # 2) execution confirmation in a real browser (also catches DOM-only XSS)
         exec_findings = await self._xss_execute(url, params)
 

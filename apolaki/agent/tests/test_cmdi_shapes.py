@@ -336,3 +336,80 @@ def test_oob_confirms_when_the_target_actually_calls_back(monkeypatch):
     assert f["family"] == "cmdi" and f["confidence"] == "confirmed"
     assert "oob" in " ".join(f["tags"])
     assert "10.0.0.9" in f["evidence"]
+
+
+# ── XSS: the request-header carrier ──────────────────────────────
+# Same delivery gap the cmdi engine already closed. The ORACLE is not touched: xss_tool's breakout
+# analysis decides exploitability, so a correctly-encoded reflection still cannot confirm.
+def _run_xss(responder, url="http://host.local/p?q=1", page=""):
+    """Drive the shipping _run_xss. `responder(headers, url)` returns the body."""
+    import asyncio
+
+    import httpx
+    reg = _new_reg()
+
+    async def fake_http(u, method="GET", headers=None, body="", capture=False, **kw):
+        return {"status": 200, "body": page, "error": "", "final_url": u}
+
+    reg._http = fake_http
+    reg._discover_params = lambda _u: _empty_list()
+    reg._xss_execute = lambda _u, _p: _empty_list()
+
+    class _Resp:
+        def __init__(self, text):
+            self.text = text
+
+    class _Client:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *a):
+            return False
+
+        async def get(self, u, headers=None, **kw):
+            return _Resp(responder(headers or {}, u))
+
+    orig = httpx.AsyncClient
+    httpx.AsyncClient = lambda **kw: _Client()
+    try:
+        return asyncio.new_event_loop().run_until_complete(reg._run_xss({"url": url}))
+    finally:
+        httpx.AsyncClient = orig
+
+
+async def _empty_list():
+    return []
+
+
+_HDR_PAGE = ('<html><body><input type="button" method="submitHeaderForm" testcase="X-Trace-Id">'
+             '</body></html>')
+
+
+def test_xss_reaches_a_reflection_that_only_arrives_in_a_request_header():
+    """The gap: the query loop rewrites the URL and nothing else, so a header-carried reflection is
+    invisible -- the canary never arrives and the endpoint reads clean."""
+    def app(headers, _u):
+        v = headers.get("X-Trace-Id", "")
+        return "<html><body><div>hello %s</div></body></html>" % v      # raw, unencoded
+
+    res = _run_xss(app, page=_HDR_PAGE)
+    assert res.findings, "header-carried XSS went undetected"
+    assert any("header" in f["title"] for f in res.findings), [f["title"] for f in res.findings]
+
+
+def test_xss_header_carrier_declines_a_correctly_encoded_reflection():
+    """NEGATIVE CONTROL, and the one that matters: the value reflects, but encoded for its context.
+    Reflection alone must never confirm -- that defect is what a previous oracle shipped."""
+    import html as _html
+
+    def safe_app(headers, _u):
+        v = _html.escape(headers.get("X-Trace-Id", ""), quote=True)
+        return "<html><body><div>hello %s</div></body></html>" % v
+
+    res = _run_xss(safe_app, page=_HDR_PAGE)
+    assert res.findings == [], "confirmed on a correctly-encoded reflection: %r" % (res.findings,)
+
+
+def test_xss_header_carrier_declines_an_endpoint_that_reflects_nothing():
+    res = _run_xss(lambda headers, _u: "<html><body>static</body></html>", page=_HDR_PAGE)
+    assert res.findings == []

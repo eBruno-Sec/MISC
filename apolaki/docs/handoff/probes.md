@@ -184,7 +184,42 @@ delay that does not reproduce does not confirm; an OOB probe whose callback neve
 non-detection; and each control asserts the probe WAS SENT before asserting nothing was reported, so
 it cannot pass by the engine simply never trying.
 
+### The native collaborator is IN-PROCESS, so OOB cannot confirm from the CLI harness
+
+Correlation in `agent/collaborator.py` is a module-level dict in the interpreter that registered the
+token, and the inbound callback is recorded by the FastAPI `/oob` route in the SERVER process. When
+the tools run inside that server -- a real mission -- the two are the same interpreter and OOB works.
+When the caller is a separate process, as `owasp_bench.py` is, the shard registers a token in its own
+memory, the target's callback lands in the server's memory, and `hits(token)` is empty forever.
+
+So the OOB shape contributes exactly **0** to any benchmark number produced through the CLI harness,
+and that zero is a property of the harness, not of the target or the engine. It is a non-detection,
+which is the correct behaviour -- but it must never be read as "the target has no OOB sink". Anyone
+scoring OOB has to drive the engines in-process.
+
 ---
+
+## A MEASUREMENT THAT CANNOT SEE ITS OWN CODE IS WORTHLESS - gate it
+
+Two consecutive full-category rescans of `cmdi` returned **exactly 36 findings, the baseline number**,
+while a fresh process in the SAME container, driving the SAME harness code path, confirmed four cases
+those runs had reported empty (`BenchmarkTest01610`, `01936`, `02146`, `02154`). The engine was
+correct; the runs were measuring code that was not loaded. There was no stale `__pycache__` and no
+error in any row - the runs were silently, confidently stale.
+
+That failure is indistinguishable from "the change did not work", and it would have been reported as
+such. The fix is not more care with `docker cp`; it is to make the run refuse to produce a number it
+cannot vouch for:
+
+    _src = inspect.getsource(tools_mod.ToolRegistry._run_form_cmdi)
+    missing = [n for n in ("argv_payloads", "_timing_cmdi_seen", "argv_oob_payloads")
+               if n not in _src]
+    if missing:
+        sys.exit("ABORT: loaded engine is missing %s -- this run would measure stale code" % missing)
+
+**Every future before/after run in this lane should carry that gate.** It is the same lesson as
+"guards that check declarations, not facts", applied to the measurement instead of the engine: assert
+the thing you are about to measure is actually there, and fail loudly when it is not.
 
 ## Files this lane owns
 
