@@ -11,7 +11,9 @@ ledger wins and this file is stale.
 |---|---:|---|---:|
 | OWASP Benchmark Java v1.2 — **product claim** | **34.9%** | 11-cat macro, cross-family FPs counted | **2.1%** |
 | OWASP Benchmark Java v1.2 — harness, official CWE-matching convention | 41.3% | 11-category macro, 2132 cases | 0.0% |
-| OWASP Benchmark Python v0.1 — harness | 34.8% | 14-category macro, 54 cases | 0.0% |
+| Python v0.1 — **hybrid** (DAST + code-assisted SAST) | **38.8%** | 14-cat macro, full 1230-case suite | **0.0%** |
+| Python v0.1 — DAST only | 24.5% | 14-cat macro, full suite | 0.0% |
+| ~~Python v0.1 — harness~~ | ~~34.8%~~ | superseded: 54 cases, ~4 per category | — |
 | **Whole-product mission — SCORED** | **precision 95.7%** · **recall 1.6%** | 22 TP / 1 FP / 1415 vulnerable | 1 cross-family FP |
 
 **The gap is the story.** Mission `90cee81c` completed in 3720s with 2 findings — a credential in a

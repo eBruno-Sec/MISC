@@ -76,6 +76,41 @@ Peer context, recomputed from raw artifacts: **ZAP 17.99%**, best published full
 > Standing rule this adds: **a within-family scorer cannot measure a whole-product false-positive
 > rate.** Any future FPR must count every confirmed finding on a clean case, whatever family it claims.
 
+### Python v0.1 — the code-assisted lane generalizes · MEASURED 2026-08-11
+
+Sealed `2026-08-11T21:10:34Z`, scored in `apolaki-scorer` started `--network none` — the scanner could
+not read ground truth even in principle.
+
+| category | cases | DAST only | **+ code-assisted** | FPR |
+|---|---:|---:|---:|---:|
+| hash | 151 | 0.0% | **100.0%** | 0.0% |
+| weakrand | 326 | 0.0% | **100.0%** | 0.0% |
+| trustbound | 37 | 0.0% | 0.0% | — (unmapped by design) |
+| **14-category macro** | 1230 | **24.5%** | **38.8%** | 0.0% |
+
+**38.8% is a HYBRID figure (DAST + code-assisted SAST), not a DAST score.** The DAST lane is still
+24.5%. Never compare 38.8% against a published DAST number — those tools were not given the source.
+
+The cause was a language gate on a language-independent analysis: `review_source_tree` walked only
+`*.java`, so an analyzer measuring 100/100/100 on Java contributed **nothing** to 514 of 1230 Python
+cases. The delta is exactly additive (7.14 + 7.14), `cross_family_fp = 0`, and 170 findings across
+1236 files each landed on a case of its own category.
+
+**Java is unchanged and it was PROVEN, not asserted**: the re-run through the new dispatcher is
+identical row-for-row to the sealed artifact (975/975 cases, 2763 files), still 100.0/100.0/100.0 at
+0.0% FPR.
+
+**The load-bearing design decision — the receiver decides the verdict, not the method name.**
+`random.getrandbits(32)` is a Mersenne Twister; `random.SystemRandom().getrandbits(32)` is
+`os.urandom`. **113 of 326 weakrand cases are the second line.** A name-matching implementation reports
+283 findings instead of 170 and takes weakrand from 100.0% to 50.2% — and it passes every positive
+test in the file. That mutant was written and killed; it is the reason this lane is trustworthy.
+
+**Recorded against the lane's own evidence, by the lane:** the seven negative controls all fail
+pre-fix with `AttributeError`, which proves the tests are NEW, not that their assertions discriminate.
+The discriminating evidence is the mutation run — 7 mutants, 7 killed. Fail-first alone was correctly
+called weak rather than counted as proof.
+
 ### OWASP Benchmark Python v0.1 — foreign-stack generalization check
 
 | date | commit | cases | official | FPR | note |
