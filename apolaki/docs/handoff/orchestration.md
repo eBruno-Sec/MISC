@@ -471,3 +471,89 @@ different ticket from wiring it. Same standard as the cmdi +0 reported against a
 ### Status
 
 Measurement in progress. No capability claim until the set diff is recorded here.
+cat >> docs/handoff/orchestration.md <<'EOF'
+
+### MEASURED -- the U1 gap, and what closing it bought
+
+Target `http://vampi:5000/` (VAmPI), mode `active`, deterministic executor, seed
+`http://vampi:5000/openapi.json` IDENTICAL in every run. "Before" is the pre-U1 code extracted from
+`92e678b^` and `docker cp`'d into the container; "after" is `92e678b`. Nothing else differs.
+
+**Two numbers, reported separately, because they are not the same claim.**
+
+#### 1. WIRING -- 0 dispatched -> 4 dispatched
+
+```
+$ MSYS_NO_PATHCONV=1 docker exec apolaki-agent-1 python /tmp/u1_diff.py
+  before  ranked_dispatched=0  still_open=4  tool_dispatches=52  untested=33
+  after1  ranked_dispatched=4  still_open=0  tool_dispatches=56  untested=25
+  after2  ranked_dispatched=4  still_open=0  tool_dispatches=56  untested=25
+```
+
+**This is the measured statement of the gap.** The graph ranked four actions and **zero reached
+dispatch** -- every prior description of U1 was an audit reading; this is a number from a real run.
+The ranking was computed and discarded, exactly as `architecture.md` 1.8 said, and the four actions
+were still sitting unexecuted when the scan ended (`still_open=4`).
+
+After: all four dispatch, `tool_dispatches` rises by exactly 4 (so the graph actions are the *only*
+new tool calls -- that is what makes the outcome diff below attributable), and the ranked list drains
+to `still_open=0`. The loop closes: `apply_result` marks the tested nodes, so the actions stop being
+suggested and the run reaches a fixpoint rather than re-recommending forever. `untested` 33 -> 25.
+
+All four were `cross_user_test -> run_bfla` on the four object endpoints
+(`/books/v1/1`, `/users/v1/1`, `/users/v1/1/email`, `/users/v1/1/password`). The tool planner
+schedules `run_bfla` only for PARAMETERIZED endpoints; these carry no query params, so the planner
+never covered them. This is surface the graph could name and the planner could not.
+
+#### 2. CAPABILITY -- +1 lead, +0 confirmed findings
+
+```
+  before findings=0 leads=1
+  after  findings=0 leads=2
+  NEW in after (not in before):
+     + Side-channel BOLA (resource existence oracle) | resource-id
+  LOST in after (regression check):
+     (none)
+  new CONFIRMED findings: NONE
+```
+
+**The honest answer to the only question U1 had to answer:** a dispatched ranked action produced one
+graded outcome the unranked run did not -- a side-channel BOLA lead on VAmPI's object endpoints --
+and produced **zero new confirmed findings**. Nothing was lost.
+
+A lead is not a finding, and this result must not be quoted as one. What is established is that the
+ranking pointed at real untested surface and the dispatch reached it; what is NOT established is that
+it converts to a confirmed finding, on this target or in general. One lead on one lab is a single
+data point, not a capability curve.
+
+#### 3. DETERMINISM -- two ranked runs, identical
+
+```
+  findings / leads / graded_outcomes / graph_dispatched /
+  ranked_actions_at_end / tool_dispatches_total / graph_stats   ALL IDENTICAL
+  => two ranked runs produce the same finding set: True
+```
+
+This was the design risk: `decayed_confidence` moves with wall-clock for untested nodes, so ranked
+ORDER can drift between runs. The executor therefore DRAINS the ranked set rather than taking the top
+item, which makes order a preference and membership stable. The repeat run confirms the finding set
+does not move.
+
+#### What this does and does not settle
+
+- **Settled:** the producer now has a consumer, bounded (`CAP_GRAPH_ACTIONS = 24`, ranked order kept
+  so a cut-off drops the least valuable first), gated (same `done` dedup, hostless guard, `MAX_STEPS`
+  and `_run_tool` passive/HITL checks as planner steps), and convergent (drains to a fixpoint).
+- **Settled:** it reaches surface the tool planner does not schedule, and it is deterministic.
+- **NOT settled:** whether that surface yields confirmed findings at any rate worth the dispatches.
+  `+1 lead / +0 findings` on one lab is the whole evidence base. The `chase_capability` and
+  `run_service_pack` tiers were NOT exercised by this run at all -- VAmPI produced no finding with
+  `enables` and no non-web service -- so two of the three mapped tiers are wired and unmeasured.
+- **Follow-up, separate ticket:** `run_bfla`'s results grade below `confirmed` and route to leads.
+  Whether that grading is correct for a resource-existence oracle is a probe-lane question, not a
+  wiring question, and it is the difference between this result reading `+1 lead` and `+1 finding`.
+- **Follow-up found while measuring:** the planner only fetches an OpenAPI spec it has already
+  DISCOVERED (`planner.py:372`). VAmPI publishes one at a documented path and links it from no
+  crawlable page, so an unseeded run finds 3 endpoints instead of 27 and produces no object nodes at
+  all. A well-known-spec-path probe would arm the whole tier autonomously. That is why the seed above
+  exists, and it is stated rather than hidden.
