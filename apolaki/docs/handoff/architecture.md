@@ -467,6 +467,32 @@ untested services: []
 finding.enables: [[]]
 ```
 
+> **CORRECTION (Q-036 step 1).** `m5.py` above is a hand copy of the producers, and it **overstates
+> what the live graph produces**. It seeds an `object` node by hand; no producer inside
+> `_seed_and_project_graph` writes one (objects reach the live graph only via
+> `tools._graph_add_url`, from a URL that happens to match `authz_matrix.is_object_path`). Driving
+> the REAL `BBHAgent._seed_and_project_graph` over two CONFIRMED findings, the recommendation list is
+> **empty outright** -- `cross_user_test` was not "the one live tier that works", it was an artifact
+> of the repro:
+>
+> ```
+> $ MSYS_NO_PATHCONV=1 docker exec apolaki-agent-1 python /tmp/d5_measure.py
+> stats            : {'nodes': 6, 'edges': 0}
+> finding.enables  : [[], []]
+> chase candidates : 0
+> next_best_actions: []
+> ```
+>
+> Two confirmed findings, zero recommended actions. The three defects below are all real and were all
+> fixed (D3 `141669f`, D5+D13 `7bcbe8d`, D6 `49310a6`); only this repro's `object` node was wrong. Row
+> 10 of the trigger table in 2.3 inherits the same error and is corrected there.
+>
+> The D6 diagnosis below also needs one word changed, and the word decides which file the fix lives
+> in. `_run_service_pack`'s `observe` + `mark_tested` block sits at the **end** of the function, after
+> the pack has already run -- so the node is not marked tested too early, it is **created too late**
+> and never exists untested at all. The fix therefore belongs at fingerprint time in
+> `agent.py:_run_service_packs`, and `tools.py` needed no change. See `handoff/orchestration.md`.
+
 Three separate dead branches, all VERIFIED DEFECTS:
 
 - **`chase_capability` is dead live.** `next_best_actions` iterates `f.get("enables")`
@@ -501,7 +527,7 @@ graph; **NO** = no representation.
 | 7 | persona | **PARTIAL** | `persona` node exists (`asset_graph.py:504`) but only in `build_from_engagement` | authenticated re-crawl as that persona; every differential in Section 4 | write personas into the LIVE graph at mint time (Section 3) |
 | 8 | credential | **PARTIAL** | `credential` nodes exist and are hashed (`asset_graph.py:218`, `archive_intel.py:57`); `ingest_intel` runs post-loop; `_do_scan_auth` writes **no** graph node at all | validation attempt -> persona mint -> authenticated discovery | write a `credential` node (vault ref, never the secret) at discovery time, from inside the loop |
 | 9 | authenticated session | **PARTIAL** | `session` node only in `build_from_engagement`; `capability:session_acquired` never written live -- MEASURED 2.2 | unlock everything gated on `authenticated`; authenticated re-crawl; session-lifecycle engine | mirror `PersonaManager.capabilities()` into `capability` nodes at the moment they become true |
-| 10 | object type | **YES (instance-level)** | `object` nodes per URL via `authz_matrix.is_object_path` (`tools.py:3126`) | `cross_user_test` -- the one live tier that works | add `props["object_template"]` (e.g. `/rest/basket/{id}`) so one confirmed BOLA generalizes to the type instead of re-testing every instance |
+| 10 | object type | **YES (instance-level)** | `object` nodes per URL via `authz_matrix.is_object_path` (`tools.py:3126`) -- from `_graph_add_url` ONLY; `_seed_and_project_graph` writes none, so 2.2's `cross_user_test` row was a repro artifact (see the correction there) | `cross_user_test` -- the one live tier whose input a producer actually writes | add `props["object_template"]` (e.g. `/rest/basket/{id}`) so one confirmed BOLA generalizes to the type instead of re-testing every instance |
 | 11 | tenant | **NO** | `Persona.tenant` exists (`personas.py:45`) and `tenant_pair()` (`personas.py:180`); neither reaches the graph | cross-tenant differential | `tenant` kind, or `persona.props["tenant"]` + an edge `persona -[belongs_to]-> tenant` |
 | 12 | technology / component | **PARTIAL** | `component` kind exists but only via post-loop `ingest_intel`; `run_fingerprint` results never become nodes | version-specific nuclei templates, known-CVE probes, `vulnerable_component` | have `run_fingerprint` write `component` nodes directly |
 | 13 | protocol / service | **PARTIAL -- and inverted** | `service` node is written *after* the pack runs and marked tested in the same breath (`tools.py:2810-2812`), so `untested("service")` is always empty -- MEASURED 2.2 | `run_service_pack` for the discovered protocol | write the `service` node at **fingerprint** time (untested), mark tested when the pack completes. Two-line change, revives a whole action tier |
