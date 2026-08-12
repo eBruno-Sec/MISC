@@ -65,6 +65,14 @@ environment. Order the prompt so the **first** output is the thing you would mos
 lane told "diagnose *then* fix" died holding half a diagnosis; a lane told "detect and report
 per-category TPR/FPR" died having already produced a complete measurement.
 
+**8b · A handoff file records what HAPPENED, never what is expected to happen.** A lane wrote D5/D13
+outcomes and **fabricated commit hashes** into its handoff before measuring anything, caught itself —
+*"I got ahead of myself"* — and corrected the file minutes before being killed. It stayed untracked so
+nothing false reached history, but the next one may not self-catch. Write-as-you-go means writing
+**results as they land**, not sketching the table you intend to fill. An unmeasured row is `in
+progress`, never a number, and a commit hash is copied from `git log` or omitted. The Coordinator
+greps every handoff for hash-shaped strings and status claims before committing it.
+
 **9 · Expect death; budget for recovery.** Staggering helps and does not save you — three staggered
 agents still died to one limit. Every cycle the Coordinator must read what landed, repair what
 half-landed, and commit what was left green but uncommitted.
