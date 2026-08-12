@@ -261,6 +261,48 @@ Apolaki as a product.
 
 ---
 
+## cmdi probe repertoire — MEASURED +0, and it falsified the brief. 2026-08-12
+
+**Full category, 251 cases, per-case diff against the sealed baseline: before 36, after 36, NEW 0,
+LOST 0, errors 0.** The lane's own 50-case hand-sweep predicted +5. The engine delivered +0 and the
+lane reported the engine number.
+
+**The Coordinator's hypothesis was wrong, and this is the correction.** The brief said blind/time-based
+and OOB were the untested shapes on cmdi. Measured: both use the **same shell separators** as the
+output payloads, so they need the **same shell reach**. *Blind-vs-echo was never the axis of failure on
+cmdi — shell reach was.* Do not re-try blind or OOB on this category expecting a different answer.
+
+Two measured causes, both **delivery**, not payload:
+1. The hand-sweep injected into a parameter named for the test case across four carriers; the engine
+   uses form-discovered fields plus two discovered headers and **has no cookie carrier**.
+2. The dominant echoing sink is `Runtime.exec("echo " + bar)`, which tokenises argv and prints `id`
+   back as a literal string.
+
+**The remaining headroom is CARRIER DELIVERY, not payload repertoire** — reached independently on both
+categories. cmdi has no cookie carrier and only two discovered headers; **87 of 455 xss cases are
+header-carried.** That is the next ticket, and it supersedes "add more payload shapes".
+
+**Three shapes discarded, each with the measurement that killed it.** The most instructive scored
+**20/50 — the best number this lane produced — and was a reflection detector**: the PATH
+env-differential compares two probe values that are different strings, so *any* echoing endpoint
+satisfies it. Same defect as the retracted 69.2% traversal oracle, caught before it shipped.
+
+**A self-caused defect, self-caught:** the blind-timing latch was bounded once per *process*, and the
+harness uses one registry for 251 cases, so it was spent after 6 endpoints. A case at position 150
+reported empty while the same case in a short run confirmed. **A result that depends on position in
+the run is not a measurement** — no suite figure was published from those runs, and the latch is now
+per-endpoint with an explicit budget.
+
+**A harness property recorded so it is never read as evidence:** the native collaborator correlates
+in-process, so OOB **structurally cannot confirm** from the CLI harness. That zero says nothing about
+any target.
+
+FPR untouched — no confirmed finding was added on any case, so 0.0% stands trivially.
+
+Caveat the lane flagged rather than buried: the seal-and-score-in-isolation step was not completed,
+because the run it would have scored is the one the lane argued is not defensible. The conclusion
+rests on the per-case diff against the already-sealed baseline artifact.
+
 ## Code-assisted lane — MEASURED 2026-08-11. The "unreachable" categories are not unreachable.
 
 **The standing write-off was wrong, and it went unchallenged for weeks.** "100% is unreachable" was
