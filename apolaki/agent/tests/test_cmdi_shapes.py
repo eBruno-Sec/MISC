@@ -108,33 +108,43 @@ def test_append_shape_is_unchanged():
 # ── WIRING: the shape must be REACHED by the engine, not merely defined ──
 # A registered payload that no code path sends is an island, and a guard that checks the declaration
 # instead of the fact passes exactly the case it exists to catch. These drive the real engine.
-def _run_form_cmdi(responder, fields=("host",)):
-    """Drive the shipping _run_form_cmdi against a stubbed transport. `responder(value)` is the
-    app: it receives the value the engine put in the field and returns the response body."""
+def _new_reg(host="host.local"):
+    import scope as scope_mod
+    from tools import ToolRegistry
+    eng = scope_mod.ScopeEngine()
+    eng.load_manual([host], [], "P")
+    return ToolRegistry(eng, mission_id=None, lab_mode=True)
+
+
+def _run_form_cmdi(responder, fields=("host",), reg=None, url="http://host.local/exec",
+                   delay=None, clock=None):
+    """Drive the shipping _run_form_cmdi against a stubbed transport.
+
+    `responder(value)` is the app: it gets the value the engine put in the field and returns a body.
+    `delay(value)` optionally returns how many VIRTUAL seconds that request took -- the caller
+    installs a fake perf_counter so a 5s timing probe costs the test nothing."""
     import asyncio
     from urllib.parse import parse_qsl
 
-    import scope as scope_mod
-    from tools import ToolRegistry
-
-    eng = scope_mod.ScopeEngine()
-    eng.load_manual(["host.local"], [], "P")
-    reg = ToolRegistry(eng, mission_id=None, lab_mode=True)
+    from urllib.parse import urlparse as _up
+    reg = reg or _new_reg(_up(url).hostname or "host.local")
     sent = []
 
-    async def fake_http(url, method="GET", headers=None, body="", capture=False, **kw):
+    async def fake_http(u, method="GET", headers=None, body="", capture=False, **kw):
         val = dict(parse_qsl(body or "", keep_blank_values=True)).get(fields[0], "")
         if headers:
             for k, v in headers.items():
                 if k.lower() not in ("content-type",):
                     val = v
         sent.append(val)
-        return {"status": 200, "body": responder(val), "error": "", "final_url": url}
+        if delay is not None and clock is not None:
+            clock[0] += delay(val)
+        return {"status": 200, "body": responder(val), "error": "", "final_url": u}
 
     reg._http = fake_http
     res = asyncio.new_event_loop().run_until_complete(
-        reg._run_form_cmdi({"url": "http://host.local/exec", "fields": list(fields)}))
-    return res, sent
+        reg._run_form_cmdi({"url": url, "fields": list(fields)}))
+    return res, sent, reg
 
 
 def test_engine_reaches_the_argv_shape_on_a_sink_no_separator_can_touch():
@@ -146,7 +156,7 @@ def test_engine_reaches_the_argv_shape_on_a_sink_no_separator_can_touch():
             return "<p>uid=0(root) gid=0(root) groups=0(root)</p>"
         return "<p>you sent: %s</p>" % value            # pure reflection for everything else
 
-    res, sent = _run_form_cmdi(argv_sink)
+    res, sent, _ = _run_form_cmdi(argv_sink)
     assert "id" in sent, "engine never sent a bare argv payload: the shape is an island"
     assert res.findings, "argv sink went undetected"
     f = res.findings[0]
@@ -157,7 +167,7 @@ def test_engine_reaches_the_argv_shape_on_a_sink_no_separator_can_touch():
 def test_engine_does_not_confirm_on_an_endpoint_that_only_reflects():
     """THE negative control for the whole shape. An app that echoes every value, including the bare
     commands, executes nothing -- and must produce no finding."""
-    res, sent = _run_form_cmdi(lambda value: "<p>you sent: %s</p>" % value)
+    res, sent, _ = _run_form_cmdi(lambda value: "<p>you sent: %s</p>" % value)
     assert "id" in sent, "control is vacuous unless the argv payload was actually sent"
     assert res.findings == [], "confirmed on reflection alone: %r" % (res.findings,)
 
@@ -169,7 +179,7 @@ def test_engine_still_confirms_the_shell_sink_through_the_append_shape():
             return "<p>%s</p>" % cmdi.EXPECTED       # the shell computed the product
         return "<p>you sent: %s</p>" % value
 
-    res, _ = _run_form_cmdi(shell_sink)
+    res, _s, _ = _run_form_cmdi(shell_sink)
     assert res.findings and res.findings[0]["family"] == "cmdi"
     assert "argv" not in " ".join(res.findings[0]["tags"])
 
@@ -181,3 +191,148 @@ def test_findings_name_the_shape_that_proved_it():
     assert f["confidence"] == "confirmed"
     assert f["cwe"] == "CWE-78"
     assert "argv" in " ".join(f["tags"])
+
+
+# ── BLIND / TIME: the latch, the budget, and the controls ────────
+def _fake_clock(monkeypatch):
+    """A virtual perf_counter so a 5s timing probe costs the test nothing."""
+    import time as _t
+    clock = [0.0]
+    monkeypatch.setattr(_t, "perf_counter", lambda: clock[0])
+    return clock
+
+
+def _reflect(value):
+    return "<p>you sent: %s</p>" % value
+
+
+def test_timing_shape_is_latched_PER_ENDPOINT_not_once_per_process(monkeypatch):
+    """The defect this replaces: the latch was a flag on the registry, so a caller driving many
+    endpoints through one registry got the blind shape on the FIRST endpoint and silence after."""
+    clock = _fake_clock(monkeypatch)
+    reg = _new_reg()
+    seen = []
+    for n in (1, 2, 3):
+        _, sent, reg = _run_form_cmdi(_reflect, reg=reg, url="http://host.local/exec%d" % n,
+                                      delay=lambda v: 0.01, clock=clock)
+        seen.append(any("sleep" in s for s in sent))
+    assert seen == [True, True, True], (
+        "blind shape ran on %r of three distinct endpoints" % (seen,))
+
+
+def test_timing_budget_is_bounded_so_no_dos(monkeypatch):
+    """The bound the old flag was protecting is kept: a form-heavy crawl cannot fill with sleeps."""
+    clock = _fake_clock(monkeypatch)
+    reg = _new_reg()
+    reg._timing_cmdi_budget = 2
+    ran = []
+    for n in range(5):
+        _, sent, reg = _run_form_cmdi(_reflect, reg=reg, url="http://host.local/e%d" % n,
+                                      delay=lambda v: 0.01, clock=clock)
+        ran.append(any("sleep" in s for s in sent))
+    assert ran == [True, True, False, False, False], ran
+
+
+def test_same_endpoint_is_only_timed_once(monkeypatch):
+    clock = _fake_clock(monkeypatch)
+    reg = _new_reg()
+    first = _run_form_cmdi(_reflect, reg=reg, delay=lambda v: 0.01, clock=clock)[1]
+    second = _run_form_cmdi(_reflect, reg=reg, delay=lambda v: 0.01, clock=clock)[1]
+    assert any("sleep" in s for s in first)
+    assert not any("sleep" in s for s in second), "re-timed an endpoint already probed"
+
+
+def test_uniformly_slow_endpoint_does_not_confirm(monkeypatch):
+    """NEGATIVE CONTROL. Every request takes 6s, including the zero-delay control. There is no
+    differential, so there is no finding."""
+    clock = _fake_clock(monkeypatch)
+    res, sent, _ = _run_form_cmdi(_reflect, delay=lambda v: 6.0, clock=clock)
+    assert any("sleep" in s for s in sent), "control is vacuous unless a timing probe was sent"
+    assert res.findings == [], "confirmed on an endpoint that is slow for every input"
+
+
+def test_one_off_slow_response_does_not_confirm(monkeypatch):
+    """NEGATIVE CONTROL. The delay appears once and does not reproduce; a coincidence under load
+    must not become a critical finding."""
+    clock = _fake_clock(monkeypatch)
+    state = {"n": 0}
+
+    def flaky(value):
+        if "sleep" in value and "sleep 0" not in value:
+            state["n"] += 1
+            return 6.0 if state["n"] == 1 else 0.01     # slow exactly once
+        return 0.01
+
+    res, sent, _ = _run_form_cmdi(_reflect, delay=flaky, clock=clock)
+    assert state["n"] >= 2, "the repeat probe was never sent"
+    assert res.findings == [], "confirmed on a delay that did not reproduce"
+
+
+def test_real_blind_sink_confirms_through_the_time_shape(monkeypatch):
+    """The positive: a sink that sleeps whenever a real delay is injected, twice over."""
+    clock = _fake_clock(monkeypatch)
+
+    def sleeps(value):
+        v = value.strip()
+        if v.startswith("sleep ") and v != "sleep 0":
+            return 6.0
+        return 0.01
+
+    res, _s, _ = _run_form_cmdi(_reflect, delay=sleeps, clock=clock)
+    assert res.findings, "blind argv sink went undetected"
+    assert res.findings[0]["family"] == "cmdi"
+    assert "time" in " ".join(res.findings[0]["tags"])
+
+
+# ── OOB: the callback is the only evidence ───────────────────────
+_OOB_URL = "http://10.0.0.5/exec"   # an in-network target: the collaborator base is in-network too,
+                                   # and reachable_from() correctly refuses the mismatched pairing
+
+
+def _oob_env(monkeypatch):
+    import collaborator as collab
+    monkeypatch.setenv("BBH_OOB_BASE", "http://agent:8000")
+    monkeypatch.setenv("BBH_OOB_DOMAIN", "")
+    monkeypatch.setattr("asyncio.sleep", _instant_sleep)
+    return collab
+
+
+async def _instant_sleep(_secs):
+    return None
+
+
+def test_form_engine_sends_oob_probes(monkeypatch):
+    """WIRING. _run_cmdi has had an OOB path all along; the form/header engine never did, so a
+    blind body-parameter sink was invisible to the product."""
+    _oob_env(monkeypatch)
+    _, sent, _ = _run_form_cmdi(_reflect, url=_OOB_URL)
+    assert any("/oob/" in s for s in sent), "form engine never sent an OOB probe"
+    assert any(s.strip().startswith(("curl", "wget")) for s in sent), "no bare argv OOB probe"
+
+
+def test_oob_callback_that_never_arrives_is_a_non_detection(monkeypatch):
+    """NEGATIVE CONTROL. No interaction is recorded, so nothing may be reported -- a timeout is
+    never a timeout-flavoured confirmation."""
+    _oob_env(monkeypatch)
+    res, sent, _ = _run_form_cmdi(_reflect, url=_OOB_URL)
+    assert any("/oob/" in s for s in sent), "control is vacuous unless a probe was sent"
+    assert res.findings == [], "reported an OOB finding with no callback"
+
+
+def test_oob_confirms_when_the_target_actually_calls_back(monkeypatch):
+    """The positive: the stub app 'runs' the fetch, which records an interaction for that token."""
+    collab = _oob_env(monkeypatch)
+
+    def calls_back(value):
+        if "/oob/" in value:
+            token = value.split("/oob/")[1].split()[0].strip("/")
+            collab.record(token, {"source_ip": "10.0.0.9", "method": "GET",
+                                  "path": "/oob/" + token, "host": "agent", "ua": "wget"})
+        return _reflect(value)
+
+    res, _s, _ = _run_form_cmdi(calls_back, url=_OOB_URL)
+    assert res.findings, "OOB callback arrived and nothing was reported"
+    f = res.findings[0]
+    assert f["family"] == "cmdi" and f["confidence"] == "confirmed"
+    assert "oob" in " ".join(f["tags"])
+    assert "10.0.0.9" in f["evidence"]

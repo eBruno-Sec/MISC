@@ -7205,6 +7205,7 @@ class ToolRegistry:
         each field, and reuses the cmdi oracles (an echoed payload cannot false-positive)."""
         import time
         import cmdi_tool as cmdi
+        import collaborator as collab
         import csrf_tool as csrf
         from urllib.parse import parse_qsl, urlencode
         url = inp["url"]
@@ -7280,14 +7281,31 @@ class ToolRegistry:
             # BLIND form cmdi. A sink that runs the command but returns nothing to echo is invisible to
             # the output oracle above, and that is the common shape in the wild -- the injection succeeds
             # and the response never changes. Time is the only remaining signal.
-            # Bounded exactly like the username-enumeration timing channel: ONCE PER MISSION, only after
-            # the cheap oracle found nothing, and only the first two fields -- so a form-heavy scan cannot
-            # fill up with 5s sleeps, which is why this was originally left out altogether.
-            if not done and not getattr(self, "_timing_cmdi_done", False):
-                self._timing_cmdi_done = True
+            #
+            # THE LATCH IS PER-ENDPOINT, NOT PER-PROCESS. It used to be `self._timing_cmdi_done`, a flag
+            # on the registry, which is right for one mission crawling one site and catastrophic for any
+            # caller that drives many endpoints through one registry: the shape ran for the FIRST
+            # endpoint and was silently dead for every one after it. The no-DoS bound is what that flag
+            # existed for, so the bound is kept and made explicit instead -- one attempt per distinct
+            # endpoint, a hard cap on how many endpoints in total, and only after the cheap oracle
+            # found nothing.
+            _timed = getattr(self, "_timing_cmdi_seen", None)
+            if _timed is None:
+                _timed = self._timing_cmdi_seen = set()
+            _budget = getattr(self, "_timing_cmdi_budget", None)
+            if _budget is None:
+                _budget = self._timing_cmdi_budget = self._ni(6, 16, 32)
+            if not done and action not in _timed and _budget > 0:
+                _timed.add(action)
+                self._timing_cmdi_budget = _budget - 1
                 _secs = 5
                 for field in fields[:2]:
-                    for item in cmdi.time_payloads("127.0.0.1", _secs):
+                    # Both blind shapes, cheapest first. The append shapes need a shell to parse the
+                    # separator; the argv shapes need the value to BE the command line. An endpoint is
+                    # one or the other, never both, so trying both is the only way to cover the class.
+                    _blind = (cmdi.time_payloads("127.0.0.1", _secs)[:3]
+                              + cmdi.argv_time_payloads(_secs))
+                    for item in _blind:
                         _t0 = time.perf_counter()
                         await self._http(action, "POST", headers, body(field, item["control"]),
                                          capture=False)
@@ -7296,14 +7314,73 @@ class ToolRegistry:
                         await self._http(action, "POST", headers, body(field, item["payload"]),
                                          capture=False)
                         _slp = time.perf_counter() - _t0
-                        if cmdi.analyze_time(_ctl, _slp, _secs):
-                            f = cmdi.time_finding(action, field, item, _ctl, _slp, _secs)
-                            f["target"] = action
-                            findings.append(f)
-                            done = True
-                            break
+                        if not cmdi.analyze_time(_ctl, _slp, _secs):
+                            continue
+                        # CONFIRM THE DIFFERENTIAL BEFORE REPORTING IT. One slow response is a
+                        # coincidence an endpoint under load produces for free; a finding here costs
+                        # the 0.0% false-positive rate. Re-run the same control/probe pair and require
+                        # the delay again.
+                        _t0 = time.perf_counter()
+                        await self._http(action, "POST", headers, body(field, item["control"]),
+                                         capture=False)
+                        _ctl2 = time.perf_counter() - _t0
+                        _t0 = time.perf_counter()
+                        await self._http(action, "POST", headers, body(field, item["payload"]),
+                                         capture=False)
+                        _slp2 = time.perf_counter() - _t0
+                        if not cmdi.analyze_time(_ctl2, _slp2, _secs):
+                            continue
+                        _mk = (cmdi.argv_time_finding if item.get("shape") == "argv"
+                               else cmdi.time_finding)
+                        f = _mk(action, field, item, _ctl2, _slp2, _secs)
+                        f["target"] = action
+                        findings.append(f)
+                        done = True
+                        break
                     if done:
                         break
+            # OOB. The last shape, and the only one that sees a sink which neither echoes nor delays:
+            # the command runs, returns nothing, and the sole evidence is the target reaching out to
+            # the collaborator. `_run_cmdi` has had this for the query-string carrier all along; the
+            # form/header engine never did, so a blind body-parameter sink was invisible to the whole
+            # product. A callback that never arrives is a NON-DETECTION -- nothing is reported on a
+            # timeout, only on a recorded interaction.
+            _oob_seen = getattr(self, "_oob_cmdi_seen", None)
+            if _oob_seen is None:
+                _oob_seen = self._oob_cmdi_seen = set()
+            _oob_budget = getattr(self, "_oob_cmdi_budget", None)
+            if _oob_budget is None:
+                _oob_budget = self._oob_cmdi_budget = self._ni(6, 16, 32)
+            if (not done and action not in _oob_seen and _oob_budget > 0
+                    and collab.enabled() and collab.reachable_from(action)):
+                _oob_seen.add(action)
+                self._oob_cmdi_budget = _oob_budget - 1
+                _tok = collab.new_token()
+                collab.register(_tok)
+                _purl = collab.probe_url(_tok)
+                # Both shapes again: a separator payload for a shell sink, a bare fetch for an argv one.
+                _probes = cmdi.oob_payloads("127.0.0.1", _purl) + cmdi.argv_oob_payloads(_purl)
+                _fired = ""
+                for field in fields[:2]:
+                    for payload in _probes:
+                        await self._http(action, "POST", headers, body(field, payload), capture=False)
+                    _fired = field
+                # POLL ONCE, AFTER every probe has been sent. Polling per field would multiply the
+                # dead-wait by the field count on the overwhelming majority of endpoints, which have
+                # no OOB sink at all -- the callback is what we are waiting for, and it does not care
+                # which field triggered it.
+                _inter = []
+                for _ in range(6):
+                    _inter = collab.hits(_tok)
+                    if _inter:
+                        break
+                    await asyncio.sleep(0.5)
+                if _inter:
+                    f = cmdi.argv_oob_finding(action, _fired, _purl, _inter)
+                    f["target"] = action
+                    findings.append(f)
+                    done = True
+                collab.clear(_tok)
             if done:
                 break
         # CUSTOM REQUEST HEADERS. Third carrier, after query params (_run_cmdi) and the form body above.

@@ -117,7 +117,37 @@ cookie 4, none 36. The shipping `_run_form_cmdi` probes query + body + discovere
 
 ---
 
-## STRUCTURAL DEFECTS FOUND BY READING THE ENGINE (not yet fixed at time of writing)
+## THE SHAPE THAT WORKS: argv-sink, value-REPLACING payloads - [SHIPPED]
+
+**Shape.** Where the launcher is handed the value as the command line itself, the value must be
+REPLACED by a bare command rather than appended to. `id` and `cat /etc/passwd`; the proof is that
+command's own output.
+
+**Reflection-immunity, which is why it is shippable.** `uid=0(root) gid=0(root)` is absent from the
+payload `id`, exactly as the computed product is absent from the echo payloads. An endpoint that
+merely reflects the payload therefore cannot satisfy `analyze_output`, and no threshold was moved to
+make the shape fire. `test_argv_proof_strings_are_absent_from_the_payloads` asserts the property for
+every payload in the list, so it cannot be lost by someone adding a payload later.
+
+**[MEASURED] 50-case sample, before any wiring:**
+
+| shape | hits / 50 |
+|---|---:|
+| append (ships today) | 5 |
+| **bare argv (new)** | **5, disjoint from the above** |
+| union | **10** |
+| bare non-command control (`zqnotacmd`), all 4 carriers | **0** |
+
+Live, on cases that were previously silent: a bare `id` returns
+`uid=0(root) gid=0(root) groups=0(root)` straight out of the handler. That is command execution
+proven by output, not a differential.
+
+Disjointness is expected by construction, not luck: the two shapes address structurally different
+sinks (a 3-element `sh -c` array vs a tokenised `exec(String)`), and an endpoint is one or the other.
+
+---
+
+## STRUCTURAL DEFECTS FOUND BY READING THE ENGINE - [SHIPPED, fixed]
 
 1. **The blind/time oracle in `_run_form_cmdi` is latched off after ONE case per process.**
    `agent/tools.py:7252` guards on `self._timing_cmdi_done`, set on the ToolRegistry. The benchmark
@@ -129,9 +159,30 @@ cookie 4, none 36. The shipping `_run_form_cmdi` probes query + body + discovere
    `agent/tools.py:7161-7178`; the form/header engine the harness actually maps `cmdi` to has none.
 3. **No cookie carrier** in either cmdi engine.
 
-Given finding E above, fixing 1 and 2 is not expected to move this suite's number much - both inherit
-the metacharacter ceiling. They are still real defects for targets that DO have shell reach and are
-worth fixing on that basis, not on a benchmark basis.
+Given finding E above, fixing 1 and 2 was **not** expected to move this suite's number much - both
+inherit the metacharacter ceiling. They were fixed as real defects for targets that DO have shell
+reach, and the honest claim for them is a capability claim, not a benchmark claim.
+
+**How they were fixed.**
+
+1. The latch became **per-endpoint with an explicit global budget** (`_timing_cmdi_seen` +
+   `_timing_cmdi_budget`, intensity-scaled 6/16/32). The bound the old flag was protecting is kept
+   and made explicit; what is removed is the accident that one registry driving many endpoints got
+   the shape once. Both blind shapes are now tried - three append separators and the two argv forms -
+   because an endpoint is one sink or the other.
+2. `_run_form_cmdi` gained the **OOB path** it never had, with the same per-endpoint budget, both
+   payload shapes, and a single poll after all probes are sent rather than one dead 3s wait per
+   field. Gated on `collaborator.reachable_from(target)`, so it is never attempted when a callback
+   could not arrive even in principle.
+3. A **repeat gate on every time-based confirmation**: the control/probe pair must reproduce the
+   delay before anything is reported. This is strictly additive precision - `analyze_time` itself is
+   untouched - and it exists because one slow response is something an endpoint under load produces
+   for free, and a finding here costs the 0.0% false-positive rate.
+
+Negative controls shipped as tests for each: an endpoint slow for EVERY input does not confirm; a
+delay that does not reproduce does not confirm; an OOB probe whose callback never arrives is a
+non-detection; and each control asserts the probe WAS SENT before asserting nothing was reported, so
+it cannot pass by the engine simply never trying.
 
 ---
 
