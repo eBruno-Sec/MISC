@@ -17,12 +17,18 @@ are live in the container; `curl -s http://localhost:8000/missions` showed no ru
 Rule 8b, in force here: **this file records what HAPPENED, never what is expected to happen.** An
 unmeasured row says `in progress`, never a number. A commit hash is copied from `git log` or omitted.
 
+Corollary learned on U1: **a count is only as good as the point it is sampled at.** A tool's
+`ToolResult.count` is sampled BEFORE `_auto_store` grades the result, so it measures routing, not
+capability. Capability claims come from the graded outcome set (`findings` + `leads`), diffed --
+never from a dispatch count.
+
 | defect | status |
 |---|---|
 | D3 -- planner delivers one parameter per endpoint | **FIXED** -- `141669f` |
 | D5 -- `chase_capability` dead: findings projected without `enables` | **FIXED** -- `7bcbe8d` |
 | D13 -- `_seed_and_project_graph` writes no edges | **FIXED** -- `7bcbe8d` (same function, same slice as D5) |
 | D6 -- `run_service_pack` dead: service node never exists untested | **FIXED** -- `49310a6`, in lane in `agent/agent.py`; `tools.py` not touched |
+| U1 -- execute the ranked actions instead of reporting them | **WIRED + MEASURED** -- code `92e678b`, measurement `b295dae`. Dispatch **0 -> 4**; graded outcome **+1 lead, +0 confirmed findings**; two runs identical. Two of three tiers wired but unexercised. |
 
 All four are landed. The single most important thing to read out of this lane is the follow-up at the
 end of the D6 section: **all three `next_best_actions` tiers are now armed and nothing consumes them
@@ -525,6 +531,17 @@ A lead is not a finding, and this result must not be quoted as one. What is esta
 ranking pointed at real untested surface and the dispatch reached it; what is NOT established is that
 it converts to a confirmed finding, on this target or in general. One lead on one lab is a single
 data point, not a capability curve.
+
+**Attribution, verified rather than assumed** -- "it appeared in the after run" is a coincidence
+argument, so both halves were checked:
+
+- the lead is produced by `authz_tool.analyze_side_channel`, called at `tools.py:6099`, which sits
+  inside `_run_bfla` (`tools.py:6060`) -- so only a `run_bfla` call can emit it;
+- `tool_dispatches` rose by exactly 4, and the four graph actions were the four `run_bfla` calls, so
+  no other new tool ran in the after scan that could have produced it.
+
+Those two together make the lead attributable to a graph-dispatched ranked action, not to run-to-run
+noise.
 
 #### 3. DETERMINISM -- two ranked runs, identical
 
