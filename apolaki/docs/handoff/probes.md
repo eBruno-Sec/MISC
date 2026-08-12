@@ -310,3 +310,45 @@ query-string engine `_run_cmdi` does use it and was exposed, but is not on the m
 `agent/tools.py` (cmdi/sqli/xss engines only) - `agent/cmdi_tool.py` - `agent/sqli_tool.py` -
 `agent/collaborator.py` - their tests - `docs/handoff/probes.md`.
 The Coordinator folds numbers into the ledger; this lane does not write it.
+
+---
+
+## CARRIER DELIVERY - the ticket this lane's own measurement produced
+
+The cmdi `+0` proved the shapes were fine and the DELIVERY was not. Both categories reached the same
+conclusion independently, which is the strongest evidence this lane has:
+
+| engine | doors it had | doors it lacked |
+|---|---|---|
+| `_run_form_cmdi` | query string, form body, 2 discovered headers | **cookie (none at all)** |
+| `_run_xss` | query string, URL fragment | **request header, cookie** |
+
+[MEASURED] carrier mix from the served application's own source:
+* cmdi, 251 cases: 28 param, 27 header, 24 querystring, 19 cookie, 153 other/laundered
+* xss, 455 cases: 220 param, **87 request header**, 60 querystring, 88 other
+
+### Shipped
+* **cmdi cookie carrier** (slice 6). Candidate names are the ones the page already reveals - its form
+  fields and its declared header names. Output shapes only; the blind shapes stay on the budgeted
+  per-endpoint path, so widening a carrier cannot widen the sleep count.
+* **cmdi header carrier widened** from a hardcoded 2 to intensity-scaled 4/8/12.
+* **xss request-header carrier** (slice 4), reusing the breakout oracle unchanged.
+
+### The two controls every NEW carrier must carry
+A new door is a new place for two already-proven failures to reappear, so both are asserted per
+carrier rather than once:
+
+1. **The probe must differ from its baseline.** This is the `set_param` defect wearing different
+   clothes: if the probe request is byte-identical to the baseline, the differential is zero and the
+   endpoint reports clean whatever it does.
+2. **A carrier that makes an endpoint ECHO is not a carrier that makes it EXECUTE.** This is the
+   filter that killed the PATH env-differential at 20/50, and it is the defect that put a 69.2%
+   traversal score into a retraction.
+
+### Still open
+* **xss cookie carrier** - not built. 
+* **cmdi/xss body content-type shapes** (JSON, multipart) the form path misses - not investigated.
+* No suite re-measurement has been run since slice 6. The cmdi `+0` figure above predates the cookie
+  carrier and does NOT describe it. Any new figure must use the `inspect.getsource` gate, must zero
+  or fix the blind budget so results do not depend on case position, and must report the silent-FN
+  count next to the score.
