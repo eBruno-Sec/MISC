@@ -470,3 +470,391 @@ additions.** Before them it had a hole precisely where the live defect lives —
 docstring says "Adding an oracle means adding its mutant." I did not edit the gate (not my lane),
 but M1, M2, M4, M5, M6, M7, M9, M10 above are all verified-killing pairs and can be pasted in as-is,
 each with the exact node id recorded in the matrix.
+
+---
+---
+
+# SESSION 3 (2026-08-11, later)
+
+Targets: (1) the code-assisted lane `3a62c04` / `3b2e409` / `411d5d1` / `ad821d4`; (2) the Java
+hybrid 61.1%; (3) anti-idle sweep of RESOLVED entries in `docs/CODEBASE_REVIEW.md`.
+
+## LEAD FINDING FOR THE COORDINATOR: one measure-lane claim is FALSE
+
+**REJECTED: `docs/handoff/measure.md` line 364, asserted by commit `75168e5`** ("both suites scored
+end to end, DAST and hybrid, sealed"):
+
+> securecookie | 61.1% | 14 FN, of which **8 are wrong-family**: the tool reported something else on
+> a vulnerable securecookie case. Those 8 are worth reading individually - they are also the source
+> of the 8 remaining cross-family FPs.
+
+MEASURED from the raw artifact `docs/benchmarks/owaspbench_java_v12_DAST_FULL_20260811.jsonl` plus
+the raw key, with my own tally that does not import `owasp_bench`:
+
+```
+securecookie vulnerable FNs total: 14
+  wrong-family (tool confirmed SOMETHING ELSE): 0
+  silent (tool confirmed nothing):             14
+```
+
+**Zero of the 14 are wrong-family. All 14 are silent.** And the 8 cross-family false positives are
+not securecookie's at all - every one of them is a CLEAN `weakrand` case carrying a confirmed
+`path_traversal`:
+
+```
+cross-family FPs (clean case, confirmed finding of ANOTHER family): 8
+    BenchmarkTest00319  weakrand  ['path_traversal']
+    BenchmarkTest00504  weakrand  ['path_traversal']
+    BenchmarkTest01074  weakrand  ['path_traversal']
+    BenchmarkTest01294  weakrand  ['path_traversal']
+    BenchmarkTest01799  weakrand  ['path_traversal']
+    BenchmarkTest01950  weakrand  ['path_traversal']
+    BenchmarkTest02616  weakrand  ['path_traversal']
+    BenchmarkTest02716  weakrand  ['path_traversal']
+```
+
+Two independent statements in that one table row are wrong: the count of wrong-family FNs (8 vs a
+measured 0) and the attribution of the 8 cross-family FPs (securecookie vs a measured weakrand).
+The number 8 is real; it was attached to the wrong category and then a causal link was invented
+between the two.
+
+**Does it change a published number? NO.** This is a DIAGNOSTIC statement inside the per-category
+shortfall table, not a figure. Checked explicitly:
+
+- `docs/LEDGERS.md` - the string does not appear; no ledgered figure depends on it.
+- `docs/STATUS.md` - the string does not appear.
+- `docs/BENCHMARK_MATRIX.md:94` carries `DAST 41.7% official / hybrid 61.1%`, both of which I
+  independently recomputed and both of which are CORRECT (below).
+- `cross_family_fp = 8` as a *count* is correct and reproduces. Only its attribution is wrong.
+
+So: nothing to retract from the scoreboard. What needs correcting is one row of prose in
+`docs/handoff/measure.md`, owned by the measurement lane. The reason it matters anyway is that this
+row was the stated reason to go read 8 specific securecookie cases - a remediation lead pointing at
+the wrong 8 cases in the wrong category. Anyone who followed it would have found nothing and had no
+way to tell whether the tool or the note was wrong.
+
+This is the failure shape the brief warned about: a summary that invents a relationship the raw
+artifact does not contain. It took an end-to-end recount to see it.
+
+## THE HEADLINE NUMBERS DO REPRODUCE - stated with the same specificity
+
+Everything below was recomputed by me, inside `--network none` containers, from the committed raw
+artifacts and the raw answer keys copied out of the lab containers. No summary was trusted.
+
+**Seals: all five committed artifacts hash to exactly the values their documents claim.**
+
+```
+95765ac789ea20cef27c4086993f79eec4c3947da6cf161fd5db3c3c319a58fb  benchmarkpython_v01_CODEASSISTED_20260811.json
+634e8270f0c80d7528dc29af44730da355dd320c46908100311911b8342c101b  benchmarkpython_v01_CODEASSISTED_MATCHED_20260811.json
+23dd777bf809616e1e8a53d8e565a7592895981b1e1407ac98b36e941953c03f  benchmarkpython_v01_DAST_20260811.jsonl
+0dd31d5a68e0a234756006b21eeec1e2c1d593ac9ba9667ba927e5b08c2e4d12  owaspbench_java_v12_CODEASSISTED_20260811.json
+0496a8cc9593672e8362fa824e8cfe94f67804900a79df40806b367fa9259099  owaspbench_java_v12_DAST_FULL_20260811.jsonl
+```
+
+The first three match `docs/handoff/code_assisted.md`; the last three match
+`docs/handoff/measure.md`. Row counts also match: 1230 / 594 / 406 / 975 / 2132.
+
+**Java, through the project's own scorer on the committed artifacts + the key from
+`apolaki-owaspbench-1:/owasp/BenchmarkJava/expectedresults-1.2.csv` (2740 rows):**
+
+```
+DAST only : OFFICIAL 41.7%   PRODUCT 41.5%   cross_family_fp 8   (0 as: crypto, hash, trustbound)
+HYBRID    : OFFICIAL 61.1%   PRODUCT 60.9%   cross_family_fp 8   (0 as: trustbound)
+```
+
+All four figures reproduce exactly.
+
+**Java, recomputed a SECOND time with my own scorer** (reads the jsonl/json rows and the CSV
+directly, never imports `owasp_bench`), which is the end-to-end recount the brief asked for:
+
+```
+cmdi          TP=36   FN=90   FP=0   TN=125   score= 28.6%
+crypto        TP=130  FN=0    FP=0   TN=116   score=100.0%
+hash          TP=129  FN=0    FP=0   TN=107   score=100.0%
+ldapi         TP=15   FN=12   FP=0   TN=32    score= 55.6%
+pathtraver    TP=87   FN=46   FP=0   TN=135   score= 65.4%
+securecookie  TP=22   FN=14   FP=0   TN=31    score= 61.1%
+sqli          TP=180  FN=92   FP=0   TN=232   score= 66.2%
+trustbound    TP=0    FN=83   FP=0   TN=43    score=  0.0%
+weakrand      TP=218  FN=0    FP=0   TN=275   score=100.0%
+xpathi        TP=6    FN=9    FP=0   TN=20    score= 40.0%
+xss           TP=137  FN=109  FP=0   TN=209   score= 55.7%
+
+hybrid contingency (10 measured cats): TP 960, FN 372, FP 0, TN 1282, total 2614
+official macro over ALL 11 (trustbound=0): 61.1%
+cross-family FPs: 8
+```
+
+Every cell matches `measure.md`'s JOB 1 table, including the contingency total 2614 and the 126
+trustbound cases held in the denominator rather than dropped. **61.1% is real.**
+
+**Python, recomputed from RAW SOURCE rather than from any artifact** - `/opt/bpy` copied out of
+`apolaki-benchmarkpython-1`, 1236 `.py` files, scanned with `codeintel.review_source_tree`, scored
+by my own scorer against `expectedresults-0.1.csv` (1230 rows), `--network none`:
+
+```
+files_scanned: 1236   findings: 170
+findings on a BenchmarkTest case: 170 over 170 distinct cases
+findings NOT on a benchmark case: 0
+cross-family fires (rule category != case category): 0
+
+category             n    TP    FN    FP    TN        TPR      FPR    score
+hash               151    71     0     0    80     100.0%     0.0%   100.0%
+weakrand           326    99     0     0   227     100.0%     0.0%   100.0%
+trustbound          37     0    18     0    19       0.0%     0.0%     0.0%
+(the other 11 categories: 0 TP, 0 FP, exactly as documented)
+code-assisted-ALONE official macro (14 cats): 14.3%
+```
+
+Row for row identical to the committed table, every cell, derived without reading the lane's own
+artifact or its summary. And through the project's scorer on the committed artifacts:
+
+```
+DAST only : OFFICIAL 24.5%   PRODUCT 24.5%
+HYBRID    : OFFICIAL 38.8%   PRODUCT 38.8%
+```
+
+`24.5 + 100/14 + 100/14 = 38.79`. Additive as claimed. **The 0.0% -> 100.0% on both hash (151
+cases) and weakrand (326 cases) at 0.0% FPR is real.**
+
+## Environment used by every measurement above
+
+No image was rebuilt. The committed working tree is mounted READ-ONLY over `/app`; mutants are
+mounted over `/app/codereview.py` for the life of one container only:
+
+```
+MSYS_NO_PATHCONV=1 docker run --rm --network none \
+  -v "<repo>/agent:/app:ro" [-v "<scratch>/m/<ID>.py:/app/codereview.py:ro"] \
+  -v "<scratch>:/w" -w /app apolaki-agent:latest python -m pytest tests/test_source_lane.py -q -rf
+```
+
+Mount sanity against the empty-volume trap: `/app` = 183 entries and `import codereview` exposes
+`scan_python_hash`; the benchmark tree mounts as 1236 `.py` and the scanner reports
+`files_scanned: 1236`. No exit code was trusted without a file count.
+
+---
+
+# TARGET 1 - the code-assisted lane. VERDICT: CONFIRMED, with three named defects that cost the
+# benchmark nothing, and one report-surface REJECT in a file this lane does not own.
+
+## 1a. The mutation matrix, re-derived from scratch (NOT taken from the doc)
+
+I wrote my own seven mutants as one-line weakenings of `codereview.py`, each anchored on a string
+that occurs exactly once in the file. The harness refuses to emit a mutant whose anchor is not
+unique, which caught my first M4 anchor matching `mask_source` as well as `mask_python_source`.
+
+Baseline first: `tests/test_source_lane.py` = **69 passed, 0 failed** on the unmutated tree.
+
+| mutant | the one-line weakening | killed by (NAMED test) | verdict |
+|---|---|---|---|
+| M1 | `if c == "#":` -> `if c == "#" or src.startswith("//", i):` | `test_python_mask_does_not_treat_floor_division_as_a_comment` | KILLED |
+| M2 | `_PY_RANDOM_CALL` receiver dropped: `random\s*\.\s*(M)` -> `\.\s*(M)` | `test_python_system_random_is_a_csprng_not_a_weak_generator` (+3) | KILLED |
+| M3 | `_PY_USEDFORSEC` -> a regex that cannot match | `test_python_usedforsecurity_false_is_not_flagged` (+2) | KILLED |
+| M4 | `mask_python_source` returns `(text, {})`, so rules see raw text | `test_python_md5_named_only_in_a_comment_or_string_is_not_flagged` (+7) | KILLED |
+| M5 | `_py_binds_module` -> `return True` | `test_python_a_foreign_random_module_is_not_the_stdlib_one` | KILLED |
+| M6 | `_py_shadowed` -> `return False` | `test_python_a_user_defined_md5_is_not_the_stdlib_call` | KILLED |
+| M7 | `_PY_HASHLIB_CALL` greps the callee name, `hashlib.` optional | `test_python_a_user_defined_md5_is_not_the_stdlib_call` | KILLED |
+
+**7 mutants, 7 killed - count independently confirmed.** Graded strictly: in every case the failing
+assertion is the one the test exists for, printed in the pytest output (M1 fails on
+`assert 'n // 2' in "half = n     ..."`). No collection error, import error, fixture failure or
+generic nonzero exit was credited.
+
+M2's headline number reproduces exactly. Scoring every mutant against the real 1236-file suite:
+
+```
+BASE / M1 / M3 / M5 / M6 / M7 :  170 findings   hash 100.0%  weakrand 100.0%  macro 14.3%
+M2 (receiver ignored)         :  283 findings   hash 100.0%  weakrand  50.2%  macro 10.7%
+                                 weakrand FP 113, FPR 49.8%
+```
+
+**283 vs 170, +113 false positives, weakrand 100.0 -> 50.2%.** Exactly the claim, and note what the
+table shows that the doc did not: M2 does not lose a single true positive. weakrand TPR stays
+100.0% and only FPR moves. The receiver rule is worth nothing on the TPR side and everything on the
+FPR side, which is precisely why only a negative control can catch it and why a suite-score-only
+gate would have passed the mutant.
+
+Five of the seven mutants leave the suite at exactly 170 findings and die ONLY on unit tests. That
+is a stronger argument for benchmark-invisible negative controls than the doc made for itself - it
+credited only M6 and M7 with that property.
+
+## 1b. The receiver claim, attacked with shapes the implementation has never seen
+
+This is the load-bearing decision (113 of 326 weakrand cases), so it got 45 hand-built cases with
+declared ground truth. **Every CSPRNG shape I could construct stays clean.** The claim survives its
+hardest form:
+
+```
+ok  B1  random.SystemRandom().getrandbits(32)                          clean
+ok  B2  module-level  _RNG = random.SystemRandom()  reused in a fn     clean
+ok  B3  class attribute  rng = random.SystemRandom()                   clean
+ok  B4  function returning random.SystemRandom()                       clean
+ok  B5  from random import SystemRandom                                clean
+ok  B6  import random as r ; r.SystemRandom()                          clean
+ok  B9  from random import SystemRandom as Random  (aliased to the WEAK name)   clean
+ok  B10 from numpy import random                                       clean
+ok  B11 import numpy.random as random                                  clean
+ok  B12 self.random.getrandbits(32)   (attribute receiver)             clean
+ok  B13 "random"/"md5" only in a comment, a string, a docstring        clean
+ok  B14 a local `def random()`                                         clean
+```
+
+and the weak twin of each shape is still caught:
+
+```
+ok  A3  _RNG = random.Random() reused          -> random.Random()@L3
+ok  A4  class attr rng = random.Random()       -> random.Random()@L4
+ok  A5  function returning random.Random()     -> random.Random()@L4
+ok  A6  from random import getrandbits, bare   -> random.getrandbits()@L4
+ok  A7  from random import Random              -> random.Random()@L4
+ok  A9  from random import getrandbits as grb  -> random.getrandbits()@L4
+```
+
+B9 is the one I most expected to break it - `from random import SystemRandom as Random`, a CSPRNG
+bound to the name of the weak class - and it stays clean, because the rule reads the ORIGINAL
+symbol, not the local name. The inverse (`from random import Random as SystemRandom`) is correctly
+flagged. The receiver claim is real.
+
+`usedforsecurity=False` is honoured in all four spellings tested, including on `hashlib.new`, split
+across lines, and NOT leaking to a second `md5()` call on the same line (H16 still fires).
+Floor division does not blank the rest of the line (H17). All 17 hash cases behave.
+
+### DEFECT 1 (FALSE NEGATIVE) - an aliased module import is silently invisible
+
+```
+import random as r    ; r.getrandbits(32)   -> NOT FLAGGED   (should be CWE-330)
+import random as rnd  ; rnd.choice(xs)      -> NOT FLAGGED
+import hashlib as hl  ; hl.md5(d)           -> NOT FLAGGED   (should be CWE-328)
+```
+
+Root cause, and it is the ugly kind: `_py_imports()` **computes the binding and throws it away**.
+`import random as r` correctly produces `modules["r"] = "random"`, but `scan_python_random` only
+consults `modules` through `_py_binds_module`, which is a SUPPRESSION test - it can decide that the
+name `random` is not the stdlib, and it can never decide that the name `r` IS. The detection
+regexes hard-code the literal receiver:
+
+```python
+_PY_RANDOM_CALL  = re.compile(r"(?<![\w.])random\s*\.\s*(%s)\s*\(" % _PY_RANDOM_METHODS)
+_PY_HASHLIB_CALL = re.compile(r"(?<![\w.])hashlib\s*\.\s*([A-Za-z0-9_]+)\s*\(")
+```
+
+The `from X import Y as Z` half is handled properly (A9 passes). Only the `import X as Y` half is
+missing. It is the same shape as the defect this lane was created to fix - a capability thrown away
+by a name check - one level down.
+
+**Measured cost to the claimed numbers: ZERO.**
+`grep -rlE "^[ \t]*import[ \t]+(random|hashlib)[ \t]+as" <suite>` returns **0 files**. The
+100.0%/100.0% stands. This is a generality defect, not a wrong number, and the benchmark cannot see
+it by construction.
+
+### DEFECT 2 (FALSE POSITIVE) - `_PY_CLOCK_TOKEN` flags timestamps, not tokens
+
+```python
+_PY_CLOCK_TOKEN = re.compile(
+    r"(?<![\w.])(\w*(?:token|session|nonce|otp|secret|salt|apikey|password|guid|uuid)\w*)"
+    r"\s*=[^\n]{0,90}?" + _PY_CLOCK, re.I)
+```
+
+Any identifier merely CONTAINING one of those words, followed within 90 characters by a clock read,
+is reported as CWE-337 "a security value derived from the clock":
+
+```
+session_start = time.time()          -> FLAGGED  "clock -> session_start"    FALSE POSITIVE
+token_expiry  = time.time() + 3600   -> FLAGGED  "clock -> token_expiry"     FALSE POSITIVE
+```
+
+Neither is a security value derived from the clock. Both are a clock reading stored under a name
+that mentions one. Recording when a session began is not weak randomness.
+
+Confirmed in the wild, not only in my fixtures. Scanning the container's own
+`/usr/local/lib/python3.12` (5139 files) produced exactly one CWE-337, and it is this bug:
+
+```
+site-packages/anthropic/lib/credentials/_workload.py:346
+  return AccessToken(token=_unwrap_secret(token), expires_at=int(time.time()) + expires_in)
+```
+
+The regex matched the keyword argument `token=`, then found `time.time()` 60 characters later on
+the same line. It is not even an assignment statement. `expires_at` comes from the clock; the token
+does not.
+
+**Measured cost to the claimed numbers: ZERO.** The `<securityword> = <clock>` shape appears in 0
+of the suite's testcode files. Invisible to the benchmark, same as Defect 1.
+
+### DEFECT 3 (minor, under-reporting only) - `.seed(` is effectively dead in `_PY_CLOCK_SEED`
+
+`(?<![\w.])(?:random\s*\.\s*seed|\.\s*seed|Random)\s*\(\s*<clock>` applies the lookbehind to the
+whole alternation, so the `\.\s*seed` branch can only match when the character before the dot is
+NOT a word character. `rng.seed(time.time())` therefore does not match it, and neither does
+`random.Random(time.time())` (the `Random` branch is blocked by the preceding dot). The stronger
+CWE-337 is silently downgraded to a plain CWE-330 for the qualified-constructor spelling. No false
+positive; a missed severity.
+
+## 1c. Generality - reproduced, and extended to a third codebase
+
+Apolaki's own tree, from the committed working tree:
+
+```
+files_scanned: 174   findings: 4
+  guidance.py:401           CWE-328  SHA1             hashlib.sha1("|".join(parts).encode())   REAL
+  juiceshop_solvers.py:771  CWE-330  random.choice()  random.choice("bcdfghjklmnpqrstvwxz")    REAL
+  owasp_bench.py:140        CWE-330  random.Random()  rng = random.Random(seed)                REAL
+  sarif_io.py:71            CWE-328  SHA1             hashlib.sha1("|".join(...).encode())     REAL
+```
+
+All four verified by reading the source at those exact lines. 4/4 true call sites, 0 misidentified.
+The claim reproduces.
+
+**Third codebase, neither the benchmark nor Apolaki**: `/usr/local/lib/python3.12` - CPython's
+stdlib plus site-packages, **5139 files**, a corpus with no relationship to either.
+
+```
+findings: 100     CWE-330: 66    CWE-328: 33    CWE-337: 1
+```
+
+Spot-checked against the real source: `uuid.py:620` (`random.getrandbits(48)`), `tempfile.py:146`
+(`self._rng = _Random()` via `from random import Random as _Random` - the aliased SYMBOL import the
+detector does handle), `cryptography/.../rsa.py:275` (`a = random.randint(2, n - 1)`),
+`httpx/_auth.py:309` (`hashlib.sha1(s)`), `smb/ntlm.py` MD4/MD5, `ldap3/.../digestMd5.py` MD5. All
+real call sites.
+
+**99 of 100 are true call sites; the single false positive is Defect 2.** One borderline worth
+naming: `starlette/_compat.py:19` is `hashlib.md5(data, usedforsecurity=usedforsecurity)` - the
+kwarg is a VARIABLE, so the literal-`False` guard cannot fire and the call is flagged. Conservative
+rather than wrong, but a reader should know the guard is literal-only.
+
+**Conclusion: it is a detector, not a signature.** It transfers to a 5139-file corpus it was never
+written against at roughly a 1% false-positive rate, and that 1% has a named regex behind it.
+
+## 1d. What `411d5d1` was honest about, settled
+
+The lane recorded that its seven negative controls all fail pre-fix with `AttributeError`, which
+proves the tests are NEW and not that their assertions discriminate, and offered the mutation run
+as the real evidence. **That is the correct reading, and the mutation run does carry the weight.**
+I re-derived it independently: 7/7, named assertion each time. Check 1 is satisfied only in its
+weak form; check 2 is satisfied in its strong form, which is the one that matters. The lane graded
+its own evidence correctly, which is rare enough to record.
+
+## TARGET 1 VERDICT: CONFIRMED
+
+| check | result |
+|---|---|
+| 1. failed before the fix | PASS, weak form (AttributeError). The lane said so itself and did not overclaim. |
+| 2. exact assertion kills the mutant | PASS, strong. 7/7 re-derived from scratch, named test each time, nothing generic credited. |
+| 3. negative controls stay clean | PASS. 20 CSPRNG/clean shapes including 12 unseen receivers, all clean. |
+| 4. false positives anywhere | PASS on both suites (0 FP in 1230 Python cases, 0 cross-family; 0 FP in the Java run). Two FP shapes exist (Defects 1-2) but measure 0 on both suites and 1 in 5139 files on a third codebase. |
+| 5. deterministic replay | PASS. 170 findings on every re-run; pure text analysis, no network, no clock, no ordering input. |
+| 6. clean environment | PASS. Read-only mount of the committed tree, `--network none`, nothing copied in, no rebuild. |
+| 7. all surfaces agree | PASS for this lane's files - every finding carries `lane: code-assisted` and `provenance: source-derived`, and the scorer prints both banners. See the Target 2 REJECT for `owasp_bench.report`, which is not this lane's file. |
+| 8. generalises | PASS. 5139-file third corpus at 99/100 true call sites; 4/4 on Apolaki; 12 unseen receiver shapes correct. Three named defects filed. |
+
+**The 100.0% / 100.0% at 0.0% FPR is real, and I could not make it wrong.** Two full categories at
+100.0% is exactly the number that has been wrong here before; this one is not.
+
+**For the owner of `agent/codereview.py`** (I do not edit production code):
+- Defect 1: consult the `modules` map `_py_imports` already builds, so `import random as r` and
+  `import hashlib as hl` resolve. The binding is computed today and discarded.
+- Defect 2: `_PY_CLOCK_TOKEN` must require the clock value to BE the security value, not merely
+  share a line with it. As written it reports an audit timestamp as CWE-337.
+- Defect 3: hoist the lookbehind into each alternative of `_PY_CLOCK_SEED`.
+
