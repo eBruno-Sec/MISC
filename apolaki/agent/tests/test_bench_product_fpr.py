@@ -84,3 +84,30 @@ def test_report_prints_both_numbers_and_labels_which_is_which():
     assert "OFFICIAL SUITE SCORE" in txt and "PRODUCT SUITE SCORE" in txt
     assert "how good is Apolaki" in txt
     assert "cross-family false positives" in txt
+
+
+def test_a_row_with_no_finding_cannot_book_a_false_positive():
+    """The `x or DEFAULT` trap, in the one place it would corrupt a published number.
+
+    `confs[:len(fams)] or confs` returned the FULL confidence list when `fams` was empty, because
+    `confs[:0]` is `[]` and `[]` is falsy. A row carrying no finding at all then read as confirmed and
+    booked a product false positive out of nothing. Latent (scan() builds both lists together), but a
+    scorer that can invent an FP decides the numbers we publish.
+    """
+    assert ob._any_confirmed({"families": [], "conf": ["confirmed"]}) is False
+    assert ob._any_confirmed({"families": [], "conf": []}) is False
+    assert ob._any_confirmed({}) is False
+    # ...while a real finding is still counted, and the truncation still guards a ragged pair.
+    assert ob._any_confirmed({"families": ["sqli"], "conf": ["confirmed"]}) is True
+    assert ob._any_confirmed({"families": ["sqli"], "conf": ["lead", "confirmed"]}) is False
+
+
+def test_an_empty_row_on_a_clean_case_scores_TN_not_FP():
+    """End to end: the defect's actual consequence, not just the predicate."""
+    key = {"C1": ("securecookie", False)}
+    run = {"target": "java", "results": [
+        {"test": "C1", "category": "securecookie", "families": [], "conf": ["confirmed"]}]}
+    s = ob.score(run, key)
+    b = s["per_category"]["securecookie"]
+    assert (b["fp_any"], b["tn_any"]) == (0, 1)
+    assert s["cross_family_fp"] == 0

@@ -1127,4 +1127,27 @@ The real issue is not my message. That lane staged files it does not own, which 
 fires it will commit another lane's half-finished working tree under a message that does not
 describe it, and a bisect across that commit will be meaningless. Worth a word to that lane.
 
+---
+
+# OPEN ITEMS CARRIED FORWARD - re-checked today, still unfixed
+
+Everything this lane has rejected across three sessions, with today's status. Nothing here is
+new; the point is that none of it has been closed, and each was re-measured rather than assumed.
+
+| # | item | owner file | re-checked today |
+|---|---|---|---|
+| 1 | `poc_bundle.build()` claims a negative control that never ran | `agent/poc_bundle.py` | STILL LIVE, and now worse - see 3a. The claim is categorically inapplicable to a source-derived finding, not merely unproven. |
+| 2 | `owasp_bench.report()` prints "comparable to a PUBLISHED tool score" under a hybrid banner that says never compare | `agent/owasp_bench.py` | STILL LIVE, reproduced on both the Java and Python hybrid runs today. |
+| 3 | `_any_confirmed` falsy default (`confs[:len(fams)] or confs`) | `agent/owasp_bench.py:391` | STILL LIVE. MEASURED today: `_any_confirmed({'families': [], 'conf': ['confirmed']})` returns **True** - a row with no finding behind it books a product false positive. Latent only (both lists are built together in `scan()`), but this is the `x or DEFAULT` shape that has bitten this project twice. |
+| 4 | `owasp_bench.py` D1/D2 - a run file with no `target` prints NEITHER suite score; `--base` silently ignored on the JSON path | `agent/owasp_bench.py` | Not re-run today (session 2 measured both). |
+| 5 | `control_ran` accepts artifacts that state the control did NOT run (`{'controls': ['']}`, `{'negative_controls': {'count': 0}}`) | `agent/report.py` | Not re-run today. Latent - no shipping producer emits those shapes. |
+| 6 | `sqli_tool.py` has ZERO entries in `agent/mutation_gate.py` despite being the module behind most true positives | `agent/mutation_gate.py` | Not re-checked. Session 2 left 8 verified killing pairs ready to paste. |
+| 7 | boolean-blind SQLi oracle has no baseline-stability control | `agent/sqli_tool.py` | Not re-run today. Session 1's REJECT stands. |
+| 8 | Defects 1-3 in the code-assisted lane (aliased import FN, clock-token FP, dead `.seed(` branch) | `agent/codereview.py` | NEW today. Now pinned by 4 strict xfails, so the suite will announce the fix. |
+
+Items 1, 2 and 3 are all in the reporting path rather than the detection path, which is the pattern
+worth naming: this project's detection has been getting steadily harder to fool, and every
+outstanding rejection is now about a surface that describes a finding rather than the oracle that
+found it. That is where the next honest-numbers failure will come from.
+
 

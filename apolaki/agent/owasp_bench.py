@@ -387,8 +387,16 @@ def _any_confirmed(row: dict) -> bool:
     family it claims.
     """
     fams = row.get("families") or []
+    if not fams:
+        return False          # no finding, so nothing to be confirmed -- and see below
+    # `confs[:len(fams)] or confs` was the original, and it is the `x or DEFAULT` trap written into
+    # this project's own memory as having bitten it twice. With `fams == []`, `confs[:0]` is `[]`,
+    # which is FALSY, so it fell back to the full `confs` list and returned True for a row carrying no
+    # finding at all -- booking a product false positive out of nothing. Latent, because `scan()`
+    # builds both lists together, but a scorer that can invent an FP is the last place to leave a
+    # latent bug: it decides the numbers we publish.
     confs = row.get("conf") or ["confirmed"] * len(fams)
-    return any(c not in _UNPROVEN for c in confs[:len(fams)] or confs)
+    return any(c not in _UNPROVEN for c in confs[:len(fams)])
 
 
 def score(run: dict, key: dict) -> dict:
