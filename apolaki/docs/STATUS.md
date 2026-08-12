@@ -9,8 +9,9 @@ ledger wins and this file is stale.
 
 | track | figure | denominator | FPR |
 |---|---:|---|---:|
-| OWASP Benchmark Java v1.2 — **product claim** | **34.9%** | 11-cat macro, cross-family FPs counted | **2.1%** |
-| OWASP Benchmark Java v1.2 — harness, official CWE-matching convention | 41.3% | 11-category macro, 2132 cases | 0.0% |
+| Java v1.2 — **hybrid** (DAST + code-assisted SAST) | **61.1%** off. / **60.9%** prod. | 11-cat macro, full 2132 DAST + 975 SAST | **0.0%** |
+| Java v1.2 — **DAST only** | **41.7%** off. / **41.5%** prod. | 11-cat macro, full suite | **0.0%** |
+| ~~Java v1.2 — earlier figures~~ | ~~41.3% / 34.9% @ 2.1%~~ | superseded by the full sealed run; the 2.1% FPR was the cross-family artifact, since fixed | — |
 | Python v0.1 — **hybrid** (DAST + code-assisted SAST) | **38.8%** | 14-cat macro, full 1230-case suite | **0.0%** |
 | Python v0.1 — DAST only | 24.5% | 14-cat macro, full suite | 0.0% |
 | ~~Python v0.1 — harness~~ | ~~34.8%~~ | superseded: 54 cases, ~4 per category | — |

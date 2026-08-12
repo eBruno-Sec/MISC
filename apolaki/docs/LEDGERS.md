@@ -39,6 +39,21 @@ Every scored run. Sealed = the result artifact was hashed **before** the answer 
 Peer context, recomputed from raw artifacts: **ZAP 17.99%**, best published full-suite DAST **26%**,
 11-tool DAST mean **~11%**. See PEER_BASELINES.md.
 
+> ### ✅ SUPERSEDED by the full sealed run, 2026-08-11 — and independently reproduced
+>
+> The retraction below stands as the record of how the 41.3% / 0.0% pair was wrong. It has since been
+> replaced by a full-suite sealed measurement, and the Breaker recomputed every figure **twice** —
+> once through the project scorer, once with an independent tally straight off the raw jsonl giving
+> **TP 960 / FN 372 / FP 0 / TN 1282, cross_family_fp 8**. All five committed seals reproduce.
+>
+> | Java v1.2 | official | product |
+> |---|---:|---:|
+> | **DAST only** — the only line comparable to a published tool score | **41.7%** | **41.5%** |
+> | **HYBRID** (DAST + code-assisted SAST) | **61.1%** | **60.9%** |
+>
+> FPR **0.0%** on every category under both conventions. The 2.1% product FPR in the retraction was
+> the cross-family artifact; counting it is now built into the scorer and the residue is 8 cases.
+>
 > ### ⚠ RETRACTION, 2026-08-10 — 41.3% / 0.0% FPR is not the product claim
 >
 > Adversarial verification **REJECTED** the headline pair. Two separate problems, both MEASURED.

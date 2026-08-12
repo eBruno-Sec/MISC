@@ -532,12 +532,23 @@ def report(s: dict) -> str:
     if s.get("suite_macro") is not None:
         lines.append("OFFICIAL SUITE SCORE (macro over ALL %d suite categories, unmeasured = 0): %s"
                      % (s.get("suite_size"), _fmt(s.get("suite_macro"))))
-        lines.append("   ^ comparable to a PUBLISHED tool score (official CWE-matching convention:")
-        lines.append("     a finding only counts against a clean case if it claims that case's family)")
+        # THE CAPTION MUST KNOW ITS LANE. These two lines sit directly under the number, which makes
+        # them the ones that survive a copy/paste -- and on a HYBRID run they were printing
+        # "comparable to a PUBLISHED tool score" eleven lines below a banner saying the opposite.
+        # A caption that contradicts its own banner is worse than no caption: the banner scrolls away
+        # and the caption travels with the figure.
+        _hybrid = bool(s.get("lane") and "code" in str(s.get("lane")).lower())
+        if _hybrid:
+            lines.append("   ^ NOT comparable to a published DAST score -- this run includes the")
+            lines.append("     code-assisted (SAST) lane, and those tools were never given the source")
+        else:
+            lines.append("   ^ comparable to a PUBLISHED tool score (official CWE-matching convention:")
+            lines.append("     a finding only counts against a clean case if it claims that case's family)")
         lines.append("")
         lines.append("PRODUCT SUITE SCORE (same TPR; every confirmed finding on a clean case is an FP): %s"
                      % _fmt(s.get("suite_macro_product")))
-        lines.append("   ^ THIS is the number to quote when the question is 'how good is Apolaki'")
+        lines.append("   ^ the number to quote for 'how good is Apolaki'%s"
+                     % (" -- as a HYBRID (DAST + code-assisted SAST) figure" if _hybrid else ""))
         _x = s.get("cross_family_fp") or 0
         if _x:
             lines.append("   cross-family false positives the official convention forgives: %d" % _x)

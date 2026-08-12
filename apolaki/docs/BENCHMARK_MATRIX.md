@@ -91,8 +91,8 @@ result in either direction** — that conversion is how a broken lab becomes a f
 
 | target | tier | state | note |
 |---|---|---|---|
-| OWASP Benchmark Java v1.2 | 1 | **PASSING** | full 2132 DAST + 975 code-assisted, sealed. DAST 41.7% official / hybrid 61.1% |
-| OWASP Benchmark Python v0.1 | 1 | **PASSING** | full 1230-case suite. DAST 24.5% / hybrid 38.8% |
+| OWASP Benchmark Java v1.2 | 1 | **PASSING** | full 2132 DAST + 975 SAST, sealed. **DAST-only 41.7% off / 41.5% prod** — the only line comparable to a published tool score. **HYBRID 61.1% / 60.9% is DAST + code-assisted SAST** and must never be compared against ZAP 17.99% or best-published-DAST 26%; those tools were not given the source. FPR 0.0% on every category, both conventions |
+| OWASP Benchmark Python v0.1 | 1 | **PASSING** | full 1230-case suite. **DAST-only 24.5%**; **HYBRID 38.8% (DAST + code-assisted SAST)**, same non-comparability rule. FPR 0.0% |
 | Juice Shop (+ juice-shop-bench) | 2 | RUNNING | scoreboard is a coverage signal, not accuracy |
 | DVWA · bWAPP · Mutillidae · WebGoat | 2 | RUNNING | classic web classes |
 | VAmPI | 2 | PASSING | API/BOLA — autonomous cross-user BOLA proven here |
