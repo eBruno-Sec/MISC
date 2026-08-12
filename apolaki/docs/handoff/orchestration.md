@@ -574,3 +574,34 @@ does not move.
   crawlable page, so an unseeded run finds 3 endpoints instead of 27 and produces no object nodes at
   all. A well-known-spec-path probe would arm the whole tier autonomously. That is why the seed above
   exists, and it is stated rather than hidden.
+
+### Island check on the new event -- half-wired, and the missing half is not mine
+
+U1 emits a new event type, `graph_action`, one per dispatched ranked action (action, tool, target,
+capability, utility, findings). Registration is not rendering, so both consumers were checked:
+
+- **API / persistence: OK.** `main.py:2423` logs every event with
+  `db.add_log(session_id, event.get("type", "info"), event)` and appends it to `sess["events"]`
+  regardless of type, so `graph_action` reaches the DB and the mission event feed.
+- **Live UI: DROPPED.** The event switch in `ui/index.html` (~1376-1412, and the replay switch at
+  ~1412) is a `case` list with **no `default:` branch**, so an unrecognised type is silently
+  discarded. The per-action outcome line is invisible to an operator watching a run.
+
+Partial mitigation already in place: the batch announcement is an `info` event
+("Graph-directed execution -- the world model ranked N action(s)..."), and `info` IS rendered. So the
+operator sees THAT graph-directed execution happened and how many actions were ranked; they do not
+see each action's target and result.
+
+**`ui/index.html` is not this lane's file, so it was not edited.** Patch for whoever owns it -- one
+case in each of the two switches:
+
+```js
+    case "graph_action": log("info",
+      `<strong>graph &rarr; ${esc(d.action||"")}</strong> via ${esc(d.tool||"")} on ${esc(d.target||"")}` +
+      (d.findings>0?` <span style="color:var(--accent)">(${d.findings})</span>`:"")); break;
+```
+
+Worth fixing beyond this event: a `default:` branch that logs unknown types would have made this
+visible immediately, and will catch the next new event type for free. A switch with no default is the
+same shape as the guards-that-check-declarations problem -- it fails silently in the direction of
+looking fine.
