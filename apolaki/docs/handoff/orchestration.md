@@ -22,7 +22,12 @@ unmeasured row says `in progress`, never a number. A commit hash is copied from 
 | D3 -- planner delivers one parameter per endpoint | **FIXED** -- `141669f` |
 | D5 -- `chase_capability` dead: findings projected without `enables` | **FIXED** -- `7bcbe8d` |
 | D13 -- `_seed_and_project_graph` writes no edges | **FIXED** -- `7bcbe8d` (same function, same slice as D5) |
-| D6 -- `run_service_pack` dead: service node never exists untested | **FIXED** -- in lane, `agent/agent.py`; `tools.py` not touched |
+| D6 -- `run_service_pack` dead: service node never exists untested | **FIXED** -- `49310a6`, in lane in `agent/agent.py`; `tools.py` not touched |
+
+All four are landed. The single most important thing to read out of this lane is the follow-up at the
+end of the D6 section: **all three `next_best_actions` tiers are now armed and nothing consumes them
+inside the execution loop** (U1 / architecture.md 1.8). Steps 1-3 of the build order arm the producer;
+U1 is what makes the scan act on it.
 
 ---
 
