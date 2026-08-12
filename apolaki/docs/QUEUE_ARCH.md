@@ -70,6 +70,47 @@ vs authenticated coverage separately · attack-path evolution.
 
 ---
 
+## Q-035 · Model + effort configuration — an EXPERIMENT, not an opinion
+
+Erwin asked for a measured recommendation across Opus 5 / 4.8 / 4.7 / 4.6 for Builder, cheap parallel
+agents, and verification/research. **There is no measured evidence in this repository, so no
+recommendation has been given, twice.** Anything asserted without the experiment would be invention
+dressed as analysis — the exact failure this project keeps retracting.
+
+The experiment that would settle it: take one ticket of known shape (a small Builder slice with a
+negative control, e.g. a `docs/handoff/architecture.md` D-item), run it under each model at fixed
+effort, and record **tokens-to-green**, tool calls, whether the negative control was written unasked,
+and whether the first patch passed the mutation check. Repeat on one Breaker task, where depth mattered
+most (the two highest-value runs so far were 64 and 78 tool calls).
+
+Standing hypothesis, **UNTESTED**: the discipline rules — commit-per-slice, write-as-you-go, mandatory
+negative controls — bound the blast radius of a bad decision, which should lower the model requirement
+for **Builders** specifically. The **Breaker** and **Architect** roles are where model strength has
+visibly paid. Do not act on this until it is measured.
+
+## Q-036 · Fold the 15 verified defects into the canonical queue
+
+`docs/handoff/architecture.md` §6.1 carries **15 VERIFIED DEFECTS, 6 MISSING EVIDENCE, 10 UPGRADE
+OPPORTUNITIES**, each with `file:line` and the module to extend. They live in a handoff file, which
+means they are evidence, not work — the Coordinator owns folding them into `QUEUE.md` as tickets.
+
+Build order from §6.5, cheapest-first and each independently shippable:
+
+1. **D3, D5, D6, D13** — all small, all revive machinery that is already written and dead.
+   (D3 is one line for an immediate coverage gain.)
+2. **D1 + D15 + D14** — the loop: delete the inert pass count, add `fact_signature`, fix the budget check.
+3. **D2 + D4** — the dedup ledger key (8 probes for 5 URLs; `params` dropped so `q` is never tested).
+4. **U1** — execute the ranked actions. **Q-030 is complete at this point.**
+5. Section 2 trigger table (needs 1–4).
+6. Section 3 secret-safe handle + event-driven credential artery (D7, D9, D10) → Q-032.
+7. Section 4 persona-as-ledger-dimension (D11) → Q-033.
+8. Section 5 events + timeline (U8) → Q-034, rendered **last** so it can only report what the earlier
+   steps actually record.
+
+**Every step needs the negative control proving the OLD behaviour is gone**, not merely that the new
+one exists. D5, D6 and D7 are each a case where a mechanism was declared present and was measurably
+inert — the exact shape this project has shipped four times.
+
 ## Sequencing note
 
 These are large and they all depend on Q-030 being settled first — a credential/persona/report design
