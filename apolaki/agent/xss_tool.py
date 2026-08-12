@@ -69,9 +69,25 @@ EXEC_PAYLOADS = (
 
 
 def set_param(url: str, name: str, value: str) -> str:
+    """Set `name` to `value` on `url`. A MISSING parameter is APPENDED, never dropped.
+
+    THE CONTRACT, and it is shared with `ssrf_tool.set_param` and `dom_trace.set_param`; all three
+    must agree, and `tests/test_set_param_contract.py` asserts that they do.
+
+    This function used to rewrite only parameters already present, and silently returned the URL
+    UNCHANGED for any other name. Every injection engine probes through it -- `_run_sqli`,
+    `_run_nosqli`, `_run_cmdi`, `_run_xss` -- and they routinely probe a parameter DISCOVERED rather
+    than one already on the URL. For those, the "probe" the engine sent was the baseline itself: the
+    differential was zero by construction, and the endpoint was reported clean without ever being
+    tested. A false negative shaped exactly like a correct non-detection, which is the worst shape
+    there is.
+    """
     p = urlparse(url)
     pairs = parse_qsl(p.query, keep_blank_values=True)
-    pairs = [(k, value if k == name else v) for k, v in pairs]
+    if any(k == name for k, _ in pairs):
+        pairs = [(k, value if k == name else v) for k, v in pairs]
+    else:
+        pairs.append((name, value))
     return urlunparse(p._replace(query=urlencode(pairs, doseq=True)))
 
 

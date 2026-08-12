@@ -199,6 +199,40 @@ scoring OOB has to drive the engines in-process.
 
 ---
 
+## WHY THE FULL-CATEGORY cmdi NUMBER DID NOT MOVE - it is my own no-DoS budget
+
+**No cmdi suite figure is published here, because the one this lane produced cannot be defended.**
+Three full-category rescans returned **exactly 36**, the baseline number. The cause is now MEASURED
+and it is neither staleness nor the engine:
+
+`BenchmarkTest01610` is confirmed by the **argv TIME-BLIND** shape, not the output shape:
+
+    title    OS command injection (argv-time-blind) in 'BenchmarkTest01610'
+    evidence 5.0s vs control 0.0s (injected 5s)
+    tags     ['cmdi', 'rce', 'argv', 'blind', 'time']
+
+and the blind shape is bounded to `self._ni(6, 16, 32)` **endpoints per process**. The harness builds
+ONE `ToolRegistry` for the whole run, so at standard intensity the blind shape is spent after 6
+endpoints and every case after that is silently un-probed. `01610` sits at roughly case 150 of 251.
+
+This is why the same case flips: scanned in a short run it CONFIRMS, scanned at position 150 it
+reports empty. Verified by deleting two rows from the checkpoint and re-running only those - both
+came back `['cmdi']` where the full run had `[]`. **A result that depends on a case's position in the
+run is not a measurement**, and publishing the 36 would have reported a working shape as a failure.
+
+The tension is real and it is not a bug to paper over: one timed endpoint costs up to
+2 fields x 5 shapes x 2 requests x 5 s = 100 s, so 251 endpoints of blind probing is hours, and the
+budget is exactly what stops a form-heavy crawl filling with sleeps. Options, none free:
+
+1. Raise intensity for a benchmark run (`deep`/`insane` -> 16/32). Still not 251.
+2. Make the blind probe cheaper - shorter sleep, stop at the first shape that shows any delay.
+3. Give the harness a fresh registry per case, which changes what is being measured (a real mission
+   does not get one).
+
+**The honest split:** the argv OUTPUT shape is unbudgeted and its gain is real; the argv TIME shape
+is budgeted and its gain does not survive a 251-case single-process run. A future measurement must
+report which of the two produced each confirmation, or it will keep re-discovering this.
+
 ## A MEASUREMENT THAT CANNOT SEE ITS OWN CODE IS WORTHLESS - gate it
 
 Two consecutive full-category rescans of `cmdi` returned **exactly 36 findings, the baseline number**,
@@ -220,6 +254,32 @@ cannot vouch for:
 **Every future before/after run in this lane should carry that gate.** It is the same lesson as
 "guards that check declarations, not facts", applied to the measurement instead of the engine: assert
 the thing you are about to measure is actually there, and fail loudly when it is not.
+
+## `set_param` - one contract, and the control that would have caught the divergence
+
+Handed to this lane by the orchestration lane (D3). Three modules define `set_param` and every
+injection engine probes through one: `xss_tool` (used by `_run_sqli`, `_run_nosqli`, `_run_cmdi`,
+`_run_xss`), `ssrf_tool`, `dom_trace`. They disagreed about a MISSING parameter - `ssrf_tool` and
+`dom_trace` appended it, `xss_tool` returned the URL **unchanged**.
+
+Why it is a silent false negative: when an engine probes a parameter it DISCOVERED rather than one
+already on the URL, the dropped parameter means the probe URL IS the baseline URL. The engine sends
+the baseline, compares it against the baseline, finds no difference, and reports clean. The probe was
+never sent, and the result is shaped exactly like a correct non-detection.
+
+Fixed by making `xss_tool` append, and documented at the definition. The load-bearing part is the
+control in `agent/tests/test_set_param_contract.py`:
+
+    assert mod.set_param(BASE, param, "PAYLOAD") != BASE   # a probe that equals its baseline is not a probe
+
+asserted for all three modules over present AND absent parameters, plus a cross-module agreement
+test. Mutation-tested both ways: making `ssrf_tool` drop a missing parameter kills 4 tests, making
+`xss_tool` append the wrong value kills 5.
+
+**Effect on this lane's cmdi work: CHECKED, UNAFFECTED.** The benchmark maps `cmdi` to
+`_run_form_cmdi`, which contains zero `set_param` calls - it builds bodies with `urlencode` and
+carries headers directly. Verified by counting call sites inside the function's line range. The
+query-string engine `_run_cmdi` does use it and was exposed, but is not on the measured path.
 
 ## Files this lane owns
 
