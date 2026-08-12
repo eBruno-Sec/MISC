@@ -129,7 +129,31 @@ merely reflects the payload therefore cannot satisfy `analyze_output`, and no th
 make the shape fire. `test_argv_proof_strings_are_absent_from_the_payloads` asserts the property for
 every payload in the list, so it cannot be lost by someone adding a payload later.
 
-**[MEASURED] 50-case sample, before any wiring:**
+### THE ENGINE NUMBER IS +0, AND IT OVERRIDES THE SAMPLE BELOW - [MEASURED, full category]
+
+Output shapes only on both sides (blind budgets zeroed, so the comparison is like with like),
+all 251 cmdi cases, per-case diff against the sealed `owaspbench_java_v12_DAST_FULL_20260811`:
+
+    cases 251 | before 36 | after 36 | NEW 0 | LOST 0 | errors 0
+
+**The hand-sweep predicted +5. The shipping engine delivers +0.** Report the engine number.
+
+The difference is DELIVERY, not the payload. The sweep put each payload in a parameter *named after
+the test case*, across four carriers (query, body, header, cookie). `_run_form_cmdi` puts payloads in
+the fields it discovers in the page's form, plus up to two discovered request headers, and has no
+cookie carrier at all. When the form's input name is not the name the handler reads, the payload
+never arrives - so the shape is correct and simply never reaches the sink.
+
+Second reason the output shape cannot pay here: the dominant echoing sink is
+`Runtime.exec("echo " + bar)`, which tokenises argv and prints `id` back as the literal string `id`.
+Only a sink where the value is argv[0] executes it, and those mostly do not echo - which is why the
+confirmations that DO land (`01610`, `02146`) come from the argv TIME-BLIND shape, not this one.
+
+**So the remaining cmdi headroom is carrier delivery, not payload repertoire** - the same conclusion
+the xss analysis reached independently (87 of 455 xss cases are header-carried and unreachable by a
+query-only engine). That is the next thing to build, and it is worth more than any further payload.
+
+**[MEASURED] 50-case hand-sweep - kept for the shape analysis, NOT as a gain estimate:**
 
 | shape | hits / 50 |
 |---|---:|
@@ -138,7 +162,7 @@ every payload in the list, so it cannot be lost by someone adding a payload late
 | union | **10** |
 | bare non-command control (`zqnotacmd`), all 4 carriers | **0** |
 
-Live, on cases that were previously silent: a bare `id` returns
+Live, on cases the append shape cannot touch, a bare `id` returns
 `uid=0(root) gid=0(root) groups=0(root)` straight out of the handler. That is command execution
 proven by output, not a differential.
 
