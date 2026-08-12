@@ -352,3 +352,34 @@ carrier rather than once:
   carrier and does NOT describe it. Any new figure must use the `inspect.getsource` gate, must zero
   or fix the blind budget so results do not depend on case position, and must report the silent-FN
   count next to the score.
+
+---
+
+## SEALED CARRIER MEASUREMENT - xss: +0
+
+One run, testing the carrier hypothesis and nothing else. No new payload shapes involved.
+`inspect.getsource` gate passed (`_run_xss carries discover_header_names, request header`); blind
+budgets zeroed so no result depends on case position.
+
+Seeded sample of 120 of 455 xss cases (seed 1337), paired PER CASE against the same cases in the
+sealed `owaspbench_java_v12_DAST_FULL_20260811` artifact. Artifact sha256, sealed before any key was
+fetched:
+
+    8161ac035dadd49f97fcd2dee3b23dba985ac92094115db76d3e96053732a2e5
+
+    PAIRED cases 120 | before 27 | after 27 | NEW 0 | LOST 0 | errors 0
+
+**The request-header carrier from slice 4 moved nothing.** FPR unchanged - no confirmed finding was
+added on any case, so the 0.0% is preserved trivially.
+
+**And it is not because the carrier failed to run.** [MEASURED] on the first 60 sampled pages,
+`header_vector.discover_header_names` returns a name for **18 of 60**, so the carrier was exercised
+on roughly 30% of cases and produced zero additional confirmations. That distinguishes the two
+explanations that matter: this is not a delivery gap that went unreached, it is delivery that
+reached and still proved nothing. The breakout oracle declined every header-carried reflection it
+saw, which is the oracle behaving exactly as specified - a correctly-encoded reflection must not
+confirm.
+
+Note for anyone tempted by the 87-of-455 header-carrier count above: **a carrier being present in
+the suite is not evidence that widening it will score.** The count says where values come from, not
+whether the value reaches an exploitable sink unencoded.
