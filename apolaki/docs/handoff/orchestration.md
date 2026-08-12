@@ -20,9 +20,9 @@ unmeasured row says `in progress`, never a number. A commit hash is copied from 
 | defect | status |
 |---|---|
 | D3 -- planner delivers one parameter per endpoint | **FIXED** -- `141669f` |
-| D5 -- `chase_capability` dead: findings projected without `enables` | **FIXED** |
-| D13 -- `_seed_and_project_graph` writes no edges | **FIXED** (same function, same slice as D5) |
-| D6 -- `run_service_pack` dead: service node never exists untested | in progress -- see the ownership note below, it turned out to be fixable IN LANE |
+| D5 -- `chase_capability` dead: findings projected without `enables` | **FIXED** -- `7bcbe8d` |
+| D13 -- `_seed_and_project_graph` writes no edges | **FIXED** -- `7bcbe8d` (same function, same slice as D5) |
+| D6 -- `run_service_pack` dead: service node never exists untested | **FIXED** -- in lane, `agent/agent.py`; `tools.py` not touched |
 
 ---
 
@@ -318,4 +318,94 @@ branch never clears `tested`, so the existing `observe` + `mark_tested` at the e
 `_run_service_pack` correctly transitions the same node to tested when the pack completes.
 
 Recorded here because "this needs the other lane" would have been the wrong call, and the reason it
-was the wrong call is a code read, not a preference.
+was the wrong call is a code read, not a preference. Re-verified against `tools.py` at `4250422`
+(the probe lane's committed work): the block is unchanged, still at 2810-2812, still at the end of
+the function.
+
+### The measurement, before
+
+Driving the real `BBHAgent._run_service_packs` with ssh:22 and redis:6379 already discovered by a
+prior nmap, capturing the graph state at the moment the packs are dispatched -- the only window in
+which the planner could act on the fact:
+
+```
+$ MSYS_NO_PATHCONV=1 docker exec apolaki-agent-1 python /tmp/d6_measure.py
+services discovered by fingerprint : [22, 6379]
+--- AT DISPATCH (the only window the planner could act in) ---
+service nodes in graph  : []
+untested('service')     : []
+next_best_actions       : []
+```
+
+Two services fingerprinted, **zero service nodes in the graph**. Not "empty by construction" in the
+sense of being observed and instantly retired -- the discovery step wrote nothing at all.
+
+### What was implemented
+
+In `_run_service_packs`, immediately after `_targets` is computed and before the packs are
+dispatched: `self.tools.graph.observe("service", "host:port", ..., source="fingerprint")`, untested,
+with `enables` taken from the same `service_router.route` the report-time `build_from_engagement`
+uses so the tier's impact ranking matches the report instead of defaulting.
+
+Seeded for `_targets` only -- the pack-eligible services. A web or unknown service has no pack
+(`pack_for` returns `{}`), so arming `run_service_pack` for one would produce an action the executor
+cannot honour. A graph write failure goes to the existing `tools._swallow` ledger, not to a silent
+`except: pass`, because a silent one would put the tier straight back to dead with no trace.
+
+`agent/tools.py` was NOT modified.
+
+### The measurement, after
+
+```
+--- AT DISPATCH ---
+service nodes in graph  : ['t.local:22', 't.local:6379']
+untested('service')     : ['t.local:22', 't.local:6379']
+next_best_actions       : ['run_service_pack']
+```
+
+- service nodes at dispatch: **0 -> 2**
+- `untested('service')`: **`[]` -> 2 entries**
+- `next_best_actions`: **`[]` -> `['run_service_pack']`**
+
+### Negative controls -- and the second half
+
+`agent/tests/test_service_discovery_graph.py`, 7 tests.
+
+- `test_a_discovered_service_is_untested_in_the_graph_before_its_pack_runs` -- the arming control.
+  The middle state (observed, not yet tested) IS the fix. A test asserting "a service node exists"
+  passes on the broken code, because the broken code also produces a service node -- just never an
+  untested one. A test asserting the end state passes too.
+- `test_the_pack_still_marks_the_same_node_tested_when_it_completes` -- **the other half**, and the
+  one that matters most for a fix that spans two files. It drives the REAL
+  `ToolRegistry._run_service_pack` over the node this fix seeds and asserts (a) exactly two service
+  nodes still exist, so the pack MERGED rather than creating a second identity, and (b) the redis
+  node is now tested while ssh is not. Arming a tier that nothing disarms recommends the same pack
+  forever; seeding under a key `tools.py` does not use leaves the first node untested forever.
+  Neither failure is visible from the arming test.
+
+Pre-fix run: **4 failed, 3 passed.** The 3 that pass pre-fix are guards (no node for a pack-less
+service, nothing in passive mode, idempotence).
+
+### Mutation check -- 5 mutants, 5 killed by the intended assertion
+
+| mutant | result |
+|---|---|
+| the node is seeded with `tested=True` (the defect, relocated into the new code) | 2 failed |
+| every discovered service seeded, including web/unknown | 1 failed |
+| `enables` dropped | 1 failed |
+| the graph-write failure swallowed silently instead of recorded | 1 failed |
+| seeded under key `host/port` instead of `host:port`, diverging from `tools.py` | 3 failed -- incl. the composition test, which catches the second-identity failure |
+
+### Regression
+
+`2013 passed, 9 skipped, 1 xfailed, 0 failed in 322s`.
+
+### Follow-up this uncovered
+
+`untested("service")` is now populated, but nothing CONSUMES `next_best_actions()` inside the
+execution loop -- U1 / architecture.md 1.8: `plan_next()` and `apply_result()` still have no non-test
+callers, and `_close_autonomy_loop` runs after the loop finishes. So all three tiers are now armed
+(`chase_capability` from D5, `run_service_pack` from D6, `cross_user_test` which already worked) and
+the ranked output still only reaches the report. **Arming the producer was steps 1-3 of the build
+order; U1 is what makes it act.** Worth stating plainly so the next reader does not mistake "the tier
+fires" for "the scan does the work".

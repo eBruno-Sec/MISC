@@ -1555,6 +1555,35 @@ class BBHAgent:
         # inside tools.execute(); the graph is still the single source of truth (workers don't talk to each other).
         _targets = [s for s in services
                     if not (_sr.is_web(s["service"]) or s["service"] == "unknown" or not s.get("host"))]
+        # D6 (architecture.md 6.1): write the discovered service into the LIVE graph HERE, at
+        # fingerprint time, UNTESTED — before its pack runs.
+        #
+        # MEASURED before this: with ssh:22 and redis:6379 discovered, the graph held ZERO service
+        # nodes at dispatch and `untested("service")` was [] — so the `run_service_pack` tier in
+        # `AssetGraph.next_best_actions` (asset_graph.py:300, which reads exactly that set) could
+        # never fire. The audit reads the cause as `tools.py:2810-2812` marking the node tested "two
+        # lines later"; the sharper reading is that the block sits at the END of `_run_service_pack`,
+        # AFTER the pack has executed. The node was not marked tested too early — it was CREATED too
+        # late, and so never existed in the state the planner consults.
+        #
+        # `tools.py` needs no change and is not touched: `observe` is idempotent by (kind, key) and
+        # its merge branch never clears `tested`, so the existing observe + mark_tested at the end of
+        # `_run_service_pack` correctly transitions THIS node to tested when the pack completes. A
+        # pack that is gated off, errors, or never runs now leaves an untested service behind — which
+        # is precisely the fact the tier exists to report.
+        #
+        # `enables` comes from the same `service_router.route` the report-time
+        # `build_from_engagement` uses, so the tier's impact ranking matches the report instead of
+        # falling back to the default.
+        try:
+            for _r in _sr.route(_targets):
+                self.tools.graph.observe(
+                    "service", "%s:%s" % (_r.get("host", ""), _r.get("port")),
+                    label=_r["service"], source="fingerprint", scope_asset=_r.get("host", ""),
+                    enables=sorted({e for c in _r["checks"] for e in c.get("enables", [])}),
+                    service=_r["service"], port=_r.get("port"))
+        except Exception as _e:
+            self.tools._swallow(_e, "service_graph_seed", host)
         _sem = _aio.Semaphore(6)
 
         async def _run_pack(s):
