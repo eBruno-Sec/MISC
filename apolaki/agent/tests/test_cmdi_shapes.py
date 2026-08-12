@@ -105,6 +105,75 @@ def test_append_shape_is_unchanged():
     assert cmdi.EXPECTED not in "".join(i["payload"] for i in items)
 
 
+# ── WIRING: the shape must be REACHED by the engine, not merely defined ──
+# A registered payload that no code path sends is an island, and a guard that checks the declaration
+# instead of the fact passes exactly the case it exists to catch. These drive the real engine.
+def _run_form_cmdi(responder, fields=("host",)):
+    """Drive the shipping _run_form_cmdi against a stubbed transport. `responder(value)` is the
+    app: it receives the value the engine put in the field and returns the response body."""
+    import asyncio
+    from urllib.parse import parse_qsl
+
+    import scope as scope_mod
+    from tools import ToolRegistry
+
+    eng = scope_mod.ScopeEngine()
+    eng.load_manual(["host.local"], [], "P")
+    reg = ToolRegistry(eng, mission_id=None, lab_mode=True)
+    sent = []
+
+    async def fake_http(url, method="GET", headers=None, body="", capture=False, **kw):
+        val = dict(parse_qsl(body or "", keep_blank_values=True)).get(fields[0], "")
+        if headers:
+            for k, v in headers.items():
+                if k.lower() not in ("content-type",):
+                    val = v
+        sent.append(val)
+        return {"status": 200, "body": responder(val), "error": "", "final_url": url}
+
+    reg._http = fake_http
+    res = asyncio.new_event_loop().run_until_complete(
+        reg._run_form_cmdi({"url": "http://host.local/exec", "fields": list(fields)}))
+    return res, sent
+
+
+def test_engine_reaches_the_argv_shape_on_a_sink_no_separator_can_touch():
+    """An argv sink: it runs argv[0] and echoes anything it cannot run.
+
+    The append payloads reflect and must NOT confirm; the bare argv payload must."""
+    def argv_sink(value):
+        if value.strip() == "id":
+            return "<p>uid=0(root) gid=0(root) groups=0(root)</p>"
+        return "<p>you sent: %s</p>" % value            # pure reflection for everything else
+
+    res, sent = _run_form_cmdi(argv_sink)
+    assert "id" in sent, "engine never sent a bare argv payload: the shape is an island"
+    assert res.findings, "argv sink went undetected"
+    f = res.findings[0]
+    assert f["family"] == "cmdi" and f["confidence"] == "confirmed"
+    assert "argv" in " ".join(f["tags"])
+
+
+def test_engine_does_not_confirm_on_an_endpoint_that_only_reflects():
+    """THE negative control for the whole shape. An app that echoes every value, including the bare
+    commands, executes nothing -- and must produce no finding."""
+    res, sent = _run_form_cmdi(lambda value: "<p>you sent: %s</p>" % value)
+    assert "id" in sent, "control is vacuous unless the argv payload was actually sent"
+    assert res.findings == [], "confirmed on reflection alone: %r" % (res.findings,)
+
+
+def test_engine_still_confirms_the_shell_sink_through_the_append_shape():
+    """Additive, not a replacement: a real shell sink must still be caught by the old shape."""
+    def shell_sink(value):
+        if "echo" in value and "$((" in value:
+            return "<p>%s</p>" % cmdi.EXPECTED       # the shell computed the product
+        return "<p>you sent: %s</p>" % value
+
+    res, _ = _run_form_cmdi(shell_sink)
+    assert res.findings and res.findings[0]["family"] == "cmdi"
+    assert "argv" not in " ".join(res.findings[0]["tags"])
+
+
 def test_findings_name_the_shape_that_proved_it():
     f = cmdi.argv_output_finding("https://t/p", "host", "id",
                                  {"kind": "command-output", "match": "uid=0(root) gid=0"})

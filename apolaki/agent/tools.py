@@ -7147,6 +7147,22 @@ class ToolRegistry:
                         break
                 if confirmed:
                     continue
+                # 1b) ARGV SINK: replace the value instead of appending to it. Where the launcher is
+                # handed the value as the command line itself, it is tokenised into argv and run with
+                # no shell, so every separator payload above is inert by construction.
+                for item in cmdi.argv_payloads():
+                    r, _ = await get(c, xt.set_param(url, p, item["payload"]))
+                    if r is None:
+                        continue
+                    hit = cmdi.analyze_output(base_body, r.text)
+                    if hit:
+                        _req = xt.set_param(url, p, item["payload"])
+                        findings.append(self._attach_poc(
+                            cmdi.argv_output_finding(url, p, item["payload"], hit), _req, r))
+                        ev.append(_req); confirmed = True
+                        break
+                if confirmed:
+                    continue
                 # 2) time-based blind
                 for item in cmdi.time_payloads(orig, seconds):
                     _, ctl = await get(c, xt.set_param(url, p, item["control"]))
@@ -7243,6 +7259,24 @@ class ToolRegistry:
                         findings.append(f); done = True; break
                 if done:
                     break
+                # ARGV SINK. The payloads above all APPEND to the observed value, which only works
+                # where a shell parses it. A launcher handed the value as the command line itself
+                # (Runtime.exec(String), execve) tokenises it into argv and runs it with no shell, so
+                # a separator is just another argv word and the append shape can never fire. There
+                # the value must be REPLACED by a bare command, and the proof is that command's own
+                # output -- absent from the payload, so a reflecting endpoint still cannot confirm.
+                for item in cmdi.argv_payloads():
+                    r = await self._http(action, "POST", headers, body(field, item["payload"]), capture=False)
+                    if r.get("error"):
+                        continue
+                    hit = cmdi.analyze_output(base_body, r.get("body", ""))
+                    if hit:
+                        f = cmdi.argv_output_finding(action, field, item["payload"], hit)
+                        f["target"] = action
+                        await self._http(action, "POST", headers, body(field, item["payload"]), capture=True)
+                        findings.append(f); done = True; break
+                if done:
+                    break
             # BLIND form cmdi. A sink that runs the command but returns nothing to echo is invisible to
             # the output oracle above, and that is the common shape in the wild -- the injection succeeds
             # and the response never changes. Time is the only remaining signal.
@@ -7293,6 +7327,20 @@ class ToolRegistry:
                             _hit = cmdi.analyze_output(_hbody, _r.get("body", ""))
                             if _hit:
                                 f = cmdi.output_finding(_htgt, "header:" + _hn, item["payload"], _hit)
+                                f["target"] = _htgt
+                                findings.append(f)
+                                break
+                        if findings:
+                            break
+                        # Same argv-sink shape on the header carrier: a header value handed straight
+                        # to a process launcher is the identical sink, reached by a different door.
+                        for item in cmdi.argv_payloads():
+                            _r = await self._http(_htgt, "POST", {_hn: item["payload"]}, "", capture=False)
+                            if _r.get("error"):
+                                continue
+                            _hit = cmdi.analyze_output(_hbody, _r.get("body", ""))
+                            if _hit:
+                                f = cmdi.argv_output_finding(_htgt, "header:" + _hn, item["payload"], _hit)
                                 f["target"] = _htgt
                                 findings.append(f)
                                 break
