@@ -105,8 +105,27 @@ report says so.
 
 ## Negative controls [DONE - all green, all failed before the code existed]
 
-Written first. Every one of them failed with `AttributeError` before the implementation existed,
-which is the weakest possible way to fail first but an unambiguous one.
+Written first, and re-verified against the pre-fix code afterwards: `codereview.py` and
+`codeintel.py` restored from `3a62c04^` with the new test file in place, all seven controls run.
+
+```
+test_python_sha256_and_sha512_are_not_flagged                       FAILS (pre-fix)
+test_python_usedforsecurity_false_is_not_flagged                    FAILS (pre-fix)
+test_python_secrets_and_os_urandom_are_not_flagged                  FAILS (pre-fix)
+test_python_md5_named_only_in_a_comment_or_string_is_not_flagged    FAILS (pre-fix)
+test_python_random_named_only_in_a_comment_or_string_is_not_flagged FAILS (pre-fix)
+test_python_a_user_defined_md5_is_not_the_stdlib_call               FAILS (pre-fix)
+test_python_system_random_is_a_csprng_not_a_weak_generator          FAILS (pre-fix)
+```
+
+**Be precise about what that proves.** Every one of them fails with
+`AttributeError: module 'codereview' has no attribute 'scan_python_hash'`. That is an unambiguous
+fail-first, and it is the WEAKEST useful form of one: it shows the test is new, not that its
+assertion discriminates. A test asserting `1 == 2` would fail the same way.
+
+The evidence that these assertions actually catch something is the MUTATION TEST below, which puts
+a plausible implementation in place and shows each control still kills it. A negative control is
+only worth the mutant it survives.
 
 | # | control | test |
 |---|---|---|
