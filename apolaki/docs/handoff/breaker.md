@@ -858,3 +858,172 @@ its own evidence correctly, which is rare enough to record.
   share a line with it. As written it reports an audit timestamp as CWE-337.
 - Defect 3: hoist the lookbehind into each alternative of `_PY_CLOCK_SEED`.
 
+---
+
+# TARGET 2 - the Java hybrid 61.1%. VERDICT: the FIGURES are CONFIRMED; the REPORT SURFACE is
+# REJECTED, and one prose claim in `measure.md` is REJECTED (see the lead finding at the top).
+
+The four figures and all five seals reproduce - recorded in full at the top of this session. What
+follows is the part Target 2 actually asked about: can a reader conflate them, and is the
+code-assisted contribution labelled SAST everywhere it appears.
+
+## 2a. REJECTED - the scorer's own output contradicts itself on a hybrid run
+
+`agent/owasp_bench.py`, `report()` lines 532-540, prints these annotations UNCONDITIONALLY whenever
+`suite_macro is not None`, with no reference to the lane. On the HYBRID Java run the operator sees,
+in one uninterrupted block:
+
+```
+!! MIXED LANES IN ONE RUN (HYBRID RESULT): code-assisted, dast
+   ...
+   printed next to the DAST-only figure. It may NEVER be compared against a published
+   DAST score (ZAP 17.99%, best-published 26%) -- those tools were never given source.
+
+CODE-ASSISTED (SAST) LANE - findings are SOURCE-DERIVED from operator-supplied code.
+   This is not a DAST result. Do NOT fold it into a DAST figure and do NOT compare it
+   against a published DAST score ...
+
+   [ the table ]
+
+OFFICIAL SUITE SCORE (macro over ALL 11 suite categories, unmeasured = 0):  61.1%
+   ^ comparable to a PUBLISHED tool score (official CWE-matching convention: ...)
+
+PRODUCT SUITE SCORE (same TPR; every confirmed finding on a clean case is an FP):  60.9%
+   ^ THIS is the number to quote when the question is 'how good is Apolaki'
+```
+
+**"It may NEVER be compared against a published DAST score" and "^ comparable to a PUBLISHED tool
+score" are eleven lines apart, about the same number.** The second annotation is also the one that
+sits directly under the figure, which is the line that survives a copy/paste - the exact failure
+mode `_lane_banner`'s own docstring says it exists to prevent ("A percentage travels; the sentence
+explaining what produced it does not").
+
+`PRODUCT SUITE SCORE ... ^ THIS is the number to quote when the question is 'how good is Apolaki'`
+has the same problem: on a hybrid run it tells the reader to quote 60.9% as the product number with
+no lane qualifier attached to that sentence.
+
+The banner is a real improvement and it is doing most of the work. But a banner that is contradicted
+by the caption under the number is check 7 (all surfaces agree) failing inside a single command's
+output. **REJECTED.** `agent/owasp_bench.py` is not my file; the fix is to make lines 535-536 and
+540 lane-aware - on a run whose `lanes` is anything but `["dast"]`, the "comparable to a PUBLISHED
+tool score" claim is false and must not print.
+
+## 2b. Is the code-assisted contribution labelled SAST everywhere it appears? Mostly YES
+
+MEASURED sweep of every occurrence of 61.1 / 60.9 / 38.8 in `docs/`:
+
+| surface | labelled? |
+|---|---|
+| `docs/handoff/measure.md:22-23` | YES - "HYBRID (DAST + code-assisted)" in the row |
+| `docs/handoff/code_assisted.md:24-25,329` | YES - "HYBRID (DAST + code-assisted)" |
+| `docs/LEDGERS.md:89-92` | YES - and carries the never-compare sentence |
+| `docs/STATUS.md:14` | YES - "hybrid (DAST + code-assisted SAST)" |
+| `docs/BENCHMARK_MATRIX.md:94-95` | WEAK - "DAST 41.7% official / hybrid 61.1%". The word "hybrid" is present; "SAST"/"code-assisted" is only in the neighbouring clause ("2132 DAST + 975 code-assisted") |
+| every finding object | YES - `lane: code-assisted`, `provenance: source-derived`, `analysis: static-call-site`, `tags: ["sast","code-assisted"]` (verified by constructing one) |
+| the scorer's stdout | banner YES, caption under the number NO - see 2a |
+
+## 2c. FOUND - `docs/STATUS.md` still shows the RETRACTED Java numbers
+
+The Java hybrid does not appear on the scoreboard at all, and the DAST row is stale:
+
+```
+docs/STATUS.md:12  OWASP Benchmark Java v1.2 - product claim   34.9%  ...  FPR 2.1%
+docs/STATUS.md:13  OWASP Benchmark Java v1.2 - harness, official conventio 41.3%  FPR 0.0%
+```
+
+34.9% / 2.1% is the figure the pathtraver retraction produced, superseded by `75168e5`. The measured
+and now independently verified values are **41.7% official / 41.5% product DAST-only** and
+**61.1% / 60.9% hybrid, FPR 0.0%**. Neither appears in `STATUS.md`, and `grep` finds no 41.7 / 61.1
+in `LEDGERS.md` either - so the file's own tie-break rule ("if they disagree, the ledger wins") does
+not help, because the ledger has not been updated for Java at all. The Python rows ARE current.
+
+Coordinator: both files are yours. This is understated, not overstated - the board shows Java worse
+and dirtier than the sealed measurement says it is.
+
+---
+
+# TARGET 3 - anti-idle. Two results: one earlier REJECT re-confirmed and made worse, one
+# RESOLVED entry I attacked and could NOT break.
+
+## 3a. Session 2's `poc_bundle` REJECT is STILL LIVE, and the code-assisted lane makes it worse
+
+Session 2 found that `837b1f0` gated `report.proof_and_retest` but not `poc_bundle.build()`. Still
+true, and the code-assisted lane supplies a harder instance of it. MEASURED on a real finding built
+by `codereview.review_python`:
+
+```
+finding: weak_hash / CWE-328 / confidence=confirmed / lane=code-assisted
+         no 'request' key, no 'response' key
+
+report.control_ran(f)                    -> False
+report.proof_and_retest(f)['negative_control']
+   -> "NO NEGATIVE CONTROL WAS RECORDED for this finding. ..."          HONEST
+
+poc_bundle.build(f)['confirmation']['negative_control']
+   -> "A negative-control request WITHOUT the trigger does NOT reproduce the confirming
+       signal (differential measured over a stable baseline)."          NOT GATED
+poc_bundle.build(f)['confirmation']['evidence_requirements']
+   -> ["...", "Negative control captured showing the confirming signal is ABSENT without
+       the trigger.", "Baseline + mutation request/response retained for deterministic replay."]
+```
+
+This is worse than the SQLi instance session 2 recorded. There, the claim was merely unproven. Here
+it is **categorically inapplicable**: a static call-site analysis has no request, no mutation, no
+baseline and no differential, so "a negative-control request ... differential measured over a stable
+baseline" and "baseline + mutation request/response retained for deterministic replay" describe an
+experiment that could not exist for this finding class. The dossier is the visible moat (`6d99cab`),
+it is served over the API (`main.py` `poc_bundle_export`) and embedded by `report.py`.
+
+Same one-line fix session 2 named: `report.control_ran` is importable and pure. **REJECTED, second
+time, owner of `agent/poc_bundle.py`.**
+
+Note the honest half: the report gate itself DOES hold for this finding shape, which is a real
+result for `837b1f0` - a finding class it was never tested against still gates correctly.
+
+## 3b. S11c / S11d attacked on an angle V4 did not cover - COULD NOT BREAK
+
+V4 already recorded the hostless-URL hole in these two, so I attacked the other side: **scope
+escape**. Removing S11c's `startswith("http") or startswith("/")` guard means `urljoin` now resolves
+protocol-relative links, and S11d's parsers resolve attacker-controlled robots.txt/sitemap content
+against a caller-supplied base. Both should be able to walk off-origin.
+
+The parsers do emit off-origin URLs. MEASURED, base `https://target.example:8443/app/`:
+
+```
+parse_robots("Disallow: https://evil.example/admin\nDisallow: //evil.example/x\nDisallow: /real/\n
+              Sitemap: https://evil.example/sitemap.xml")
+  urls     -> ['https://evil.example/admin', 'https://evil.example/x',
+               'https://target.example:8443/real/']       same_origin: [False, False, True]
+  sitemaps -> ['https://evil.example/sitemap.xml']
+
+parse_sitemap("<loc>https://evil.example/p</loc><loc>/ok/p</loc>")
+  urls -> ['https://evil.example/p', 'https://target.example:8443/ok/p']
+
+urljoin(base, '//evil.example/x') -> 'https://evil.example/x'
+   startswith("http") = True   <- passes the S11c replacement guard
+   same_origin        = False
+```
+
+**But it never reaches the network.** Two independent downstream guards catch every one:
+
+```
+agent.py:1661   _new = [u for u in _got.get("urls", []) if self.scope.validate(u)[0]]
+crawl.bfs_frontier(['https://evil.example/x', 'https://target.example:8443/app/ok'], base, set())
+   -> ['https://target.example:8443/app/ok']        the off-origin candidate is dropped
+```
+
+And a robots.txt that is really an HTML error page - the common 200-with-HTML case - yields **0**
+URLs, so the parser does not invent a surface either.
+
+**Verdict: S11c and S11d hold. I tried to break them and could not.** Recorded because a negative
+control that was never written is not the same as a fix that does not work, and this one works. The
+residual is latent and identical in shape to V4's: neither parser asserts a host itself, so both are
+one new caller away from being a live scope escape. The predicate V4 recommended
+(`urlparse(u).netloc` non-empty) does NOT cover this case - `https://evil.example/x` has a netloc.
+The parsers need `same_origin(u, base)`, not a netloc check.
+
+One capability gap noticed in passing, MEASURED: `agent.py:1661` reads `_got["urls"]` and never
+reads `_got["sitemaps"]`, so a `Sitemap:` directive in robots.txt is parsed and discarded. Only
+`/sitemap.xml` at the root is ever fetched.
+
+
