@@ -413,3 +413,80 @@ def test_xss_header_carrier_declines_a_correctly_encoded_reflection():
 def test_xss_header_carrier_declines_an_endpoint_that_reflects_nothing():
     res = _run_xss(lambda headers, _u: "<html><body>static</body></html>", page=_HDR_PAGE)
     assert res.findings == []
+
+
+# ── COOKIE CARRIER: the fourth door ──────────────────────────────
+def _run_form_cmdi_cookies(responder, fields=("host",), url="http://host.local/exec"):
+    """Drive _run_form_cmdi with a stub that reads the COOKIE header rather than the body."""
+    import asyncio
+
+    from urllib.parse import urlparse as _up
+    reg = _new_reg(_up(url).hostname or "host.local")
+    sent = []
+
+    async def fake_http(u, method="GET", headers=None, body="", capture=False, **kw):
+        cookie = (headers or {}).get("Cookie", "")
+        sent.append(cookie)
+        return {"status": 200, "body": responder(cookie), "error": "", "final_url": u}
+
+    reg._http = fake_http
+    res = asyncio.new_event_loop().run_until_complete(
+        reg._run_form_cmdi({"url": url, "fields": list(fields)}))
+    return res, sent
+
+
+def _cookie_val(cookie, name="host"):
+    from urllib.parse import unquote
+    for part in (cookie or "").split(";"):
+        k, _, v = part.strip().partition("=")
+        if k == name:
+            return unquote(v)
+    return ""
+
+
+def test_cmdi_reaches_a_sink_fed_only_by_a_cookie():
+    """The gap: query, body and header all carry the payload somewhere the handler never reads, so
+    the command runs on the app's own value and the endpoint reports clean."""
+    def cookie_sink(cookie):
+        if _cookie_val(cookie).strip() == "id":
+            return "<p>uid=0(root) gid=0(root) groups=0(root)</p>"
+        return "<p>ok</p>"
+
+    res, sent = _run_form_cmdi_cookies(cookie_sink)
+    assert any("host=" in c for c in sent), "engine never sent a cookie carrier probe"
+    assert res.findings, "cookie-fed command injection went undetected"
+    f = res.findings[0]
+    assert f["family"] == "cmdi" and f["confidence"] == "confirmed"
+    assert "cookie:" in f["title"], f["title"]
+
+
+def test_cookie_probe_always_differs_from_its_baseline():
+    """The control the unified set_param contract exists for, applied to a NEW carrier: a probe whose
+    request is identical to the baseline has a zero differential and reports clean whatever it does."""
+    res, sent = _run_form_cmdi_cookies(lambda cookie: "<p>ok</p>")
+    cookie_probes = [c for c in sent if "host=" in c]
+    assert cookie_probes, "no cookie probe was sent"
+    baseline = cookie_probes[0]
+    assert any(c != baseline for c in cookie_probes[1:]), (
+        "every cookie probe equalled the baseline request: the probe IS the baseline")
+
+
+def test_cookie_carrier_does_not_confirm_on_an_endpoint_that_only_echoes():
+    """A carrier that makes an endpoint ECHO is not a carrier that makes it EXECUTE."""
+    res, sent = _run_form_cmdi_cookies(lambda cookie: "<p>you sent: %s</p>" % _cookie_val(cookie))
+    assert any("host=" in c for c in sent), "control is vacuous unless a cookie probe was sent"
+    assert res.findings == [], "confirmed on cookie reflection alone: %r" % (res.findings,)
+
+
+def test_cookie_carrier_runs_only_after_the_cheaper_carriers_fail():
+    """Bounded work: a form sink caught by the body carrier must not also pay for cookie probes."""
+    state = {"n": 0}
+
+    def body_sink(_cookie):
+        state["n"] += 1
+        # first call is the baseline; the marker must be ABSENT there or the differential is dead
+        return "<p>ok</p>" if state["n"] == 1 else "<p>%s</p>" % cmdi.EXPECTED
+
+    res, sent = _run_form_cmdi_cookies(body_sink)
+    assert res.findings
+    assert not any("host=" in c for c in sent), "cookie probes sent despite an earlier confirmation"

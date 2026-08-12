@@ -18,7 +18,7 @@ import tempfile
 import xml.etree.ElementTree as ET
 from dataclasses import dataclass, field
 from typing import Optional
-from urllib.parse import urlparse, urlunparse, urljoin
+from urllib.parse import urlparse, urlunparse, urljoin, quote
 
 import authz_tool as authz
 import db
@@ -7424,7 +7424,7 @@ class ToolRegistry:
             try:
                 import header_vector as _hv
                 _pg = await self._http(url, "GET", capture=False)
-                _hnames = _hv.discover_header_names(_pg.get("body", "") or "")[:2]
+                _hnames = _hv.discover_header_names(_pg.get("body", "") or "")[:self._ni(4, 8, 12)]
                 _htgt = forms[0][0] if forms else url
                 if _hnames and self.scope.validate(_htgt)[0]:
                     _hbase = await self._http(_htgt, "POST", {_hnames[0]: "127.0.0.1"}, "", capture=False)
@@ -7470,6 +7470,56 @@ class ToolRegistry:
                                     f["target"] = _htgt
                                     findings.append(f)
                                     break
+                        if findings:
+                            break
+            except Exception:
+                pass
+        # COOKIE CARRIER. The fourth door, and the one this engine never had. An app that shells out
+        # with a value taken from a cookie is reached by none of the above: the query string, the form
+        # body and the request headers all carry our payload somewhere the handler never reads, so the
+        # command runs on the app's own value and the endpoint reports clean.
+        #
+        # The candidate NAMES are the ones the page already reveals -- its form fields and its declared
+        # header names. That is the general form of this whole ticket: the engines were discovering
+        # input names correctly and then delivering them through one carrier only. A name worth probing
+        # in a form field is worth probing as a cookie.
+        if not findings:
+            try:
+                _ctgt = forms[0][0] if forms else url
+                _cnames, _seen_c = [], set()
+                for _, _flds in forms:
+                    for _f in _flds:
+                        if _f and _f.lower() not in _SKIP and _f.lower() not in _seen_c:
+                            _seen_c.add(_f.lower())
+                            _cnames.append(_f)
+                for _hn in (locals().get("_hnames") or []):
+                    if _hn.lower() not in _seen_c:
+                        _seen_c.add(_hn.lower())
+                        _cnames.append(_hn)
+                _cnames = _cnames[:self._ni(4, 8, 12)]
+                if _cnames and self.scope.validate(_ctgt)[0]:
+                    def _ck(name, val):
+                        return {"Cookie": "%s=%s" % (name, quote(val, safe=""))}
+                    _cbase = await self._http(_ctgt, "POST", _ck(_cnames[0], "127.0.0.1"), "",
+                                              capture=False)
+                    _cbody = _cbase.get("body", "")
+                    for _cn in _cnames:
+                        # Both shapes, output only -- the blind shapes stay on the budgeted path above
+                        # so widening the carrier cannot widen the sleep count.
+                        for item in cmdi.output_payloads("127.0.0.1") + cmdi.argv_payloads():
+                            _r = await self._http(_ctgt, "POST", _ck(_cn, item["payload"]), "",
+                                                  capture=False)
+                            if _r.get("error"):
+                                continue
+                            _hit = cmdi.analyze_output(_cbody, _r.get("body", ""))
+                            if not _hit:
+                                continue
+                            _mk = (cmdi.argv_output_finding if item.get("shape") == "argv"
+                                   else cmdi.output_finding)
+                            f = _mk(_ctgt, "cookie:" + _cn, item["payload"], _hit)
+                            f["target"] = _ctgt
+                            findings.append(f)
+                            break
                         if findings:
                             break
             except Exception:
