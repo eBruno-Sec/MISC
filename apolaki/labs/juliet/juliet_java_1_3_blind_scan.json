@@ -1,0 +1,999 @@
+{
+  "environment_failures": [],
+  "git_sha": "bcd3e23186fb0e76a2ca64edbb05f96a1e619a8e",
+  "lane": "code-assisted (SAST)",
+  "per_class": {
+    "CWE-327": {
+      "environment_failures": 0,
+      "files": 38,
+      "findings": 166,
+      "measured": 38
+    },
+    "CWE-328": {
+      "environment_failures": 0,
+      "files": 55,
+      "findings": 51,
+      "measured": 55
+    },
+    "CWE-338": {
+      "environment_failures": 0,
+      "files": 38,
+      "findings": 34,
+      "measured": 38
+    }
+  },
+  "per_entry": [
+    {
+      "case_id": "source-00e6da94840313662b4bb1de",
+      "category": "CWE-338",
+      "finding_count": 1,
+      "measurement_status": "MEASURED",
+      "source_sha256": "dc87cf900aed11cf6870b3095c2705ecc887a07ae08507766f21e29c30991f73"
+    },
+    {
+      "case_id": "source-01de0d77fadebe7a417f157f",
+      "category": "CWE-327",
+      "finding_count": 5,
+      "measurement_status": "MEASURED",
+      "source_sha256": "3e3b688130922b8d9b465ec974db7c5395b5241f0f9df941db7fa94a6fc86038"
+    },
+    {
+      "case_id": "source-023a2bf51314c810c2766089",
+      "category": "CWE-328",
+      "finding_count": 1,
+      "measurement_status": "MEASURED",
+      "source_sha256": "0353efeefa93f176cd4b70f5a2e3b72d005b2fa1037607cf6ac416a14466a9fc"
+    },
+    {
+      "case_id": "source-02656e687eb498247dd79076",
+      "category": "CWE-328",
+      "finding_count": 1,
+      "measurement_status": "MEASURED",
+      "source_sha256": "d4600dc7e433ce284f6b557a52194db82593f5b93a01f3de4903e1d7ba354ac3"
+    },
+    {
+      "case_id": "source-035956d1d8a023bff3c464f2",
+      "category": "CWE-338",
+      "finding_count": 1,
+      "measurement_status": "MEASURED",
+      "source_sha256": "5ed821c64e741b774767841bda32f919a1673369e60343dac1436e011481b5f0"
+    },
+    {
+      "case_id": "source-03a2794c867f1dacac0fe67e",
+      "category": "CWE-327",
+      "finding_count": 5,
+      "measurement_status": "MEASURED",
+      "source_sha256": "1d4cd2b405a324fb8b83ee3f923a4b08409b67c7b983a5636de9c5d4f83b4fb8"
+    },
+    {
+      "case_id": "source-03ff6278a67bd62fcc7bc18d",
+      "category": "CWE-338",
+      "finding_count": 1,
+      "measurement_status": "MEASURED",
+      "source_sha256": "e2fe9c71fc39c1a852373675f434041ef423651b1e3a5ba9af5e637755cd631d"
+    },
+    {
+      "case_id": "source-04086c0ff75446c2d49e314b",
+      "category": "CWE-328",
+      "finding_count": 1,
+      "measurement_status": "MEASURED",
+      "source_sha256": "314bf4553423e265d646caba7f67482bf826aabed2057c1d0bf95dad2631a7bd"
+    },
+    {
+      "case_id": "source-09bda4b8b2c38f022b1fea28",
+      "category": "CWE-338",
+      "finding_count": 0,
+      "measurement_status": "MEASURED",
+      "source_sha256": "b52c50060b1118d09265d3384472e1499391a31dd573e0233ceaa3a54b36142e"
+    },
+    {
+      "case_id": "source-0ca1c723c79f8e3e1ca2ecca",
+      "category": "CWE-328",
+      "finding_count": 0,
+      "measurement_status": "MEASURED",
+      "source_sha256": "bfe86e059b5db215206c859ee0fb3ed91c78022d90e1ffbbfaca15bb542725e8"
+    },
+    {
+      "case_id": "source-0d94dc17a71db69fbefc1637",
+      "category": "CWE-338",
+      "finding_count": 1,
+      "measurement_status": "MEASURED",
+      "source_sha256": "61ed411a122e39dc75f7149fa0802ad8401312773440b01b159428f5ad1527bf"
+    },
+    {
+      "case_id": "source-0edf7ce667049dae955fc22d",
+      "category": "CWE-328",
+      "finding_count": 1,
+      "measurement_status": "MEASURED",
+      "source_sha256": "34ecc9c02e5578676db312bd0a38d40cd3860bf7446769c7d356a8d00c8d6f4d"
+    },
+    {
+      "case_id": "source-1213019f05bf5470d7b83880",
+      "category": "CWE-328",
+      "finding_count": 1,
+      "measurement_status": "MEASURED",
+      "source_sha256": "417b67d80c9d8d5c731d11010060add160e9b000ecce841f72803f43fd5a5d52"
+    },
+    {
+      "case_id": "source-13117030117bee64cee31bfb",
+      "category": "CWE-328",
+      "finding_count": 1,
+      "measurement_status": "MEASURED",
+      "source_sha256": "3a192a75abbe13de24a33c4a9c190f52caaa5af390018db5d22f06b68b6aa5fe"
+    },
+    {
+      "case_id": "source-14d1b27f3c46ecce559a6a39",
+      "category": "CWE-328",
+      "finding_count": 1,
+      "measurement_status": "MEASURED",
+      "source_sha256": "fddcfb997df1d4f8738a5ebd90cd20eb8154b3197b4e55c8fe58968bbbc8e3f0"
+    },
+    {
+      "case_id": "source-14ec66e10fc67777f6bd17a5",
+      "category": "CWE-328",
+      "finding_count": 1,
+      "measurement_status": "MEASURED",
+      "source_sha256": "0a672edd19e3294a98d0e2ce0bd65553951a49ed55bf185b778e6bd638f64e7f"
+    },
+    {
+      "case_id": "source-15d2349da54f785e5c1b3960",
+      "category": "CWE-338",
+      "finding_count": 0,
+      "measurement_status": "MEASURED",
+      "source_sha256": "a11387f5cf4d35fd3cb52573bc10f9bbe590c4ac894e5d762c65bc3818e4e62c"
+    },
+    {
+      "case_id": "source-18797ef29a322e8d2338011b",
+      "category": "CWE-328",
+      "finding_count": 1,
+      "measurement_status": "MEASURED",
+      "source_sha256": "90f8c669e16015c0c65154e3edd41d647ee361fda356dc062b8b7d40e9eb01b2"
+    },
+    {
+      "case_id": "source-19dbc556e594de04c13301c5",
+      "category": "CWE-328",
+      "finding_count": 1,
+      "measurement_status": "MEASURED",
+      "source_sha256": "6fcc7ae771bb31cdd4c9e53227e36e5ba5d4de1a9a50b4d6cbfbb45007e15b2e"
+    },
+    {
+      "case_id": "source-1d416e68319728014ef06773",
+      "category": "CWE-338",
+      "finding_count": 1,
+      "measurement_status": "MEASURED",
+      "source_sha256": "86b9f1f5f7c376da47649e9bf9252da2d55ef295fe6396882d4df0f946ec9a1a"
+    },
+    {
+      "case_id": "source-1efab7e2397bc6d9ea58e91a",
+      "category": "CWE-328",
+      "finding_count": 1,
+      "measurement_status": "MEASURED",
+      "source_sha256": "22ed15e8d851554dd354ecbf23b6bb388ae61436fbebe2727f749ec2625b050b"
+    },
+    {
+      "case_id": "source-1f2c92dae4825e2fd494d7cc",
+      "category": "CWE-327",
+      "finding_count": 6,
+      "measurement_status": "MEASURED",
+      "source_sha256": "23353bf4d334ca6a8fe4a161077eda7c19965169fa2b665194467dc64690f936"
+    },
+    {
+      "case_id": "source-227a8a7daf020db6a0837e2c",
+      "category": "CWE-338",
+      "finding_count": 1,
+      "measurement_status": "MEASURED",
+      "source_sha256": "b230a36bf03dc912b2848f264caefcdbcb1d4eafbed00d2921bcf804782d6337"
+    },
+    {
+      "case_id": "source-288e202b6517b1160985e960",
+      "category": "CWE-338",
+      "finding_count": 1,
+      "measurement_status": "MEASURED",
+      "source_sha256": "8f962ff050f9facc7fadc97690c46015dd2b62b77e4564cc5637ecc000e7a294"
+    },
+    {
+      "case_id": "source-2d1823b012a124985315b264",
+      "category": "CWE-338",
+      "finding_count": 1,
+      "measurement_status": "MEASURED",
+      "source_sha256": "ac09cbcd1b32674e118e33e59b0a840f0c191c49d69df54e2f9d846808651766"
+    },
+    {
+      "case_id": "source-2fccb6ea5d7003524deeab48",
+      "category": "CWE-327",
+      "finding_count": 4,
+      "measurement_status": "MEASURED",
+      "source_sha256": "2a1a80b76a9c4f41625d2a4015a1ad139f3d90e506028f3200488ed7fc67960e"
+    },
+    {
+      "case_id": "source-310d65a6dee5471fe3ec8269",
+      "category": "CWE-338",
+      "finding_count": 1,
+      "measurement_status": "MEASURED",
+      "source_sha256": "69413c89c9ba58f2bb84a57de0c01e525a8cf52beb10e8db0381c7b2cb2cdfde"
+    },
+    {
+      "case_id": "source-31716276947635eb0aa36a1f",
+      "category": "CWE-338",
+      "finding_count": 1,
+      "measurement_status": "MEASURED",
+      "source_sha256": "0964715cfff559592c90d69166668a01edd39ee7742738be279cbd95931f3c6b"
+    },
+    {
+      "case_id": "source-31d6cb807a38c946f9758dc7",
+      "category": "CWE-327",
+      "finding_count": 5,
+      "measurement_status": "MEASURED",
+      "source_sha256": "1dbf0b89f055c3ac9d03e547f1546bd22e73f73d4dc7340661da14b03e8ea06b"
+    },
+    {
+      "case_id": "source-3235f9d9826a1dcb4a6d9858",
+      "category": "CWE-328",
+      "finding_count": 1,
+      "measurement_status": "MEASURED",
+      "source_sha256": "e46208be4af970bd1d8d83a6c59111ade46dfc079a03b9365adeb3868cd6c6ef"
+    },
+    {
+      "case_id": "source-32b88ce789ffd499206b51a1",
+      "category": "CWE-327",
+      "finding_count": 5,
+      "measurement_status": "MEASURED",
+      "source_sha256": "2547f05483bd09e4a52e7564d3bbae9e1e3fd3989a5387d6c54d0ea9af012e33"
+    },
+    {
+      "case_id": "source-3465c9011d1cdb639198e245",
+      "category": "CWE-327",
+      "finding_count": 5,
+      "measurement_status": "MEASURED",
+      "source_sha256": "66304d3fa7b97898c92bdba8ffc08c7a5c7c12ca39f78c897fd2f2beb2be46b2"
+    },
+    {
+      "case_id": "source-359c1fcbaa3367326d8fffd3",
+      "category": "CWE-327",
+      "finding_count": 5,
+      "measurement_status": "MEASURED",
+      "source_sha256": "748a312567cf447b51cebc82c050c63c4f676485767184bdf75394fb651f5a64"
+    },
+    {
+      "case_id": "source-3a2509e178c37f849c2e6269",
+      "category": "CWE-338",
+      "finding_count": 1,
+      "measurement_status": "MEASURED",
+      "source_sha256": "6cd4c3232555581d6378524d87c0a5d9742ef3f71ad382e7736e18483bf0fa16"
+    },
+    {
+      "case_id": "source-3a751b8cfaf04e950b1cdf7c",
+      "category": "CWE-328",
+      "finding_count": 1,
+      "measurement_status": "MEASURED",
+      "source_sha256": "3bbbdac14921404b2e420474ef49e34d40a255feccc3cb1a3ba2c27527e8a042"
+    },
+    {
+      "case_id": "source-40cde7b804f3a17ac642deaa",
+      "category": "CWE-327",
+      "finding_count": 5,
+      "measurement_status": "MEASURED",
+      "source_sha256": "8e443bcb9217ac7bd3455864bcee62a8fe3a2ea7edfdf485b6b3fc134748e3dc"
+    },
+    {
+      "case_id": "source-439f3caa676a1099eb9f12df",
+      "category": "CWE-338",
+      "finding_count": 1,
+      "measurement_status": "MEASURED",
+      "source_sha256": "23b04b094b396c96d8716faf77876b94948be2799bab9f0f30be06f3945779be"
+    },
+    {
+      "case_id": "source-4609e0ec1556a9412b940a6f",
+      "category": "CWE-327",
+      "finding_count": 5,
+      "measurement_status": "MEASURED",
+      "source_sha256": "9848b9f6e29d7ccf971496181511a814027ff0a310398bde4929ba105db2b30c"
+    },
+    {
+      "case_id": "source-48588931b95dea7361109e26",
+      "category": "CWE-327",
+      "finding_count": 4,
+      "measurement_status": "MEASURED",
+      "source_sha256": "8e663668620e5ce06c5bb4c60c6c0f8c1c38700bde8985b179cb35d8df372898"
+    },
+    {
+      "case_id": "source-4af7e4e711615b26d35ea62c",
+      "category": "CWE-327",
+      "finding_count": 4,
+      "measurement_status": "MEASURED",
+      "source_sha256": "bc558ae00f1a6597a62dd581b49f5782b2c3da58a411032e0ae37a9785612cdc"
+    },
+    {
+      "case_id": "source-4d5983eea557dac485f8b73f",
+      "category": "CWE-328",
+      "finding_count": 1,
+      "measurement_status": "MEASURED",
+      "source_sha256": "8db29772b09450aab0718799db45a25bd260550d644e9ecc36c987746358e1be"
+    },
+    {
+      "case_id": "source-4e926d53f9341d6308f564cb",
+      "category": "CWE-338",
+      "finding_count": 1,
+      "measurement_status": "MEASURED",
+      "source_sha256": "99889d3289ff93fb673fb665dd5c1ac950f2f5f2d63ee1e5a8dbbe7187a3199e"
+    },
+    {
+      "case_id": "source-4fafcd48882a26bc7491cc34",
+      "category": "CWE-338",
+      "finding_count": 0,
+      "measurement_status": "MEASURED",
+      "source_sha256": "7a5c42f3e1ef682714b9f39d58ee7ef1d725a54a6f8bfb9ff8ab52dbfd6a18c5"
+    },
+    {
+      "case_id": "source-513549ecd37cce27a3d96298",
+      "category": "CWE-327",
+      "finding_count": 5,
+      "measurement_status": "MEASURED",
+      "source_sha256": "9505f037e11d787c6263e39b05788c0715f8bd8abbc91d59010ed7633263c097"
+    },
+    {
+      "case_id": "source-5230cabb1089f1900380a0aa",
+      "category": "CWE-338",
+      "finding_count": 1,
+      "measurement_status": "MEASURED",
+      "source_sha256": "f5a2c5d7651f35aee4c2bc7bcba66f2ce1c802bc2af9afd3e3d37f64ac0f30d7"
+    },
+    {
+      "case_id": "source-549c44163a2580da8107c81e",
+      "category": "CWE-328",
+      "finding_count": 1,
+      "measurement_status": "MEASURED",
+      "source_sha256": "9e609d4f589911f55f4c3583784463a0b6608013d53ea602b9a8bfbf956f9e55"
+    },
+    {
+      "case_id": "source-559a4b11402c707a1fe947e8",
+      "category": "CWE-328",
+      "finding_count": 1,
+      "measurement_status": "MEASURED",
+      "source_sha256": "7f7613205b3aae75af55ecc250d118f6b930ab6856193d8b6ade42d6133313a7"
+    },
+    {
+      "case_id": "source-571e03375dd2c29894ed2b8d",
+      "category": "CWE-327",
+      "finding_count": 5,
+      "measurement_status": "MEASURED",
+      "source_sha256": "68a49ef8f39f890f579b41a575443679979ad4cd22166847b0b507c80db2078c"
+    },
+    {
+      "case_id": "source-59b231ac429c6f18bbd80647",
+      "category": "CWE-328",
+      "finding_count": 1,
+      "measurement_status": "MEASURED",
+      "source_sha256": "bd85ad50eed8afa3535fd6fde99a5be4fefb37154f4e3a7d4de2cc4c72710a5f"
+    },
+    {
+      "case_id": "source-5d1e6a85ac3d8612efe795da",
+      "category": "CWE-328",
+      "finding_count": 1,
+      "measurement_status": "MEASURED",
+      "source_sha256": "3a264f981d450f56377b8bd3188b845c674b2c0bd4e541df264a35d007bf9b13"
+    },
+    {
+      "case_id": "source-5d237671534049b11a53364f",
+      "category": "CWE-327",
+      "finding_count": 0,
+      "measurement_status": "MEASURED",
+      "source_sha256": "4c5bda1166145bcd8a880470d835a4ca7f3f335758645a70cf3c7b8a4bcbc9be"
+    },
+    {
+      "case_id": "source-60df688d08b6d3dcdf150f87",
+      "category": "CWE-338",
+      "finding_count": 1,
+      "measurement_status": "MEASURED",
+      "source_sha256": "09ab81ff74cb76f6c28cd9a8a113bd3746e43f8f529661495744f5ffd2d197d4"
+    },
+    {
+      "case_id": "source-61ea5f47c6122121cd623a63",
+      "category": "CWE-338",
+      "finding_count": 1,
+      "measurement_status": "MEASURED",
+      "source_sha256": "e5200b06cf75a6e82c422043448073a4e810411fef3417499b4b3de3deb3a231"
+    },
+    {
+      "case_id": "source-64c93d61de17a92475815a3a",
+      "category": "CWE-327",
+      "finding_count": 4,
+      "measurement_status": "MEASURED",
+      "source_sha256": "93d01d868c4455fec817aa3f21a9eb7bf31a5d488c556a828ef3810d754f42f3"
+    },
+    {
+      "case_id": "source-69083cd0cb8cdc7040ca8e5e",
+      "category": "CWE-328",
+      "finding_count": 1,
+      "measurement_status": "MEASURED",
+      "source_sha256": "43866ac6d31a7e95544d5582215a2900cf6111844b909818e8946badb52cf0b7"
+    },
+    {
+      "case_id": "source-6b9565737c818e00a91d8577",
+      "category": "CWE-328",
+      "finding_count": 1,
+      "measurement_status": "MEASURED",
+      "source_sha256": "b30cfda0a6824d37d9a9f74668c878d6420a560d2fb66c1295639555446694e3"
+    },
+    {
+      "case_id": "source-72b1e9bdc089bd41861881ac",
+      "category": "CWE-338",
+      "finding_count": 1,
+      "measurement_status": "MEASURED",
+      "source_sha256": "4c84d78cdc3ff4abdf5624fee1e3907adf35c21455b045d7c749361e8e9714b3"
+    },
+    {
+      "case_id": "source-73501da6543fdf1309627df7",
+      "category": "CWE-338",
+      "finding_count": 1,
+      "measurement_status": "MEASURED",
+      "source_sha256": "c1b8e1430731bed393947145c4c6ef634443863464c9130e8283102c157d63c8"
+    },
+    {
+      "case_id": "source-74df1719ce1500add000ecf8",
+      "category": "CWE-328",
+      "finding_count": 1,
+      "measurement_status": "MEASURED",
+      "source_sha256": "58fb5e3a850ce347d7e1d4a0f45ad12d9ba024bbd10a258d3dd7b57b0dc24b78"
+    },
+    {
+      "case_id": "source-75135944f664bf48c6a4edee",
+      "category": "CWE-328",
+      "finding_count": 1,
+      "measurement_status": "MEASURED",
+      "source_sha256": "08b9cb8601e94b589551affc9e3d7ff8df8c1cb22a9bdf45f8401b6ce61e2453"
+    },
+    {
+      "case_id": "source-7d6abc7d198cba0e234a8cbe",
+      "category": "CWE-328",
+      "finding_count": 1,
+      "measurement_status": "MEASURED",
+      "source_sha256": "0d4f0822188cfbd1cf0789f0ef7bfceb546c14f9caad1a7457de5dede5b4b030"
+    },
+    {
+      "case_id": "source-81931749b9136a18c12b1e86",
+      "category": "CWE-327",
+      "finding_count": 5,
+      "measurement_status": "MEASURED",
+      "source_sha256": "e861ae31283457f15bf011bdac64ac7a56179fe5bcdaee4013252c3e69883749"
+    },
+    {
+      "case_id": "source-87b466b7ac87941787733f52",
+      "category": "CWE-338",
+      "finding_count": 1,
+      "measurement_status": "MEASURED",
+      "source_sha256": "288c479bd687efd4062ee68c9513704ab81209cfdd40328f70f2e86a8d26d0d2"
+    },
+    {
+      "case_id": "source-8b32e7907d530de29fd271c9",
+      "category": "CWE-328",
+      "finding_count": 1,
+      "measurement_status": "MEASURED",
+      "source_sha256": "c44aa36d5b7770f068c0d966043fc1e77b2d0f6db027171a928e85fa0e6b6bc7"
+    },
+    {
+      "case_id": "source-8b88f15677908d71b72d2fe0",
+      "category": "CWE-327",
+      "finding_count": 5,
+      "measurement_status": "MEASURED",
+      "source_sha256": "91501748d12fd109aeabc084d383cc13f8aa55b2a965460da09f34229e5f7ee9"
+    },
+    {
+      "case_id": "source-8f65a3457ea7a764ea822830",
+      "category": "CWE-327",
+      "finding_count": 5,
+      "measurement_status": "MEASURED",
+      "source_sha256": "681dd58bc19cda99a59e2b5e670d04cf05b61155f0bade9b190294f02cb10394"
+    },
+    {
+      "case_id": "source-8f9590ea0fb7c54c3518e4a0",
+      "category": "CWE-328",
+      "finding_count": 1,
+      "measurement_status": "MEASURED",
+      "source_sha256": "7cad4e8316c32f1d0048e3b0868328fd8cb8ae4a77fa6b8eee0a7bd6aaec8eb4"
+    },
+    {
+      "case_id": "source-8ff7a96bb5eec0722055da81",
+      "category": "CWE-328",
+      "finding_count": 1,
+      "measurement_status": "MEASURED",
+      "source_sha256": "6def02f54c5236f5dfd5c5c2d21167643c62816f41684a7f7aecd0c2d9c7b607"
+    },
+    {
+      "case_id": "source-9454a39e91ce641e08c9c2f8",
+      "category": "CWE-328",
+      "finding_count": 1,
+      "measurement_status": "MEASURED",
+      "source_sha256": "850e0f815a9c582fdf8be841189142b2cb27b1711913840743617db2cd91526e"
+    },
+    {
+      "case_id": "source-956adf791997f06b1d8e4d05",
+      "category": "CWE-338",
+      "finding_count": 1,
+      "measurement_status": "MEASURED",
+      "source_sha256": "b682dcf7d3bab6f8422e1bbb63d0ba9ff988a33d4fd043218ebcececf0194c48"
+    },
+    {
+      "case_id": "source-95be05a20f7005750cf49ab5",
+      "category": "CWE-328",
+      "finding_count": 0,
+      "measurement_status": "MEASURED",
+      "source_sha256": "fce238f91166d09ae47408d303851828b2bf11bc32f7b232fe884afdd54da1a8"
+    },
+    {
+      "case_id": "source-98a98882d8739f0099a2370b",
+      "category": "CWE-328",
+      "finding_count": 1,
+      "measurement_status": "MEASURED",
+      "source_sha256": "c61ed0ac605ba9eeec494f1242de15dd5ba1f0347b48a59b32349d6331dbf5a7"
+    },
+    {
+      "case_id": "source-9926d2b539673f88d160ced7",
+      "category": "CWE-327",
+      "finding_count": 5,
+      "measurement_status": "MEASURED",
+      "source_sha256": "70df9005b7359716996b0ba5dd007a13c01f376e6feaad94734f7262ab76e56e"
+    },
+    {
+      "case_id": "source-9a9ed080cc8cf88d8c6e37c5",
+      "category": "CWE-328",
+      "finding_count": 1,
+      "measurement_status": "MEASURED",
+      "source_sha256": "a3a0b768cb4a51625f9c4f9383b68ca09933a18d1548c6a64c50569b7201184d"
+    },
+    {
+      "case_id": "source-9b864e7f8aa3ad7e2636fbe2",
+      "category": "CWE-327",
+      "finding_count": 0,
+      "measurement_status": "MEASURED",
+      "source_sha256": "fce238f91166d09ae47408d303851828b2bf11bc32f7b232fe884afdd54da1a8"
+    },
+    {
+      "case_id": "source-9e22c08d2da486116f9e713b",
+      "category": "CWE-327",
+      "finding_count": 0,
+      "measurement_status": "MEASURED",
+      "source_sha256": "886764e25ccdb1a85ba1e299c19b9117e799f177d1e22ae3a0b835d444c81f61"
+    },
+    {
+      "case_id": "source-9e7f7d6eb2da4b41cb91c214",
+      "category": "CWE-338",
+      "finding_count": 1,
+      "measurement_status": "MEASURED",
+      "source_sha256": "56a992d4b2472b83442d8a0688bde56caf1141e94c227663c375cecf4641630a"
+    },
+    {
+      "case_id": "source-9f9567b250bf7f5df44a8d67",
+      "category": "CWE-338",
+      "finding_count": 0,
+      "measurement_status": "MEASURED",
+      "source_sha256": "fce238f91166d09ae47408d303851828b2bf11bc32f7b232fe884afdd54da1a8"
+    },
+    {
+      "case_id": "source-a20cc5b808def2abfc2920f0",
+      "category": "CWE-328",
+      "finding_count": 1,
+      "measurement_status": "MEASURED",
+      "source_sha256": "07f4a943bb7842cb77dace28002b39edb03729b585d0b8a9dedbb6251d0539d0"
+    },
+    {
+      "case_id": "source-a241d8a936e36c65d6289dd6",
+      "category": "CWE-327",
+      "finding_count": 5,
+      "measurement_status": "MEASURED",
+      "source_sha256": "5a84aa7386bcddac351f5d8902d1b266e007285d67f16463a6eb2873e30df2bb"
+    },
+    {
+      "case_id": "source-a4d679c68cf76dff8201c04c",
+      "category": "CWE-328",
+      "finding_count": 1,
+      "measurement_status": "MEASURED",
+      "source_sha256": "3032f1aa47bcdf15d47ab9fbcc66d874add43c8f0523fd2d5a4b879603ca229c"
+    },
+    {
+      "case_id": "source-a6a2189e43e9cbd54731f995",
+      "category": "CWE-328",
+      "finding_count": 1,
+      "measurement_status": "MEASURED",
+      "source_sha256": "d1188d25d9af13778ad454be38984ce6a8ee84cb489cc43ec014cb56bd9b1de6"
+    },
+    {
+      "case_id": "source-a6c1e43e5850d84839418d1a",
+      "category": "CWE-338",
+      "finding_count": 1,
+      "measurement_status": "MEASURED",
+      "source_sha256": "5ce9eba925086d3c28cae5da3db28f3c21ec234b28c3c46b6081d58c4c1a60b8"
+    },
+    {
+      "case_id": "source-a84200a918d913c334e103bf",
+      "category": "CWE-338",
+      "finding_count": 1,
+      "measurement_status": "MEASURED",
+      "source_sha256": "3ec5cf9eb7234907d9e6509715298ceee963cb23f2c8f42843a65387824907f0"
+    },
+    {
+      "case_id": "source-a9b975bbfa30b8b791e5df8c",
+      "category": "CWE-327",
+      "finding_count": 5,
+      "measurement_status": "MEASURED",
+      "source_sha256": "68a3503f41abe48ad42a5cb5c9ba6a61aff6f6c6dd238534fec36d30face9615"
+    },
+    {
+      "case_id": "source-a9c48304eb86ce072fa03665",
+      "category": "CWE-338",
+      "finding_count": 1,
+      "measurement_status": "MEASURED",
+      "source_sha256": "aa34a897bf0de55c7e2b1bd430384e6feb4ebeb1f6fd3f318c9ad85a3e1b3944"
+    },
+    {
+      "case_id": "source-a9e63487a85b2dc19601851c",
+      "category": "CWE-328",
+      "finding_count": 1,
+      "measurement_status": "MEASURED",
+      "source_sha256": "b52b3402b62251760900332f69e33e8dd25d15489ac7d3d3d6fc9ca045a57f7a"
+    },
+    {
+      "case_id": "source-aa6d411b3563297735c4d12f",
+      "category": "CWE-328",
+      "finding_count": 1,
+      "measurement_status": "MEASURED",
+      "source_sha256": "f9cd63a2f391b9e7353cae128ad3ec81eb23ce92e7af76612f9776e1390d3d08"
+    },
+    {
+      "case_id": "source-ace518d7c7940913c64d20e6",
+      "category": "CWE-327",
+      "finding_count": 5,
+      "measurement_status": "MEASURED",
+      "source_sha256": "555170a392041c2efde8a6a88e3ef25692aac75c84ec7b76769d106092964572"
+    },
+    {
+      "case_id": "source-acef6708378bf357e161aba6",
+      "category": "CWE-338",
+      "finding_count": 1,
+      "measurement_status": "MEASURED",
+      "source_sha256": "f655b669e5d3923089cc16f32decb23cec6517b15fc22de479f5421ac487d35d"
+    },
+    {
+      "case_id": "source-ad180cd33d34d43a4fb7e0ff",
+      "category": "CWE-328",
+      "finding_count": 1,
+      "measurement_status": "MEASURED",
+      "source_sha256": "aa88aee1e89730249f31f8c351d0b064b66d2614dc1f937b06de6b9256d8926e"
+    },
+    {
+      "case_id": "source-ae48c50b9603509483ca8c71",
+      "category": "CWE-328",
+      "finding_count": 1,
+      "measurement_status": "MEASURED",
+      "source_sha256": "a9957ed2dcb4860693053d1f9c7653c82ae5df14300a54ef08b3b226077000b2"
+    },
+    {
+      "case_id": "source-af2bb5a573a1d98995af19f9",
+      "category": "CWE-327",
+      "finding_count": 5,
+      "measurement_status": "MEASURED",
+      "source_sha256": "9a1b4281dfbe054b994dd22a959491bdf0d6eef11a48a5a0832918b66be8a8d2"
+    },
+    {
+      "case_id": "source-b015a865bfc478c89b7ee52a",
+      "category": "CWE-338",
+      "finding_count": 1,
+      "measurement_status": "MEASURED",
+      "source_sha256": "2ef79bc83dff4ef67b39fd5cea64d093339dff5b73fc5765f86152f0f171c0e7"
+    },
+    {
+      "case_id": "source-b0dea13378c52359c6a84ebe",
+      "category": "CWE-328",
+      "finding_count": 1,
+      "measurement_status": "MEASURED",
+      "source_sha256": "6baf4decd70402229c06efb6b37f649565b7ef8c0a611415fd5ae23fc6f05b3b"
+    },
+    {
+      "case_id": "source-b343e225e9051e1e055f0290",
+      "category": "CWE-338",
+      "finding_count": 1,
+      "measurement_status": "MEASURED",
+      "source_sha256": "cbf7d72f64a88d0bab2a9c2f744327a5a83d09cda6280355e455ebaf80a2bf1e"
+    },
+    {
+      "case_id": "source-b636f25d8944911addd2c5bf",
+      "category": "CWE-327",
+      "finding_count": 4,
+      "measurement_status": "MEASURED",
+      "source_sha256": "610c45110d0ca31878be7def5a5cde74d006f071161c1e1622e5eea8162ef89c"
+    },
+    {
+      "case_id": "source-bc20fa750e6da90b6f401054",
+      "category": "CWE-328",
+      "finding_count": 1,
+      "measurement_status": "MEASURED",
+      "source_sha256": "81df5ecb692aabdb6b32c77a7aecc606f555a4a211533637ed713b78c2751805"
+    },
+    {
+      "case_id": "source-bdea7fa9f048e679775e846f",
+      "category": "CWE-328",
+      "finding_count": 1,
+      "measurement_status": "MEASURED",
+      "source_sha256": "ef70cbb0ada5787e8ed8ca3d5dd41fe7a881c0fa2200a6ccbcf61fc18db6531b"
+    },
+    {
+      "case_id": "source-bf2beda47fbbfafa6ed77e41",
+      "category": "CWE-328",
+      "finding_count": 1,
+      "measurement_status": "MEASURED",
+      "source_sha256": "d83068a5102d3d4d0743dd37f4cc6836f6ef467bbe6387e4cf7bad83755ba969"
+    },
+    {
+      "case_id": "source-bf714ab80db82ddbbbb15e4b",
+      "category": "CWE-338",
+      "finding_count": 1,
+      "measurement_status": "MEASURED",
+      "source_sha256": "e91c059760206ccfed592d101d3bb0666d4156ce65fac6ce2dedbb2582b94eb5"
+    },
+    {
+      "case_id": "source-bf7cdcb1472ecf0f23a8bbce",
+      "category": "CWE-327",
+      "finding_count": 5,
+      "measurement_status": "MEASURED",
+      "source_sha256": "ed29d68333d1c0844b6788f3c62b32cae3b8404f91711c3dc1de9ecf1d8e02a9"
+    },
+    {
+      "case_id": "source-c0ff1288f0a310fd6d53c17d",
+      "category": "CWE-327",
+      "finding_count": 5,
+      "measurement_status": "MEASURED",
+      "source_sha256": "b1ed2c31691b0e041d66f454a4262718010a410e88bed7541612c94402a90d6b"
+    },
+    {
+      "case_id": "source-c31f627b6777c1ff9bfade50",
+      "category": "CWE-327",
+      "finding_count": 5,
+      "measurement_status": "MEASURED",
+      "source_sha256": "462a42225a41e830f48a3322946f71e15c5f07f8534db0456aad107bc036e122"
+    },
+    {
+      "case_id": "source-c3f682e161b8616c2376a2b7",
+      "category": "CWE-328",
+      "finding_count": 1,
+      "measurement_status": "MEASURED",
+      "source_sha256": "d8c6823165b91cc3e371e63f209e2f20b0f668657b27ee7107f6f9e62ff7ef3d"
+    },
+    {
+      "case_id": "source-c6ad9566a908397a9beb65c7",
+      "category": "CWE-328",
+      "finding_count": 1,
+      "measurement_status": "MEASURED",
+      "source_sha256": "c7766bedc93251dc05bac21b9ca127bacea4b288440d97f4c487cd528f14dd62"
+    },
+    {
+      "case_id": "source-c7292b2e01ccb5f3481e8798",
+      "category": "CWE-327",
+      "finding_count": 5,
+      "measurement_status": "MEASURED",
+      "source_sha256": "5edab91155ab5f31e80b9f5db889fde8fb684d96c844d7d3b926f068f3ff5071"
+    },
+    {
+      "case_id": "source-c75b73f9832e85451321a145",
+      "category": "CWE-338",
+      "finding_count": 1,
+      "measurement_status": "MEASURED",
+      "source_sha256": "64fd564b726e22adacce905fc3f4f67f3cbd0cedeea8773124795ae2bb5a49c8"
+    },
+    {
+      "case_id": "source-c9fcc8d29b247aac114350ac",
+      "category": "CWE-328",
+      "finding_count": 0,
+      "measurement_status": "MEASURED",
+      "source_sha256": "b52c50060b1118d09265d3384472e1499391a31dd573e0233ceaa3a54b36142e"
+    },
+    {
+      "case_id": "source-ccdf939a6601ca51428545d2",
+      "category": "CWE-328",
+      "finding_count": 1,
+      "measurement_status": "MEASURED",
+      "source_sha256": "6762f4df87ea370f43c3c3b59d9c35c69fe6e2be35a1a86de7fa2408fedd782b"
+    },
+    {
+      "case_id": "source-ce344ad038f29da6e8da3cc9",
+      "category": "CWE-328",
+      "finding_count": 1,
+      "measurement_status": "MEASURED",
+      "source_sha256": "bf366924f36ae80f4f1ee04d3dd5f09c11f39d2824c3e73dbc5721588d828f9c"
+    },
+    {
+      "case_id": "source-d02fdebe87de0d36608e3201",
+      "category": "CWE-338",
+      "finding_count": 1,
+      "measurement_status": "MEASURED",
+      "source_sha256": "3434a794132607951e7cb803643c1f0446cb726434b01cdcd2d71bf56f3546d9"
+    },
+    {
+      "case_id": "source-d4705dc5584f1413733f077c",
+      "category": "CWE-328",
+      "finding_count": 1,
+      "measurement_status": "MEASURED",
+      "source_sha256": "5d70d06351bcfa4e4436efbbd313ee49bd70baed2d933bd3019263d68fe61d12"
+    },
+    {
+      "case_id": "source-d8f48c2096e9a069e848f88a",
+      "category": "CWE-338",
+      "finding_count": 1,
+      "measurement_status": "MEASURED",
+      "source_sha256": "18a15451dced8b90e85d478b9328277ddd31e20f953b1eddb427c565b497a6a3"
+    },
+    {
+      "case_id": "source-d949df1ed91cc4899704edab",
+      "category": "CWE-327",
+      "finding_count": 5,
+      "measurement_status": "MEASURED",
+      "source_sha256": "228d87fb12fb523d290b718468fe4b39cf05c7879adcc3e5f98335e8221e1e3e"
+    },
+    {
+      "case_id": "source-da4a43a7c8c3a4e3171396b6",
+      "category": "CWE-338",
+      "finding_count": 1,
+      "measurement_status": "MEASURED",
+      "source_sha256": "bad9405c7c30c15a97467eddaba19362f935f7007b1feeeeaca218a67af5580b"
+    },
+    {
+      "case_id": "source-dc0bf9d8c71b929bd2a8cec8",
+      "category": "CWE-338",
+      "finding_count": 1,
+      "measurement_status": "MEASURED",
+      "source_sha256": "defc67657876a097bbeba9ba0679e998ac19982e0aaa59190dd2334613fa319c"
+    },
+    {
+      "case_id": "source-deb6951b547e98ffefdd149c",
+      "category": "CWE-327",
+      "finding_count": 5,
+      "measurement_status": "MEASURED",
+      "source_sha256": "d763e4b6ec965be044fda220c6e23939788ef252f4826675a30150d51a90e071"
+    },
+    {
+      "case_id": "source-e002dbb5c9b72eebedc328c4",
+      "category": "CWE-328",
+      "finding_count": 1,
+      "measurement_status": "MEASURED",
+      "source_sha256": "24d74f2aed87b24bc02c1fcda639a3884960214f300933db0f7a3334d8ccde10"
+    },
+    {
+      "case_id": "source-e03334c3091f52d71754dd78",
+      "category": "CWE-328",
+      "finding_count": 1,
+      "measurement_status": "MEASURED",
+      "source_sha256": "0381cb5402578d2e841477d9b4b6ab0769eb3c54f7e6fbd9c146bc990fa8fa19"
+    },
+    {
+      "case_id": "source-e0c85156f15fa1fa5e8aa9d9",
+      "category": "CWE-328",
+      "finding_count": 0,
+      "measurement_status": "MEASURED",
+      "source_sha256": "0045928f5a880112a6f956f25abe65da98b9b52444b9ff7cce8a847d3d786884"
+    },
+    {
+      "case_id": "source-e1d7c5eba00717f6c2d9f869",
+      "category": "CWE-328",
+      "finding_count": 1,
+      "measurement_status": "MEASURED",
+      "source_sha256": "eddde279d9f6b045307d69447cd1f9815619914120188b858be48e5740183169"
+    },
+    {
+      "case_id": "source-eb7b27df37b9c743983ea7e5",
+      "category": "CWE-327",
+      "finding_count": 4,
+      "measurement_status": "MEASURED",
+      "source_sha256": "05e11cfccbaa338207d531a61785f2f21c864b4eb20c4d349aedb9a0fdc2f638"
+    },
+    {
+      "case_id": "source-edea3600ab589d9b1949504a",
+      "category": "CWE-327",
+      "finding_count": 5,
+      "measurement_status": "MEASURED",
+      "source_sha256": "dac24c6ad8eabae9ae25317b5fe1e5a1a9fe993c5dd36cb069b96120f2403950"
+    },
+    {
+      "case_id": "source-ee008f5de3a70515f60b999a",
+      "category": "CWE-327",
+      "finding_count": 6,
+      "measurement_status": "MEASURED",
+      "source_sha256": "cea85dcad83e0711050cac697db4b433b86019ea69b4a589ec9e88f3496f5e75"
+    },
+    {
+      "case_id": "source-ee5629c08a908591e4cc5b93",
+      "category": "CWE-327",
+      "finding_count": 5,
+      "measurement_status": "MEASURED",
+      "source_sha256": "881d089e2c676782db0603110dfa5954af3e5449b8226fcbe8a492c2d373fdaa"
+    },
+    {
+      "case_id": "source-f01133799affe79640f6b22b",
+      "category": "CWE-328",
+      "finding_count": 1,
+      "measurement_status": "MEASURED",
+      "source_sha256": "81d7236769bf0eacb21d567d7acca35577b8dc0e45785e9edd09e708e30fe624"
+    },
+    {
+      "case_id": "source-f86e73342822eb31a5ac327b",
+      "category": "CWE-328",
+      "finding_count": 1,
+      "measurement_status": "MEASURED",
+      "source_sha256": "67774202c67c1d3fc69d0708f8b188e5ff95bf6e5dae2da20cb04abf45050cd4"
+    },
+    {
+      "case_id": "source-fa344e5038909a5c24bec719",
+      "category": "CWE-328",
+      "finding_count": 1,
+      "measurement_status": "MEASURED",
+      "source_sha256": "de5f995f44f884fe7f6f90c218d482fafe70a297c028720fa1b20874ddbc561c"
+    },
+    {
+      "case_id": "source-fac09d9b44630c2cd343ba2b",
+      "category": "CWE-338",
+      "finding_count": 1,
+      "measurement_status": "MEASURED",
+      "source_sha256": "3246a750c2cbd25dc2c3d04768fc9cb066f5e87da2d0d11375605a33339ff687"
+    },
+    {
+      "case_id": "source-fb82fbf8608da817a78db411",
+      "category": "CWE-327",
+      "finding_count": 0,
+      "measurement_status": "MEASURED",
+      "source_sha256": "b52c50060b1118d09265d3384472e1499391a31dd573e0233ceaa3a54b36142e"
+    }
+  ],
+  "run_seal": {
+    "git_sha": "bcd3e23186fb0e76a2ca64edbb05f96a1e619a8e",
+    "path": "/results/juliet_java_1_3_run.jsonl",
+    "sealed_at": "2026-08-13T04:32:13.681069+00:00",
+    "sha256": "fea6db9ead640e9d9810e137ff288e83286d89795f4e1123f7642e7252b074c3",
+    "size_bytes": 587007
+  },
+  "scope": [
+    "CWE-327",
+    "CWE-328",
+    "CWE-338"
+  ],
+  "semantic_sha256": "8f8524c76928e2b60fd329155266531c77076477453a091bf797cad39c7eb01f",
+  "suite": {
+    "archive_bytes": 76798417,
+    "archive_name": "2017-10-01-juliet-test-suite-for-java-v1-3.zip",
+    "archive_sha256": "d985f4177c2bcd7b03455a05c1c8f2e755f55c9eb250accd052f05f877347e60",
+    "author": "NSA Center for Assured Software; distributed by NIST SARD",
+    "cwe_prefixes": {
+      "CWE-327": "Java/src/testcases/CWE327_Use_Broken_Crypto/",
+      "CWE-328": "Java/src/testcases/CWE328_Reversible_One_Way_Hash/",
+      "CWE-338": "Java/src/testcases/CWE338_Weak_PRNG/"
+    },
+    "expected_case_files": [
+      [
+        "CWE-327",
+        34
+      ],
+      [
+        "CWE-328",
+        51
+      ],
+      [
+        "CWE-338",
+        34
+      ]
+    ],
+    "expected_files": {
+      "CWE-327": 38,
+      "CWE-328": 55,
+      "CWE-338": 38
+    },
+    "language": "Java",
+    "license": "US public domain; CC0-1.0 for any NIST foreign rights",
+    "manifest_entry": "Java/manifest.xml",
+    "manifest_recovery_lines": [
+      50084,
+      66737
+    ],
+    "name": "NIST SARD Juliet Java",
+    "upstream": "https://samate.nist.gov/SARD/test-suites/111",
+    "version": "1.3 (2017-10-01)"
+  },
+  "timestamp": "2026-08-13T04:32:13.681385+00:00",
+  "tool_version": "apolaki-bench-juliet/1"
+}
