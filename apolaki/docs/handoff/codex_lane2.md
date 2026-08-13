@@ -281,4 +281,18 @@ read-only, and the gate output above is from that run. Coordinator should normal
 Liveness was not run or updated, no image was rebuilt, no running mission was interrupted, and no
 `validated_on` value changed, per the lease.
 
-Commits: pending.
+## Integration
+
+Benchmark implementation and measured artifacts: `502cf2c` (`Apolaki: add sealed Juliet Java
+benchmark adapter`). This commit adds ten files and modifies zero existing files.
+
+Claude should cherry-pick the implementation commit, then this handoff-closure commit. Do not mark
+Q-040 complete from this branch: no SQLi production file changed, the strict xfail correctly remains,
+and the SQLi category has no before/after result. First extend ownership to `agent/tools.py`,
+`agent/tests/test_bbh.py`, and `agent/tests/test_sqli_oracle_negative_controls.py`, apply the recorded
+producer/consumer patch, add a transport-level repeat-request assertion, and measure the full SQLi
+denominator.
+
+The B-010 result can be integrated as **code-assisted (SAST), partial Juliet scope** only. Preserve
+the 329-case denominator, the two exact manifest-recovery lines, and all 60 CWE-327 false positives.
+Do not relabel it whole-suite Juliet, DAST, or 100% coverage.
