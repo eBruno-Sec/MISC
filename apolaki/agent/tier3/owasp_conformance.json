@@ -1,0 +1,70 @@
+{
+  "environment_failures": [],
+  "git_sha": "776dff1",
+  "per_class": {},
+  "per_entry": [
+    {
+      "clause": "dual_official_product_scoring",
+      "evidence": "synthetic cross-family clean finding: official FP=0, product FP=1",
+      "status": "CONFORMANT"
+    },
+    {
+      "clause": "full_suite_macro_denominator",
+      "evidence": "score reports suite_size=11 and 10 unmeasured categories",
+      "status": "CONFORMANT"
+    },
+    {
+      "clause": "checkpoint_flush_and_fsync",
+      "evidence": "scan checkpoint calls flush and os.fsync per case",
+      "status": "CONFORMANT"
+    },
+    {
+      "clause": "checkpoint_resume",
+      "evidence": "scan loads completed case IDs before dispatch",
+      "status": "CONFORMANT"
+    },
+    {
+      "clause": "truncated_tail_recovery",
+      "evidence": "one complete row survived a truncated final JSONL row",
+      "status": "CONFORMANT"
+    },
+    {
+      "clause": "raw_evidence_retention",
+      "evidence": "scan rows retain families/conf/targets/error but no raw_evidence field",
+      "status": "GAP"
+    },
+    {
+      "clause": "seal_before_key_enforced",
+      "evidence": "main loads run and key without creating or verifying a seal token",
+      "status": "GAP"
+    },
+    {
+      "clause": "explicit_result_vocabulary",
+      "evidence": "rows use free-text error strings; no PASS/FAIL/FP/FN/environment enum",
+      "status": "GAP"
+    },
+    {
+      "clause": "full_b1_metric_set",
+      "evidence": "TP/TN/FP/FN, TPR and FPR exist; precision, F1 and FNR are absent",
+      "status": "PARTIAL"
+    },
+    {
+      "clause": "environment_failure_not_scored",
+      "evidence": "ordinary row errors increment errors and are still booked as FN/TN",
+      "status": "GAP"
+    },
+    {
+      "clause": "position_independence",
+      "evidence": "one ToolRegistry is reused across the case loop without recording budget state",
+      "status": "GAP"
+    }
+  ],
+  "semantic_sha256": "27b4922459d7e84cafe4397f7142d80cce065ae1d912b82cbd36faed187a0a02",
+  "summary": {
+    "CONFORMANT": 5,
+    "GAP": 5,
+    "PARTIAL": 1
+  },
+  "timestamp": "2026-08-13T03:00:07.739851+00:00",
+  "tool_version": "apolaki-bench-contract/1"
+}

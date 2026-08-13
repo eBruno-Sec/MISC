@@ -75,3 +75,72 @@ Targeted verification:
 ```text
 7 passed in 6.77s
 ```
+
+Commit: `776dff1` (`Apolaki B-001: make Tier-3 controls executable and measurable`).
+
+## M2 - B-002 benchmark adapter contract
+
+Status: implemented and measured; commit pending.
+
+`agent/bench_contract.py` is a pure contract layer, not another scanner. It supplies:
+
+- explicit pre-key measurement states and post-key result vocabulary;
+- JSONL per-case append, flush, fsync, resume, duplicate conflict detection, truncated-final-row
+  recovery, and separation of a valid final row with no newline;
+- mandatory `raw_evidence` on every case, including non-detections and environment failures;
+- a verifiable `ArtifactSeal` token that blocks the key loader if the blind run changed;
+- complete B1 TP/TN/FP/FN, precision, recall, F1, FPR, and FNR over the full denominator;
+- separate official and product views, where the product view counts a confirmed foreign-family
+  finding on a clean case as an FP;
+- a non-publishable result when any B1 case is missing, unsupported, inconclusive, or failed due to
+  the environment. The full denominator remains visible; no environment failure becomes an FN/TN.
+
+### Unmodified OWASP adapter conformance
+
+The measured artifact is `agent/tier3/owasp_conformance.json`:
+
+```text
+CONFORMANT 5 | PARTIAL 1 | GAP 5
+semantic_sha256=27b4922459d7e84cafe4397f7142d80cce065ae1d912b82cbd36faed187a0a02
+artifact_sha256=3e40dd2aa4e537cbc7a0a3c6430f94d0c98e59cf0b86ad2900c511e65205fd8a
+```
+
+| clause | measured state |
+|---|---|
+| dual official/product scoring | CONFORMANT |
+| full-suite macro denominator | CONFORMANT |
+| checkpoint flush + fsync | CONFORMANT |
+| checkpoint resume | CONFORMANT |
+| truncated final-row recovery | CONFORMANT |
+| full B1 metric set | PARTIAL - precision, F1 and FNR absent |
+| raw-evidence retention | GAP |
+| enforced seal-before-key | GAP |
+| explicit result vocabulary | GAP |
+| environment failure excluded from scoring | GAP |
+| position independence | GAP - one registry reused, budget state not recorded |
+
+This is why `owasp_bench.py` remains untouched: it already supplies five proven behaviours, and the
+new contract states the five adoption gaps for a future owner instead of silently claiming conformance.
+
+### Tests, negative controls, and mutations
+
+The first run was `12 passed, 1 failed`. My new evidence-retention assertion assumed input index 1
+would remain case `C`, while the scorer deliberately sorts IDs for position independence. It was a
+wrong test and was corrected to select by `case_id`; the retention obligation was unchanged. Final:
+
+```text
+14 passed in 1.94s
+```
+
+Fail-before-fix at `fe6875b` is only `ImportError: bench_contract` and therefore proves newness, not
+discrimination. Three semantic mutants supply the actual evidence:
+
+1. Removed `verify_seal(seal)`: the exact tamper test failed `DID NOT RAISE SealError`; the key loader
+   would have run.
+2. Replaced `product_hit = bool(confirmed)` with `product_hit = official_hit`: the exact product test
+   failed `assert 0 == 1` for the clean cross-family FP.
+3. Removed per-case `os.fsync`: the exact checkpoint test failed because the fsync call list was empty.
+
+All three were restored before further work. `bench_contract.py` SHA-256 before the mutants and after
+restoration was identical:
+`D37624CC083F7390A45E9B44D77C2A1CC4612A3205B009DDF79C8146ED20FC9B`.
