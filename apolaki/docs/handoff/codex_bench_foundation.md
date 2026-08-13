@@ -191,3 +191,33 @@ Fail-before-fix is again only module absence, so three semantic mutants provide 
 
 `tier3/gate.py` was restored byte-identically after the mutants. SHA-256 before and after:
 `ADB18FE66131D8B0ADEF629B5C9D43FA290CCE00D44BCE049A9144C5BB90E62A`.
+
+Commit: `a1b48c2` (`Apolaki B-003: ratchet executable Tier-3 coverage`).
+
+## Full-suite integration catch - B-002 CLI consumer
+
+The first post-milestone full suite was not green and is not hidden:
+
+```text
+2 failed, 2094 passed, 9 skipped, 5 xfailed, 9 warnings in 295.19s
+```
+
+Both failures were the dead-code guard doing its job:
+
+- bare scan: `bench_contract.write_json_artifact` had no production caller;
+- qualified ratchet: `37 -> 43`, with exactly six new `bench_contract.*` APIs test-consumed but not
+  production-consumed.
+
+No baseline or allowlist was changed. `bench_contract.main` now supplies real CLI paths for checkpoint
+inspection, sealing, OWASP conformance artifacts, and sealed B1 scoring. The sealed scoring path calls
+all six APIs and retains the run seal, key hash, key-read timestamp, and ordering verdict in its output.
+
+Targeted contract plus the two exact dead-code assertions:
+
+```text
+17 passed in 84.78s
+qualified dead-code: count=37 baseline=37 ok=True
+bench_contract islands: []
+```
+
+This integration repair is pending its own commit before the final full-suite rerun.

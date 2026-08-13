@@ -6,6 +6,7 @@ vocabulary, retained raw evidence, and separate official/product B1 scoring.
 """
 from __future__ import annotations
 
+import argparse
 from dataclasses import asdict, dataclass
 import datetime as dt
 import hashlib
@@ -429,3 +430,76 @@ def write_json_artifact(path: str | Path, artifact: dict) -> str:
         os.fsync(fh.fileno())
     os.replace(tmp, dest)
     return hashlib.sha256(body.encode("utf8")).hexdigest()
+
+
+def main(argv=None) -> int:
+    """CLI consumer for contract inspection, sealing, conformance, and B1 scoring."""
+    parser = argparse.ArgumentParser(description=__doc__)
+    sub = parser.add_subparsers(dest="command", required=True)
+
+    checkpoint = sub.add_parser("checkpoint", help="inspect a durable per-case checkpoint")
+    checkpoint.add_argument("--run", required=True)
+
+    seal = sub.add_parser("seal", help="seal a blind run before ground truth is read")
+    seal.add_argument("--run", required=True)
+    seal.add_argument("--git-sha", default="")
+
+    conformance = sub.add_parser("conformance", help="measure the reference OWASP adapter")
+    conformance.add_argument("--output", required=True)
+    conformance.add_argument("--temp-dir", required=True)
+    conformance.add_argument("--git-sha", default="")
+
+    score = sub.add_parser("score-b1", help="seal a checkpoint, then score it against JSON ground truth")
+    score.add_argument("--run", required=True)
+    score.add_argument("--key", required=True,
+                       help="JSON object: case_id -> [category, vulnerable]")
+    score.add_argument("--family-map", required=True,
+                       help="JSON object: category -> accepted finding families")
+    score.add_argument("--output", required=True)
+    score.add_argument("--git-sha", default="")
+    args = parser.parse_args(argv)
+
+    if args.command == "checkpoint":
+        rows = load_checkpoint(args.run)
+        print(json.dumps({"cases": len(rows), "case_ids": sorted(_case_id(row) for row in rows)}))
+        return 0
+    if args.command == "seal":
+        print(json.dumps(seal_run(args.run, args.git_sha).to_dict(), sort_keys=True))
+        return 0
+    if args.command == "conformance":
+        import owasp_bench
+        artifact = conformance_artifact(owasp_bench, args.temp_dir, args.git_sha)
+        print("artifact_sha256=%s" % write_json_artifact(args.output, artifact))
+        return 0
+
+    run_seal = seal_run(args.run, args.git_sha)
+    key, receipt = load_key_after_seal(
+        run_seal, args.key, lambda path: json.loads(Path(path).read_text(encoding="utf8")))
+    family_map_raw = json.loads(Path(args.family_map).read_text(encoding="utf8"))
+    family_map = {str(category): set(families or [])
+                  for category, families in family_map_raw.items()}
+    result = score_b1(load_checkpoint(args.run), key, family_map)
+    artifact = {
+        "tool_version": TOOL_VERSION,
+        "git_sha": args.git_sha or os.environ.get("APOLAKI_GIT_SHA") or "unknown",
+        "timestamp": dt.datetime.now(dt.timezone.utc).isoformat(),
+        "per_entry": result.get("per_case") or [],
+        "per_class": ((result.get("product") or {}).get("per_category") or {}),
+        "environment_failures": [row for row in result.get("unresolved") or []
+                                 if row.get("result") == ENVIRONMENT_FAILURE],
+        "score": result,
+        "blind_ordering": receipt,
+    }
+    artifact["semantic_sha256"] = hashlib.sha256(_canonical({
+        "score": artifact["score"], "blind_ordering": {
+            "run_sha256": receipt["run_seal"]["sha256"],
+            "key_sha256": receipt["key_sha256"],
+            "ordering_ok": receipt["ordering_ok"],
+        },
+    })).hexdigest()
+    print("artifact_sha256=%s" % write_json_artifact(args.output, artifact))
+    return 0 if result["publishable"] else 1
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

@@ -172,3 +172,23 @@ def test_conformance_artifact_has_required_provenance_and_a_stable_semantic_dige
     assert first["git_sha"] == "abc" and first["environment_failures"] == []
     assert first["semantic_sha256"] == second["semantic_sha256"]
     assert sum(first["summary"].values()) == len(first["per_entry"])
+
+
+def test_cli_scores_only_after_sealing_and_retains_the_blind_receipt(tmp_path):
+    run = tmp_path / "run.jsonl"
+    checkpoint = bc.CaseCheckpoint(run)
+    checkpoint.append(_case("V", families=["sqli"]))
+    checkpoint.append(_case("C"))
+    key = tmp_path / "key.json"
+    key.write_text(json.dumps({"V": ["sqli", True], "C": ["sqli", False]}), encoding="utf8")
+    families = tmp_path / "families.json"
+    families.write_text(json.dumps({"sqli": ["sqli"]}), encoding="utf8")
+    output = tmp_path / "score.json"
+    assert bc.main(["score-b1", "--run", str(run), "--key", str(key),
+                    "--family-map", str(families), "--output", str(output),
+                    "--git-sha", "abc"]) == 0
+    artifact = json.loads(output.read_text(encoding="utf8"))
+    assert artifact["score"]["publishable"] is True
+    assert artifact["score"]["official"]["overall"]["tp"] == 1
+    assert artifact["blind_ordering"]["ordering_ok"] is True
+    assert artifact["blind_ordering"]["run_seal"]["sha256"] == bc.seal_run(run).sha256
