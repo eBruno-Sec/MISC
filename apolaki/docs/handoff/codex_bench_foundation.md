@@ -144,3 +144,50 @@ discrimination. Three semantic mutants supply the actual evidence:
 All three were restored before further work. `bench_contract.py` SHA-256 before the mutants and after
 restoration was identical:
 `D37624CC083F7390A45E9B44D77C2A1CC4612A3205B009DDF79C8146ED20FC9B`.
+
+Commit: `d5746a4` (`Apolaki B-002: codify proof-safe benchmark adapters`).
+
+## M3 - B-003 Tier-3 quality gate
+
+Status: implemented and measured; commit pending.
+
+`scripts/tier3_gate.sh` executes the real registry, retains its current artifact, and compares it
+with `agent/tier3/baseline.json`. The generic runner process code is deliberately not the oracle:
+the known strict xfail makes that process nonzero. `tier3.gate` instead requires every baseline PASS
+to remain PASS, records loss of a class's final passing control separately, treats removed baseline
+nodes as `NOT_RUN`, and fails on every current `FAIL`, `ERROR`, `NOT_RUN`, or environment failure.
+The baseline file is never modified by the gate.
+
+Unit verification:
+
+```text
+14 passed in 2.08s
+```
+
+End-to-end shell-gate output:
+
+```text
+Tier-3: 32/33 controls passed across 15 classes
+semantic_sha256=9a651e709d8e430e12abed610089d26b80ddf8e12408dca16b1758b4078fb455
+artifact_sha256=f2642fcaee32128ca638d8bd59868e812eefa5300f920140ae01e7da0eeddad1
+gate_artifact_sha256=02a9c03d32fb7c82ed3fe9d04f713abe3a834b91abed0695b9ed6758e3c1b15e
+32 Tier-3 control(s) pass; no regression against a baseline of 32
+known non-passes (not credited): sqli-unstable-page-noise
+```
+
+Gate semantic SHA-256:
+`64caa30c79d78282175771d9e29f9a2b08e81b0df1180a52d1e39a5607f2804c`.
+Both the current and baseline registry semantic hashes are
+`9a651e709d8e430e12abed610089d26b80ddf8e12408dca16b1758b4078fb455`.
+
+Fail-before-fix is again only module absence, so three semantic mutants provide discrimination:
+
+1. Changed regression from `current_status != PASS` to `current_status == FAIL`: exact tests lost
+   regression records for `SKIPPED`, `ERROR`, and `NOT_RUN` (3 failed, 1 passed).
+2. Hardcoded class regression false: removing the class's only passing node no longer reported the
+   `sqli` class regression; the exact assertion failed.
+3. Made only `FAIL` fatal for a newly registered control: `ERROR` and `NOT_RUN` incorrectly returned
+   `ok=True`; exact tests failed (2 failed, 1 passed).
+
+`tier3/gate.py` was restored byte-identically after the mutants. SHA-256 before and after:
+`ADB18FE66131D8B0ADEF629B5C9D43FA290CCE00D44BCE049A9144C5BB90E62A`.
