@@ -261,6 +261,47 @@ Apolaki as a product.
 
 ---
 
+## NIST Juliet Java 1.3 — first Tier-1 suite beyond OWASP Benchmark. 2026-08-13
+
+Pinned: SARD test-suite 111, archive **76,798,417 bytes**,
+sha256 `d985f4177c2bcd7b03455a05c1c8f2e755f55c9eb250accd052f05f877347e60`. Blind scan 131 Java files;
+scored scope **119 testcase files / 329 direct `bad()`/`goodN()` methods**; **0 skipped within the
+denominator**. Two fresh runs produced byte-identical 131-row checkpoints and identical scores
+(checkpoint sha256 `fea6db9e…`).
+
+**CODE-ASSISTED (SAST) ONLY. This is not a DAST figure and not a whole-suite figure.**
+
+| CWE | TP | TN | FP | FN | total | precision | recall | F1 |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|
+| CWE-327 | 34 | 0 | **60** | 0 | 94 | 36.17% | 100% | 53.13% |
+| CWE-328 | 51 | 90 | 0 | 0 | 141 | 100% | 100% | 100% |
+| CWE-338 | 34 | 60 | 0 | 0 | 94 | 100% | 100% | 100% |
+| **overall** | **119** | **150** | **60** | **0** | **329** | **66.48%** | **100%** | **79.87%** |
+
+**Recall is 100% and this is the first non-zero FPR the project has recorded.** Both facts matter and
+neither should be smoothed over.
+
+**The 60 false positives are a GROUND-TRUTH DISAGREEMENT, not a detector bug — and the disagreement
+was preserved rather than special-cased.** Every one is a Juliet "good" control using bare
+`Cipher.getInstance("AES")`. Juliet labels those fixed; Apolaki reports them, because in Java bare
+`AES` resolves to **`AES/ECB/PKCS5Padding`**, and ECB is a real weakness. On the security merits
+Apolaki's call is defensible and arguably more correct than the label.
+
+**We are not changing the detector to match the label, and we are not changing the label.** Silencing
+bare-AES would make the number prettier and the tool worse; editing Juliet's expected results is
+forbidden outright. The honest position is to publish 66.48% precision with the disagreement stated —
+a scanner that argues with a 2017 benchmark about ECB and can show its reasoning is worth more than
+one that scores 100% by agreeing. **Any future "fix" that recovers those 60 points by suppressing
+bare-AES detection is to be rejected on sight.**
+
+**109 Juliet CWE families are explicitly UNSUPPORTED by this run** and stay that way until a real
+capability covers them. Unsupported is a status, not a gap to paper over.
+
+**The B-002 contract held unchanged under a genuinely foreign suite** — checkpoint/resume,
+seal-before-key, raw evidence, dual scoring, full B1 metrics and unresolved-case handling all worked
+without modification. That was the actual point of running Juliet: the contract had zero consumers,
+and in this codebase a mechanism with no consumer is the shape that has shipped inert four times.
+
 ## U1 — MEASURED. The wiring works; the capability is +0 findings. 2026-08-12
 
 The Q-030 gap, as a number from a real run rather than an audit reading. VAmPI, deterministic
