@@ -30,10 +30,18 @@ never from a dispatch count.
 | D6 -- `run_service_pack` dead: service node never exists untested | **FIXED** -- `49310a6`, in lane in `agent/agent.py`; `tools.py` not touched |
 | U1 -- execute the ranked actions instead of reporting them | **WIRED + MEASURED** -- code `92e678b`, measurement `b295dae`. Dispatch **0 -> 4**; graded outcome **+1 lead, +0 confirmed findings**; two runs identical. Two of three tiers wired but unexercised. |
 
-All four are landed. The single most important thing to read out of this lane is the follow-up at the
-end of the D6 section: **all three `next_best_actions` tiers are now armed and nothing consumes them
-inside the execution loop** (U1 / architecture.md 1.8). Steps 1-3 of the build order arm the producer;
-U1 is what makes the scan act on it.
+All four defects are landed, and U1 is wired and measured on top of them.
+
+The single most important thing to read out of this lane, stated with both numbers kept apart because
+they are different claims:
+
+- **Wiring: real and complete.** The graph ranked 4 actions and dispatched **0**; it now dispatches
+  **4**, drains to a fixpoint, and reaches object endpoints the tool planner never schedules.
+- **Capability: one lead, no confirmed finding.** The set diff against an unranked run on the same
+  target is **+1 lead, +0 confirmed findings**, nothing lost, identical across two runs.
+
+The D6 follow-up below ("nothing consumes the ranked output") described the state before `92e678b`
+and is kept as the record of what U1 was fixing -- it is no longer current.
 
 ---
 
