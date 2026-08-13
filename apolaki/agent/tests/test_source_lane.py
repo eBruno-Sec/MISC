@@ -295,9 +295,31 @@ def test_the_source_categories_have_a_family_mapping():
         assert fam in ob.FAMILIES[cat]
 
 
-def test_trustbound_stays_unmapped_because_no_detector_ships_for_it():
-    """A mapping with no detector behind it is a claim. This category scores an honest 0."""
-    assert not ob.FAMILIES.get("trustbound")
+def test_trustbound_is_mapped_only_because_a_detector_now_ships_for_it():
+    """This assertion used to read `assert not ob.FAMILIES.get("trustbound")`, and it was right to.
+    A mapping with no detector behind it is a claim, and the category scored an honest 0 rather
+    than a fabricated number.
+
+    What changed is not the standard, it is the evidence. A dataflow analysis now separates the
+    clean twins, measured sealed at **0.0% FPR on both suites** (Java 67 TP / 0 FP / 43 TN,
+    Python 18 TP / 0 FP / 19 TN). The bar was never "somebody mapped it"; it was "the clean twins
+    survive it".
+
+    So the invariant this test pins is inverted but not weakened: the mapping may exist ONLY while
+    the detector that earns it exists. If `scan_trust_boundary` is ever removed, this fails, and
+    the honest response is to unmap the category again rather than to delete this test.
+    """
+    assert ob.FAMILIES.get("trustbound") == {"trust_boundary"}
+    assert hasattr(cr, "scan_trust_boundary")
+    # and the detector has to actually discriminate, not merely exist
+    sink = ('request.getSession().setAttribute("userid", bar);')
+    tainted = ('String param = request.getParameter("p"); String bar = param;')
+    constant = ('String bar = "constant";')
+    wrap = ("import javax.servlet.http.*;\npublic class C extends HttpServlet {\n"
+            "  public void doPost(HttpServletRequest request, HttpServletResponse response) {\n"
+            "    %s\n    %s\n  }\n}\n")
+    assert len(cr.scan_trust_boundary(wrap % (tainted, sink), "C.java")) == 1
+    assert cr.scan_trust_boundary(wrap % (constant, sink), "C.java") == []
 
 
 def test_a_code_assisted_run_is_scored_and_labelled_as_such():

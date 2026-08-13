@@ -196,6 +196,63 @@ class AssetGraph:
     _SEARCH_HINTS = ("q", "query", "search", "s", "keyword", "term")
     _UPLOAD_HINTS = ("file", "upload", "filename", "path", "dir")
 
+    def param_role(self, name) -> str:
+        """A parameter's behavioural role from its NAME. Extracted so every param writer classifies
+        identically — `ingest_intel` used to own this inline, which meant a parameter learned from a
+        form or a schema could never earn a role, and `to_observations` reads role, not location."""
+        n = str(name or "").lower()
+        if any(h in n for h in self._REDIRECT_HINTS):
+            return "redirect"
+        if n in self._SEARCH_HINTS or "search" in n:
+            return "search"
+        if any(h in n for h in self._UPLOAD_HINTS):
+            return "upload"
+        return "generic"
+
+    # OpenAPI's own `in` vocabulary. "form" is deliberately NOT a fifth value: an HTML form field and a
+    # JSON body field arrive at the server the same way and are testable by the same engines, so both
+    # are `body` and the difference is carried by `content_type`.
+    PARAM_LOCATIONS = ("query", "body", "header", "path", "cookie")
+
+    def observe_param(self, endpoint_key: str, name, *, location: str = "query", ptype: str = "",
+                      required=None, method: str = "", content_type: str = "", source: str = "",
+                      **props) -> str:
+        """THE single writer for a parameter fact, wherever it was learned.
+
+        Before this, a `param` node could only ever mean a QUERY parameter: the two writers were
+        `ingest_intel` (name only, no endpoint, post-loop) and `build_from_engagement` (report-time,
+        fed by `surface.build_inventory`, which unions query strings). A body parameter had nowhere to
+        live, so the planner could not name one -- MEASURED on VAmPI, whose spec declares 9 body
+        parameters and 0 query parameters: 100% of its testable parameter surface was invisible.
+
+        KEY RULE, and why it is two rules: a query parameter keeps the exact key
+        `{endpoint}?{name}` that `build_from_engagement` has always minted, because changing it would
+        move existing node identities under the report -- the D12 defect this repo has already paid
+        for once. Every other location gets `{endpoint}#{location}:{name}`. Same node kind, same
+        `has_param` edge; the location is a prop, not a new kind.
+        """
+        loc = str(location or "query").lower()
+        if loc not in self.PARAM_LOCATIONS:
+            loc = "query"
+        nm = str(name)
+        key = ("%s?%s" % (endpoint_key, nm) if loc == "query"
+               else "%s#%s:%s" % (endpoint_key, loc, nm))
+        return self.observe("param", key, label=nm, source=source,
+                            role=self.param_role(nm), location=loc,
+                            ptype=(str(ptype) or None), required=required,
+                            method=(str(method).upper() or None) if method else None,
+                            content_type=(str(content_type) or None), **props)
+
+    def params_at(self, location: str = None) -> list:
+        """Parameter nodes, optionally filtered by location. The reader the planner gating needs;
+        a param written before this change has no `location` prop and reads as `query`."""
+        out = []
+        for n in self.nodes("param"):
+            loc = (n.get("props") or {}).get("location") or "query"
+            if location is None or loc == location:
+                out.append(n)
+        return out
+
     def ingest_intel(self, intel: dict, source: str = "harvest") -> int:
         """Project the intel HARVEST (candidates by kind) into the graph as typed nodes so the planner
         reads the FULL observation vocabulary from the graph, not from flat lists. Secrets are never
@@ -206,12 +263,9 @@ class AssetGraph:
         for oid in cands.get("object_id", []) or []:
             self.observe("object", str(oid), label=str(oid), source=source, enables=["foreign_object_read"])
         for pm in cands.get("param", []) or []:
-            name = str(pm).lower()
-            role = ("redirect" if any(h in name for h in self._REDIRECT_HINTS)
-                    else "search" if name in self._SEARCH_HINTS or "search" in name
-                    else "upload" if any(h in name for h in self._UPLOAD_HINTS)
-                    else "generic")
-            self.observe("param", str(pm), label=str(pm), source=source, role=role)
+            # harvested from text, so there is no endpoint and no location to claim: the key stays the
+            # bare name it has always been, and `param_role` is the shared classifier.
+            self.observe("param", str(pm), label=str(pm), source=source, role=self.param_role(pm))
         for v in cands.get("version", []) or []:
             self.observe("component", str(v), label=str(v), source=source)
         for c in cands.get("credential", []) or []:
@@ -241,13 +295,18 @@ class AssetGraph:
         if "session_acquired" in caps:
             obs.add("authenticated")
         for pnode in self.nodes("param"):
-            role = (pnode.get("props") or {}).get("role")
+            props = pnode.get("props") or {}
+            role = props.get("role")
             if role == "redirect":
                 obs.add("has_redirect_param")
             elif role == "search":
                 obs.add("has_search_param")
             elif role == "upload":
                 obs.add("has_file_upload")
+            # The observation the planner needs to gate body-capable engines on. Absent `location`
+            # means a param written before locations existed, which was always a query param.
+            if (props.get("location") or "query") == "body":
+                obs.add("has_body_params")
         for e in self.nodes("endpoint"):
             low = (e.get("label") or e.get("key") or "").lower()
             if any(k in low for k in ("/login", "/signin", "/sign-in", "/auth", "/session")):
@@ -478,7 +537,9 @@ def build_from_engagement(mission_id: str, *, recon: dict = None, urls: list = N
                             scope_asset=scope_asset, enables=["foreign_object_read"])
             g.link(eid, oid, "exposes", source="recon")
         for p in (inv.get("params") or []):
-            pid = g.observe("param", (host + path + "?" + str(p)), label=str(p), source="recon")
+            # build_inventory unions QUERY strings, so location is query by construction. Routed
+            # through observe_param so the key rule and the role classifier live in one place.
+            pid = g.observe_param((host + path) if host else path, p, location="query", source="recon")
             g.link(eid, pid, "has_param", source="recon")
 
     # findings + what they unlock

@@ -2227,7 +2227,14 @@ def _eval_call(node, env, ctx):
         call_args = args
         if unit[1] and unit[1][0] in ("self", "cls") and len(args) == len(unit[1]) - 1:
             call_args = [recv if recv is not None else _UNK] + args
-        return _run_unit(fname, unit, call_args, ctx)
+        # ARITY HAS TO MATCH. A file that defines its own `doSomething(request, param)` and also
+        # calls `thing.doSomething(param)` on an interface from another file has two different
+        # methods with one name. Inlining the local one for the foreign call bound `request` to
+        # the tainted argument and `param` to nothing, so the taint was DROPPED and the case
+        # reported clean -- 16 of the 16 Java misses in the first measurement were exactly this.
+        # A signature mismatch means this is not that method; fall through to taint-preserving.
+        if len(call_args) == len(unit[1]):
+            return _run_unit(fname, unit, call_args, ctx)
 
     # ---- a summary for a method defined in ANOTHER file ------------
     verdict = ctx.summaries.get(fname)
@@ -2561,7 +2568,12 @@ def _assign(skel, lits, s, e, rhs, aug, env, ctx, py):
     """Bind the left-hand side. Handles `Type name`, `name`, `a[k]` and `obj.attr[k]` -- the last
     is how the Python sink is written (`flask.session[bar] = '12345'`)."""
     lhs = _parse(skel, lits, s, e, py)
-    if lhs[0] == "index":
+    # A Java ARRAY DECLARATION parses as an index expression: `String[] values = ...` is
+    # ("index", ("name","String"), ...). It is a declaration, not a store, and treating it as one
+    # dropped the assignment on the floor -- `values` stayed unknown, the taint never reached the
+    # sink, and 126 real Java cases reported clean while every synthetic test stayed green. An
+    # indexed target is only a store when the thing being indexed is actually a container.
+    if lhs[0] == "index" and _eval(lhs[1], env, ctx).kind in ("session", "map", "list"):
         base = _eval(lhs[1], env, ctx)
         key = _const_of(_eval(lhs[2], env, ctx)) if lhs[2] is not None else None
         if base.kind == "session":
@@ -2602,10 +2614,13 @@ def _assign(skel, lits, s, e, rhs, aug, env, ctx, py):
 
 
 # ── Java unit extraction ─────────────────────────────────────────
-_J_METHOD = re.compile(
-    r"(?:^|[;{}])\s*(?:(?:public|private|protected|static|final|synchronized|abstract|native)\s+)*"
-    r"(?:[A-Za-z_$][\w$.]*(?:\s*<[^;{}]*?>)?(?:\s*\[\s*\])*)\s+"
-    r"([A-Za-z_$]\w*)\s*\(([^;{}()]*)\)\s*(?:throws\s[\w.,\s]+?)?\{")
+# NOT a regex over the whole declaration. The first version of this anchored on the character
+# before the modifiers and required `throws` to sit on the same line, so it matched the synthetic
+# signatures in the tests and NOT ONE real servlet: every OWASP Benchmark method carries an
+# `@Override` annotation and wraps its `throws` clause onto the next line. The tests were green and
+# the Java half of the category found zero. Structure is scanned instead of matched.
+_J_NOT_A_METHOD = {"if", "for", "while", "switch", "catch", "synchronized", "new", "return",
+                   "throw", "else", "do", "try", "case", "assert", "instanceof", "super", "this"}
 
 
 def _java_units(skel: str) -> dict:
@@ -2616,17 +2631,50 @@ def _java_units(skel: str) -> dict:
     A unit is `(lang, param names, a, b, route)` -- offsets for Java, logical-line indices for
     Python -- so one inliner serves both dialects."""
     units = {}
-    for m in _J_METHOD.finditer(skel):
-        name = m.group(1)
-        if name in _J_KEYWORDS or name in _J_MODIFIERS:
+    n = len(skel)
+    for m in _WORD_RX.finditer(skel):
+        name = m.group(0)
+        if name in _J_NOT_A_METHOD or name in _J_MODIFIERS:
             continue
+        k = _ws(skel, m.end(), n)
+        if k >= n or skel[k] != "(":
+            continue
+        # The token before the name has to be a return type, a modifier, or the tail of a generic
+        # or array type -- that is what separates `void doGet(` from `foo.bar(` and from `if (`.
+        p = m.start() - 1
+        while p >= 0 and skel[p] in " \t\r\n":
+            p -= 1
+        if p < 0 or skel[p] in ".@":
+            continue
+        prev_word = ""
+        if skel[p].isalnum() or skel[p] in "_$":
+            back = p
+            while back >= 0 and (skel[back].isalnum() or skel[back] in "_$"):
+                back -= 1
+            prev_word = skel[back + 1:p + 1]
+        elif skel[p] not in ">]":
+            continue
+        if prev_word in _J_NOT_A_METHOD:
+            continue
+        close = _close_of(skel, k, n)
+        params_txt = skel[k + 1:close - 1]
+        if ";" in params_txt or "{" in params_txt:
+            continue
+        j = _ws(skel, close, n)
+        if _word_at(skel, j, n) == "throws":                # may wrap onto the next line
+            brace = skel.find("{", j)
+            semi = skel.find(";", j)
+            if brace < 0 or (0 <= semi < brace):
+                continue
+            j = brace
+        if j >= n or skel[j] != "{":
+            continue                                       # an abstract/interface declaration
         params = []
-        for part in m.group(2).split(","):
+        for part in params_txt.split(","):
             toks = _WORD_RX.findall(part)
             if toks:
                 params.append(toks[-1])
-        open_brace = skel.rindex("{", m.start(), m.end())
-        units[name] = ("java", params, open_brace, _close_of(skel, open_brace, len(skel)), None)
+        units[name] = ("java", params, j, _close_of(skel, j, n), None)
     return units
 
 
@@ -3048,6 +3096,11 @@ def summarize_units(text: str, source: str = "") -> dict:
         elif (taint_run is not None and not _tainted(taint_run)
               and taint_run.kind == "const"):
             out[name] = "const"
+        else:
+            # EVERY unit is reported, including the ones with no verdict. `merge_summaries` needs
+            # to know that a name was DEFINED here and decided nothing -- absence of a verdict is
+            # not agreement with someone else's verdict.
+            out[name] = None
     return out
 
 
@@ -3058,12 +3111,18 @@ def merge_summaries(per_file: list) -> dict:
     neither verdict is applied -- the caller falls back to taint-preserving. Claiming "const" for
     a name that is safe in one file and a request read in another is how a whole-tree analysis
     invents a false negative out of a coincidence.
+
+    AND A MISSING VERDICT IS A DISAGREEMENT. `summarize_units` reports every unit it saw,
+    verdict or not, precisely so that a name decided "const" in one file and left undecided in
+    another is RETRACTED rather than generalised. Reading only the entries that carry a verdict
+    lets one accidental constant helper vouch for every same-named method in the tree.
     """
-    seen = {}
+    seen, defined = {}, set()
     for table in per_file:
         for name, verdict in (table or {}).items():
-            if name in seen and seen[name] != verdict:
+            if name in defined and seen.get(name) != verdict:
                 seen[name] = None
-            elif name not in seen:
+            elif name not in defined:
                 seen[name] = verdict
+            defined.add(name)
     return {k: v for k, v in seen.items() if v}

@@ -2696,6 +2696,51 @@ class BBHAgent:
                 return _ag._nid("endpoint", k)
         return cls._graph_host_node(g, s)
 
+    def _project_body_params(self, g) -> None:
+        """Project captured FORM fields into the graph as typed `body` parameter nodes.
+
+        Q-031 row 4. Until this, a `param` node could only ever mean a QUERY parameter: the only
+        writers were `ingest_intel` (bare names, post-loop) and `build_from_engagement` (report-time,
+        fed by `surface.build_inventory`, which unions query strings). **No body parameter had ever
+        reached the graph from any producer, at any point in a mission.** The knowledge was not
+        missing -- `crawl.extract_forms` already returns each field's name, default value AND input
+        type, and it lands in `tools.recon["forms"]` -- it simply had nowhere to be recorded, which is
+        the same drop-at-a-handoff shape as D3.
+
+        The endpoint is keyed `netloc+path` to match `_graph_add_url`, so a form on an already-known
+        endpoint attaches to that node rather than minting a second identity for it.
+        """
+        from urllib.parse import urlparse as _up
+        for fm in (self.tools.recon.get("forms") or []):
+            act = str((fm or {}).get("action") or "").strip()
+            if not act:
+                continue
+            try:
+                p = _up(act)
+            except Exception:
+                continue
+            if not p.netloc:
+                continue
+            ep_key = p.netloc + (p.path or "/")
+            eid = g.observe("endpoint", ep_key, label=(p.path or "/"), source="form-capture")
+            hid = self._graph_host_node(g, act)
+            if hid:
+                g.link(hid, eid, "serves", source="form-capture")
+            method = str(fm.get("method") or "GET").upper()
+            # `inputs` carries the declared type; `fields` is names only. Prefer inputs, fall back to
+            # fields, so a producer that only ever wrote names still yields parameters.
+            typed = {str(i.get("name")): str(i.get("type") or "")
+                     for i in (fm.get("inputs") or []) if isinstance(i, dict) and i.get("name")}
+            for name in (fm.get("fields") or []):
+                if not name:
+                    continue
+                # A GET form's fields arrive in the query string, a POST form's in the body. Claiming
+                # `body` for both would tell the planner to schedule body engines on a query surface.
+                loc = "body" if method != "GET" else "query"
+                pid = g.observe_param(ep_key, name, location=loc, ptype=typed.get(str(name), ""),
+                                      method=method, source="form-capture")
+                g.link(eid, pid, "has_param", source="form-capture")
+
     def _seed_and_project_graph(self, g) -> None:
         """Project ALL current engagement state into the mission graph so the graph is the single
         source the primary planner reads (CHAD: graph-authoritative execution). Seeds the in-scope
@@ -2740,6 +2785,7 @@ class BBHAgent:
                 hid = self._graph_host_node(g, u)
                 if hid:
                     g.link(hid, eid, "serves", source="recon")
+            self._project_body_params(g)
             for f in (self.findings or []):
                 fam = (f.get("family") or "")
                 # D5: the capability a confirmed finding unlocks — the input the chase_capability
@@ -2851,8 +2897,45 @@ class BBHAgent:
         live = [h for h in (self.tools.recon.get("live_hosts") or [])
                 if isinstance(h, dict) and (_host_of(h.get("url", "")) in hostset or h.get("url") in eps)]
         recon = {"subdomains": hosts, "live_hosts": live,
-                 "target": self.tools.recon.get("target"), "domain": self.tools.recon.get("domain")}
+                 "target": self.tools.recon.get("target"), "domain": self.tools.recon.get("domain"),
+                 "forms": self._forms_from_graph(g, bases)}
         return hosts, eps, recon
+
+    def _forms_from_graph(self, g, bases: dict) -> list:
+        """The planner's `recon["forms"]` list, REBUILT FROM THE GRAPH's parameter nodes.
+
+        MEASURED defect this closes: `_graph_primary_state` returned a recon dict whose keys were
+        exactly `subdomains / live_hosts / target / domain`. Every form-driven branch in the planner
+        reads `state["recon"]["forms"]`, so in the deterministic executor that read `[]` no matter how
+        many forms the crawl had captured -- 2 captured, 0 delivered. `run_stored_xss`, `run_csrf` and
+        `run_race` therefore never fired at all; `run_auth_sqli`, `run_form_nosqli` and
+        `run_form_cmdi` survived only because unrelated fallback branches re-discover forms from
+        login-ish paths and page URLs, which masked the hole.
+
+        Rebuilt from the graph rather than passed through from `tools.recon`, because the executor's
+        whole contract is that the planner's world-state is graph-derived (an empty graph must yield
+        no actions). That also means this is the ONE place a body parameter becomes schedulable
+        surface, whatever taught it to the graph -- an HTML form today, an OpenAPI `requestBody` the
+        moment a producer records one, with no second code path.
+        """
+        by_ep = {}
+        for pnode in g.params_at("body"):
+            props = pnode.get("props") or {}
+            key = str(pnode.get("key") or "")
+            ep_key = key.split("#", 1)[0]
+            if not ep_key:
+                continue
+            slot = by_ep.setdefault(ep_key, {"fields": [], "method": props.get("method") or "POST"})
+            nm = pnode.get("label")
+            if nm and nm not in slot["fields"]:
+                slot["fields"].append(nm)
+        out = []
+        for ep_key, slot in sorted(by_ep.items()):
+            action = self._endpoint_url(ep_key, bases)
+            if not action:            # no host recorded -> not a target (Q-019)
+                continue
+            out.append({"action": action, "method": slot["method"], "fields": slot["fields"]})
+        return out
 
     # U1 (architecture.md 6.3): the graph's ranked action -> a concrete tool.
     #

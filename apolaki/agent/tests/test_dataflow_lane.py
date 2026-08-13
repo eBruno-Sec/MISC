@@ -556,6 +556,104 @@ def test_python_iterating_a_tainted_collection_yields_tainted_elements():
     assert len(cr.scan_trust_boundary(src, "case.py")) == 1
 
 
+# ================================================================ the REAL declaration shape
+# The synthetic servlets above use a one-line signature and no annotation. Every real servlet in
+# the benchmark has both an `@Override` and a `throws` clause wrapped onto the next line, and the
+# first version of the method finder matched neither -- 34 green tests and ZERO findings on 126
+# real Java cases. A helper that recognises no real declaration is worse than no helper.
+
+def test_a_real_servlet_declaration_is_recognised():
+    src = """package org.owasp.benchmark.testcode;
+import javax.servlet.http.*;
+@WebServlet(value = "/trustbound-00/Case")
+public class Case extends HttpServlet {
+    private static final long serialVersionUID = 1L;
+
+    @Override
+    public void doGet(HttpServletRequest request, HttpServletResponse response)
+            throws ServletException, IOException {
+        doPost(request, response);
+    }
+
+    @Override
+    public void doPost(HttpServletRequest request, HttpServletResponse response)
+            throws ServletException, IOException {
+        response.setContentType("text/html;charset=UTF-8");
+        java.util.Map<String, String[]> map = request.getParameterMap();
+        String param = "";
+        if (!map.isEmpty()) {
+            String[] values = map.get("Case");
+            if (values != null) param = values[0];
+        }
+        request.getSession().putValue("userid", param);
+    }
+}
+"""
+    units = cr._java_units(cr.mask_source(src)[0])
+    assert "doPost" in units and "doGet" in units
+    assert units["doPost"][1] == ["request", "response"]
+    assert len(_flags(src, source="Case.java")) == 1
+
+
+def test_control_structures_are_not_mistaken_for_declarations():
+    src = _java("""
+        String param = request.getParameter("name");
+        String bar = "safe";
+        for (int i = 0; i < 3; i++) { bar = "still safe"; }
+        while (false) { bar = param; }
+        try { bar = "safe"; } catch (Exception e) { bar = "safe"; }
+        switch (2) { case 1: bar = param; break; default: break; }
+        request.getSession().setAttribute("userid", bar);
+""")
+    units = cr._java_units(cr.mask_source(src)[0])
+    assert "if" not in units and "for" not in units and "while" not in units
+    assert "catch" not in units and "switch" not in units
+    assert _flags(src) == []
+
+
+# ================================================================ one name, two methods
+
+def test_a_same_named_method_with_a_different_signature_is_not_inlined():
+    """A file that defines `doSomething(request, param)` and also calls `thing.doSomething(param)`
+    on an interface from another file has TWO methods with one name. Inlining the local one for
+    the foreign call binds the arguments to the wrong parameters and DROPS the taint. All 16 Java
+    misses in the first sealed measurement were this."""
+    src = _java("""
+        String param = request.getParameter("name");
+        Thing thing = ThingFactory.createThing();
+        String bar = thing.doSomething(param);
+        request.getSession().setAttribute("userid", bar);
+""", extra="""
+    private static String doSomething(HttpServletRequest request, String param) {
+        return "This is a different method that happens to share a name";
+    }
+""")
+    assert len(_flags(src)) == 1
+
+
+def test_merge_summaries_retracts_a_name_left_undecided_elsewhere():
+    """A verdict is only usable if EVERY definition of that name agrees. A name that is provably
+    constant in one file and undecided in another must fall back to taint-preserving; reading only
+    the entries that carry a verdict lets one accidental constant helper vouch for the tree."""
+    decided = {"getValue": "const", "other": "source"}
+    undecided = {"getValue": None}
+    assert cr.merge_summaries([decided]) == {"getValue": "const", "other": "source"}
+    assert cr.merge_summaries([decided, undecided]) == {"other": "source"}
+    assert cr.merge_summaries([decided, {"getValue": "source"}]) == {"other": "source"}
+
+
+def test_summarize_units_reports_undecided_units_too():
+    helper = """package com.example.app;
+public class Helper {
+    public String constant(String p) { return "bar"; }
+    public String passthrough(String p) { return p; }
+}
+"""
+    s = cr.summarize_units(helper, "Helper.java")
+    assert s["constant"] == "const"
+    assert "passthrough" in s and s["passthrough"] is None
+
+
 # ================================================================ findings are well formed
 
 def test_the_finding_names_the_source_and_the_sink_not_just_the_line():

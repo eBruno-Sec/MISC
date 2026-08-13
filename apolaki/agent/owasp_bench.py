@@ -73,11 +73,18 @@ FAMILIES = {
     # are unreachable by the DAST lane and score 0 there -- which is the honest result, not a gap to
     # paper over. They are reachable by reading the source the operator supplies.
     #
-    # `trustbound` is deliberately ABSENT. Its clean twins launder the tainted value through a
-    # collection (`map.get("keyA-")`), a StringBuilder, or a ternary whose branch is decided by
-    # constant folding -- distinguishing them needs real dataflow, not a call-site match. A
-    # conservative approximation flags the clean twins, and a category mapped to a detector that
-    # cannot separate them is a fabricated score. Leaving it unmapped scores an honest 0.
+    # `trustbound` was deliberately ABSENT until a detector existed that could separate the clean
+    # twins, on the reasoning that a category mapped to a detector which cannot is a fabricated
+    # score. That bar has now been met by an actual dataflow analysis rather than a call-site
+    # match, and the standing comment's own reading of the twins was checked against all 163 cases
+    # while doing it: the collection and constant-folded-ternary launderers are real (and the
+    # collection one is subtler than it said -- the clean twin reads the TAINTED key first), but
+    # the StringBuilder claim was WRONG for this category. Every StringBuilder in Java
+    # `trustbound` is constructed from `param`, so it is a propagator here, not a launderer.
+    #
+    # The mapping is only as good as its clean twins, and those are measured: see
+    # docs/handoff/dataflow.md for the FPR on the twins and the negative controls that decide it.
+    "trustbound": {"trust_boundary"},
     "crypto": {"weak_crypto"},
     "hash": {"weak_hash"},
     "xxe": {"xxe"},
