@@ -317,6 +317,7 @@ def review_source_tree(root: str, max_file_bytes: int = 2_000_000) -> dict:
         return dict(blank, error="no source provided: not a directory: %s" % root)
     props = load_properties(root)
     findings, files = [], []
+    sources = []
     for dirpath, dirnames, filenames in os.walk(root):
         dirnames[:] = [d for d in dirnames if d not in _SKIP_DIRS]
         for fn in filenames:
@@ -332,9 +333,24 @@ def review_source_tree(root: str, max_file_bytes: int = 2_000_000) -> dict:
             except Exception:
                 continue
             files.append(rel)
-            for f in cr.review_source(text, rel, props):
-                f["file"] = rel
-                findings.append(f)
+            sources.append((rel, text))
+    # PASS 1 -- RETURN PROVENANCE ACROSS THE WHOLE TREE, before any file is judged.
+    #
+    # The dataflow rule cannot decide a trust-boundary question from one file. A request wrapper is
+    # a normal thing to write, and at the call site `scr.getTheValue(name)` and
+    # `scr.getTheParameter(name)` are the same three tokens on the same tainted receiver -- one
+    # returns a constant, the other returns the client's data, and the difference lives in another
+    # file entirely. Summarising every method's return provenance first is what makes the
+    # DIFFERENCE visible; without it the analysis has to guess, and either guess is a whole class
+    # of error (flag the constant helper, or miss the wrapper).
+    #
+    # Deliberately not cached across calls: a summary computed from a different tree is a summary
+    # about different code.
+    summaries = cr.merge_summaries([cr.summarize_units(text, rel) for rel, text in sources])
+    for rel, text in sources:
+        for f in cr.review_source(text, rel, props, summaries):
+            f["file"] = rel
+            findings.append(f)
     by_cwe, by_file = {}, {}
     for f in findings:
         by_cwe[f["cwe"]] = by_cwe.get(f["cwe"], 0) + 1

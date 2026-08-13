@@ -604,9 +604,29 @@ def _source_finding(source: str, family: str, cwe: str, title: str, hit: dict,
     }
 
 
-def review_java(text: str, source: str, props: dict = None) -> list:
-    """CODE-ASSISTED (SAST) review of one Java source file. Findings are SOURCE-DERIVED."""
+def _trust_boundary_findings(source: str, text: str, summaries: dict = None) -> list:
+    """The dataflow lane's contribution, in the same finding shape as every other code-assisted
+    rule. Shared by both languages on purpose: a consumer must not be able to tell which language
+    produced a finding, only which lane did."""
     out = []
+    for h in scan_trust_boundary(text, source, summaries):
+        out.append(_source_finding(
+            source, "trust_boundary", "CWE-501",
+            "Trust boundary violation: request data written into the session", h,
+            "An attacker chooses what the application stores as trusted state. Anything that "
+            "later reads the session believes a value the client supplied.",
+            "Validate the value against an allow-list before it crosses into the session, and "
+            "never let a request-supplied string become a session ATTRIBUTE NAME.",
+            "the value reaching %s at line %s is request-derived (%s); this is a dataflow "
+            "conclusion, not a call-site match -- the same sink with a constant is not reported"
+            % (h.get("api"), h.get("line"), h.get("source")),
+            ["dataflow", "trust-boundary"]))
+    return out
+
+
+def review_java(text: str, source: str, props: dict = None, summaries: dict = None) -> list:
+    """CODE-ASSISTED (SAST) review of one Java source file. Findings are SOURCE-DERIVED."""
+    out = _trust_boundary_findings(source, text, summaries)
     for h in scan_java_crypto(text, props):
         out.append(_source_finding(
             source, "weak_crypto", "CWE-327", "Weak cryptographic algorithm: %s" % h["algorithm"], h,
@@ -1139,13 +1159,13 @@ def looks_like_python(text: str, source: str = "") -> bool:
     return bool(_PY_MARKER.search(text or ""))
 
 
-def review_python(text: str, source: str, props: dict = None) -> list:
+def review_python(text: str, source: str, props: dict = None, summaries: dict = None) -> list:
     """CODE-ASSISTED (SAST) review of one Python source file. Findings are SOURCE-DERIVED.
 
-    Deliberately the same three families and the same finding shape as `review_java`: a consumer of
+    Deliberately the same families and the same finding shape as `review_java`: a consumer of
     this lane must not be able to tell which language produced a finding, only which lane did.
     """
-    out = []
+    out = _trust_boundary_findings(source, text, summaries)
     for h in scan_python_crypto(text, props):
         out.append(_source_finding(
             source, "weak_crypto", "CWE-327", "Weak cryptographic algorithm: %s" % h["algorithm"], h,
@@ -1178,12 +1198,17 @@ def review_python(text: str, source: str, props: dict = None) -> list:
 
 # LANGUAGE DISPATCH. One entry point, so a caller never has to know which analyzer to reach for --
 # and so adding the next language is a row here rather than a second walk of the tree.
-def review_source(text: str, source: str, props: dict = None) -> list:
-    """CODE-ASSISTED (SAST) review of one source file, whatever language it is written in."""
+def review_source(text: str, source: str, props: dict = None, summaries: dict = None) -> list:
+    """CODE-ASSISTED (SAST) review of one source file, whatever language it is written in.
+
+    `summaries` is the whole-tree return-provenance table from `summarize_units`. It is optional:
+    without it the dataflow rule still works, it just cannot tell a request-wrapping helper from a
+    constant-returning one, and defaults to taint-preserving for both.
+    """
     if looks_like_java(text, source):
-        return review_java(text, source, props)
+        return review_java(text, source, props, summaries)
     if looks_like_python(text, source):
-        return review_python(text, source, props)
+        return review_python(text, source, props, summaries)
     return []
 
 
@@ -1403,3 +1428,1642 @@ def review(text: str, source: str) -> dict:
             "family": "code-review", "tags": ["disclosure"], "confidence": "candidate"})
     return {"findings": findings, "endpoints": extract_endpoints(text),
             "entropy_hits": scan_entropy(text)}
+
+
+# ══════════════════════════════════════════════════════════════════════════════════════════════
+# DATAFLOW LANE — trust boundary violation (CWE-501) decided by PROVENANCE
+# ══════════════════════════════════════════════════════════════════════════════════════════════
+# Everything above this line decides a verdict at a CALL SITE, because for a weak cipher the call
+# site IS the defect. This section exists because trust-boundary violation is the opposite shape:
+#
+#   request.getSession().setAttribute("userid", bar);
+#
+# is the defect or is nothing at all, and the difference is entirely where `bar` came from. In the
+# OWASP Benchmark's `trustbound` category 126 of 126 Java cases and 37 of 37 Python cases call a
+# session sink, and the suite carries 493 MORE clean session sinks outside the category (the
+# `rememberMe` boilerplate). A detector that matches the sink scores 100% TPR at 100% FPR.
+#
+# So this is an abstract interpreter, not a matcher. It walks statements in order over a small
+# lattice — CONST / TAINT / UNKNOWN plus keyed containers — folds the constants it can, and asks
+# one question at the sink: is this value request-derived?
+#
+# Four things the clean twins actually do, all decidable and none of them textual:
+#
+#   1. CONSTANT FOLDING. `int num = 86;  if ((7*42) - num > 200) bar = CONST; else bar = param;`
+#      is clean and `int num = 106;  bar = (7*42) - num > 200 ? CONST : param;` is vulnerable. The
+#      predicate is character-identical; only a number declared eight lines earlier differs. Both
+#      the arm TAKEN and the arm HOLDING the parameter have to be computed.
+#   2. LAST WRITE WINS. The clean map twin reads the tainted key FIRST and the safe key second:
+#      `bar = map.get("keyB"); bar = map.get("keyA");`. Asking whether `map.get("keyB")` appears
+#      flags both twins.
+#   3. KEYED SLOTS. A map is not one taint bit. Nor is a list: `remove(0)` then `get(1)` is the
+#      safe element and `get(0)` is the parameter.
+#   4. PROVENANCE OF THE SOURCE. Two things that read exactly like request reads are not:
+#      a helper that returns a constant, and `request.path` under a route with no converters.
+#
+# Deliberately NOT modelled as sanitizers: encoders. `escapeHtml(param)` is still attacker-chosen
+# data in a trusted store — CWE-501 is about trust, CWE-116 output encoding is about a rendering
+# context, and a session is not a rendering context. Recorded in docs/handoff/dataflow.md before
+# any score was taken, so the choice could not be back-fitted to an answer key.
+#
+# The default for anything unmodelled is TAINT-PRESERVING. An unknown call with a tainted argument
+# returns taint. Dropping taint at an unrecognised transformation is how a dataflow engine reports
+# a vulnerable file clean, and that is a far worse failure here than an extra unknown.
+
+
+class _V(object):
+    """A value in the lattice. `slots` carries container contents and is deliberately MUTABLE, so
+    a `put` through one name is visible through an alias of the same object."""
+    __slots__ = ("kind", "val", "slots")
+
+    def __init__(self, kind, val=None, slots=None):
+        self.kind, self.val, self.slots = kind, val, slots
+
+    def __repr__(self):                                   # pragma: no cover - debugging aid
+        return "<%s %r>" % (self.kind, self.val if self.slots is None else self.slots)
+
+
+_TAINT = _V("taint")
+_UNK = _V("unknown")
+# The inside of the trust boundary. Reading from a session is not reading from the client, so it
+# must not be taint — otherwise `session.getAttribute(k)` re-enters as untrusted and every
+# read-modify-write of a session attribute becomes a false positive.
+_SESSION = _V("session")
+
+
+def _K(v):
+    return _V("const", v)
+
+
+def _taint(origin=None):
+    """Taint carries WHERE it came from. A finding that can only say "line 47" makes the reader
+    re-derive the whole flow; one that names `request.getHeader()` is a report."""
+    return _V("taint", origin) if origin else _TAINT
+
+
+def _origin(*vals):
+    """The first named provenance among these values, so a propagator does not lose it."""
+    for v in vals:
+        if v is not None and v.kind == "taint" and v.val:
+            return v.val
+        if v is not None and v.kind in ("map", "list", "sb"):
+            inner = v.slots.values() if v.kind == "map" else v.slots
+            got = _origin(*inner)
+            if got:
+                return got
+    return None
+
+
+def _tainted(v) -> bool:
+    if v is None:
+        return False
+    if v.kind == "taint":
+        return True
+    if v.kind == "map":
+        return any(_tainted(x) for x in v.slots.values())
+    if v.kind in ("list", "sb"):
+        return any(_tainted(x) for x in v.slots)
+    return False
+
+
+def _const_of(v):
+    """The concrete constant, or None. A container never folds to one."""
+    return v.val if (v is not None and v.kind == "const") else None
+
+
+def _merge(a, b):
+    """Join two values from branches that both stay live."""
+    if a is None:
+        return b if b is not None else _UNK
+    if b is None:
+        return a
+    if _tainted(a) or _tainted(b):
+        return _taint(_origin(a, b))
+    if a.kind == "const" and b.kind == "const" and a.val == b.val:
+        return a
+    if a.kind == b.kind == "session":
+        return a
+    return _UNK
+
+
+def _clone_env(env: dict) -> dict:
+    """Copy for a branch. Containers are copied one level deep so a `put` inside a branch that is
+    not taken cannot leak back into the join."""
+    out = {}
+    for k, v in env.items():
+        if v is not None and v.kind == "map":
+            out[k] = _V("map", None, dict(v.slots))
+        elif v is not None and v.kind in ("list", "sb"):
+            out[k] = _V(v.kind, None, list(v.slots))
+        else:
+            out[k] = v
+    return out
+
+
+def _join_envs(base: dict, a: dict, b: dict) -> dict:
+    out = dict(base)
+    for name in set(a) | set(b):
+        out[name] = _merge(a.get(name, base.get(name)), b.get(name, base.get(name)))
+    return out
+
+
+# ── tokenizer ────────────────────────────────────────────────────
+# Runs over the MASKED SKELETON, so a bracket or a quote inside a comment or a string body can
+# never confuse it, and every offset it reports still maps to a real line.
+_NUM_RX = re.compile(r"\d+")
+_WORD_RX = re.compile(r"[A-Za-z_$][A-Za-z0-9_$]*")
+_OPS2 = ("==", "!=", "<=", ">=", "&&", "||", "+=", "-=", "//", "**", "->", "::")
+
+
+def _lit_end(skel: str, i: int, e: int) -> int:
+    """Index just past the literal opening at `i`. Brace depth is tracked because a Python
+    f-string keeps its `{...}` interpolations in the skeleton AS CODE, and those can contain a
+    quote of their own."""
+    q = skel[i]
+    if skel.startswith(q * 3, i):
+        j = skel.find(q * 3, i + 3)
+        return e if j < 0 else min(j + 3, e)
+    j, depth = i + 1, 0
+    while j < e:
+        c = skel[j]
+        if c == "{":
+            depth += 1
+        elif c == "}":
+            depth = max(0, depth - 1)
+        elif c == q and depth == 0:
+            return j + 1
+        elif c == "\n" and depth == 0:
+            return j
+        j += 1
+    return e
+
+
+def _tokens(skel: str, lits: dict, s: int, e: int) -> list:
+    """[(kind, value, start, end)] with kind in str / num / name / op."""
+    out, i = [], s
+    while i < e:
+        c = skel[i]
+        if c in " \t\r\n\x0b\x0c\\":
+            i += 1
+            continue
+        if c in "\"'":
+            j = _lit_end(skel, i, e)
+            out.append(("str", lits.get(i, ""), i, j))
+            i = j
+            continue
+        if not c.isdigit():
+            m = _WORD_RX.match(skel, i)
+            if m:
+                # A Python string PREFIX is a word glued to a quote. An f-string has to be told
+                # apart here or its `{...}` interpolations are swallowed by the literal span and
+                # `f"prefix{param}suffix"` reads as a constant -- a false NEGATIVE, and the one
+                # direction this analysis must never take.
+                nxt = skel[m.end():m.end() + 1]
+                if nxt in ("'", '"') and set(m.group(0).lower()) <= set("rbuf"):
+                    j = _lit_end(skel, m.end(), e)
+                    kind = "fstr" if "f" in m.group(0).lower() else "str"
+                    out.append((kind, lits.get(m.end(), ""), m.end(), j))
+                    i = j
+                    continue
+                out.append(("name", m.group(0), i, m.end()))
+                i = m.end()
+                continue
+        m = _NUM_RX.match(skel, i)
+        if m:
+            out.append(("num", int(m.group(0)), i, m.end()))
+            i = m.end()
+            continue
+        two = skel[i:i + 2]
+        if two in _OPS2:
+            out.append(("op", two, i, i + 2))
+            i += 2
+            continue
+        out.append(("op", c, i, i + 1))
+        i += 1
+    return out
+
+
+# ── expression parser (precedence climbing, shared by both dialects) ──
+_PREC = {"*": 10, "/": 10, "%": 10, "//": 10,
+         "+": 9, "-": 9,
+         "<": 7, ">": 7, "<=": 7, ">=": 7,
+         "==": 6, "!=": 6, "in": 6, "not in": 6, "is": 6,
+         "&&": 4, "and": 4,
+         "||": 3, "or": 3}
+
+
+class _P(object):
+    """Precedence climbing. Small on purpose: the grammar it covers is the grammar a dataflow
+    question is asked in, not the whole language."""
+
+    def __init__(self, toks, py):
+        self.t, self.i, self.py = toks, 0, py
+
+    def peek(self, k=0):
+        return self.t[self.i + k] if self.i + k < len(self.t) else ("eof", None, -1, -1)
+
+    def take(self):
+        tok = self.peek()
+        self.i += 1
+        return tok
+
+    def at(self, kind, val=None):
+        tok = self.peek()
+        return tok[0] == kind and (val is None or tok[1] == val)
+
+    def eat(self, kind, val=None):
+        if self.at(kind, val):
+            self.i += 1
+            return True
+        return False
+
+    def parse(self):
+        return self.ternary()
+
+    def ternary(self):
+        if self.py:
+            node = self.binary(0)
+            if self.at("name", "if"):                     # `a if cond else b`
+                self.take()
+                cond = self.binary(0)
+                if self.eat("name", "else"):
+                    return ("cond", cond, node, self.ternary())
+                return ("cond", cond, node, ("unknown",))
+            return node
+        node = self.binary(0)
+        if self.eat("op", "?"):
+            a = self.ternary()
+            self.eat("op", ":")
+            return ("cond", node, a, self.ternary())
+        return node
+
+    def binary(self, minp):
+        left = self.unary()
+        while True:
+            tok = self.peek()
+            k, v = tok[0], tok[1]
+            op = None
+            if k == "op" and v in _PREC:
+                op = v
+            elif self.py and k == "name" and v in ("and", "or", "in", "is"):
+                op = v
+            elif self.py and k == "name" and v == "not" and self.peek(1)[1] == "in":
+                op = "not in"
+            if op is None or _PREC.get(op, 0) < minp:
+                return left
+            self.take()
+            if op == "not in":
+                self.take()
+            right = self.binary(_PREC[op] + 1)
+            left = ("bin", op, left, right)
+
+    def unary(self):
+        tok = self.peek()
+        k, v = tok[0], tok[1]
+        if k == "op" and v in ("-", "!", "~", "+"):
+            self.take()
+            return ("un", v, self.unary())
+        if self.py and k == "name" and v == "not":
+            self.take()
+            return ("un", "not", self.unary())
+        if not self.py and k == "name" and v == "new":
+            self.take()
+            name = self.qualified_name()
+            args = self.args() if self.at("op", "(") else []
+            return self.postfix(("new", name, args))
+        return self.postfix(self.primary())
+
+    def qualified_name(self):
+        parts = []
+        while self.at("name"):
+            parts.append(self.take()[1])
+            if self.at("op", ".") and self.peek(1)[0] == "name":
+                self.take()
+                continue
+            break
+        if self.at("op", "<"):                            # generics: skip the type arguments
+            depth = 0
+            while self.i < len(self.t):
+                v = self.peek()[1]
+                self.take()
+                if v == "<":
+                    depth += 1
+                elif v == ">":
+                    depth -= 1
+                    if depth <= 0:
+                        break
+        return ".".join(parts)
+
+    def primary(self):
+        tok = self.peek()
+        k, v = tok[0], tok[1]
+        if k == "str":
+            self.take()
+            return ("str", v, tok[2])
+        if k == "fstr":
+            self.take()
+            return ("fstr", v, tok[2], tok[3])
+        if k == "num":
+            self.take()
+            return ("num", v)
+        if k == "name":
+            self.take()
+            if v in ("true", "True"):
+                return ("bool", True)
+            if v in ("false", "False"):
+                return ("bool", False)
+            if v in ("null", "None"):
+                return ("null",)
+            return ("name", v)
+        if k == "op" and v == "(":
+            self.take()
+            if not self.py:                               # Java cast: `(String) x`
+                save = self.i
+                if self.at("name"):
+                    self.qualified_name()
+                    if self.eat("op", ")"):
+                        nxt = self.peek()
+                        if nxt[0] in ("name", "str", "num") or (nxt[0] == "op" and nxt[1] == "("):
+                            return self.unary()
+                self.i = save
+            node = self.parse()
+            self.eat("op", ")")
+            return node
+        if k == "op" and v == "[":
+            self.take()
+            items = []
+            while not self.at("op", "]") and self.peek()[0] != "eof":
+                items.append(self.parse())
+                if not self.eat("op", ","):
+                    break
+            self.eat("op", "]")
+            return ("listlit", items)
+        if k == "op" and v == "{":
+            self.take()
+            depth = 1
+            while self.peek()[0] != "eof" and depth:
+                vv = self.take()[1]
+                if vv == "{":
+                    depth += 1
+                elif vv == "}":
+                    depth -= 1
+            return ("dictlit",)
+        self.take()
+        return ("unknown",)
+
+    def postfix(self, node):
+        while True:
+            if self.at("op", "."):
+                self.take()
+                if self.at("name"):
+                    node = ("attr", node, self.take()[1])
+                    continue
+                return node
+            if self.at("op", "("):
+                node = ("call", node, self.args())
+                continue
+            if self.at("op", "["):
+                self.take()
+                lo = None if self.at("op", ":") else self.parse()
+                if self.eat("op", ":"):
+                    hi = None if self.at("op", "]") else self.parse()
+                    self.eat("op", "]")
+                    node = ("slice", node, lo, hi)
+                    continue
+                self.eat("op", "]")
+                node = ("index", node, lo)
+                continue
+            return node
+
+    def args(self):
+        self.eat("op", "(")
+        out = []
+        while not self.at("op", ")") and self.peek()[0] != "eof":
+            out.append(self.parse())
+            if not self.eat("op", ","):
+                break
+        self.eat("op", ")")
+        return out
+
+
+def _parse(skel, lits, s, e, py):
+    toks = _tokens(skel, lits, s, e)
+    return _P(toks, py).parse() if toks else ("unknown",)
+
+
+# ── the abstract interpreter ─────────────────────────────────────
+class _Ctx(object):
+    """Everything the evaluator needs that is not the environment."""
+    __slots__ = ("py", "src", "skel", "lits", "units", "summaries", "route", "depth",
+                 "hits", "seen", "stack", "lines")
+
+    def __init__(self, py, src, skel, lits, units, summaries):
+        self.py, self.src, self.skel, self.lits = py, src, skel, lits
+        self.units = units or {}
+        self.summaries = summaries or {}
+        self.route, self.depth = None, 0
+        self.hits, self.seen, self.stack, self.lines = [], set(), [], []
+
+
+# Containers, by the type actually constructed. A map is not one taint bit and neither is a list;
+# `remove(0)` then `get(1)` is a different element from `get(0)`.
+_MAP_TYPES = ("HashMap", "Hashtable", "TreeMap", "LinkedHashMap", "ConcurrentHashMap", "Properties",
+              "ConfigParser", "RawConfigParser", "SafeConfigParser", "OrderedDict", "dict")
+_LIST_TYPES = ("ArrayList", "LinkedList", "Vector", "Stack", "ArrayDeque", "HashSet", "list")
+_SB_TYPES = ("StringBuilder", "StringBuffer")
+# Reading FROM the session is reading from the inside of the trust boundary, so it is never taint.
+_SESSION_GETTERS = ("getSession", "getServletContext", "getSessionContext")
+# The sink. CWE-501 is "untrusted data into a trusted store"; these are the stores.
+_SINK_METHODS = ("setAttribute", "putValue", "setValue", "update", "setdefault")
+_MAP_GET = ("get", "getProperty", "getString", "getAttribute", "getOrDefault")
+_MAP_PUT = ("put", "set", "setProperty", "putIfAbsent")
+_LIST_ADD = ("add", "append", "push", "addAll", "offer")
+
+
+def _num(v):
+    return v if isinstance(v, int) and not isinstance(v, bool) else None
+
+
+def _fold_bin(op, a, b, py):
+    """Constant arithmetic. Integer division is INTEGER — `500 / 42` is 11 in Java, and reading it
+    as 11.9 is how a folder gets the next codebase's branch backwards."""
+    if isinstance(a, str) and isinstance(b, str):
+        if op == "+":
+            return a + b
+        if op == "in":
+            return b.find(a) >= 0
+        if op == "not in":
+            return b.find(a) < 0
+        if op == "==":
+            return a == b
+        if op == "!=":
+            return a != b
+        return None
+    na, nb = _num(a), _num(b)
+    if na is None or nb is None:
+        if op == "==":
+            return a == b
+        if op == "!=":
+            return a != b
+        return None
+    try:
+        if op == "+":
+            return na + nb
+        if op == "-":
+            return na - nb
+        if op == "*":
+            return na * nb
+        if op in ("/", "//"):
+            if nb == 0:
+                return None
+            q = abs(na) // abs(nb)                        # Java `/` truncates toward zero
+            return q if (na >= 0) == (nb >= 0) else -q
+        if op == "%":
+            return na % nb if nb else None
+        if op == "<":
+            return na < nb
+        if op == ">":
+            return na > nb
+        if op == "<=":
+            return na <= nb
+        if op == ">=":
+            return na >= nb
+        if op == "==":
+            return na == nb
+        if op == "!=":
+            return na != nb
+    except Exception:
+        return None
+    return None
+
+
+def _truth(v):
+    """True / False when the value folds to a decidable condition, else None. `None` is the whole
+    point: an unfoldable condition means BOTH arms stay live, it never means 'assume false'."""
+    if v is None or v.kind != "const":
+        return None
+    x = v.val
+    if isinstance(x, bool):
+        return x
+    return None
+
+
+def _sb_value(v):
+    if any(_tainted(x) for x in v.slots):
+        return _TAINT
+    parts = [_const_of(x) for x in v.slots]
+    if parts and all(isinstance(p, str) for p in parts):
+        return _K("".join(parts))
+    return _UNK
+
+
+def _eval(node, env, ctx):
+    k = node[0]
+    if k == "str":
+        return _K(node[1])
+    if k == "fstr":
+        return _eval_fstring(node, env, ctx)
+    if k in ("num", "bool"):
+        return _K(node[1])
+    if k == "null":
+        return _K(None)
+    if k == "unknown":
+        return _UNK
+    if k == "dictlit":
+        return _V("map", None, {})
+    if k == "listlit":
+        return _V("list", None, [_eval(x, env, ctx) for x in node[1]])
+    if k == "name":
+        return env.get(node[1], _UNK)
+    if k == "un":
+        x = _eval(node[2], env, ctx)
+        c = _const_of(x)
+        if node[1] == "-" and _num(c) is not None:
+            return _K(-c)
+        if node[1] in ("not", "!") and isinstance(c, bool):
+            return _K(not c)
+        return _TAINT if _tainted(x) else _UNK
+    if k == "bin":
+        return _eval_bin(node, env, ctx)
+    if k == "cond":
+        t = _truth(_eval(node[1], env, ctx))
+        if t is True:
+            return _eval(node[2], env, ctx)
+        if t is False:
+            return _eval(node[3], env, ctx)
+        return _merge(_eval(node[2], env, ctx), _eval(node[3], env, ctx))
+    if k == "attr":
+        return _eval_attr(node, env, ctx)
+    if k == "index":
+        return _eval_index(node, env, ctx)
+    if k == "slice":
+        base = _eval(node[1], env, ctx)
+        return _TAINT if _tainted(base) else _UNK
+    if k == "new":
+        return _eval_new(node, env, ctx)
+    if k == "call":
+        return _eval_call(node, env, ctx)
+    return _UNK
+
+
+def _eval_fstring(node, env, ctx):
+    """An f-string is half literal and half CODE. The interpolations stay in the skeleton, so they
+    are parsed and evaluated here; the constant parts are already decoded in `lits`."""
+    _kind, const_parts, s, e = node
+    interps, j = [], s
+    while j < e:
+        c = ctx.skel[j]
+        if c == "{":
+            k = _close_of(ctx.skel, j, e)
+            interps.append(_eval(_parse(ctx.skel, ctx.lits, j + 1, k - 1, True), env, ctx))
+            j = k
+            continue
+        j += 1
+    if any(_tainted(v) for v in interps):
+        return _taint(_origin(*interps))
+    return _K(const_parts) if not interps else _UNK
+
+
+def _eval_bin(node, env, ctx):
+    op, a, b = node[1], _eval(node[2], env, ctx), _eval(node[3], env, ctx)
+    ca, cb = _const_of(a), _const_of(b)
+    if ca is not None and cb is not None:
+        folded = _fold_bin(op, ca, cb, ctx.py)
+        if folded is not None:
+            return _K(folded)
+    if op in ("+", "-", "*", "/", "//", "%"):
+        if _tainted(a) or _tainted(b):
+            return _taint(_origin(a, b))
+        return _UNK
+    return _UNK                                            # a comparison is a bool, not a payload
+
+
+def _eval_attr(node, env, ctx):
+    name = node[2]
+    obj = node[1]
+    # `flask.session` / a bare `session` bound by `from flask import session`
+    if name == "session" and obj[0] == "name" and obj[1] in ("flask", "app"):
+        return _SESSION
+    base = _eval(obj, env, ctx)
+    if base.kind == "session":
+        return _UNK
+    if _tainted(base):
+        # `request.path` under a route with NO converters is pinned to a literal. This is the
+        # Python twin of "the receiver decides the verdict": it READS like a request source and
+        # constant-propagating the route decorator proves it is not one.
+        if ctx.py and name == "path" and ctx.route and "<" not in ctx.route:
+            return _K(ctx.route)
+        if name in _SOURCE_NAMES:
+            return _taint("request.%s" % name)
+        return _taint(_origin(base))
+    return _UNK
+
+
+def _eval_index(node, env, ctx):
+    base = _eval(node[1], env, ctx)
+    idx = _eval(node[2], env, ctx) if node[2] is not None else _UNK
+    key = _const_of(idx)
+    if base.kind == "map":
+        if key is not None and key in base.slots:
+            return base.slots[key]
+        if key is not None:
+            return _UNK
+        return _TAINT if _tainted(base) else _UNK          # unknown key -> any slot
+    if base.kind == "list":
+        n = _num(key)
+        if n is not None and -len(base.slots) <= n < len(base.slots):
+            return base.slots[n]
+        return _TAINT if _tainted(base) else _UNK
+    cb = _const_of(base)
+    if isinstance(cb, str):
+        n = _num(key)
+        if n is not None and -len(cb) <= n < len(cb):
+            return _K(cb[n])
+        return _UNK
+    return _TAINT if _tainted(base) else _UNK
+
+
+def _eval_new(node, env, ctx):
+    tname = (node[1] or "").split(".")[-1]
+    args = [_eval(a, env, ctx) for a in node[2]]
+    if tname in _SB_TYPES:
+        return _V("sb", None, [a for a in args if a.kind != "const" or isinstance(a.val, str)] or [])
+    if tname in _MAP_TYPES:
+        return _V("map", None, {})
+    if tname in _LIST_TYPES:
+        return _V("list", None, [])
+    return _TAINT if any(_tainted(a) for a in args) else _UNK
+
+
+def _sink(ctx, api, value, off):
+    """Record one trust-boundary violation. Deduplicated per (line, sink): a value that reaches
+    the same sink by two paths is one defect, not two."""
+    line = _line_of(ctx.src, off)
+    if (line, api) in ctx.seen:
+        return
+    ctx.seen.add((line, api))
+    source_api = _origin(value) or "the HTTP request"
+    ctx.hits.append({
+        "construct": api, "api": api, "line": line, "cwe": "CWE-501",
+        "resolved_from": "dataflow", "source": source_api, "spec": api,
+        "why": "a value read from the HTTP request (%s) reaches %s while still under the "
+               "attacker's control -- untrusted data is written into a trusted store"
+               % (source_api, api)})
+
+
+def _eval_call(node, env, ctx):
+    callee, argnodes = node[1], node[2]
+    args = [_eval(a, env, ctx) for a in argnodes]
+    off = _node_off(node)
+
+    if callee[0] == "name":
+        fname, recv = callee[1], None
+    elif callee[0] == "attr":
+        fname, recv = callee[2], _eval(callee[1], env, ctx)
+    else:
+        return _TAINT if any(_tainted(a) for a in args) else _UNK
+
+    # ---- crossing INTO the trusted store ---------------------------
+    # `request.getSession()` is the one call on a tainted receiver that does not return client
+    # data: it returns the store on the other side of the boundary. Without this the sink's
+    # receiver is just more taint and the sink is never recognised at all.
+    if fname in _SESSION_GETTERS and recv is not None:
+        return _SESSION
+
+    # ---- the sink -------------------------------------------------
+    if recv is not None and recv.kind == "session" and fname in _SINK_METHODS:
+        # BOTH argument positions count. `setAttribute(bar, "10340")` puts the attacker's string
+        # in the KEY and `setAttribute("userid", bar)` puts it in the VALUE; the benchmark uses
+        # both, so an argument-position rule is no more use than a call-name rule.
+        for a in args:
+            if _tainted(a):
+                _sink(ctx, ("session.%s" % fname) if ctx.py else ("HttpSession.%s" % fname),
+                      a, off)
+                break
+        return _UNK
+    if recv is not None and recv.kind == "session":
+        return _UNK
+
+    # ---- constructing a container --------------------------------
+    # Python builds these with a plain call (`configparser.ConfigParser()`, `dict()`), Java with
+    # `new`. Both have to land on a real container or the keyed-slot analysis never engages and
+    # every twin in the map family collapses to one taint bit.
+    if fname in _MAP_TYPES:
+        return _V("map", None, {})
+    if fname in _LIST_TYPES and not args:
+        return _V("list", None, [])
+    if fname in _SB_TYPES:
+        return _V("sb", None, [a for a in args])
+
+    # ---- built-ins that fold --------------------------------------
+    if fname == "len" and recv is None and args:
+        c = _const_of(args[0])
+        if isinstance(c, str):
+            return _K(len(c))
+        return _UNK
+    if fname in ("length", "size") and recv is not None and not args:
+        c = _const_of(recv)
+        if isinstance(c, str):
+            return _K(len(c))
+        if recv.kind == "list":
+            return _K(len(recv.slots))
+        return _UNK
+    if fname == "charAt" and recv is not None and args:
+        c, n = _const_of(recv), _num(_const_of(args[0]))
+        if isinstance(c, str) and n is not None and -len(c) <= n < len(c):
+            return _K(c[n])
+        return _TAINT if _tainted(recv) else _UNK
+
+    # ---- containers -----------------------------------------------
+    if recv is not None and recv.kind == "map":
+        if fname in _MAP_PUT and len(args) >= 2:
+            key = _const_of(args[-2])
+            recv.slots[key if key is not None else object()] = args[-1]
+            return _UNK
+        if fname in _MAP_GET and args:
+            key = _const_of(args[-1] if len(args) < 3 else args[1])
+            if len(args) >= 2 and _const_of(args[1]) is not None:
+                key = _const_of(args[1])                   # configparser: get(section, option)
+            elif len(args) >= 1:
+                key = _const_of(args[0])
+            if key is not None:
+                return recv.slots.get(key, _UNK)
+            return _TAINT if _tainted(recv) else _UNK
+        if fname in ("remove", "pop") and args:
+            key = _const_of(args[0])
+            if key is not None:
+                return recv.slots.pop(key, _UNK)
+        return _UNK
+    if recv is not None and recv.kind == "list":
+        if fname in _LIST_ADD and args:
+            recv.slots.append(args[0])
+            return _UNK
+        if fname in ("get", "pop", "remove") and args:
+            n = _num(_const_of(args[0]))
+            if n is not None and -len(recv.slots) <= n < len(recv.slots):
+                return recv.slots.pop(n) if fname in ("pop", "remove") else recv.slots[n]
+            return _TAINT if _tainted(recv) else _UNK
+        if fname == "insert" and len(args) >= 2:
+            n = _num(_const_of(args[0]))
+            recv.slots.insert(n if n is not None else 0, args[1])
+            return _UNK
+        return _TAINT if _tainted(recv) else _UNK
+    if recv is not None and recv.kind == "sb":
+        if fname in ("append", "insert", "replace", "delete", "reverse", "deleteCharAt"):
+            for a in args:
+                if a.kind != "const" or isinstance(a.val, str):
+                    recv.slots.append(a)
+            return recv                                    # chainable: returns the same builder
+        if fname == "toString":
+            return _sb_value(recv)
+        return _sb_value(recv)
+
+    # ---- a method defined in this same file ------------------------
+    # 85 of 126 Java trustbound cases route the whole transform through a private helper or an
+    # inner class. Without this, two thirds of the category is opaque.
+    unit = ctx.units.get(fname)
+    if unit is not None and ctx.depth < 4 and fname not in ctx.stack:
+        # A bound method's first parameter is the receiver, and the call site does not pass it.
+        call_args = args
+        if unit[1] and unit[1][0] in ("self", "cls") and len(args) == len(unit[1]) - 1:
+            call_args = [recv if recv is not None else _UNK] + args
+        return _run_unit(fname, unit, call_args, ctx)
+
+    # ---- a summary for a method defined in ANOTHER file ------------
+    verdict = ctx.summaries.get(fname)
+    if verdict == "const":
+        return _UNK                                        # provably not request-derived
+    if verdict == "source":
+        return _TAINT
+
+    # ---- default: taint-preserving ---------------------------------
+    # An unrecognised transformation does NOT clear taint. `escapeHtml(param)` lands here, and
+    # that is deliberate: CWE-501 is about trust, and entity-encoding an attacker's string does
+    # not make a session key trusted.
+    if _tainted(recv) or any(_tainted(a) for a in args):
+        if fname in _SOURCE_NAMES and _tainted(recv):
+            return _taint("request.%s()" % fname)
+        return _taint(_origin(recv, *args))
+    return _UNK
+
+
+def _node_off(node):
+    """Best-effort source offset for a node, for line attribution."""
+    if node[0] == "str" and len(node) > 2:
+        return node[2]
+    for part in node[1:]:
+        if isinstance(part, tuple):
+            off = _node_off(part)
+            if off >= 0:
+                return off
+        if isinstance(part, list):
+            for x in part:
+                if isinstance(x, tuple):
+                    off = _node_off(x)
+                    if off >= 0:
+                        return off
+    return -1
+
+
+_SOURCE_NAMES = ("getParameter", "getParameterValues", "getParameterMap", "getParameterNames",
+                 "getHeader", "getHeaders", "getHeaderNames", "getCookies", "getQueryString",
+                 "getInputStream", "getReader", "getPathInfo", "getRequestURI", "getRequestURL",
+                 "getTheParameter", "getTheCookie", "args", "form", "headers", "cookies",
+                 "values", "query_string", "json", "data", "files", "path", "full_path", "url")
+
+
+# There was a `_source_of(node, env, ctx)` here that walked the SINK's argument expression looking
+# for a request read, to name the source in the evidence line. It was wrong by construction: by the
+# time a value reaches the sink it is usually a bare local (`setAttribute("userid", bar)`), and the
+# expression that read the request is twenty lines away. Provenance travels with the VALUE, not
+# with the syntax at the sink, so `_taint(origin)` carries it and this function had nothing left to
+# do. Deleted rather than justified -- an uncalled function is a fact, not a declaration.
+
+
+# ── Java statement walker ────────────────────────────────────────
+_J_KEYWORDS = {"if", "for", "while", "switch", "catch", "return", "new", "else", "do", "try",
+               "synchronized", "finally", "case", "default", "break", "continue", "throw"}
+_J_MODIFIERS = {"public", "private", "protected", "static", "final", "abstract", "synchronized",
+                "native", "transient", "volatile", "strictfp", "default"}
+
+
+def _ws(skel, i, e):
+    while i < e and skel[i] in " \t\r\n":
+        i += 1
+    return i
+
+
+def _word_at(skel, i, e):
+    m = _WORD_RX.match(skel, i)
+    return m.group(0) if (m and m.end() <= e) else ""
+
+
+def _close_of(skel, i, e):
+    """Index just past the group whose opener is at `i`."""
+    pairs = {"(": ")", "{": "}", "[": "]"}
+    want = pairs.get(skel[i])
+    if not want:
+        return i + 1
+    depth, j = 0, i
+    while j < e:
+        c = skel[j]
+        if c in "([{":
+            depth += 1
+        elif c in ")]}":
+            depth -= 1
+            if depth == 0:
+                return j + 1
+        j += 1
+    return e
+
+
+def _j_stmt_span(skel, i, e):
+    """(start, end) of one statement beginning at `i` -- a block, or everything up to its `;`."""
+    i = _ws(skel, i, e)
+    if i >= e:
+        return i, i
+    if skel[i] == "{":
+        return i, _close_of(skel, i, e)
+    depth, j = 0, i
+    while j < e:
+        c = skel[j]
+        if c in "([{":
+            depth += 1
+        elif c in ")]}":
+            if depth == 0:
+                return i, j
+            depth -= 1
+        elif c == ";" and depth == 0:
+            return i, j + 1
+        j += 1
+    return i, e
+
+
+def _top_assign(skel, s, e):
+    """Offset of the top-level `=` (or `+=`) in [s,e), else -1, plus whether it was augmented."""
+    depth = 0
+    for j in range(s, e):
+        c = skel[j]
+        if c in "([{":
+            depth += 1
+        elif c in ")]}":
+            depth -= 1
+        elif c == "=" and depth == 0:
+            if j + 1 < e and skel[j + 1] == "=":
+                continue
+            prev = skel[j - 1] if j > s else " "
+            if prev in "!<>=":
+                continue
+            return (j, True) if prev in "+-*/%|&^" else (j, False)
+    return -1, False
+
+
+def _java_block(skel, lits, s, e, env, ctx, stop_break=False):
+    i = s
+    if i < e and skel[_ws(skel, i, e):_ws(skel, i, e) + 1] == "{":
+        i = _ws(skel, i, e) + 1
+        e = max(i, e - 1) if skel[e - 1:e] == "}" else e
+    guard = 0
+    while i < e and guard < 20000:
+        guard += 1
+        i = _ws(skel, i, e)
+        if i >= e:
+            break
+        c = skel[i]
+        if c in ";}":
+            i += 1
+            continue
+        if c == "{":
+            end = _close_of(skel, i, e)
+            _java_block(skel, lits, i, end, env, ctx)
+            i = end
+            continue
+        w = _word_at(skel, i, e)
+        if w == "if":
+            i = _java_if(skel, lits, i, e, env, ctx)
+            continue
+        if w == "switch":
+            i = _java_switch(skel, lits, i, e, env, ctx)
+            continue
+        if w in ("for", "while"):
+            k = _ws(skel, i + len(w), e)
+            head_s, head_e = (k, _close_of(skel, k, e)) if k < e and skel[k] == "(" else (k, k)
+            bs, be = _j_stmt_span(skel, head_e, e)
+            _java_loop(skel, lits, head_s, head_e, bs, be, env, ctx)
+            i = be
+            continue
+        if w in ("try", "finally", "do", "synchronized", "else"):
+            k = _ws(skel, i + len(w), e)
+            if k < e and skel[k] == "(":
+                k = _close_of(skel, k, e)
+            bs, be = _j_stmt_span(skel, k, e)
+            _java_block(skel, lits, bs, be, env, ctx)
+            i = be
+            continue
+        if w == "catch":
+            k = _ws(skel, i + len(w), e)
+            if k < e and skel[k] == "(":
+                k = _close_of(skel, k, e)
+            bs, be = _j_stmt_span(skel, k, e)
+            _java_block(skel, lits, bs, be, env, ctx)
+            i = be
+            continue
+        if w in ("break", "continue"):
+            _s, se = _j_stmt_span(skel, i, e)
+            if stop_break and w == "break":
+                return se
+            i = se
+            continue
+        if w in ("class", "interface", "enum"):
+            k = skel.find("{", i)
+            i = _close_of(skel, k, e) if 0 <= k < e else e
+            continue
+        if w in _J_MODIFIERS:
+            nxt = _word_at(skel, _ws(skel, i + len(w), e), e)
+            if nxt in ("class", "interface", "enum"):
+                k = skel.find("{", i)
+                i = _close_of(skel, k, e) if 0 <= k < e else e
+                continue
+        ss, se = _j_stmt_span(skel, i, e)
+        if se <= ss:
+            break
+        _java_simple(skel, lits, ss, se, env, ctx, w)
+        i = se
+    return i
+
+
+def _java_if(skel, lits, i, e, env, ctx):
+    k = _ws(skel, i + 2, e)
+    if k >= e or skel[k] != "(":
+        return i + 2
+    cs, ce = k + 1, _close_of(skel, k, e) - 1
+    ts, te = _j_stmt_span(skel, ce + 1, e)
+    j = _ws(skel, te, e)
+    es = ee = None
+    if _word_at(skel, j, e) == "else":
+        es, ee = _j_stmt_span(skel, j + 4, e)
+    cond = _truth(_eval(_parse(skel, lits, cs, ce, False), env, ctx))
+    if cond is True:
+        _java_block(skel, lits, ts, te, env, ctx)
+    elif cond is False:
+        if es is not None:
+            _java_block(skel, lits, es, ee, env, ctx)
+    else:
+        base = _clone_env(env)
+        a = _clone_env(base)
+        _java_block(skel, lits, ts, te, a, ctx)
+        b = _clone_env(base)
+        if es is not None:
+            _java_block(skel, lits, es, ee, b, ctx)
+        env.clear()
+        env.update(_join_envs(base, a, b))
+    return ee if ee is not None else te
+
+
+def _java_loop(skel, lits, hs, he, bs, be, env, ctx):
+    """One pass through the body, joined with not entering. `for (Cookie c : theCookies)` binds the
+    element to the collection's taint -- iterating attacker-supplied headers yields attacker
+    strings, and that is the source shape 20 cases in the category use."""
+    head = skel[hs:he]
+    base = _clone_env(env)
+    body = _clone_env(base)
+    ci = head.find(":")
+    if ci > 0 and _top_assign(skel, hs, he)[0] < 0:
+        toks = _tokens(skel, lits, hs + 1, hs + ci)
+        names = [t[1] for t in toks if t[0] == "name"]
+        coll = _eval(_parse(skel, lits, hs + ci + 1, he - 1, False), body, ctx)
+        if names:
+            body[names[-1]] = _TAINT if _tainted(coll) else _UNK
+    else:
+        semi = head.find(";")
+        if semi > 0:
+            _java_simple(skel, lits, hs + 1, hs + semi + 1, body, ctx, "")
+    _java_block(skel, lits, bs, be, body, ctx)
+    env.clear()
+    env.update(_join_envs(base, base, body))
+
+
+def _java_switch(skel, lits, i, e, env, ctx):
+    k = _ws(skel, i + 6, e)
+    if k >= e or skel[k] != "(":
+        return i + 6
+    ce = _close_of(skel, k, e)
+    sel = _eval(_parse(skel, lits, k + 1, ce - 1, False), env, ctx)
+    bs = _ws(skel, ce, e)
+    if bs >= e or skel[bs] != "{":
+        return ce
+    be = _close_of(skel, bs, e)
+    labels = []                                            # [(const or None-for-default, pos)]
+    j, depth = bs + 1, 0
+    while j < be - 1:
+        c = skel[j]
+        if c in "([{":
+            depth += 1
+        elif c in ")]}":
+            depth -= 1
+        elif depth == 0:
+            w = _word_at(skel, j, be)
+            if w == "case":
+                colon = skel.find(":", j)
+                if colon < 0:
+                    break
+                lab = _const_of(_eval(_parse(skel, lits, j + 4, colon, False), env, ctx))
+                labels.append((lab, colon + 1))
+                j = colon + 1
+                continue
+            if w == "default" and skel.find(":", j) >= 0:
+                colon = skel.find(":", j)
+                labels.append((None, colon + 1))
+                j = colon + 1
+                continue
+        j += 1
+    want = _const_of(sel)
+    if want is not None and labels:
+        start = None
+        for lab, pos in labels:
+            if lab is not None and lab == want:
+                start = pos
+                break
+        if start is None:
+            start = next((pos for lab, pos in labels if lab is None), None)
+        if start is not None:
+            _java_block(skel, lits, start, be - 1, env, ctx, stop_break=True)
+        return be
+    base = _clone_env(env)
+    outs = []
+    for _lab, pos in labels:
+        arm = _clone_env(base)
+        _java_block(skel, lits, pos, be - 1, arm, ctx, stop_break=True)
+        outs.append(arm)
+    merged = base
+    for arm in outs:
+        merged = _join_envs(base, merged, arm)
+    env.clear()
+    env.update(merged)
+    return be
+
+
+def _java_simple(skel, lits, s, e, env, ctx, head):
+    if head == "return":
+        val = _eval(_parse(skel, lits, s + 6, e - 1 if skel[e - 1:e] == ";" else e, False), env, ctx)
+        env["__return__"] = _merge(env.get("__return__"), val)
+        return
+    end = e - 1 if skel[e - 1:e] == ";" else e
+    eq, aug = _top_assign(skel, s, end)
+    if eq < 0:
+        _eval(_parse(skel, lits, s, end, False), env, ctx)
+        return
+    rhs = _eval(_parse(skel, lits, eq + (2 if aug else 1), end, False), env, ctx)
+    _assign(skel, lits, s, eq - (1 if aug else 0), rhs, aug, env, ctx, False)
+
+
+def _assign(skel, lits, s, e, rhs, aug, env, ctx, py):
+    """Bind the left-hand side. Handles `Type name`, `name`, `a[k]` and `obj.attr[k]` -- the last
+    is how the Python sink is written (`flask.session[bar] = '12345'`)."""
+    lhs = _parse(skel, lits, s, e, py)
+    if lhs[0] == "index":
+        base = _eval(lhs[1], env, ctx)
+        key = _const_of(_eval(lhs[2], env, ctx)) if lhs[2] is not None else None
+        if base.kind == "session":
+            key = _eval(lhs[2], env, ctx) if lhs[2] is not None else _UNK
+            for val in (key, rhs):
+                if _tainted(val):
+                    off = _node_off(lhs)
+                    _sink(ctx, "session[]" if py else "HttpSession.setAttribute", val,
+                          off if off >= 0 else s)
+                    break
+            return
+        if base.kind == "map":
+            base.slots[key if key is not None else object()] = rhs
+            return
+        if base.kind == "list":
+            n = _num(key)
+            if n is not None and -len(base.slots) <= n < len(base.slots):
+                base.slots[n] = rhs
+            return
+        return
+    toks = _tokens(skel, lits, s, e)
+    names = [t[1] for t in toks if t[0] == "name"]
+    if not names:
+        return
+    target = names[-1]
+    if aug:
+        prev = env.get(target)
+        if prev is not None and prev.kind == "sb":
+            prev.slots.append(rhs)
+            return
+        ca, cb = _const_of(prev), _const_of(rhs)
+        if isinstance(ca, str) and isinstance(cb, str):
+            env[target] = _K(ca + cb)
+        else:
+            env[target] = _TAINT if (_tainted(prev) or _tainted(rhs)) else _UNK
+        return
+    env[target] = rhs
+
+
+# ── Java unit extraction ─────────────────────────────────────────
+_J_METHOD = re.compile(
+    r"(?:^|[;{}])\s*(?:(?:public|private|protected|static|final|synchronized|abstract|native)\s+)*"
+    r"(?:[A-Za-z_$][\w$.]*(?:\s*<[^;{}]*?>)?(?:\s*\[\s*\])*)\s+"
+    r"([A-Za-z_$]\w*)\s*\(([^;{}()]*)\)\s*(?:throws\s[\w.,\s]+?)?\{")
+
+
+def _java_units(skel: str) -> dict:
+    """{method name -> unit}. Inner classes included: the benchmark routes 85 of 126 cases through
+    `new Test().doSomething(...)` declared inside the servlet, and without them two thirds of the
+    category is opaque.
+
+    A unit is `(lang, param names, a, b, route)` -- offsets for Java, logical-line indices for
+    Python -- so one inliner serves both dialects."""
+    units = {}
+    for m in _J_METHOD.finditer(skel):
+        name = m.group(1)
+        if name in _J_KEYWORDS or name in _J_MODIFIERS:
+            continue
+        params = []
+        for part in m.group(2).split(","):
+            toks = _WORD_RX.findall(part)
+            if toks:
+                params.append(toks[-1])
+        open_brace = skel.rindex("{", m.start(), m.end())
+        units[name] = ("java", params, open_brace, _close_of(skel, open_brace, len(skel)), None)
+    return units
+
+
+def _run_unit(name, unit, args, ctx):
+    """Inline a method defined in the same file. Precision, not a summary: the fold inside the
+    helper has to happen with the CALLER's real arguments, or a helper that folds to a constant
+    for one caller and passes the parameter through for another gets one verdict for both."""
+    lang, params, a, b, route = unit
+    env = {}
+    for i, p in enumerate(params):
+        env[p] = args[i] if i < len(args) else _UNK
+    ctx.depth += 1
+    ctx.stack.append(name)
+    prev_route = ctx.route
+    if route:
+        ctx.route = route
+    try:
+        if lang == "py":
+            _py_exec(a, b, env, ctx)
+        else:
+            _java_block(ctx.skel, ctx.lits, a, b, env, ctx)
+    finally:
+        ctx.route = prev_route
+        ctx.stack.pop()
+        ctx.depth -= 1
+    return env.get("__return__", _UNK)
+
+
+# ── Python statement walker ──────────────────────────────────────
+# Indentation, not braces. The logical-line splitter skips over literals with `_lit_end`, so a
+# triple-quoted docstring cannot be mistaken for a run of statements and an open bracket keeps a
+# continuation on the same logical line.
+def _py_logical_lines(skel: str) -> list:
+    """[(indent, start, end)] -- one entry per logical line, blanks and comments dropped."""
+    out, i, n = [], 0, len(skel)
+    while i < n:
+        j = i
+        while j < n and skel[j] in " \t":
+            j += 1
+        indent = len(skel[i:j].expandtabs(8))
+        k, depth = j, 0
+        while k < n:
+            c = skel[k]
+            if c in "\"'":
+                k = _lit_end(skel, k, n)
+                continue
+            if c in "([{":
+                depth += 1
+            elif c in ")]}":
+                depth -= 1
+            elif c == "\n":
+                if depth > 0 or (k > 0 and skel[k - 1] == "\\"):
+                    k += 1
+                    continue
+                break
+            k += 1
+        if skel[j:k].strip():
+            out.append((indent, j, k))
+        i = k + 1
+    return out
+
+
+def _py_colon(skel, s, e):
+    """Offset of the header's trailing `:`, else -1."""
+    depth, last = 0, -1
+    for j in range(s, e):
+        c = skel[j]
+        if c in "([{":
+            depth += 1
+        elif c in ")]}":
+            depth -= 1
+        elif c == ":" and depth == 0:
+            last = j
+    return last
+
+
+def _py_body(ctx, j, hi):
+    """(lo, hi) line range of the block headed by line `j`."""
+    d = ctx.lines[j][0]
+    lo = j + 1
+    k = lo
+    while k < hi and ctx.lines[k][0] > d:
+        k += 1
+    return lo, k
+
+
+def _py_exec(lo, hi, env, ctx):
+    lines, skel, lits = ctx.lines, ctx.skel, ctx.lits
+    i, guard = lo, 0
+    base_indent = lines[lo][0] if lo < hi else 0
+    while i < hi and guard < 20000:
+        guard += 1
+        indent, s, e = lines[i]
+        if indent < base_indent:
+            break
+        w = _word_at(skel, s, e)
+        if w in ("if", "elif"):
+            i = _py_if(i, hi, env, ctx)
+            continue
+        if w == "match":
+            i = _py_match(i, hi, env, ctx)
+            continue
+        if w in ("for", "while"):
+            i = _py_loop(i, hi, env, ctx, w)
+            continue
+        if w in ("try", "except", "finally", "with", "else"):
+            blo, bhi = _py_body(ctx, i, hi)
+            if bhi > blo:
+                _py_exec(blo, bhi, env, ctx)
+            i = bhi
+            continue
+        if w in ("def", "class", "async"):
+            _lo, bhi = _py_body(ctx, i, hi)
+            i = bhi
+            continue
+        if w in ("import", "pass", "break", "continue", "raise", "global", "nonlocal", "assert",
+                 "del", "print", "yield"):
+            i += 1
+            continue
+        if w == "from":
+            i += 1
+            continue
+        if w == "return":
+            val = _eval(_parse(skel, lits, s + 6, e, True), env, ctx)
+            env["__return__"] = _merge(env.get("__return__"), val)
+            i += 1
+            continue
+        eq, aug = _top_assign(skel, s, e)
+        if eq < 0:
+            _eval(_parse(skel, lits, s, e, True), env, ctx)
+        else:
+            rhs = _eval(_parse(skel, lits, eq + 1, e, True), env, ctx)
+            _assign(skel, lits, s, eq - (1 if aug else 0), rhs, aug, env, ctx, True)
+        i += 1
+    return i
+
+
+def _py_if(i, hi, env, ctx):
+    lines, skel, lits = ctx.lines, ctx.skel, ctx.lits
+    d = lines[i][0]
+    arms, j = [], i
+    while j < hi:
+        indent, s, e = lines[j]
+        if indent != d:
+            break
+        w = _word_at(skel, s, e)
+        if (j == i and w not in ("if", "elif")) or (j > i and w not in ("elif", "else")):
+            break
+        colon = _py_colon(skel, s, e)
+        cond = None if w == "else" else (s + len(w), colon if colon > 0 else e)
+        blo, bhi = _py_body(ctx, j, hi)
+        arms.append((cond, blo, bhi))
+        j = bhi
+    live, definite = [], False
+    for cond, blo, bhi in arms:
+        t = True if cond is None else _truth(_eval(_parse(skel, lits, cond[0], cond[1], True),
+                                                   env, ctx))
+        if t is False:
+            continue
+        live.append((blo, bhi))
+        if t is True:
+            definite = True
+            break
+    if definite and len(live) == 1:
+        _py_exec(live[0][0], live[0][1], env, ctx)
+        return j
+    base = _clone_env(env)
+    outs = []
+    for blo, bhi in live:
+        arm = _clone_env(base)
+        _py_exec(blo, bhi, arm, ctx)
+        outs.append(arm)
+    if not definite:
+        outs.append(base)                                  # the path where no arm is taken
+    merged = base
+    for arm in outs:
+        merged = _join_envs(base, merged, arm)
+    env.clear()
+    env.update(merged)
+    return j
+
+
+def _py_match(i, hi, env, ctx):
+    lines, skel, lits = ctx.lines, ctx.skel, ctx.lits
+    _d, s, e = lines[i]
+    colon = _py_colon(skel, s, e)
+    sel = _eval(_parse(skel, lits, s + 5, colon if colon > 0 else e, True), env, ctx)
+    blo, bhi = _py_body(ctx, i, hi)
+    want = _const_of(sel)
+    arms, j = [], blo
+    while j < bhi:
+        indent, cs, ce = lines[j]
+        if indent != (lines[blo][0] if blo < bhi else 0):
+            j += 1
+            continue
+        ccolon = _py_colon(skel, cs, ce)
+        labels = []
+        wildcard = False
+        for tok in _tokens(skel, lits, cs + 4, ccolon if ccolon > 0 else ce):
+            if tok[0] == "str":
+                labels.append(tok[1])
+            elif tok[0] == "num":
+                labels.append(tok[1])
+            elif tok[0] == "name" and tok[1] == "_":
+                wildcard = True
+        alo, ahi = _py_body(ctx, j, bhi)
+        arms.append((labels, wildcard, alo, ahi))
+        j = ahi
+    if want is not None:
+        chosen = next((a for a in arms if want in a[0]), None)
+        if chosen is None:
+            chosen = next((a for a in arms if a[1]), None)
+        if chosen is not None:
+            _py_exec(chosen[2], chosen[3], env, ctx)
+        return bhi
+    base = _clone_env(env)
+    merged = base
+    for _labels, _wc, alo, ahi in arms:
+        arm = _clone_env(base)
+        _py_exec(alo, ahi, arm, ctx)
+        merged = _join_envs(base, merged, arm)
+    env.clear()
+    env.update(merged)
+    return bhi
+
+
+def _py_loop(i, hi, env, ctx, kind):
+    lines, skel, lits = ctx.lines, ctx.skel, ctx.lits
+    _d, s, e = lines[i]
+    colon = _py_colon(skel, s, e)
+    head_end = colon if colon > 0 else e
+    blo, bhi = _py_body(ctx, i, hi)
+    base = _clone_env(env)
+    body = _clone_env(base)
+    if kind == "for":
+        toks = _tokens(skel, lits, s + 3, head_end)
+        split = next((n for n, t in enumerate(toks) if t[0] == "name" and t[1] == "in"), None)
+        if split is not None:
+            targets = [t[1] for t in toks[:split] if t[0] == "name"]
+            coll = _eval(_parse(skel, lits, toks[split][3], head_end, True), body, ctx)
+            # Iterating an attacker-supplied collection yields attacker-supplied elements. This is
+            # the source shape behind `for name in request.headers.keys(): param = name`.
+            elem = _TAINT if _tainted(coll) else _UNK
+            for t in targets:
+                body[t] = elem
+    if bhi > blo:
+        _py_exec(blo, bhi, body, ctx)
+    env.clear()
+    env.update(_join_envs(base, base, body))
+    return bhi
+
+
+_PY_DEF_HEAD = re.compile(r"(?:async[ \t]+)?def[ \t]+([A-Za-z_]\w*)[ \t]*\(")
+_PY_ROUTE = re.compile(r"@[\w.]*\b(?:route|get|post|put|delete|patch)\s*\(")
+
+
+def _py_units(skel, lits, lines) -> dict:
+    """{function name -> unit}. Nested defs included: a Flask app registers its handlers inside
+    `def init(app)`, so a top-level-only walk sees nothing at all."""
+    units = {}
+    for idx, (_indent, s, e) in enumerate(lines):
+        w = _word_at(skel, s, e)
+        if w not in ("def", "async"):
+            continue
+        # The header is matched from the logical line's own start, NOT with a `^`-anchored
+        # pattern: a nested `def` never sits at column 0, and anchoring it there found only the
+        # module-level function -- which, since the walker steps over `def` blocks, meant every
+        # Flask handler registered inside `def init(app)` was walked by nothing at all.
+        m = _PY_DEF_HEAD.match(skel, s)
+        if not m:
+            continue
+        name = m.group(1)
+        popen = m.end() - 1
+        pclose = _close_of(skel, popen, len(skel))
+        params = [t[1] for t in _tokens(skel, lits, popen + 1, pclose - 1) if t[0] == "name"]
+        blo, bhi = _py_body_at(lines, idx)
+        route = None
+        k = idx - 1
+        while k >= 0 and skel[lines[k][1]] == "@":
+            rm = _PY_ROUTE.search(skel, lines[k][1], lines[k][2])
+            if rm:
+                strs = [t[1] for t in _tokens(skel, lits, rm.end() - 1, lines[k][2])
+                        if t[0] == "str"]
+                if strs:
+                    route = strs[0]
+            k -= 1
+        units[name] = ("py", params, blo, bhi, route)
+    return units
+
+
+def _py_body_at(lines, idx):
+    d = lines[idx][0]
+    lo, k = idx + 1, idx + 1
+    while k < len(lines) and lines[k][0] > d:
+        k += 1
+    return lo, k
+
+
+# ── entry points and the public API ──────────────────────────────
+_J_REQ_DECL = re.compile(r"(?<![\w.$])(?:javax\.servlet\.http\.)?(?:Http)?ServletRequest\s+"
+                         r"([A-Za-z_$]\w*)")
+_PY_FLASK = re.compile(r"(?m)^[ \t]*(?:from[ \t]+flask\b|import[ \t]+flask\b)")
+_PY_SESSION_IMPORT = re.compile(r"(?m)^[ \t]*from[ \t]+flask[ \t]+import[^\n]*\bsession\b")
+
+
+def _seed_java(skel, env):
+    """Bind every HttpServletRequest reference in the file -- parameter OR field -- to taint. A
+    wrapper class keeps the request in a field, and a summary computed without it reports the
+    wrapper's request-reading method as safe."""
+    for m in _J_REQ_DECL.finditer(skel):
+        env[m.group(1)] = _TAINT
+
+
+def _seed_python(skel, env):
+    if _PY_FLASK.search(skel):
+        env["request"] = _TAINT
+        if _PY_SESSION_IMPORT.search(skel):
+            env["session"] = _SESSION
+
+
+def _ctx_for(text, source, summaries):
+    py = not looks_like_java(text, source) and looks_like_python(text, source)
+    if py:
+        skel, lits = mask_python_source(text)
+        ctx = _Ctx(True, text, skel, lits, {}, summaries)
+        ctx.lines = _py_logical_lines(skel)
+        ctx.units = _py_units(skel, lits, ctx.lines)
+    else:
+        skel, lits = mask_source(text)
+        ctx = _Ctx(False, text, skel, lits, {}, summaries)
+        ctx.lines = []
+        ctx.units = _java_units(skel)
+    return ctx
+
+
+def scan_trust_boundary(text: str, source: str = "", summaries: dict = None) -> list:
+    """Untrusted request data written into a trusted store (CWE-501), decided by PROVENANCE.
+
+    `summaries` carries the return-provenance of methods defined in OTHER files -- see
+    `summarize_units`. Without it a helper that wraps the request is indistinguishable from one
+    that returns a constant, and both of those exist in the wild for the same reason they exist in
+    the benchmark: a request wrapper is a normal thing to write.
+    """
+    if not (text or "").strip():
+        return []
+    ctx = _ctx_for(text, source, summaries)
+    for name, unit in list(ctx.units.items()):
+        env = {}
+        if ctx.py:
+            _seed_python(ctx.skel, env)
+        else:
+            _seed_java(ctx.skel, env)
+        for p in unit[1]:
+            if p in env:
+                continue
+        prev_route = ctx.route
+        ctx.route = unit[4] or ctx.route
+        ctx.stack.append(name)
+        try:
+            if ctx.py:
+                if unit[3] > unit[2]:
+                    _py_exec(unit[2], unit[3], env, ctx)
+            else:
+                _java_block(ctx.skel, ctx.lits, unit[2], unit[3], env, ctx)
+        except Exception:
+            # One unparseable method must not silence the rest of the file. It costs recall on
+            # that method, never correctness on another.
+            pass
+        finally:
+            ctx.stack.pop()
+            ctx.route = prev_route
+    return sorted(ctx.hits, key=lambda h: h["line"])
+
+
+def summarize_units(text: str, source: str = "") -> dict:
+    """{method name -> "const" | "source"} for methods whose return provenance does not depend on
+    their arguments.
+
+    Computed by running the body twice -- once with every parameter bound to taint, once with
+    every parameter bound to a constant:
+
+      returns a CONSTANT under both       -> "const"   (never request-derived; a safe source)
+      returns TAINT even under constants  -> "source"  (reads the request itself)
+      anything else                       -> no verdict, and the caller's default applies
+
+    The asymmetry is deliberate. "const" is only claimed when the taint-bound run produced an
+    actual constant, so a body this analysis fails to understand yields UNKNOWN and gets NO
+    verdict rather than a clean bill of health. A misparse must cost recall, never soundness.
+    """
+    out = {}
+    if not (text or "").strip():
+        return out
+    ctx = _ctx_for(text, source, None)
+    for name, unit in list(ctx.units.items()):
+        verdicts = []
+        for bound in (_TAINT, _K("x")):
+            env = {}
+            if ctx.py:
+                _seed_python(ctx.skel, env)
+            else:
+                _seed_java(ctx.skel, env)
+            for p in unit[1]:
+                env[p] = bound
+            ctx.stack.append(name)
+            try:
+                if ctx.py:
+                    if unit[3] > unit[2]:
+                        _py_exec(unit[2], unit[3], env, ctx)
+                else:
+                    _java_block(ctx.skel, ctx.lits, unit[2], unit[3], env, ctx)
+                verdicts.append(env.get("__return__"))
+            except Exception:
+                verdicts.append(None)
+            finally:
+                ctx.stack.pop()
+        taint_run, const_run = verdicts[0], verdicts[1]
+        if const_run is not None and _tainted(const_run):
+            out[name] = "source"
+        elif (taint_run is not None and not _tainted(taint_run)
+              and taint_run.kind == "const"):
+            out[name] = "const"
+    return out
+
+
+def merge_summaries(per_file: list) -> dict:
+    """Fold per-file summaries into one table.
+
+    A NAME COLLISION IS A REASON TO SAY NOTHING. If two files define `getValue` and they disagree,
+    neither verdict is applied -- the caller falls back to taint-preserving. Claiming "const" for
+    a name that is safe in one file and a request read in another is how a whole-tree analysis
+    invents a false negative out of a coincidence.
+    """
+    seen = {}
+    for table in per_file:
+        for name, verdict in (table or {}).items():
+            if name in seen and seen[name] != verdict:
+                seen[name] = None
+            elif name not in seen:
+                seen[name] = verdict
+    return {k: v for k, v in seen.items() if v}
