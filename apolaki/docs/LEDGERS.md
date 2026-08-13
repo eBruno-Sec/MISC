@@ -261,6 +261,44 @@ Apolaki as a product.
 
 ---
 
+## Q-040 CLOSED — an unstable page can no longer confirm blind SQLi. 2026-08-13
+
+The GET and POST blind paths now issue a second identical baseline request; a failed or unstable
+baseline cannot confirm. Error-based, quote-recovery, UNION and timing oracles untouched.
+
+**Full SQLi denominator, 504 cases (272 vulnerable / 232 clean):**
+
+| run | TP | FN | FP | TN | TPR | FPR |
+|---|---:|---:|---:|---:|---:|---:|
+| sequential before | 180 | 92 | 0 | 232 | 66.2% | 0.0% |
+| sequential after | 180 | 92 | 0 | 232 | 66.2% | 0.0% |
+
+**Byte-identical artifacts**, sha256 `32a06263b3a8eb64cb4a546b5b218213002e8d07587c6383e93a91dd116bae37`.
+Exactly the predicted outcome — benchmark pages are static, so stability sampling costs nothing there
+while closing the real-world false-positive path. Added cost: one GET per query-bearing endpoint, one
+POST per tested form field. **The strict xfail is now a genuine pass; Tier-3 is 33/33.**
+
+**The residual, recorded rather than tuned around.** Adversarial 8-shard runs were volatile: pre-fix
+2 FP, post-fix 1 FP, on *different case IDs*. The remaining case **could not be reproduced even with
+64 concurrent direct replays**, so it was excluded from the authoritative comparison and documented.
+That is the correct handling — an unreproducible result is not evidence in either direction — but it
+means **concurrent-load blind SQLi still has an unexplained FP mode.** Open, not closed.
+
+Three semantic mutants killed by their exact assertions: inverted stability condition (stable
+vulnerable finding disappears), sample count 2→1 (request-sequence assertion fails), deleted rejection
+branch (historical unstable case returns True).
+
+## Q-031 row 4 — schema: 100% of VAmPI's parameter surface is lost. 2026-08-13
+
+MEASURED by the orchestration lane while building the rediscovery trigger table. The architecture
+audit predicted schema had no representation; the number is worse than "a gap": **every parameter on
+VAmPI's surface is invisible to the planner**, because typed body parameters have nowhere to live in
+the graph. This is the single largest named blind spot in the discovery model, and it explains why
+`run_bfla` only ever gets scheduled for query-parameterized endpoints.
+
+Also landed: `41b3780` closes the `graph_action` UI island the lane found in its own U1 change — and
+the degraded path turned out to be worse than the missing one.
+
 ## NIST Juliet Java 1.3 — first Tier-1 suite beyond OWASP Benchmark. 2026-08-13
 
 Pinned: SARD test-suite 111, archive **76,798,417 bytes**,
