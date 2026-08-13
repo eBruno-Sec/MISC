@@ -97,9 +97,23 @@ def similar(a: str, b: str) -> float:
     return SequenceMatcher(None, a or "", b or "").ratio()
 
 
-def analyze_boolean(baseline: str, true_body: str, false_body: str, thresh: float = 0.95) -> bool:
-    """Injectable when TRUE tracks the baseline but FALSE diverges (the condition
-    reaches the query). Identical TRUE/FALSE => not injectable (conservative)."""
+BOOLEAN_BASELINE_SAMPLE_COUNT = 2
+_MISSING_BASELINE_REPEAT = object()
+
+
+def analyze_boolean(baseline: str, true_body: str, false_body: str, thresh: float = 0.95,
+                    *, baseline_repeat=_MISSING_BASELINE_REPEAT) -> bool:
+    """Injectable when a stable reference and TRUE agree while FALSE diverges.
+
+    Shipping callers always provide ``baseline_repeat``.  The omitted form remains
+    only for older deterministic helper fixtures; a source ratchet and transport
+    controls pin both production call sites to the sampled form.
+    """
+    if baseline_repeat is not _MISSING_BASELINE_REPEAT:
+        # An unstable or failed reference invalidates both predicate outcomes. Prefer
+        # a false negative to asserting SQLi from ordinary response instability.
+        if baseline_repeat is None or similar(baseline, baseline_repeat) < thresh:
+            return False
     st = similar(baseline, true_body)
     stf = similar(true_body, false_body)
     return st >= thresh and stf < thresh

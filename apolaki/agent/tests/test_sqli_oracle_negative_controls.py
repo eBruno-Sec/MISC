@@ -47,13 +47,11 @@ def test_the_two_recorded_bodies_really_do_straddle_the_threshold():
     assert sqli.similar(NOISE_A, NOISE_B) < 0.95, "below the oracle's divergence threshold"
 
 
-@pytest.mark.xfail(strict=True, reason="LIVE DEFECT: analyze_boolean has no baseline-stability "
-                                       "control, so an unstable page confirms blind SQLi. "
-                                       "Remove this marker when the oracle re-samples the baseline.")
 def test_an_unstable_page_must_not_confirm_blind_sqli():
     """BenchmarkTest00494 exactly: the app ignores the field, and the only thing that 'diverged'
     was which resolver error the container happened to return."""
-    assert not sqli.analyze_boolean(NOISE_A, NOISE_A, NOISE_B)
+    assert not sqli.analyze_boolean(
+        NOISE_A, NOISE_A, NOISE_B, baseline_repeat=NOISE_B)
 
 
 # ── negative controls the oracles DO survive; these must keep passing ──────────

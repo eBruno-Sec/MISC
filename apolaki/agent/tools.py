@@ -6637,6 +6637,14 @@ class ToolRegistry:
             base_r, _ = await get(c, url)
             base_body = base_r.text if base_r is not None else ""
             base_status = base_r.status_code if base_r is not None else 0
+            base_samples = [base_body] if base_r is not None else []
+            if params:
+                for _ in range(1, sqli.BOOLEAN_BASELINE_SAMPLE_COUNT):
+                    sample_r, _ = await get(c, url)
+                    if sample_r is None:
+                        break
+                    base_samples.append(sample_r.text)
+            base_repeat_body = base_samples[1] if len(base_samples) > 1 else None
             union_done = False   # UNION escalation runs at most once per call (bounded)
             for p in params:
                 orig = qvals.get(p, "1")
@@ -6682,7 +6690,8 @@ class ToolRegistry:
                     rf, _ = await get(c, xt.set_param(url, p, pair["false"]))
                     if rt is None or rf is None:
                         continue
-                    if sqli.analyze_boolean(base_body, rt.text, rf.text):
+                    if sqli.analyze_boolean(
+                            base_body, rt.text, rf.text, baseline_repeat=base_repeat_body):
                         _req = xt.set_param(url, p, pair["false"])
                         _tv = xt.set_param(url, p, pair["true"])
                         findings.append(self._attach_poc(
@@ -6730,6 +6739,13 @@ class ToolRegistry:
                         if fbase is None:
                             continue
                         fbody, hit = fbase.text, False
+                        fbase_samples = [fbody]
+                        for _ in range(1, sqli.BOOLEAN_BASELINE_SAMPLE_COUNT):
+                            sample_r = await _post(forig)
+                            if sample_r is None:
+                                break
+                            fbase_samples.append(sample_r.text)
+                        fbody_repeat = fbase_samples[1] if len(fbase_samples) > 1 else None
                         for probe in sqli.ERROR_PROBES[:self._ni(3, 6, len(sqli.ERROR_PROBES))]:
                             rp = await _post(forig + probe)
                             if rp is None:
@@ -6747,7 +6763,8 @@ class ToolRegistry:
                             rt, rf = await _post(pair["true"]), await _post(pair["false"])
                             if rt is None or rf is None:
                                 continue
-                            if sqli.analyze_boolean(fbody, rt.text, rf.text):
+                            if sqli.analyze_boolean(
+                                    fbody, rt.text, rf.text, baseline_repeat=fbody_repeat):
                                 _req = "%s [POST %s]" % (form["action"], field)
                                 findings.append(self._attach_poc(
                                     sqli.boolean_finding(form["action"], field, pair), _req, rf,
