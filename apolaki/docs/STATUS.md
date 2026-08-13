@@ -3,7 +3,35 @@
 Updated by the Coordinator. Numbers here must match [LEDGERS.md](LEDGERS.md); if they disagree, the
 ledger wins and this file is stale.
 
-**Last update**: 2026-08-10, squad assembly.
+**Last update**: 2026-08-13.
+
+## Lanes right now
+
+| lane | owner | state |
+|---|---|---|
+| Trust-boundary dataflow | Claude | live — **1684 uncommitted lines in `codereview.py`**, 2 dead-code gate failures are its |
+| Orchestration / Q-031 triggers | Claude | live — U1 measured and committed; closing its own UI island |
+| Q-040 blind-SQLi stability | **Codex** (leased) | `sqli_tool.py` + `tools.py` + the strict-xfail test file |
+| Probe repertoire | — | **CLOSED.** Both hypotheses falsified by its own measurements |
+
+Tree at HEAD: **2142 passed / 9 skipped / 5 xfailed / 2 failed**, the 2 failures being the dataflow
+lane's uncommitted work. The 5 xfails are *strict* markers pinning named live defects — removing one
+without fixing what it pins is forbidden (Q-040, Q-041, Q-042).
+
+## Two hypotheses tested and FALSIFIED — both were mine
+
+| hypothesis | verdict | evidence |
+|---|---|---|
+| cmdi is limited by payload repertoire (blind/time/OOB) | **FALSE** | +0 across 251 cases. Blind and OOB use the *same shell separators* as the output payloads, so they need the same shell reach. Shell reach was the axis, never blind-vs-echo |
+| cmdi/xss are limited by carrier delivery | **FALSE** | +0 across 120 paired xss cases — and the carrier **ran** on ~30% of them (header names found on 18 of 60 sampled pages). Delivery arrived and proved nothing |
+
+Recorded so no future lane spends a night on either. A measured "no" changed the plan twice.
+
+## Tier-3 adversarial corpus — now has an address (B-001, Codex)
+
+**33 controls across 15 classes, 32/33 passing, 0 regressions, 0 environment failures.** Executable
+gate at `scripts/tier3_gate.sh` (LF-normalized and pinned via `.gitattributes`). Known non-pass
+`sqli-unstable-page-noise` is **not credited** — it is the Q-040 defect, held by a strict xfail.
 
 ## Current numbers
 
@@ -16,6 +44,14 @@ ledger wins and this file is stale.
 | Python v0.1 — DAST only | 24.5% | 14-cat macro, full suite | 0.0% |
 | ~~Python v0.1 — harness~~ | ~~34.8%~~ | superseded: 54 cases, ~4 per category | — |
 | **Whole-product mission — SCORED** | **precision 95.7%** · **recall 1.6%** | 22 TP / 1 FP / 1415 vulnerable | 1 cross-family FP |
+| **NIST Juliet Java 1.3 — code-assisted (SAST)** | **precision 66.48%** · **recall 100%** · F1 79.87% | 329 methods, 0 skipped in denominator | **60 FP, all bare-`AES`** |
+
+**Juliet's 60 false positives are a ground-truth disagreement we are KEEPING.** Every one is a Juliet
+"good" control using bare `Cipher.getInstance("AES")`, which in Java resolves to `AES/ECB/PKCS5Padding`
+— and ECB is a real weakness. Apolaki's call is arguably more correct than the 2017 label. We do not
+silence the detector to recover the points, and we do not touch the answer key. **Any future change
+that recovers those 60 by suppressing bare-AES detection is rejected on sight.** 109 Juliet CWE
+families remain **UNSUPPORTED** — a status, not a gap to paper over.
 
 **The gap is the story.** Mission `90cee81c` completed in 3720s with 2 findings — a credential in a
 source comment and jquery@2.1.4 — **neither of them a benchmark case**. The count reached 2 at the
@@ -26,10 +62,18 @@ describing Apolaki as a product.
 Peer context (recomputed from raw artifacts): ZAP **17.99%** · best published full-suite DAST **26%**
 · 11-tool DAST mean **~11%**.
 
-**Standing ceiling**: 100% is not reachable on the black-box lane. 1101 Java cases (crypto 246,
-hash 236, weakrand 493, trustbound 126) have no externally observable signal; ZAP scores 0.00% on
-all of them and the 11-tool mean is 0.0%. Closing them needs a declared IAST/runtime lane, labelled
-as such — never folded into a DAST figure.
+**⚠ THE OLD "STANDING CEILING" CLAIM WAS WRONG AND IS RETIRED.** It read: *1101 Java cases (crypto
+246, hash 236, weakrand 493, trustbound 126) have no externally observable signal, so closing them
+needs IAST.* That was true of **HTTP**, and I restated it as a limit of **Apolaki** for weeks. Erwin
+pushed back twice. He was right.
+
+Measured since: **crypto 100.0%, weakrand 88.5%→100.0%, hash 69.0%→100.0%, all at 0.0% FPR**, via the
+code-assisted (SAST) lane reading source the operator supplies — a capability `agent/codereview.py`
+already half-had. Only **trustbound** (126 Java + 37 Python) is still an honest 0, unmapped on purpose
+because its clean twins launder the tainted value and a call-site match would fabricate the score.
+
+**The replacement rule: never restate a limit of one lane as a limit of the platform.** A
+code-assisted figure is still labelled SAST and still never folded into a DAST number.
 
 ## The funnel — ANSWERED (was the top unknown)
 
