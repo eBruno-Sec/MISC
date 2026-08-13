@@ -261,6 +261,40 @@ Apolaki as a product.
 
 ---
 
+## Throughput — DIAGNOSED, and the answer is "do not build it". 2026-08-13
+
+The 8.5 s/tool-call figure has been quoted for three days and was never diagnosed. Now it is, and the
+verdict is **no production change**.
+
+```
+TCP 2.673 ms · TLS 3.590 ms                          <- not the network
+browser bundle   47.056 s/URL serial -> 14.674 s/URL bounded   3.207x
+non-empty DOM    13.865 s -> 6.138 s, identical 4-finding SHA across SIX runs
+mission probe    22.465 s -> 9.036 s                            2.486x
+mission WALL     177.370 s -> 187.102 s   <- FLIPPED WITH RUN ORDER
+```
+
+**Serialisation was the browser-probe bottleneck — and the bounded implementation was already present
+at the baseline.** The 2.5–3.2× is real at the component level and **vanishes end to end**, because
+`katana`, `subfinder`, `wayback` and `crtsh` dominate mission variance. Codex made no production
+change and explicitly does not claim a mission speedup. That restraint is the result.
+
+**This closes the "recall is bounded by wall-clock" story as stated.** It is bounded by *recon tool*
+wall-clock, not by probe concurrency — which is a different ticket and a much less attractive one.
+Combined with the schema finding (100% of VAmPI's parameter surface invisible), the evidence now says
+recall is limited more by **what we cannot see** than by **how fast we probe it**.
+
+## Q-043 — the no-DoS promise was not implemented, and I said it was. 2026-08-13
+
+Codex's rate-limit control **failed**: with `Retry-After: 2`, both widths sent 47 requests and width 6
+started 14 inside the window. Verified independently — **`Retry-After` appears nowhere in `agent/`**,
+zero grep hits, and `tools.py:3296` (which I cited as the enforcement point in five lease prompts) is
+subfinder argument handling.
+
+I fabricated that citation and propagated it. **A Coordinator citation is a claim, not evidence** —
+file:line references in briefs get verified before repetition, and a lane that cannot reproduce a
+cited behaviour should treat the citation as the defect. Queued as Q-043.
+
 ## Q-040 CLOSED — an unstable page can no longer confirm blind SQLi. 2026-08-13
 
 The GET and POST blind paths now issue a second identical baseline request; a failed or unstable
