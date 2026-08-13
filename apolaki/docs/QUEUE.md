@@ -43,6 +43,34 @@ not by silencing the gate.
 
 ---
 
+## Rank 0 — five defects now PINNED by strict xfails, surfaced 2026-08-12
+
+Each is a real defect with a written reason, held by a strict xfail so it becomes a regression test
+the moment it is fixed. Removing a marker without fixing the defect is forbidden.
+
+### Q-040 · `analyze_boolean` has no baseline-stability control · **CRITICAL** · `ready`
+`tests/test_sqli_oracle_negative_controls.py::test_an_unstable_page_must_not_confirm_blind_sqli`.
+**An unstable page confirms blind SQLi.** This is a false-positive path in our strongest category —
+sqli is 21 of the 22 whole-product true positives, and FPR is currently 0.0% on every category of
+both suites, which is the platform's single best property. Fix: the oracle must re-sample the
+baseline and prove stability before crediting a boolean differential. Remove the marker only then.
+
+### Q-041 · aliased module imports are invisible to the source lane · **HIGH** · `ready`
+`import random as r` / `import hashlib as hl`. `_py_imports()` computes `modules['r'] = 'random'` and
+then **throws the binding away** — `_py_binds_module` can only SUPPRESS a name, never resolve one, and
+`_PY_RANDOM_CALL` / `_PY_HASHLIB_CALL` hard-code the literal receivers. The `from X import Y as Z`
+half is handled correctly, so this is a half-implemented mechanism, not a missing one. Costs the
+benchmark **0 cases** (no aliased imports in the suite) — it is a pure generality hole, and generality
+is the whole claim of the code-assisted lane.
+
+### Q-042 · `_PY_CLOCK_TOKEN` fires on a name that merely CONTAINS a security word · **HIGH** · `ready`
+Any identifier containing a security word within 90 characters of a clock read is reported as CWE-337
+"a security value derived from the clock" — so an audit or expiry timestamp is a false positive.
+**Confirmed in the wild**: the single CWE-337 across 5139 files of the container's stdlib is this bug
+firing on the keyword argument `token=` in `anthropic/lib/credentials/_workload.py:346`. Costs the
+benchmark 0 cases; costs credibility on any real codebase. Fix: bind the value, do not pattern-match
+its name — the same "receiver decides, not the name" rule that took Python weakrand from 50.2% to 100%.
+
 ## Rank 0a — Q-021A · contain the SCA proof overclaim · **CRITICAL** · `in flight`
 
 Spec: [CODEX_AUDIT_VERDICTS.md](CODEX_AUDIT_VERDICTS.md) verdicts 1–5. Jumps the queue ahead of

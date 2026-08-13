@@ -132,12 +132,37 @@ Ordering rule: existing Apolaki capability first, then authoritative Tier 1, the
 mark `UNSUPPORTED` and raise a separate capability item — the benchmark row stays red until the
 capability is real.
 
-### ⛔ LEASED TO CODEX — B-001, B-002, B-003. Claude does not touch these.
+### ✅ LEASE RETURNED — B-001, B-002, B-003 DELIVERED by Codex, verified and integrated
 
-Leased 2026-08-12 from baseline SHA `fe6875b`, branch `codex/bench-foundation`, worktree
-`../MISC-codex-bench`. **Claude and every Claude subagent have relinquished these benchmark IDs and
-the write paths below until Codex returns a completion report and commits.** No Claude lane may be
-spawned or resumed into them.
+Leased 2026-08-12 from `fe6875b`; returned at `b55f336`; cherry-picked onto `main` as
+`24fd129 · 3336dc1 · 3730fa0 · 4fe3f8e · 2891b54`. **Lease released — these IDs and paths are back
+under normal Coordinator assignment.**
+
+**Delivered**: B-001 executable Tier-3 registry, **33 controls across 15 classes**; B-002 durable
+checkpoint + seal-before-key + raw-evidence + dual-view B1 scoring contract; B-003 regression ratchet
+and executable `scripts/tier3_gate.sh`. Seven semantic mutants, all killed by their intended
+assertions. Dead-code count restored to 37/37, no contract islands.
+
+**Verified independently by the Coordinator, not accepted on report**: full suite re-run from the
+Codex worktree in a throwaway container — **2097 passed, 9 skipped, 5 xfailed**, matching the claim
+exactly. The diff touches **only new files** (12 files, +2690 lines, 0 existing files modified), so
+the collision-free lease held in fact and not merely in policy.
+
+**The `1 → 5 xfailed` delta was checked and is NOT Codex's.** All five come from the Breaker's
+session-3 work and each is a strict xfail pinning a **named live defect** with a written reason — the
+correct way to record a known failure, and they become regression tests the moment each is fixed. See
+the defect list now queued below.
+
+### Tier-3 status after B-001
+
+| | |
+|---|---|
+| controls registered | **33**, across **15** classes |
+| passing | **32 / 33**, 0 regressions, 0 environment failures |
+| known non-pass | `sqli-unstable-page-noise` — strict-xfailed and **not credited** |
+
+Codex explicitly did **not** run liveness, rebuild images, run bake-drift, alter `validated_on`, or
+touch Claude-owned files, and left the shared worktree's existing dirt untouched. All correct.
 
 Codex's exclusive write paths:
 `agent/tier3/**` · `agent/bench_contract.py` · `agent/tests/test_tier3_*.py` ·
