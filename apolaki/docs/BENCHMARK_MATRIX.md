@@ -132,6 +132,25 @@ Ordering rule: existing Apolaki capability first, then authoritative Tier 1, the
 mark `UNSUPPORTED` and raise a separate capability item — the benchmark row stays red until the
 capability is real.
 
+### ⛔ LEASED TO CODEX — B-001, B-002, B-003. Claude does not touch these.
+
+Leased 2026-08-12 from baseline SHA `fe6875b`, branch `codex/bench-foundation`, worktree
+`../MISC-codex-bench`. **Claude and every Claude subagent have relinquished these benchmark IDs and
+the write paths below until Codex returns a completion report and commits.** No Claude lane may be
+spawned or resumed into them.
+
+Codex's exclusive write paths:
+`agent/tier3/**` · `agent/bench_contract.py` · `agent/tests/test_tier3_*.py` ·
+`agent/tests/test_bench_contract*.py` · `scripts/tier3_gate.sh` ·
+`docs/handoff/codex_bench_foundation.md`
+
+`agent/owasp_bench.py` is **read-only to Codex** — the dataflow lane holds a narrow write permission
+on its `FAMILIES["trustbound"]` entry, so B-002 is scoped as a NEW module proving conformance by
+reading the reference implementation. Claude adopts the contract into `owasp_bench.py` afterwards.
+
+Claude retains sole ownership of `QUEUE.md`, `QUEUE_ARCH.md`, `STATUS.md`, `LEDGERS.md`, this file,
+and all ticket state.
+
 ### P1 — consolidate what we can already measure
 - **B-001** Tier 3 corpus: give the existing scattered negative controls a single home and a runner,
   with per-class coverage reporting. No new targets. *(Highest value; lowest cost; blocks nothing.)*

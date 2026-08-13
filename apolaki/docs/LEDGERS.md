@@ -261,6 +261,50 @@ Apolaki as a product.
 
 ---
 
+## U1 — MEASURED. The wiring works; the capability is +0 findings. 2026-08-12
+
+The Q-030 gap, as a number from a real run rather than an audit reading. VAmPI, deterministic
+executor, identical seed, before = `92e678b^`, after = `92e678b`:
+
+```
+before  ranked_dispatched=0  still_open=4  tool_dispatches=52  untested=33
+after   ranked_dispatched=4  still_open=0  tool_dispatches=56  untested=25
+```
+
+**The graph ranked four actions and ZERO reached dispatch** — they were still sitting unexecuted when
+the scan ended. That is `architecture.md` 1.8, measured. After: all four dispatch, `tool_dispatches`
+rises by **exactly 4** (so the graph actions are the only new tool calls, which is what makes the
+outcome diff attributable), and the ranked list **drains to zero** — `apply_result` marks the nodes
+tested, so the loop reaches a fixpoint instead of re-recommending forever.
+
+All four were `cross_user_test -> run_bfla` on object endpoints **the tool planner never covers**: it
+schedules `run_bfla` only for PARAMETERIZED endpoints and these carry no query params. Surface the
+graph could name and the planner could not.
+
+**Reported as two numbers on purpose, so they are never conflated: wiring 0 -> 4 dispatched;
+capability +1 lead, +0 confirmed findings.** Q-030 is complete as wiring. It is not yet a capability
+win, and the honest reading is that the ranking is correct while the surface it opened did not yield
+a confirmable finding on this target.
+
+## xss carrier — MEASURED +0, and the diagnostic is what makes it an answer. 2026-08-12
+
+120 of 455 xss cases, seed 1337, paired per case against the sealed
+`owaspbench_java_v12_DAST_FULL_20260811` artifact. `getsource` gate passed, blind budgets zeroed so
+no result depends on case position, sha256 sealed before any key was fetched.
+
+```
+PAIRED cases 120 | before 27 | after 27 | NEW 0 | LOST 0 | errors 0
+```
+
+**Header names were discovered on 18 of the first 60 sampled pages — so the carrier RAN on roughly 30%
+of cases and still confirmed nothing.** That distinction is the whole value of the result: this is not
+delivery that never happened, it is delivery that arrived and proved nothing, with the breakout oracle
+declining every header-carried reflection it saw — the oracle behaving as specified.
+
+**Carrier delivery is now falsified as the axis on both categories**, exactly as blind-vs-echo was
+falsified on cmdi. Two hypotheses tested and rejected with measurements rather than argument. Do not
+invest further in carriers or payload shapes for cmdi/xss without a new, differently-grounded reason.
+
 ## cmdi probe repertoire — MEASURED +0, and it falsified the brief. 2026-08-12
 
 **Full category, 251 cases, per-case diff against the sealed baseline: before 36, after 36, NEW 0,
