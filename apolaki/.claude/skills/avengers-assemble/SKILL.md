@@ -39,6 +39,12 @@ limit still landed seven slices plus a rewritten oracle. Every prompt names the 
 to **as it works**, and every Builder prompt says verbatim: *"land each green slice as its own commit;
 do not batch — assume you may be killed at any moment."*
 
+**3c · Ownership covers the CONTAINER, not just the repo.** Disjoint files are not enough. Two lanes
+with disjoint write sets still collided inside the shared `apolaki-agent-1`, because both were told to
+`docker cp` their work into it — one overwrote the other and died mid-restore. Git isolation did not
+help, because the collision was never in git. **Every lane gets its own throwaway container mounting
+its own tree.** That instruction was in the House Rules block causing this, and is now fixed there.
+
 **4 · Disjoint write sets, declared before anyone spawns — docs included.** Write the ownership table
 into `docs/QUEUE.md` first. Cross-lane needs go to `docs/handoff/<lane>.md`, **never** the shared
 queue: routing hand-offs into a file another agent owned forced one lane to "restore the other lane's
@@ -143,9 +149,15 @@ semantic variant before calling a fix general. See `benchmark-score`.
   second emitter — check both before calling anything unreachable.
 - Benchmarks immutable: never modify apps, cases, labels, scoring or denominators, and never build a
   benchmark-specific signature.
+- RUN TESTS IN YOUR OWN THROWAWAY CONTAINER. Never `docker cp` into `apolaki-agent-1` and never
+  restart it — it is shared, and two lanes doing that overwrote each other's files mid-run (one died
+  holding a half-finished restore of the other's work). Use:
+    MSYS_NO_PATHCONV=1 docker run --rm -v "<ABS-WINDOWS-PATH>/agent:/app" -w /app \
+      apolaki-agent python -m pytest tests/ -p no:cacheprovider
+  This is the pattern five Codex lanes used with zero collisions. It also means /app is your working
+  tree rather than a baked image, so there is nothing to deploy and nothing to forget to deploy.
 - `curl -s http://localhost:8000/missions` before `docker compose build agent` — a build SIGKILLs a
-  running mission (three have died that way). Fast deploy: `docker cp <f> apolaki-agent-1:/app/<f>`
-  + `docker restart apolaki-agent-1`. /app is BAKED, so an uncommitted change is not live.
+  running mission (three have died that way). You should not need to build at all.
 - Git Bash: MSYS_NO_PATHCONV=1 for docker exec with absolute paths; -w /app absolute. pytest already
   sets addopts = -q. A Git-Bash /tmp path in `docker -v` silently mounts an EMPTY volume and tools
   report success having scanned 0 files — always check the scanned-file count, never trust exit 0.
