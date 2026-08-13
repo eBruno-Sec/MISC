@@ -642,3 +642,96 @@ renderLogEntry()   [replay switch]
 Negative control, run on the same page before the fix: an unrecognised type added **0 lines** while a
 handled one added 1 -- which is exactly what `graph_action` and `degraded` were doing in every mission
 until now.
+
+---
+
+# Q-031 -- Section 2, the rediscovery trigger table
+
+Starting at row 4 (`schema`), which the audit calls the highest-value gap, rather than at the top of
+the list. Standing rule held throughout: **a trigger the graph cannot express is a design gap, not a
+rule** -- so this says where the gap is instead of inventing a representation.
+
+## Row 4, `schema` -- MEASURED, and the audit's diagnosis is one layer off
+
+The audit says schema has **NO** representation because "`fetch_openapi` / `run_graphql` results reach
+`tools.recon`/`tools.urls` only". Measured against VAmPI's real published spec:
+
+```
+$ MSYS_NO_PATHCONV=1 docker exec apolaki-agent-1 python /tmp/schema_gap.py
+SPEC DECLARES
+  operations            : 14 {'GET': 8, 'POST': 3, 'DELETE': 1, 'PUT': 2}
+  query parameters      : 0
+  header parameters     : 0
+  BODY parameters       : 9
+
+endpoints_from_openapi RETURNS
+  urls                  : 12
+  urls carrying a query : 0
+  body params carried   : 0
+  methods preserved     : 0
+```
+
+**Every testable parameter on this API is a body parameter, and not one reaches the planner.** 100% of
+the declared parameter surface is lost. This is also why D3 cannot help here: D3 fixed the delivery of
+QUERY parameters, and this target declares zero.
+
+Three separate losses, all in `surface.endpoints_from_openapi` (`surface.py:94-133`):
+
+1. **`requestBody` is never read.** The parameter loop is `if p.get("in") == "query"`
+   (`surface.py:123`), so OpenAPI 3 `requestBody` and Swagger 2 `in: body` are both skipped.
+   9 declared body parameters, 0 extracted.
+2. **The method collapses to a bool.** `testable = True` (`surface.py:118`) records only THAT some
+   method exists; the URL is then emitted GET-shaped. 6 of 14 operations here are POST/PUT/DELETE, so
+   even the endpoints that ARE imported get probed with the wrong verb.
+3. **Declared values are discarded.** Query params, when present, are emitted as `f"{n}=test"`
+   (`surface.py:131`) while the spec's own `example` / `default` / `enum` are ignored -- the same
+   invented-value shape D3 was about, in the importer this time.
+
+### Why this row is not fixable from this lane's files -- the real blocker
+
+The audit's phrasing implies the spec reaches `tools.recon` and merely fails to reach the graph. It
+does not. `_fetch_openapi` (`tools.py:3766-3781`) parses the spec into a local `spec` variable,
+converts it to URLs, calls `self._add_urls(endpoints)`, and returns. **The spec object is then
+garbage-collected.** `tools.recon` never receives it, and no projector can project a fact that no
+longer exists.
+
+So the honest statement for the trigger table is:
+
+> Row 4 is **NOT blocked by the graph's expressiveness.** `AssetGraph` already has a `param` kind with
+> `has_param` edges (`asset_graph.py:475-477`), and `observe(**props)` takes arbitrary props, so
+> `location` / `type` / `required` / `method` need no new node kind at all; a `schema` kind is a
+> one-word addition if it is even wanted. The row is blocked because **the fact is destroyed at the
+> tool boundary before any consumer can see it.**
+
+That distinction decides which file the fix lives in. This is not a graph-design problem to solve in
+`asset_graph.py`; it is a one-line persistence problem in `tools.py` followed by ordinary projection
+work in `agent.py`. Sized honestly:
+
+- `tools.py` -- `_fetch_openapi` keeps the parsed spec, e.g.
+  `self.recon.setdefault("openapi", {})[base_url] = spec`. One line. **`agent/tools.py` is unowned but
+  I have NOT taken it** -- flagged here for the Coordinator rather than reached into.
+- `surface.py` -- read `requestBody` / `in: body`, keep the method, prefer declared
+  `example`/`default`. Also not this lane's file.
+- `agent.py` + `asset_graph.py` (mine) -- project `param` nodes carrying
+  `props{location,type,required,method}` and arm the body-capable engines. This half is ready to write
+  the moment the fact survives the tool call.
+
+### What the trigger would then be
+
+On record, **NOT implemented**, and deliberately expressed in the existing vocabulary:
+
+- **fact selector:** `param` nodes with `props["location"] == "body"` whose `first_seen` is newer than
+  the last iteration -- the same `first_seen` predicate 2.1 already specifies, no new mechanism.
+- **armed actions:** the body-carrying probes, aimed at the endpoint the `has_param` edge points at.
+- **dedup scope:** the planner's own key namespace, exactly as U1's graph steps already use, so a
+  schema trigger cannot re-probe what the tool planner already covered (the D2 lesson).
+- **termination:** unchanged. `apply_result` marks the param tested, the selector stops returning it,
+  and the loop reaches the same deterministic fixpoint U1 already drains to. No pass count.
+
+### Rows still unexamined
+
+Rows 1-3 and 5-15 have **not** been re-measured in this lane. The audit's readings stand as written,
+with this caveat: row 4's diagnosis was one layer off when checked against the code, and 2.2's repro
+was wrong (corrected in `7ffc576`). Two of the three things this lane checked in Section 2 were
+inaccurate, so the remaining rows should be verified against the code before anything is built on
+them, not taken as given.
