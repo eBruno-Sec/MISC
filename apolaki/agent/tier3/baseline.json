@@ -1,0 +1,979 @@
+{
+  "coverage": {
+    "classes": 15,
+    "classes_with_passing_safe_control": 8,
+    "classes_without_passing_safe_control": [
+      "benchmark_scoring",
+      "code_assisted_analysis",
+      "probe_delivery",
+      "proof_gate",
+      "proof_reporting",
+      "surface_discovery",
+      "technique_contract"
+    ],
+    "passed": 32,
+    "registered": 33,
+    "status_counts": {
+      "ERROR": 0,
+      "FAIL": 0,
+      "NOT_RUN": 0,
+      "PASS": 32,
+      "SKIPPED": 1
+    }
+  },
+  "environment_failures": [],
+  "git_sha": "fe6875b876629baaf6198748788d7ab1024c5e06",
+  "per_class": {
+    "access_control": {
+      "control_kinds": {
+        "NETWORK-FAILURE": 1,
+        "SAFE": 1,
+        "VULNERABLE": 1
+      },
+      "has_passing_safe_control": true,
+      "passed": 3,
+      "passing_control_kinds": {
+        "NETWORK-FAILURE": 1,
+        "SAFE": 1,
+        "VULNERABLE": 1
+      },
+      "registered": 3,
+      "safe_control_gap": false,
+      "status_counts": {
+        "ERROR": 0,
+        "FAIL": 0,
+        "NOT_RUN": 0,
+        "PASS": 3,
+        "SKIPPED": 0
+      }
+    },
+    "benchmark_scoring": {
+      "control_kinds": {
+        "REGRESSION": 1
+      },
+      "has_passing_safe_control": false,
+      "passed": 1,
+      "passing_control_kinds": {
+        "REGRESSION": 1
+      },
+      "registered": 1,
+      "safe_control_gap": true,
+      "status_counts": {
+        "ERROR": 0,
+        "FAIL": 0,
+        "NOT_RUN": 0,
+        "PASS": 1,
+        "SKIPPED": 0
+      }
+    },
+    "code_assisted_analysis": {
+      "control_kinds": {
+        "NOISE/LOOKALIKE": 1
+      },
+      "has_passing_safe_control": false,
+      "passed": 1,
+      "passing_control_kinds": {
+        "NOISE/LOOKALIKE": 1
+      },
+      "registered": 1,
+      "safe_control_gap": true,
+      "status_counts": {
+        "ERROR": 0,
+        "FAIL": 0,
+        "NOT_RUN": 0,
+        "PASS": 1,
+        "SKIPPED": 0
+      }
+    },
+    "command_injection": {
+      "control_kinds": {
+        "NOISE/LOOKALIKE": 3,
+        "SAFE": 1,
+        "VULNERABLE": 4
+      },
+      "has_passing_safe_control": true,
+      "passed": 8,
+      "passing_control_kinds": {
+        "NOISE/LOOKALIKE": 3,
+        "SAFE": 1,
+        "VULNERABLE": 4
+      },
+      "registered": 8,
+      "safe_control_gap": false,
+      "status_counts": {
+        "ERROR": 0,
+        "FAIL": 0,
+        "NOT_RUN": 0,
+        "PASS": 8,
+        "SKIPPED": 0
+      }
+    },
+    "evidence_contract": {
+      "control_kinds": {
+        "AMBIGUOUS": 1,
+        "SAFE": 1,
+        "VULNERABLE": 1
+      },
+      "has_passing_safe_control": true,
+      "passed": 3,
+      "passing_control_kinds": {
+        "AMBIGUOUS": 1,
+        "SAFE": 1,
+        "VULNERABLE": 1
+      },
+      "registered": 3,
+      "safe_control_gap": false,
+      "status_counts": {
+        "ERROR": 0,
+        "FAIL": 0,
+        "NOT_RUN": 0,
+        "PASS": 3,
+        "SKIPPED": 0
+      }
+    },
+    "probe_delivery": {
+      "control_kinds": {
+        "REGRESSION": 1
+      },
+      "has_passing_safe_control": false,
+      "passed": 1,
+      "passing_control_kinds": {
+        "REGRESSION": 1
+      },
+      "registered": 1,
+      "safe_control_gap": true,
+      "status_counts": {
+        "ERROR": 0,
+        "FAIL": 0,
+        "NOT_RUN": 0,
+        "PASS": 1,
+        "SKIPPED": 0
+      }
+    },
+    "proof_gate": {
+      "control_kinds": {
+        "REGRESSION": 1
+      },
+      "has_passing_safe_control": false,
+      "passed": 1,
+      "passing_control_kinds": {
+        "REGRESSION": 1
+      },
+      "registered": 1,
+      "safe_control_gap": true,
+      "status_counts": {
+        "ERROR": 0,
+        "FAIL": 0,
+        "NOT_RUN": 0,
+        "PASS": 1,
+        "SKIPPED": 0
+      }
+    },
+    "proof_reporting": {
+      "control_kinds": {
+        "AMBIGUOUS": 1
+      },
+      "has_passing_safe_control": false,
+      "passed": 1,
+      "passing_control_kinds": {
+        "AMBIGUOUS": 1
+      },
+      "registered": 1,
+      "safe_control_gap": true,
+      "status_counts": {
+        "ERROR": 0,
+        "FAIL": 0,
+        "NOT_RUN": 0,
+        "PASS": 1,
+        "SKIPPED": 0
+      }
+    },
+    "sqli": {
+      "control_kinds": {
+        "NOISE/LOOKALIKE": 5,
+        "SAFE": 1,
+        "VULNERABLE": 1
+      },
+      "has_passing_safe_control": true,
+      "passed": 6,
+      "passing_control_kinds": {
+        "NOISE/LOOKALIKE": 4,
+        "SAFE": 1,
+        "VULNERABLE": 1
+      },
+      "registered": 7,
+      "safe_control_gap": false,
+      "status_counts": {
+        "ERROR": 0,
+        "FAIL": 0,
+        "NOT_RUN": 0,
+        "PASS": 6,
+        "SKIPPED": 1
+      }
+    },
+    "surface_discovery": {
+      "control_kinds": {
+        "REGRESSION": 1
+      },
+      "has_passing_safe_control": false,
+      "passed": 1,
+      "passing_control_kinds": {
+        "REGRESSION": 1
+      },
+      "registered": 1,
+      "safe_control_gap": true,
+      "status_counts": {
+        "ERROR": 0,
+        "FAIL": 0,
+        "NOT_RUN": 0,
+        "PASS": 1,
+        "SKIPPED": 0
+      }
+    },
+    "technique_contract": {
+      "control_kinds": {
+        "REGRESSION": 1
+      },
+      "has_passing_safe_control": false,
+      "passed": 1,
+      "passing_control_kinds": {
+        "REGRESSION": 1
+      },
+      "registered": 1,
+      "safe_control_gap": true,
+      "status_counts": {
+        "ERROR": 0,
+        "FAIL": 0,
+        "NOT_RUN": 0,
+        "PASS": 1,
+        "SKIPPED": 0
+      }
+    },
+    "weak_crypto": {
+      "control_kinds": {
+        "SAFE": 1
+      },
+      "has_passing_safe_control": true,
+      "passed": 1,
+      "passing_control_kinds": {
+        "SAFE": 1
+      },
+      "registered": 1,
+      "safe_control_gap": false,
+      "status_counts": {
+        "ERROR": 0,
+        "FAIL": 0,
+        "NOT_RUN": 0,
+        "PASS": 1,
+        "SKIPPED": 0
+      }
+    },
+    "weak_hash": {
+      "control_kinds": {
+        "SAFE": 1
+      },
+      "has_passing_safe_control": true,
+      "passed": 1,
+      "passing_control_kinds": {
+        "SAFE": 1
+      },
+      "registered": 1,
+      "safe_control_gap": false,
+      "status_counts": {
+        "ERROR": 0,
+        "FAIL": 0,
+        "NOT_RUN": 0,
+        "PASS": 1,
+        "SKIPPED": 0
+      }
+    },
+    "weak_random": {
+      "control_kinds": {
+        "SAFE": 1
+      },
+      "has_passing_safe_control": true,
+      "passed": 1,
+      "passing_control_kinds": {
+        "SAFE": 1
+      },
+      "registered": 1,
+      "safe_control_gap": false,
+      "status_counts": {
+        "ERROR": 0,
+        "FAIL": 0,
+        "NOT_RUN": 0,
+        "PASS": 1,
+        "SKIPPED": 0
+      }
+    },
+    "xss": {
+      "control_kinds": {
+        "NOISE/LOOKALIKE": 1,
+        "SAFE": 1
+      },
+      "has_passing_safe_control": true,
+      "passed": 2,
+      "passing_control_kinds": {
+        "NOISE/LOOKALIKE": 1,
+        "SAFE": 1
+      },
+      "registered": 2,
+      "safe_control_gap": false,
+      "status_counts": {
+        "ERROR": 0,
+        "FAIL": 0,
+        "NOT_RUN": 0,
+        "PASS": 2,
+        "SKIPPED": 0
+      }
+    }
+  },
+  "per_entry": [
+    {
+      "control_id": "proof-gate-all-report-surfaces",
+      "control_kind": "REGRESSION",
+      "cwe": [],
+      "detail": "1 pytest item(s)",
+      "naive_failure": "A consumer can count a demoted lead as confirmed even though the canonical proof gate rejected it.",
+      "node_id": "tests/test_proof_gate_surfaces.py::test_risk_score_and_counts_agree_about_what_confirmed_means",
+      "proof_kind": "behavioural",
+      "pytest_nodes": [
+        "tests/test_proof_gate_surfaces.py::test_risk_score_and_counts_agree_about_what_confirmed_means"
+      ],
+      "pytest_returncode": 0,
+      "source_file": "tests/test_proof_gate_surfaces.py",
+      "status": "PASS",
+      "stderr_tail": "",
+      "stdout_tail": ".                                                                        [100%]\n1 passed in 1.88s\n",
+      "vulnerability_class": "proof_gate"
+    },
+    {
+      "control_id": "benchmark-product-cross-family-fp",
+      "control_kind": "REGRESSION",
+      "cwe": [],
+      "detail": "1 pytest item(s)",
+      "naive_failure": "A within-family scorer can report zero false positives while the product would show a client a foreign-family finding.",
+      "node_id": "tests/test_bench_product_fpr.py::test_clean_case_with_a_foreign_confirmed_finding_scores_TN_officially_and_FP_for_the_product",
+      "proof_kind": "behavioural",
+      "pytest_nodes": [
+        "tests/test_bench_product_fpr.py::test_clean_case_with_a_foreign_confirmed_finding_scores_TN_officially_and_FP_for_the_product"
+      ],
+      "pytest_returncode": 0,
+      "source_file": "tests/test_bench_product_fpr.py",
+      "status": "PASS",
+      "stderr_tail": "",
+      "stdout_tail": ".                                                                        [100%]\n1 passed in 1.87s\n",
+      "vulnerability_class": "benchmark_scoring"
+    },
+    {
+      "control_id": "report-does-not-invent-control",
+      "control_kind": "AMBIGUOUS",
+      "cwe": [],
+      "detail": "1 pytest item(s)",
+      "naive_failure": "A report can claim a negative control ran merely because the finding family declares one.",
+      "node_id": "tests/test_proof_claim_matches_artifact.py::test_a_finding_with_no_control_does_not_assert_one",
+      "proof_kind": "behavioural",
+      "pytest_nodes": [
+        "tests/test_proof_claim_matches_artifact.py::test_a_finding_with_no_control_does_not_assert_one"
+      ],
+      "pytest_returncode": 0,
+      "source_file": "tests/test_proof_claim_matches_artifact.py",
+      "status": "PASS",
+      "stderr_tail": "",
+      "stdout_tail": ".                                                                        [100%]\n1 passed in 1.79s\n",
+      "vulnerability_class": "proof_reporting"
+    },
+    {
+      "control_id": "weak-crypto-aead-clean-twin",
+      "control_kind": "SAFE",
+      "cwe": [
+        "CWE-327"
+      ],
+      "detail": "1 pytest item(s)",
+      "naive_failure": "A source signature can flag every Cipher.getInstance call without resolving the secure algorithm.",
+      "node_id": "tests/test_codeassisted_negative_controls.py::test_negative_control_aead_cipher_is_not_weak_crypto",
+      "proof_kind": "source-derived",
+      "pytest_nodes": [
+        "tests/test_codeassisted_negative_controls.py::test_negative_control_aead_cipher_is_not_weak_crypto"
+      ],
+      "pytest_returncode": 0,
+      "source_file": "tests/test_codeassisted_negative_controls.py",
+      "status": "PASS",
+      "stderr_tail": "",
+      "stdout_tail": ".                                                                        [100%]\n1 passed in 1.88s\n",
+      "vulnerability_class": "weak_crypto"
+    },
+    {
+      "control_id": "weak-hash-sha2-clean-twin",
+      "control_kind": "SAFE",
+      "cwe": [
+        "CWE-328"
+      ],
+      "detail": "1 pytest item(s)",
+      "naive_failure": "A source signature can treat every digest construction as a weak hash.",
+      "node_id": "tests/test_codeassisted_negative_controls.py::test_negative_control_sha256_and_sha512_are_not_weak_hashes",
+      "proof_kind": "source-derived",
+      "pytest_nodes": [
+        "tests/test_codeassisted_negative_controls.py::test_negative_control_sha256_and_sha512_are_not_weak_hashes"
+      ],
+      "pytest_returncode": 0,
+      "source_file": "tests/test_codeassisted_negative_controls.py",
+      "status": "PASS",
+      "stderr_tail": "",
+      "stdout_tail": ".                                                                        [100%]\n1 passed in 1.96s\n",
+      "vulnerability_class": "weak_hash"
+    },
+    {
+      "control_id": "weak-random-secure-random-clean-twin",
+      "control_kind": "SAFE",
+      "cwe": [
+        "CWE-330",
+        "CWE-337"
+      ],
+      "detail": "1 pytest item(s)",
+      "naive_failure": "A method-name detector can ignore the receiver and flag cryptographically secure randomness.",
+      "node_id": "tests/test_codeassisted_negative_controls.py::test_negative_control_securerandom_is_not_weak_randomness",
+      "proof_kind": "source-derived",
+      "pytest_nodes": [
+        "tests/test_codeassisted_negative_controls.py::test_negative_control_securerandom_is_not_weak_randomness"
+      ],
+      "pytest_returncode": 0,
+      "source_file": "tests/test_codeassisted_negative_controls.py",
+      "status": "PASS",
+      "stderr_tail": "",
+      "stdout_tail": ".                                                                        [100%]\n1 passed in 1.84s\n",
+      "vulnerability_class": "weak_random"
+    },
+    {
+      "control_id": "code-assisted-inert-text",
+      "control_kind": "NOISE/LOOKALIKE",
+      "cwe": [],
+      "detail": "1 pytest item(s)",
+      "naive_failure": "A text search can report comments, strings, annotations, and malformed masking residue as executable call sites.",
+      "node_id": "tests/test_codeassisted_negative_controls.py::test_inert_text_is_never_a_call_site",
+      "proof_kind": "source-derived",
+      "pytest_nodes": [
+        "tests/test_codeassisted_negative_controls.py::test_inert_text_is_never_a_call_site"
+      ],
+      "pytest_returncode": 0,
+      "source_file": "tests/test_codeassisted_negative_controls.py",
+      "status": "PASS",
+      "stderr_tail": "",
+      "stdout_tail": ".                                                                        [100%]\n1 passed in 1.77s\n",
+      "vulnerability_class": "code_assisted_analysis"
+    },
+    {
+      "control_id": "sqli-identical-response-clean",
+      "control_kind": "SAFE",
+      "cwe": [
+        "CWE-89"
+      ],
+      "detail": "1 pytest item(s)",
+      "naive_failure": "A boolean oracle can confirm without proving any semantic difference between predicates.",
+      "node_id": "tests/test_sqli_oracle_negative_controls.py::test_identical_responses_never_confirm_blind_sqli",
+      "proof_kind": "behavioural",
+      "pytest_nodes": [
+        "tests/test_sqli_oracle_negative_controls.py::test_identical_responses_never_confirm_blind_sqli"
+      ],
+      "pytest_returncode": 0,
+      "source_file": "tests/test_sqli_oracle_negative_controls.py",
+      "status": "PASS",
+      "stderr_tail": "",
+      "stdout_tail": ".                                                                        [100%]\n1 passed in 1.76s\n",
+      "vulnerability_class": "sqli"
+    },
+    {
+      "control_id": "sqli-unstable-page-noise",
+      "control_kind": "NOISE/LOOKALIKE",
+      "cwe": [
+        "CWE-89"
+      ],
+      "detail": "1 pytest item(s)",
+      "naive_failure": "One baseline sample can make ordinary response instability look like a true/false differential.",
+      "node_id": "tests/test_sqli_oracle_negative_controls.py::test_an_unstable_page_must_not_confirm_blind_sqli",
+      "proof_kind": "behavioural",
+      "pytest_nodes": [
+        "tests/test_sqli_oracle_negative_controls.py::test_an_unstable_page_must_not_confirm_blind_sqli"
+      ],
+      "pytest_returncode": 0,
+      "source_file": "tests/test_sqli_oracle_negative_controls.py",
+      "status": "SKIPPED",
+      "stderr_tail": "",
+      "stdout_tail": "x                                                                        [100%]\n1 xfailed in 1.88s\n",
+      "vulnerability_class": "sqli"
+    },
+    {
+      "control_id": "sqli-reflection-noise",
+      "control_kind": "NOISE/LOOKALIKE",
+      "cwe": [
+        "CWE-89"
+      ],
+      "detail": "1 pytest item(s)",
+      "naive_failure": "Payload reflection can be mistaken for a database predicate changing the selected records.",
+      "node_id": "tests/test_sqli_oracle_negative_controls.py::test_a_parameter_that_merely_echoes_cannot_confirm_blind_sqli",
+      "proof_kind": "behavioural",
+      "pytest_nodes": [
+        "tests/test_sqli_oracle_negative_controls.py::test_a_parameter_that_merely_echoes_cannot_confirm_blind_sqli"
+      ],
+      "pytest_returncode": 0,
+      "source_file": "tests/test_sqli_oracle_negative_controls.py",
+      "status": "PASS",
+      "stderr_tail": "",
+      "stdout_tail": ".                                                                        [100%]\n1 passed in 1.77s\n",
+      "vulnerability_class": "sqli"
+    },
+    {
+      "control_id": "sqli-nonce-noise",
+      "control_kind": "NOISE/LOOKALIKE",
+      "cwe": [
+        "CWE-89"
+      ],
+      "detail": "1 pytest item(s)",
+      "naive_failure": "Per-response nonces can create a body delta on every request and masquerade as boolean SQL injection.",
+      "node_id": "tests/test_sqli_oracle_negative_controls.py::test_a_page_with_a_per_response_nonce_cannot_confirm_blind_sqli",
+      "proof_kind": "behavioural",
+      "pytest_nodes": [
+        "tests/test_sqli_oracle_negative_controls.py::test_a_page_with_a_per_response_nonce_cannot_confirm_blind_sqli"
+      ],
+      "pytest_returncode": 0,
+      "source_file": "tests/test_sqli_oracle_negative_controls.py",
+      "status": "PASS",
+      "stderr_tail": "",
+      "stdout_tail": ".                                                                        [100%]\n1 passed in 1.74s\n",
+      "vulnerability_class": "sqli"
+    },
+    {
+      "control_id": "sqli-always-error-noise",
+      "control_kind": "NOISE/LOOKALIKE",
+      "cwe": [
+        "CWE-89"
+      ],
+      "detail": "1 pytest item(s)",
+      "naive_failure": "A generic error page can be credited as payload-induced query breakage without a recovery leg.",
+      "node_id": "tests/test_sqli_oracle_negative_controls.py::test_a_page_that_errors_on_every_input_is_not_error_recovery",
+      "proof_kind": "behavioural",
+      "pytest_nodes": [
+        "tests/test_sqli_oracle_negative_controls.py::test_a_page_that_errors_on_every_input_is_not_error_recovery"
+      ],
+      "pytest_returncode": 0,
+      "source_file": "tests/test_sqli_oracle_negative_controls.py",
+      "status": "PASS",
+      "stderr_tail": "",
+      "stdout_tail": ".                                                                        [100%]\n1 passed in 1.96s\n",
+      "vulnerability_class": "sqli"
+    },
+    {
+      "control_id": "sqli-uniform-latency-noise",
+      "control_kind": "NOISE/LOOKALIKE",
+      "cwe": [
+        "CWE-89"
+      ],
+      "detail": "1 pytest item(s)",
+      "naive_failure": "Uniform server latency can be credited as a time-based payload delay when the paired control is ignored.",
+      "node_id": "tests/test_sqli_oracle_negative_controls.py::test_an_endpoint_that_is_slow_for_everything_cannot_confirm_time_blind",
+      "proof_kind": "behavioural",
+      "pytest_nodes": [
+        "tests/test_sqli_oracle_negative_controls.py::test_an_endpoint_that_is_slow_for_everything_cannot_confirm_time_blind"
+      ],
+      "pytest_returncode": 0,
+      "source_file": "tests/test_sqli_oracle_negative_controls.py",
+      "status": "PASS",
+      "stderr_tail": "",
+      "stdout_tail": ".                                                                        [100%]\n1 passed in 1.80s\n",
+      "vulnerability_class": "sqli"
+    },
+    {
+      "control_id": "sqli-error-recovery-positive",
+      "control_kind": "VULNERABLE",
+      "cwe": [
+        "CWE-89"
+      ],
+      "detail": "1 pytest item(s)",
+      "naive_failure": "A negative-only oracle can become a mute button that rejects the real break-and-recovery signal too.",
+      "node_id": "tests/test_sqli_oracle_negative_controls.py::test_error_recovery_needs_both_legs",
+      "proof_kind": "behavioural",
+      "pytest_nodes": [
+        "tests/test_sqli_oracle_negative_controls.py::test_error_recovery_needs_both_legs"
+      ],
+      "pytest_returncode": 0,
+      "source_file": "tests/test_sqli_oracle_negative_controls.py",
+      "status": "PASS",
+      "stderr_tail": "",
+      "stdout_tail": ".                                                                        [100%]\n1 passed in 1.74s\n",
+      "vulnerability_class": "sqli"
+    },
+    {
+      "control_id": "hostless-surface-regression",
+      "control_kind": "REGRESSION",
+      "cwe": [],
+      "detail": "1 pytest item(s)",
+      "naive_failure": "A liveness guard can count discovered URLs that have no host and can never pass scope validation.",
+      "node_id": "tests/test_liveness_hostless_negative_control.py::test_a_hostless_url_fails_the_reach_check_DEAD",
+      "proof_kind": "behavioural",
+      "pytest_nodes": [
+        "tests/test_liveness_hostless_negative_control.py::test_a_hostless_url_fails_the_reach_check_DEAD"
+      ],
+      "pytest_returncode": 0,
+      "source_file": "tests/test_liveness_hostless_negative_control.py",
+      "status": "PASS",
+      "stderr_tail": "",
+      "stdout_tail": ".                                                                        [100%]\n1 passed in 1.75s\n",
+      "vulnerability_class": "surface_discovery"
+    },
+    {
+      "control_id": "access-control-dead-control",
+      "control_kind": "NETWORK-FAILURE",
+      "cwe": [
+        "CWE-639"
+      ],
+      "detail": "1 pytest item(s)",
+      "naive_failure": "An exception-shaped control object can satisfy an is-not-None check and let an untested authorization claim confirm.",
+      "node_id": "tests/test_bie_errored_control.py::test_judge_treats_an_errored_anonymous_control_as_missing",
+      "proof_kind": "behavioural",
+      "pytest_nodes": [
+        "tests/test_bie_errored_control.py::test_judge_treats_an_errored_anonymous_control_as_missing"
+      ],
+      "pytest_returncode": 0,
+      "source_file": "tests/test_bie_errored_control.py",
+      "status": "PASS",
+      "stderr_tail": "",
+      "stdout_tail": ".                                                                        [100%]\n1 passed in 1.96s\n",
+      "vulnerability_class": "access_control"
+    },
+    {
+      "control_id": "access-control-public-resource",
+      "control_kind": "SAFE",
+      "cwe": [
+        "CWE-639"
+      ],
+      "detail": "1 pytest item(s)",
+      "naive_failure": "A stricter dead-control gate can accidentally promote or obscure a resource proven public by a live anonymous control.",
+      "node_id": "tests/test_bie_errored_control.py::test_client_side_authz_keeps_rejecting_the_genuinely_public_resource",
+      "proof_kind": "behavioural",
+      "pytest_nodes": [
+        "tests/test_bie_errored_control.py::test_client_side_authz_keeps_rejecting_the_genuinely_public_resource"
+      ],
+      "pytest_returncode": 0,
+      "source_file": "tests/test_bie_errored_control.py",
+      "status": "PASS",
+      "stderr_tail": "",
+      "stdout_tail": ".                                                                        [100%]\n1 passed in 1.78s\n",
+      "vulnerability_class": "access_control"
+    },
+    {
+      "control_id": "access-control-cross-user-positive",
+      "control_kind": "VULNERABLE",
+      "cwe": [
+        "CWE-639"
+      ],
+      "detail": "1 pytest item(s)",
+      "naive_failure": "A negative-control fix can silence a real owner/non-owner authorization differential.",
+      "node_id": "tests/test_bie_errored_control.py::test_judge_still_confirms_a_real_cross_user_read_with_live_controls",
+      "proof_kind": "behavioural",
+      "pytest_nodes": [
+        "tests/test_bie_errored_control.py::test_judge_still_confirms_a_real_cross_user_read_with_live_controls"
+      ],
+      "pytest_returncode": 0,
+      "source_file": "tests/test_bie_errored_control.py",
+      "status": "PASS",
+      "stderr_tail": "",
+      "stdout_tail": ".                                                                        [100%]\n1 passed in 1.77s\n",
+      "vulnerability_class": "access_control"
+    },
+    {
+      "control_id": "technique-proof-contract-ratchet",
+      "control_kind": "REGRESSION",
+      "cwe": [],
+      "detail": "1 pytest item(s)",
+      "naive_failure": "A technique can be added without a stated negative control or evidence obligation and still look registered.",
+      "node_id": "tests/test_technique_contract.py::test_every_technique_record_carries_a_contract",
+      "proof_kind": "behavioural",
+      "pytest_nodes": [
+        "tests/test_technique_contract.py::test_every_technique_record_carries_a_contract"
+      ],
+      "pytest_returncode": 0,
+      "source_file": "tests/test_technique_contract.py",
+      "status": "PASS",
+      "stderr_tail": "",
+      "stdout_tail": ".                                                                        [100%]\n1 passed in 1.91s\n",
+      "vulnerability_class": "technique_contract"
+    },
+    {
+      "control_id": "source-proof-control-not-applicable",
+      "control_kind": "SAFE",
+      "cwe": [],
+      "detail": "1 pytest item(s)",
+      "naive_failure": "A source-derived finding can fabricate a request differential that cannot exist for a static call site.",
+      "node_id": "tests/test_evidence_contract_by_proof_kind.py::test_source_finding_does_not_claim_a_request_negative_control",
+      "proof_kind": "source-derived",
+      "pytest_nodes": [
+        "tests/test_evidence_contract_by_proof_kind.py::test_source_finding_does_not_claim_a_request_negative_control"
+      ],
+      "pytest_returncode": 0,
+      "source_file": "tests/test_evidence_contract_by_proof_kind.py",
+      "status": "PASS",
+      "stderr_tail": "",
+      "stdout_tail": ".                                                                        [100%]\n1 passed in 2.02s\n",
+      "vulnerability_class": "evidence_contract"
+    },
+    {
+      "control_id": "behavioural-proof-without-control",
+      "control_kind": "AMBIGUOUS",
+      "cwe": [],
+      "detail": "1 pytest item(s)",
+      "naive_failure": "A behavioural finding without a recorded control can be rendered as deterministically confirmed.",
+      "node_id": "tests/test_evidence_contract_by_proof_kind.py::test_behavioural_without_control_says_so_in_the_bundle_too",
+      "proof_kind": "behavioural",
+      "pytest_nodes": [
+        "tests/test_evidence_contract_by_proof_kind.py::test_behavioural_without_control_says_so_in_the_bundle_too"
+      ],
+      "pytest_returncode": 0,
+      "source_file": "tests/test_evidence_contract_by_proof_kind.py",
+      "status": "PASS",
+      "stderr_tail": "",
+      "stdout_tail": ".                                                                        [100%]\n1 passed in 1.94s\n",
+      "vulnerability_class": "evidence_contract"
+    },
+    {
+      "control_id": "behavioural-proof-with-control",
+      "control_kind": "VULNERABLE",
+      "cwe": [],
+      "detail": "1 pytest item(s)",
+      "naive_failure": "Separating proof kinds can erase the genuine request control on an honestly confirmed behavioural finding.",
+      "node_id": "tests/test_evidence_contract_by_proof_kind.py::test_behavioural_with_control_is_unchanged",
+      "proof_kind": "behavioural",
+      "pytest_nodes": [
+        "tests/test_evidence_contract_by_proof_kind.py::test_behavioural_with_control_is_unchanged"
+      ],
+      "pytest_returncode": 0,
+      "source_file": "tests/test_evidence_contract_by_proof_kind.py",
+      "status": "PASS",
+      "stderr_tail": "",
+      "stdout_tail": ".                                                                        [100%]\n1 passed in 1.87s\n",
+      "vulnerability_class": "evidence_contract"
+    },
+    {
+      "control_id": "set-param-missing-parameter-regression",
+      "control_kind": "REGRESSION",
+      "cwe": [],
+      "detail": "3 pytest item(s)",
+      "naive_failure": "A probe helper can return its baseline URL unchanged, so no payload is sent and a false negative looks clean.",
+      "node_id": "tests/test_set_param_contract.py::test_missing_parameter_is_appended_not_dropped",
+      "proof_kind": "behavioural",
+      "pytest_nodes": [
+        "tests/test_set_param_contract.py::test_missing_parameter_is_appended_not_dropped[xss_tool-xss_tool]",
+        "tests/test_set_param_contract.py::test_missing_parameter_is_appended_not_dropped[ssrf_tool-ssrf_tool]",
+        "tests/test_set_param_contract.py::test_missing_parameter_is_appended_not_dropped[dom_trace-dom_trace]"
+      ],
+      "pytest_returncode": 0,
+      "source_file": "tests/test_set_param_contract.py",
+      "status": "PASS",
+      "stderr_tail": "",
+      "stdout_tail": "...                                                                      [100%]\n3 passed in 1.91s\n",
+      "vulnerability_class": "probe_delivery"
+    },
+    {
+      "control_id": "cmdi-command-output-positive",
+      "control_kind": "VULNERABLE",
+      "cwe": [
+        "CWE-78"
+      ],
+      "detail": "1 pytest item(s)",
+      "naive_failure": "A reflection-resistant oracle can become too strict and reject real command output.",
+      "node_id": "tests/test_cmdi_shapes.py::test_argv_output_confirms_only_on_real_command_output",
+      "proof_kind": "behavioural",
+      "pytest_nodes": [
+        "tests/test_cmdi_shapes.py::test_argv_output_confirms_only_on_real_command_output"
+      ],
+      "pytest_returncode": 0,
+      "source_file": "tests/test_cmdi_shapes.py",
+      "status": "PASS",
+      "stderr_tail": "",
+      "stdout_tail": ".                                                                        [100%]\n1 passed in 1.89s\n",
+      "vulnerability_class": "command_injection"
+    },
+    {
+      "control_id": "cmdi-bare-value-noise",
+      "control_kind": "NOISE/LOOKALIKE",
+      "cwe": [
+        "CWE-78"
+      ],
+      "detail": "1 pytest item(s)",
+      "naive_failure": "An argv-shaped value can confirm merely because the application echoes an execution error string.",
+      "node_id": "tests/test_cmdi_shapes.py::test_argv_bare_noncommand_is_the_negative_control",
+      "proof_kind": "behavioural",
+      "pytest_nodes": [
+        "tests/test_cmdi_shapes.py::test_argv_bare_noncommand_is_the_negative_control"
+      ],
+      "pytest_returncode": 0,
+      "source_file": "tests/test_cmdi_shapes.py",
+      "status": "PASS",
+      "stderr_tail": "",
+      "stdout_tail": ".                                                                        [100%]\n1 passed in 1.83s\n",
+      "vulnerability_class": "command_injection"
+    },
+    {
+      "control_id": "cmdi-uniform-latency-noise",
+      "control_kind": "NOISE/LOOKALIKE",
+      "cwe": [
+        "CWE-78"
+      ],
+      "detail": "1 pytest item(s)",
+      "naive_failure": "A slow endpoint can confirm command execution when payload and zero-delay control are not compared.",
+      "node_id": "tests/test_cmdi_shapes.py::test_time_oracle_declines_a_uniformly_slow_endpoint",
+      "proof_kind": "behavioural",
+      "pytest_nodes": [
+        "tests/test_cmdi_shapes.py::test_time_oracle_declines_a_uniformly_slow_endpoint"
+      ],
+      "pytest_returncode": 0,
+      "source_file": "tests/test_cmdi_shapes.py",
+      "status": "PASS",
+      "stderr_tail": "",
+      "stdout_tail": ".                                                                        [100%]\n1 passed in 2.05s\n",
+      "vulnerability_class": "command_injection"
+    },
+    {
+      "control_id": "cmdi-blind-time-positive",
+      "control_kind": "VULNERABLE",
+      "cwe": [
+        "CWE-78"
+      ],
+      "detail": "1 pytest item(s)",
+      "naive_failure": "A bounded timing budget can prevent the real per-endpoint differential from ever reaching confirmation.",
+      "node_id": "tests/test_cmdi_shapes.py::test_real_blind_sink_confirms_through_the_time_shape",
+      "proof_kind": "behavioural",
+      "pytest_nodes": [
+        "tests/test_cmdi_shapes.py::test_real_blind_sink_confirms_through_the_time_shape"
+      ],
+      "pytest_returncode": 0,
+      "source_file": "tests/test_cmdi_shapes.py",
+      "status": "PASS",
+      "stderr_tail": "",
+      "stdout_tail": ".                                                                        [100%]\n1 passed in 2.17s\n",
+      "vulnerability_class": "command_injection"
+    },
+    {
+      "control_id": "cmdi-no-oob-callback-clean",
+      "control_kind": "SAFE",
+      "cwe": [
+        "CWE-78"
+      ],
+      "detail": "1 pytest item(s)",
+      "naive_failure": "A timeout or absent collaborator interaction can be converted into timeout-shaped proof.",
+      "node_id": "tests/test_cmdi_shapes.py::test_oob_callback_that_never_arrives_is_a_non_detection",
+      "proof_kind": "behavioural",
+      "pytest_nodes": [
+        "tests/test_cmdi_shapes.py::test_oob_callback_that_never_arrives_is_a_non_detection"
+      ],
+      "pytest_returncode": 0,
+      "source_file": "tests/test_cmdi_shapes.py",
+      "status": "PASS",
+      "stderr_tail": "",
+      "stdout_tail": ".                                                                        [100%]\n1 passed in 2.06s\n",
+      "vulnerability_class": "command_injection"
+    },
+    {
+      "control_id": "cmdi-oob-callback-positive",
+      "control_kind": "VULNERABLE",
+      "cwe": [
+        "CWE-78"
+      ],
+      "detail": "1 pytest item(s)",
+      "naive_failure": "A no-callback safety check can suppress a real correlated collaborator interaction.",
+      "node_id": "tests/test_cmdi_shapes.py::test_oob_confirms_when_the_target_actually_calls_back",
+      "proof_kind": "behavioural",
+      "pytest_nodes": [
+        "tests/test_cmdi_shapes.py::test_oob_confirms_when_the_target_actually_calls_back"
+      ],
+      "pytest_returncode": 0,
+      "source_file": "tests/test_cmdi_shapes.py",
+      "status": "PASS",
+      "stderr_tail": "",
+      "stdout_tail": ".                                                                        [100%]\n1 passed in 2.22s\n",
+      "vulnerability_class": "command_injection"
+    },
+    {
+      "control_id": "xss-encoded-reflection-noise",
+      "control_kind": "NOISE/LOOKALIKE",
+      "cwe": [
+        "CWE-79"
+      ],
+      "detail": "1 pytest item(s)",
+      "naive_failure": "A new request-header carrier can turn context-safe reflection into an XSS confirmation.",
+      "node_id": "tests/test_cmdi_shapes.py::test_xss_header_carrier_declines_a_correctly_encoded_reflection",
+      "proof_kind": "behavioural",
+      "pytest_nodes": [
+        "tests/test_cmdi_shapes.py::test_xss_header_carrier_declines_a_correctly_encoded_reflection"
+      ],
+      "pytest_returncode": 0,
+      "source_file": "tests/test_cmdi_shapes.py",
+      "status": "PASS",
+      "stderr_tail": "",
+      "stdout_tail": ".                                                                        [100%]\n1 passed in 2.16s\n",
+      "vulnerability_class": "xss"
+    },
+    {
+      "control_id": "xss-static-endpoint-clean",
+      "control_kind": "SAFE",
+      "cwe": [
+        "CWE-79"
+      ],
+      "detail": "1 pytest item(s)",
+      "naive_failure": "A carrier can report XSS even though the payload never reaches the response.",
+      "node_id": "tests/test_cmdi_shapes.py::test_xss_header_carrier_declines_an_endpoint_that_reflects_nothing",
+      "proof_kind": "behavioural",
+      "pytest_nodes": [
+        "tests/test_cmdi_shapes.py::test_xss_header_carrier_declines_an_endpoint_that_reflects_nothing"
+      ],
+      "pytest_returncode": 0,
+      "source_file": "tests/test_cmdi_shapes.py",
+      "status": "PASS",
+      "stderr_tail": "",
+      "stdout_tail": ".                                                                        [100%]\n1 passed in 2.11s\n",
+      "vulnerability_class": "xss"
+    },
+    {
+      "control_id": "cmdi-cookie-carrier-positive",
+      "control_kind": "VULNERABLE",
+      "cwe": [
+        "CWE-78"
+      ],
+      "detail": "1 pytest item(s)",
+      "naive_failure": "A probe repertoire can omit cookie delivery and report a vulnerable cookie-only sink clean.",
+      "node_id": "tests/test_cmdi_shapes.py::test_cmdi_reaches_a_sink_fed_only_by_a_cookie",
+      "proof_kind": "behavioural",
+      "pytest_nodes": [
+        "tests/test_cmdi_shapes.py::test_cmdi_reaches_a_sink_fed_only_by_a_cookie"
+      ],
+      "pytest_returncode": 0,
+      "source_file": "tests/test_cmdi_shapes.py",
+      "status": "PASS",
+      "stderr_tail": "",
+      "stdout_tail": ".                                                                        [100%]\n1 passed in 2.15s\n",
+      "vulnerability_class": "command_injection"
+    },
+    {
+      "control_id": "cmdi-cookie-echo-noise",
+      "control_kind": "NOISE/LOOKALIKE",
+      "cwe": [
+        "CWE-78"
+      ],
+      "detail": "1 pytest item(s)",
+      "naive_failure": "Adding cookie delivery can confuse reflected payload text with command execution.",
+      "node_id": "tests/test_cmdi_shapes.py::test_cookie_carrier_does_not_confirm_on_an_endpoint_that_only_echoes",
+      "proof_kind": "behavioural",
+      "pytest_nodes": [
+        "tests/test_cmdi_shapes.py::test_cookie_carrier_does_not_confirm_on_an_endpoint_that_only_echoes"
+      ],
+      "pytest_returncode": 0,
+      "source_file": "tests/test_cmdi_shapes.py",
+      "status": "PASS",
+      "stderr_tail": "",
+      "stdout_tail": ".                                                                        [100%]\n1 passed in 2.23s\n",
+      "vulnerability_class": "command_injection"
+    }
+  ],
+  "semantic_sha256": "9a651e709d8e430e12abed610089d26b80ddf8e12408dca16b1758b4078fb455",
+  "timestamp": "2026-08-13T02:43:05.742471+00:00",
+  "tool_version": "apolaki-tier3/1"
+}
