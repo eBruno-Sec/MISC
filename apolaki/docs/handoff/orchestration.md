@@ -600,16 +600,45 @@ Partial mitigation already in place: the batch announcement is an `info` event
 operator sees THAT graph-directed execution happened and how many actions were ranked; they do not
 see each action's target and result.
 
-**`ui/index.html` is not this lane's file, so it was not edited.** Patch for whoever owns it -- one
-case in each of the two switches:
+### Island CLOSED -- and it was not only my event
 
-```js
-    case "graph_action": log("info",
-      `<strong>graph &rarr; ${esc(d.action||"")}</strong> via ${esc(d.tool||"")} on ${esc(d.target||"")}` +
-      (d.findings>0?` <span style="color:var(--accent)">(${d.findings})</span>`:"")); break;
+`ui/index.html`, taken on the Coordinator's explicit direction to close this. It is not otherwise this
+lane's file and nothing else in it was touched.
+
+Fixing my own `graph_action` case meant reading the switch, and the switch held a second, worse
+instance of the same defect:
+
+- **`degraded`** (`agent/agent.py:3066`) is a **HALT of primary execution** -- the graph projection
+  failed, so the planner must stop selecting actions. It reached the report via `ctx["degraded"]`
+  (`main.py:2254`) but **never the live feed**, so an operator watching a run saw the scan simply
+  stop, with no message. Strictly more serious than a missing info line.
+
+Both are now cased, in the live switch AND the replay switch, so a mission and its replay cannot
+disagree about what happened. The root cause is fixed rather than the two symptoms: **each switch now
+has a `default:`** rendering an unhandled type as a visible, labelled UI gap (`unrendered event X --
+the mission log has it; this view has no case for it`), with a small `UI_SILENT_EVENTS` set for types
+that are deliberately not log lines. The next event type someone adds cannot vanish.
+
+**A bug I introduced and caught before committing.** The first placement put `default:` BEFORE
+`case "error"` with no `break`. JavaScript falls through, so every unhandled event would have rendered
+its own line and then run the error case -- which in the live switch calls `finishHunt("s-err","Error")`,
+i.e. an unknown event type would have marked a healthy mission FAILED. Moved last, with `break`. The
+verification below is what caught it: each event must add exactly ONE line, and a fall-through adds two.
+
+MEASURED in the real browser against the served UI, both switches:
+
+```
+handleEvent()      [live switch]
+  graph_action      added=1  "graph -> cross_user_test via run_bfla on http://vampi:5000/users/v1/1/email (1)"
+  degraded          added=1  "Error  Execution halted - graph_projection_failed ..."
+  totally_new_type  added=1  "unrendered event totally_new_type - the mission log has it; ..."
+  ai_budget         added=0  (deliberately silent)
+
+renderLogEntry()   [replay switch]
+  same four, same results, plus
+  error             added=1  "Error  a real error"      (the error case still works)
 ```
 
-Worth fixing beyond this event: a `default:` branch that logs unknown types would have made this
-visible immediately, and will catch the next new event type for free. A switch with no default is the
-same shape as the guards-that-check-declarations problem -- it fails silently in the direction of
-looking fine.
+Negative control, run on the same page before the fix: an unrecognised type added **0 lines** while a
+handled one added 1 -- which is exactly what `graph_action` and `degraded` were doing in every mission
+until now.

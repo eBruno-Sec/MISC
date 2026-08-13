@@ -1367,6 +1367,26 @@ async function startHunt(){
 // so agent "text" is trimmed to a readable lead. Tool calls/results/phase/cycle/
 // finding/error events are never trimmed.
 function trimAgent(s){s=String(s||"").trim();return s.length>360?esc(s.slice(0,360))+' <span class="muted">… (trimmed)</span>':esc(s);}
+// U1: one ranked action the GRAPH chose and the tool planner does not schedule. Shared by the live
+// and replay switches so a mission and its replay never disagree about what happened.
+function graphActionLine(d){
+  const cap=d.capability?` <span class="muted">(${esc(d.capability)})</span>`:"";
+  const hit=d.findings>0?` <span style="color:var(--accent)">(${esc(String(d.findings))})</span>`:"";
+  return `<strong>graph → ${esc(d.action||"")}</strong>${cap} via ${esc(d.tool||"")} on ${esc(d.target||"")}${hit}`;
+}
+// A HALT of primary execution (agent.py:3066, graph projection failed). It reached the report via
+// ctx["degraded"] but never the live feed, so an operator watching a run saw the scan simply stop.
+function degradedLine(d){
+  return `<strong>Execution halted — ${esc(d.reason||"degraded")}</strong>${d.content?`<div class="ev-sub">${esc(d.content)}</div>`:""}`;
+}
+// Neither of the two events above rendered, for the same reason: these switches had no default, so an
+// event type nobody had added a case for was dropped in silence — a producer with no consumer at the
+// surface, which is the defect this whole ticket has been about. An unhandled type is now VISIBLE and
+// labelled as a UI gap, so it reads as "this page does not render X" rather than as nothing happening.
+function unhandledEventLine(d){
+  return `<span class="muted">unrendered event <strong>${esc(d.type||"?")}</strong> — the mission log has it; this view has no case for it.</span>`;
+}
+const UI_SILENT_EVENTS=new Set(["_content","ai_budget","approval_required","approval_resolved"]);
 function handleEvent(d){
   switch(d.type){
     case "text": if(d.content?.trim())log("text",trimAgent(d.content)); break;
@@ -1382,6 +1402,8 @@ function handleEvent(d){
     case "scope_block": log("scope_block",esc(d.error||d.tool)); break;
     case "tool_error": log("tool_error",`${esc(d.tool)}: ${esc(d.error)}`); break;
     case "info": log("info",esc(d.content)); break;
+    case "graph_action": log("info",graphActionLine(d)); break;
+    case "degraded": log("tool_error",degradedLine(d)); break;
     case "approval_required": showApproval(d); break;
     case "approval_resolved": hideApproval(); log("info",`Gate ${esc(d.resolution)}.`); break;
     case "finding":{
@@ -1395,6 +1417,7 @@ function handleEvent(d){
     case "triage": log("triage",esc(d.verdict)); break;
     case "complete": log("complete",esc(d.content)); fetchReport(); finishHunt("s-done","Done"); break;
     case "error": log("error",esc(d.content)); finishHunt("s-err","Error"); break;
+    default: if(!UI_SILENT_EVENTS.has(d.type))log("info",unhandledEventLine(d)); break;
   }
 }
 // Display-only render of a stored event (no counters/report side effects) — used
@@ -1413,6 +1436,8 @@ function renderLogEntry(d){
     case "scope_block": log("scope_block",esc(d.error||d.tool||"")); break;
     case "tool_error": log("tool_error",`${esc(d.tool||"")}: ${esc(d.error||"")}`); break;
     case "info": log("info",esc(d.content||"")); break;
+    case "graph_action": log("info",graphActionLine(d)); break;
+    case "degraded": log("tool_error",degradedLine(d)); break;
     case "approval_resolved": log("info",`Gate ${esc(d.resolution||"")}.`); break;
     case "finding":{const f=d.finding||{},sev=(f.severity||"low").toLowerCase();
       log("finding",`<span class="sev-${sev}">[${sev.toUpperCase()}]</span> <strong>${esc(f.title||"")}</strong>`,esc(f.target||"")); break;}
@@ -1420,6 +1445,7 @@ function renderLogEntry(d){
     case "triage": log("triage",esc(d.verdict||"")); break;
     case "complete": log("complete",esc(d.content||"")); break;
     case "error": log("error",esc(d.content||"")); break;   // surface a failed run on replay
+    default: if(!UI_SILENT_EVENTS.has(d.type))log("info",unhandledEventLine(d)); break;
   }
 }
 function replayLogs(logs){(logs||[]).forEach(renderLogEntry);}
