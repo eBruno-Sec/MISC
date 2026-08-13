@@ -12,6 +12,48 @@ still scores 0.
 
 ---
 
+## THE CALL
+
+**Q1. Does the standing claim in `owasp_bench.py` hold?** *Two thirds of it. The third part is
+wrong.*
+
+- collection (`map.get("keyA-")`) launders - **CONFIRMED**, and understated: the clean twin reads
+  the TAINTED key first and the safe key second, so any rule phrased as "does `get("keyB")`
+  appear" flags both twins.
+- constant-folded ternary launders - **CONFIRMED**, and it is the sharpest discriminator in the
+  category.
+- StringBuilder launders - **WRONG for `trustbound`**. All 19 StringBuilders in the Java category
+  are constructed from `param`. There is not one constant-only StringBuilder in the category.
+  Treating a StringBuilder as a launderer here produces false NEGATIVES, not the false positives
+  the comment was written to avoid.
+
+**Q2. Is deterministic separation achievable, and by what mechanism?** *Yes. Build it.*
+
+The mechanism is an abstract interpreter over CONST / TAINT / UNKNOWN with keyed containers -
+five capabilities, all decidable, none textual:
+
+1. **constant folding** of integer arithmetic (integer division), string `in`/`not in`, and
+   indexing a constant string - then selecting the live arm of `if` / ternary / `switch` / `match`;
+2. **last-write-wins** per local, because the clean map twin's final assignment is the safe one;
+3. **keyed container slots** - a map is not one taint bit, and `remove(0)` then `get(1)` is a
+   different element from `get(0)`;
+4. **intra-file interprocedural inlining** - 85 of 126 Java cases route the transform through a
+   private helper or an inner class;
+5. **source provenance**, which is the whole thesis: two things that read exactly like request
+   reads are not request-derived - a cross-file helper that returns a constant (`getTheValue`,
+   8 Java + 3 Python cases) and `request.path` under a route with no converters (3 Python cases).
+
+Every one of these is a mechanism, not a pattern. Nothing in the plan names a case id, a file
+name or a per-case fingerprint.
+
+**Why this is not the "conservative approximation" the standing comment feared.** The default for
+an unmodelled transformation is taint-PRESERVING, so precision is only ever spent where the
+analysis can prove a constant. The controls below are what decide whether that proof holds, and
+the FPR on the clean twins is the number that settles it. **If that FPR is not 0.0%, the honest 0
+stays and this file will say so.**
+
+---
+
 ## Verdict on the standing decision: it is winnable, and the stated reason for leaving it is
 ## partly wrong
 
