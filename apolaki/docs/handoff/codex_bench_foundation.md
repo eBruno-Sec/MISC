@@ -22,7 +22,7 @@ No mission had status `running` before either invocation.
 
 ## M1 - B-001 Tier-3 corpus
 
-Status: implemented and measured; commit pending.
+Status: implemented, measured, and committed.
 
 ### Before
 
@@ -80,7 +80,7 @@ Commit: `776dff1` (`Apolaki B-001: make Tier-3 controls executable and measurabl
 
 ## M2 - B-002 benchmark adapter contract
 
-Status: implemented and measured; commit pending.
+Status: implemented, measured, and committed.
 
 `agent/bench_contract.py` is a pure contract layer, not another scanner. It supplies:
 
@@ -149,7 +149,7 @@ Commit: `d5746a4` (`Apolaki B-002: codify proof-safe benchmark adapters`).
 
 ## M3 - B-003 Tier-3 quality gate
 
-Status: implemented and measured; commit pending.
+Status: implemented, measured, and committed.
 
 `scripts/tier3_gate.sh` executes the real registry, retains its current artifact, and compares it
 with `agent/tier3/baseline.json`. The generic runner process code is deliberately not the oracle:
@@ -220,4 +220,78 @@ qualified dead-code: count=37 baseline=37 ok=True
 bench_contract islands: []
 ```
 
-This integration repair is pending its own commit before the final full-suite rerun.
+Integration repair commit: `ce49e74` (`Apolaki B-002: wire the benchmark contract CLI`).
+
+## Final verification and integration
+
+### Verbatim acceptance outputs
+
+Targeted, after all integration repairs:
+
+```text
+....................................                                     [100%]
+36 passed in 8.07s
+```
+
+Full suite, after the dead-code repair:
+
+```text
+2097 passed, 9 skipped, 5 xfailed, 9 warnings in 249.02s (0:04:09)
+```
+
+Measured baseline was `2061 passed, 9 skipped, 5 xfailed`; this lane adds **36 passing tests**, with
+skip and xfail counts unchanged.
+
+Final-SHA Tier-3 gate (`ce49e746000087d158585ea6aa9d09e8233c2c10`):
+
+```text
+Tier-3: 32/33 controls passed across 15 classes
+semantic_sha256=9a651e709d8e430e12abed610089d26b80ddf8e12408dca16b1758b4078fb455
+artifact_sha256=37bec914cb21f1081635d988c65a7474dbdb97161ef65ad2fc9414b5d9c29c4b
+gate_artifact_sha256=9cc16548da0c49e483637a7143a0503e97d856f16f8b863bb696777639574bbc
+32 Tier-3 control(s) pass; no regression against a baseline of 32
+known non-passes (not credited): sqli-unstable-page-noise
+```
+
+Gate semantic SHA-256:
+`64caa30c79d78282175771d9e29f9a2b08e81b0df1180a52d1e39a5607f2804c`.
+Control regressions: 0. Class regressions: 0. Environment failures: 0.
+
+### Not run, deliberately
+
+- `scripts/liveness.sh`: not run. Its committed baseline was read and contains **16** proven engines.
+  The script starts shared labs and executes inside `apolaki-agent-1`, which the handoff explicitly
+  reserved for three active Claude lanes. `--update` was not used and no liveness value changed.
+- `scripts/bake_drift_check.sh`: read, not run. This lane was instructed to keep the image unbaked;
+  comparing the other lanes' live container with the old image would measure their iteration state,
+  not this isolated worktree.
+- No `docker compose build`, `docker cp`, container restart, benchmark target run, external request,
+  or `validated_on` edit occurred.
+
+### Remaining honest gaps
+
+- `sqli-unstable-page-noise` is still strict-xfailed and not credited. The required baseline-stability
+  differential belongs in probe-lane-owned `sqli_tool.py`.
+- Seven of the 15 registered classes have no passing `SAFE` control yet: benchmark_scoring,
+  code_assisted_analysis, probe_delivery, proof_gate, proof_reporting, surface_discovery, and
+  technique_contract. Their existing regression/noise controls pass, but that is not a safe twin.
+- The untouched OWASP adapter has five adoption gaps recorded in `tier3/owasp_conformance.json`:
+  raw evidence, enforced sealing, explicit result vocabulary, environment-failure exclusion, and
+  position independence. Its complete B1 metric set remains partial.
+- No B1, B2, or product benchmark score changed in this lane. This is benchmark infrastructure and
+  adversarial-control coverage, not evidence of broader vulnerability recall.
+
+### Claude integration
+
+Cherry-pick the implementation commits in order:
+
+```text
+776dff1  B-001 executable Tier-3 registry
+d5746a4  B-002 benchmark contract
+a1b48c2  B-003 Tier-3 ratchet
+ce49e74  B-002 no-island CLI repair
+```
+
+All changed paths are new and inside the lease; `owasp_bench.py`, liveness files, queue/ledger files,
+and every active Claude-lane file remain untouched. After integration, rerun the 36 targeted tests,
+the full suite, and `bash scripts/tier3_gate.sh`. Claude remains the only queue-state owner.
