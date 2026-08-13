@@ -43,6 +43,21 @@ not by silencing the gate.
 
 ---
 
+## Lane changes — 2026-08-12
+
+**PROBE LANE STOOD DOWN.** Both of its hypotheses are falsified by its own measurements —
+blind-vs-echo on cmdi (+0 over 251 cases) and carrier delivery on cmdi and xss (+0 over 120 paired
+xss cases, with the carrier proven to have RUN on ~30% of them). It has nothing queued behind them,
+and keeping a lane parked on a dead theory holds its files hostage. **Do not resume agent
+`aff3a7dd3d2343dde`.** Its engine work is committed and keeps its value; the lane is closed, not the
+code.
+
+Released files: `agent/tools.py` · `agent/cmdi_tool.py` · `agent/xss_tool.py` · `agent/sqli_tool.py` ·
+`agent/ssrf_tool.py` · `agent/dom_trace.py` · `docs/handoff/probes.md`.
+
+**LEASED TO CODEX: Q-040 + B-010** from `aa8e26a`. `agent/sqli_tool.py` and its tests, plus all new
+Juliet paths, are Codex's until it returns. Claude does not spawn or resume into them.
+
 ## Rank 0 — five defects now PINNED by strict xfails, surfaced 2026-08-12
 
 Each is a real defect with a written reason, held by a strict xfail so it becomes a regression test
