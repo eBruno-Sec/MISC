@@ -233,9 +233,13 @@ def replay(flow, mutations=None, send=False, timeout=20, verify=False):
     except Exception:
         return {"sent": False, "note": "httpx unavailable", "request": spec}
     try:
+        import browser_engine as _browser_engine
+        _browser_engine.target_rate_policy.wait_sync(spec["url"])
         t0 = time.time()
         r = httpx.request(spec["method"], spec["url"], headers=spec["headers"],
                           content=spec["body"], timeout=timeout, verify=verify, follow_redirects=False)
+        _browser_engine.target_rate_policy.observe(str(r.url) or spec["url"],
+                                                   r.status_code, r.headers)
         return {"sent": True, "request": spec,
                 "response": {"status": r.status_code, "len": len(r.content),
                              "content_type": r.headers.get("content-type", ""),

@@ -20,6 +20,7 @@ from dataclasses import dataclass, field
 from typing import Optional
 from urllib.parse import urlparse, urlunparse, urljoin, quote
 
+import browser_engine as _browser_engine
 import authz_tool as authz
 import db
 import dns_recon
@@ -28,6 +29,15 @@ import surface as surface_mod
 import web_security as ws
 import xss_tool as xt
 from scope import ScopeEngine, PermissionLevel
+
+
+def _target_client(*args, _rate_policy=True, **kwargs):
+    """Create a target HTTP client with the shared per-origin safety policy."""
+    import httpx
+    policy = _browser_engine.target_rate_policy if _rate_policy else False
+    return _browser_engine.rate_limited_async_client(
+        httpx, *args, rate_policy=policy, **kwargs
+    )
 
 
 def _collapse_dup_host(u: str) -> str:
@@ -1193,7 +1203,7 @@ class ToolRegistry:
             return ToolResult("sourcemap", url, False, "Off-scope", [])
         headers = {"User-Agent": _UA, **(self.session_headers or {})}
         findings, analysed = [], None
-        async with httpx.AsyncClient(verify=False, follow_redirects=True, headers=headers, timeout=25) as c:
+        async with _target_client(verify=False, follow_redirects=True, headers=headers, timeout=25) as c:
             body = ""
             if not url.endswith(".map"):
                 try:
@@ -1248,7 +1258,7 @@ class ToolRegistry:
             return ToolResult("metadata", url, False, "Off-scope", [])
         headers = {"User-Agent": _UA, **(self.session_headers or {})}
         try:
-            async with httpx.AsyncClient(verify=False, follow_redirects=True, headers=headers, timeout=25) as c:
+            async with _target_client(verify=False, follow_redirects=True, headers=headers, timeout=25) as c:
                 r = await c.get(url)
                 data = r.content[:8_000_000]
         except Exception as e:
@@ -1414,7 +1424,7 @@ class ToolRegistry:
             return ToolResult("dir_harvest", origin, False, "Off-scope", [])
         headers = {"User-Agent": _UA, **(self.session_headers or {})}
         findings, harvested = [], 0
-        async with httpx.AsyncClient(verify=False, follow_redirects=True, headers=headers, timeout=20) as c:
+        async with _target_client(verify=False, follow_redirects=True, headers=headers, timeout=20) as c:
             async def get(u):
                 if not self.scope.validate(u)[0]:
                     return None
@@ -1498,12 +1508,17 @@ class ToolRegistry:
         if not self.budget.charge():
             raise RuntimeError("mission request budget exhausted (%d requests)" % self.budget.limit)
         h = {"User-Agent": _UA, **(self.session_headers or {}), **(headers or {})}
+        await _browser_engine.target_rate_policy.wait_async(url)
+        # Safety backoff is not target latency. Starting this timer before the wait would let a 429
+        # cooldown contaminate any caller's timing differential and turn a no-DoS fix into a finding.
         t0 = time.perf_counter()
-        async with httpx.AsyncClient(verify=False, follow_redirects=follow, headers=h, timeout=20) as c:
+        async with _target_client(verify=False, follow_redirects=follow, headers=h, timeout=20,
+                                  _rate_policy=False) as c:
             content = None
             if body is not None:
                 content = body if isinstance(body, (bytes, str)) else json.dumps(body)
             r = await c.request(method, url, content=content if isinstance(content, (bytes, str)) else None)
+            _browser_engine.target_rate_policy.observe(str(r.url) or url, r.status_code, r.headers)
             self._harvest_response(url, r)
             try:
                 self.capture.add(method, url, r.status_code, req_headers=h, resp_headers=dict(r.headers),
@@ -1602,8 +1617,8 @@ class ToolRegistry:
         auth_header, identity = None, None
         # 1) JSON API login (SPA / REST)
         try:
-            async with httpx.AsyncClient(verify=False, follow_redirects=True, timeout=15,
-                                         headers={"User-Agent": _UA}) as c:
+            async with _target_client(verify=False, follow_redirects=True, timeout=15,
+                                      headers={"User-Agent": _UA}) as c:
                 for body in ({"email": user, "password": pw}, {"username": user, "password": pw}):
                     try:
                         r = await c.post(url, json=body)
@@ -2905,7 +2920,8 @@ class ToolRegistry:
                     if not u or not self.scope.validate(u)[0]:
                         step_log.append({"goto": u, "error": "off-scope, skipped"})
                         return
-                    await page.goto(u, wait_until="domcontentloaded", timeout=12000)
+                    await _browser_engine.rate_limited_goto(
+                        page, u, wait_until="domcontentloaded", timeout=12000)
                     step_log.append({"goto": u})
 
                 if start:
@@ -3100,7 +3116,7 @@ class ToolRegistry:
         if not lab:
             try:
                 import httpx
-                async with httpx.AsyncClient(verify=False, timeout=10, headers={"User-Agent": _UA}) as c:
+                async with _target_client(verify=False, timeout=10, headers={"User-Agent": _UA}) as c:
                     html = (await c.get(base)).text
                 lab = labs.detect(html)
             except Exception:
@@ -3159,9 +3175,12 @@ class ToolRegistry:
         import httpx
         req_headers = {"User-Agent": _UA, **(self.session_headers or {}), **(headers or {})}
         try:
-            async with httpx.AsyncClient(verify=False, follow_redirects=True, timeout=15) as c:
+            await _browser_engine.target_rate_policy.wait_async(url)
+            async with _target_client(verify=False, follow_redirects=True, timeout=15,
+                                      _rate_policy=False) as c:
                 r = await c.request(method.upper(), url, headers=req_headers,
                                     content=(body.encode() if body else None))
+                _browser_engine.target_rate_policy.observe(str(r.url) or url, r.status_code, r.headers)
                 try:
                     text = r.text
                 except Exception:
@@ -3309,8 +3328,8 @@ class ToolRegistry:
     async def _get_json(self, url: str, timeout: int = 30):
         """GET a URL and parse JSON regardless of content-type (crt.sh / archive.org)."""
         import httpx
-        async with httpx.AsyncClient(verify=False, follow_redirects=True, timeout=timeout,
-                                     headers={"User-Agent": _UA}) as c:
+        async with _target_client(verify=False, follow_redirects=True, timeout=timeout,
+                                  headers={"User-Agent": _UA}) as c:
             r = await c.get(url)
             if r.status_code != 200:
                 return None
@@ -3409,7 +3428,7 @@ class ToolRegistry:
         headers = {"User-Agent": _UA, "Authorization": f"Bearer {token}",
                    "Accept": "application/vnd.github.text-match+json"}
         findings, seen, hits_total, rate_limited = [], set(), 0, False
-        async with httpx.AsyncClient(timeout=20, headers=headers) as c:
+        async with _target_client(timeout=20, headers=headers) as c:
             for i, q in enumerate(dorks):
                 try:
                     r = await c.get(f"{base}/search/code", params={"q": q, "per_page": 10})
@@ -3853,7 +3872,7 @@ class ToolRegistry:
         headers = {"User-Agent": _UA, "Content-Type": "application/json", **(self.session_headers or {})}
         endpoint = None
         introspection = None
-        async with httpx.AsyncClient(verify=False, follow_redirects=True, timeout=15, headers=headers) as c:
+        async with _target_client(verify=False, follow_redirects=True, timeout=15, headers=headers) as c:
             # discover the live GraphQL endpoint among common paths (in-scope only)
             for cand in gql.endpoint_candidates(url):
                 if not self.scope.validate(cand)[0]:
@@ -3927,8 +3946,8 @@ class ToolRegistry:
         by_key = {"%s.%s" % (a["operation"], a["arg"]): a for a in injectable}
 
         out, seen = [], set()
-        async with httpx.AsyncClient(verify=False, follow_redirects=True, timeout=15,
-                                     headers=headers) as c:
+        async with _target_client(verify=False, follow_redirects=True, timeout=15,
+                                  headers=headers) as c:
             for case in cases:
                 a = by_key.get(case["arg"])
                 if not a or case["arg"] in seen:
@@ -4111,7 +4130,7 @@ class ToolRegistry:
         reflected = []
 
         # 1) context-aware reflection analysis (fast, no browser)
-        async with httpx.AsyncClient(verify=False, follow_redirects=True, timeout=15) as c:
+        async with _target_client(verify=False, follow_redirects=True, timeout=15) as c:
             for p in params:
                 cu = xt.set_param(url, p, xt.CANARY)
                 if not self.scope.validate(cu)[0]:
@@ -4143,7 +4162,7 @@ class ToolRegistry:
             import header_vector as _hv
             _pg = await self._http(url, "GET", capture=False)
             _hnames = _hv.discover_header_names(_pg.get("body", "") or "")[:self._ni(2, 4, 6)]
-            async with httpx.AsyncClient(verify=False, follow_redirects=True, timeout=15) as c:
+            async with _target_client(verify=False, follow_redirects=True, timeout=15) as c:
                 for _hn in _hnames:
                     if not self.scope.validate(url)[0]:
                         break
@@ -4261,7 +4280,8 @@ class ToolRegistry:
                     try:
                         st["msg"] = None
                         try:
-                            await pg.goto(tu, wait_until="load", timeout=8000)
+                            await _browser_engine.rate_limited_goto(
+                                pg, tu, wait_until="load", timeout=8000)
                             await pg.wait_for_timeout(350)
                         except Exception:
                             pass
@@ -4365,7 +4385,8 @@ class ToolRegistry:
                         continue
                     fired["msgs"].clear()
                     try:
-                        await page.goto(u, wait_until="load", timeout=int(per * 1000))
+                        await _browser_engine.rate_limited_goto(
+                            page, u, wait_until="load", timeout=int(per * 1000))
                         await page.wait_for_timeout(450)
                     except Exception:
                         pass
@@ -4430,7 +4451,7 @@ class ToolRegistry:
         try:
             import form_xss as fx
             hdrs = {"User-Agent": _UA, **(self.session_headers or {})}
-            async with httpx.AsyncClient(verify=False, follow_redirects=True, timeout=15, headers=hdrs) as c:
+            async with _target_client(verify=False, follow_redirects=True, timeout=15, headers=hdrs) as c:
                 r0 = await c.get(url)
                 forms = fx.parse_forms(r0.text, url)
 
@@ -4529,7 +4550,7 @@ class ToolRegistry:
         try:
             import form_xss as fx
             hdrs = {"User-Agent": _UA, **(self.session_headers or {})}
-            async with httpx.AsyncClient(verify=False, follow_redirects=True, timeout=15, headers=hdrs) as c:
+            async with _target_client(verify=False, follow_redirects=True, timeout=15, headers=hdrs) as c:
                 r0 = await c.get(url)
                 forms = fx.parse_forms(r0.text, url)
 
@@ -4608,7 +4629,7 @@ class ToolRegistry:
         try:
             import form_xss as fx
             hdrs = {"User-Agent": _UA, **(self.session_headers or {})}
-            async with httpx.AsyncClient(verify=False, follow_redirects=True, timeout=15, headers=hdrs) as c:
+            async with _target_client(verify=False, follow_redirects=True, timeout=15, headers=hdrs) as c:
                 r0 = await c.get(url)
                 forms = fx.parse_forms(r0.text, url)
                 seen = set()
@@ -4655,7 +4676,7 @@ class ToolRegistry:
         # rejected and nothing reflects (this is what made the first cut find 0).
         hdrs = {"User-Agent": _UA, **(self.session_headers or {})}
         try:
-            async with httpx.AsyncClient(verify=False, follow_redirects=True, timeout=15, headers=hdrs) as c:
+            async with _target_client(verify=False, follow_redirects=True, timeout=15, headers=hdrs) as c:
                 r0 = await c.get(url)
                 forms = fx.parse_forms(r0.text, url)
                 if not forms:
@@ -4750,7 +4771,8 @@ class ToolRegistry:
                     for pl in xt.EXEC_PAYLOADS:
                         fired["msg"] = None
                         try:
-                            await page.goto(page_url, wait_until="domcontentloaded", timeout=9000)
+                            await _browser_engine.rate_limited_goto(
+                                page, page_url, wait_until="domcontentloaded", timeout=9000)
                             # fill other required text fields with benign defaults, the target with the payload
                             for fn in form["text_fields"]:
                                 val = pl if fn == field else (form["fields"].get(fn) or "x")
@@ -4884,7 +4906,7 @@ class ToolRegistry:
             return f"{p.scheme}://{p.netloc}{p.path}?{urlencode(q)}"
 
         discovered = []
-        async with httpx.AsyncClient(verify=False, follow_redirects=True, headers=headers, timeout=12) as c:
+        async with _target_client(verify=False, follow_redirects=True, headers=headers, timeout=12) as c:
             rnd = "zz" + os.urandom(4).hex()                 # a param that certainly does not exist
             try:
                 br = await c.get(with_param(base, rnd, canary))
@@ -4949,7 +4971,7 @@ class ToolRegistry:
             # exist with name=..." otherwise, which zeroed this find in-mission).
             return "; ".join("%s=%s" % (k, v) for k, v in d.items() if v is not None)
         try:
-            async with httpx.AsyncClient(verify=False, follow_redirects=True, timeout=20, headers=hdrs) as c:
+            async with _target_client(verify=False, follow_redirects=True, timeout=20, headers=hdrs) as c:
                 try:
                     r0 = await c.get(url, headers={"Cookie": _ch(base_cookies)}) if base_cookies else await c.get(url)
                 except Exception as e:
@@ -5069,7 +5091,8 @@ class ToolRegistry:
                         pass
                 page.on("request", _on_req)
                 try:
-                    await page.goto(u, wait_until="domcontentloaded", timeout=12000)
+                    await _browser_engine.rate_limited_goto(
+                        page, u, wait_until="domcontentloaded", timeout=12000)
                     await page.wait_for_timeout(600)
                 except Exception:
                     pass
@@ -5263,7 +5286,8 @@ class ToolRegistry:
                         pass
                 page.on("request", _on_request)
                 try:
-                    await page.goto(probe["nav"], wait_until="load", timeout=9000)
+                    await _browser_engine.rate_limited_goto(
+                        page, probe["nav"], wait_until="load", timeout=9000)
                     # CSTI needs the client-side template engine (AngularJS) to bootstrap and run a digest
                     # before {{7*7}} becomes 49 — wait for network idle.
                     if probe["class"] == "csti":
@@ -5546,7 +5570,7 @@ class ToolRegistry:
             except Exception:
                 return 0, ""
 
-        async with httpx.AsyncClient(verify=False, follow_redirects=False, timeout=15) as c:
+        async with _target_client(verify=False, follow_redirects=False, timeout=15) as c:
             # 1) redirect_uri validation bypass
             for v in oauth.redirect_uri_variants(info["redirect_uri"]):
                 target = oauth.build_authorize(endpoint, params, {"redirect_uri": v["value"]})
@@ -5897,7 +5921,7 @@ class ToolRegistry:
         origin = "https://bbh-evil.example"
         headers = {"User-Agent": _UA, **(self.session_headers or {})}
         try:
-            async with httpx.AsyncClient(verify=False, timeout=15, headers=headers) as c:
+            async with _target_client(verify=False, timeout=15, headers=headers) as c:
                 base = await c.get(url)
                 base_body = base.text
                 # CORS
@@ -6026,7 +6050,7 @@ class ToolRegistry:
         marker = "jp" + secrets.token_hex(4)
         sep = "&" if "?" in url else "?"
         try:
-            async with httpx.AsyncClient(verify=True, timeout=15, follow_redirects=True) as c:
+            async with _target_client(verify=True, timeout=15, follow_redirects=True) as c:
                 for cbp in ("callback", "jsonp", "cb", "jsoncallback", "callbackfn", "cbfn", "jsonpcallback"):
                     probe = "%s%s%s=%s" % (url, sep, cbp, marker)
                     try:
@@ -6073,7 +6097,7 @@ class ToolRegistry:
             r = await c.request(method, url, headers={"User-Agent": _UA, **h}, content=body)
             return {"status": r.status_code, "length": len(r.content)}
 
-        async with httpx.AsyncClient(verify=False, follow_redirects=False, timeout=15) as c:
+        async with _target_client(verify=False, follow_redirects=False, timeout=15) as c:
             for m in methods:
                 try:
                     method_results[m] = await send(c, m, test_headers)
@@ -6123,14 +6147,18 @@ class ToolRegistry:
             # HTTP/2 multiplexes the burst over one warmed connection (closest to a
             # single-packet race); fall back cleanly if the h2 package is absent.
             try:
-                return httpx.AsyncClient(verify=False, follow_redirects=False, timeout=20,
-                                         http2=True, limits=limits)
+                return _target_client(verify=False, follow_redirects=False, timeout=20,
+                                      http2=True, limits=limits, _rate_policy=False)
             except Exception:
-                return httpx.AsyncClient(verify=False, follow_redirects=False, timeout=20, limits=limits)
+                return _target_client(verify=False, follow_redirects=False, timeout=20,
+                                      limits=limits, _rate_policy=False)
 
         async def read_state(c):
             try:
+                await _browser_engine.target_rate_policy.wait_async(verify_url)
                 r = await c.get(verify_url, headers=verify_headers)
+                _browser_engine.target_rate_policy.observe(str(r.url) or verify_url,
+                                                           r.status_code, r.headers)
                 return {"status": r.status_code, "length": len(r.content), "body": r.text[:2000]}
             except Exception:
                 return {}
@@ -6139,10 +6167,14 @@ class ToolRegistry:
         async with make_client() as c:
             # warm the pool without triggering the action (OPTIONS, not the method)
             try:
-                await c.request("OPTIONS", url, headers=headers)
+                await _browser_engine.target_rate_policy.wait_async(url)
+                warm = await c.request("OPTIONS", url, headers=headers)
+                _browser_engine.target_rate_policy.observe(str(warm.url) or url,
+                                                           warm.status_code, warm.headers)
             except Exception:
                 pass
             for _ in range(rounds):
+                await _browser_engine.target_rate_policy.wait_async(url)
                 before = await read_state(c) if verify_url else None
                 gate = asyncio.Event()
 
@@ -6150,6 +6182,8 @@ class ToolRegistry:
                     await gate.wait()          # all workers park here first...
                     try:
                         r = await c.request(method, url, headers=headers, content=content)
+                        _browser_engine.target_rate_policy.observe(str(r.url) or url,
+                                                                   r.status_code, r.headers)
                         return {"status": r.status_code, "length": len(r.content)}
                     except Exception:
                         return {"status": 0, "length": 0}
@@ -6203,7 +6237,7 @@ class ToolRegistry:
                 return {"status": 0, "error": True,
                         "elapsed": time.perf_counter() - t0, "body": "", "target": tgt}
 
-        async with httpx.AsyncClient(verify=False, follow_redirects=True, headers=headers) as c:
+        async with _target_client(verify=False, follow_redirects=True, headers=headers) as c:
             for p in params:
                 confirmed = False
                 # 1) regular SSRF — fetch cloud metadata and detect real content
@@ -6366,7 +6400,7 @@ class ToolRegistry:
             return d
 
         findings = []
-        async with httpx.AsyncClient(verify=False, follow_redirects=False, timeout=15) as c:
+        async with _target_client(verify=False, follow_redirects=False, timeout=15) as c:
             for it in inputs:
                 orig = it["value"] if isinstance(it["value"], str) else str(it["value"])
                 bad = deser.corrupt(orig, it)
@@ -6456,7 +6490,7 @@ class ToolRegistry:
         ctype = inp.get("content_type", "application/xml")
         headers = {"User-Agent": _UA, "Content-Type": ctype, **(self.session_headers or {})}
         findings = []
-        async with httpx.AsyncClient(verify=False, follow_redirects=False, timeout=15) as c:
+        async with _target_client(verify=False, follow_redirects=False, timeout=15) as c:
             # 1) in-band local file read
             for file_uri, _rx in xxe.FILE_TARGETS:
                 payload = xxe.build_inband_xml(file_uri, sample)
@@ -6632,8 +6666,8 @@ class ToolRegistry:
             except Exception:
                 return None, time.perf_counter() - t0
 
-        async with httpx.AsyncClient(verify=False, follow_redirects=True, headers=headers,
-                                     timeout=seconds + 20) as c:
+        async with _target_client(verify=False, follow_redirects=True, headers=headers,
+                                  timeout=seconds + 20) as c:
             base_r, _ = await get(c, url)
             base_body = base_r.text if base_r is not None else ""
             base_status = base_r.status_code if base_r is not None else 0
@@ -6926,8 +6960,8 @@ class ToolRegistry:
             return (s.replace("&apos;", "'").replace("&quot;", '"')
                      .replace("&amp;", "&").replace("&#39;", "'"))
 
-        async with httpx.AsyncClient(verify=False, follow_redirects=True,
-                                     headers=headers, timeout=25) as c:
+        async with _target_client(verify=False, follow_redirects=True,
+                                  headers=headers, timeout=25) as c:
             async def q(p, payload):
                 t = xt.set_param(url, p, payload)
                 if not self.scope.validate(t)[0]:
@@ -7066,7 +7100,7 @@ class ToolRegistry:
             except Exception:
                 return None
 
-        async with httpx.AsyncClient(verify=False, follow_redirects=True, headers=headers, timeout=15) as c:
+        async with _target_client(verify=False, follow_redirects=True, headers=headers, timeout=15) as c:
             base_r = await get(c, url)
             base_body = base_r.text if base_r is not None else ""
             for p in params:
@@ -7177,8 +7211,8 @@ class ToolRegistry:
             except Exception:
                 return None, time.perf_counter() - t0
 
-        async with httpx.AsyncClient(verify=False, follow_redirects=True, headers=headers,
-                                     timeout=seconds + 20) as c:
+        async with _target_client(verify=False, follow_redirects=True, headers=headers,
+                                  timeout=seconds + 20) as c:
             base_r, _ = await get(c, url)
             base_body = base_r.text if base_r is not None else ""
             for p in params:
@@ -7659,9 +7693,9 @@ class ToolRegistry:
         findings = []
         try:
             hdrs = {"User-Agent": _UA}
-            async with httpx.AsyncClient(verify=False, follow_redirects=True, timeout=15, headers=hdrs) as anon, \
-                       httpx.AsyncClient(verify=False, follow_redirects=True, timeout=15,
-                                         headers={**hdrs, **sess}) as auth:
+            async with _target_client(verify=False, follow_redirects=True, timeout=15, headers=hdrs) as anon, \
+                       _target_client(verify=False, follow_redirects=True, timeout=15,
+                                      headers={**hdrs, **sess}) as auth:
                 a_base = (await auth.get(url)).text
                 n_base = (await anon.get(url)).text
                 private = cd.private_tokens(a_base, n_base)
@@ -7801,8 +7835,8 @@ class ToolRegistry:
         samples = {}
         try:
             for _ in range(16):
-                async with httpx.AsyncClient(verify=False, follow_redirects=False, timeout=15,
-                                             headers={"User-Agent": _UA}) as c:
+                async with _target_client(verify=False, follow_redirects=False, timeout=15,
+                                          headers={"User-Agent": _UA}) as c:
                     r = await c.get(url)
                     for sc in r.headers.get_list("set-cookie"):
                         ck = SimpleCookie()
@@ -7944,8 +7978,8 @@ class ToolRegistry:
         user, pw = cred[0], cred[1]
         findings = []
         try:
-            async with httpx.AsyncClient(verify=False, follow_redirects=True, timeout=20,
-                                         headers={"User-Agent": _UA}) as c:
+            async with _target_client(verify=False, follow_redirects=True, timeout=20,
+                                      headers={"User-Agent": _UA}) as c:
                 g = await c.get(url)
                 pre = {k: v for k, v in c.cookies.items()}
                 form = ue.parse_login_form(g.text or "", url)
@@ -8155,7 +8189,7 @@ class ToolRegistry:
             return ToolResult("session_lifecycle", base, True, "already tested this mission", [])
         self._sesslife_done = True
         notes, findings = [], []
-        async with httpx.AsyncClient(verify=False, follow_redirects=False, timeout=20) as client:
+        async with _target_client(verify=False, follow_redirects=False, timeout=20) as client:
             acct, why = await self._sl_mint(client, base, inp)
             if not acct:
                 return ToolResult("session_lifecycle", base, True, sl.inconclusive(why), [])
@@ -8702,7 +8736,8 @@ class ToolRegistry:
                         await ctx.set_extra_http_headers(hdrs)
                 await self._ctx_add_cookies(ctx)
                 page = await ctx.new_page()
-                await page.goto(url, wait_until="domcontentloaded", timeout=10000)
+                await _browser_engine.rate_limited_goto(
+                    page, url, wait_until="domcontentloaded", timeout=10000)
                 hit = await css.read_cssom(page, token)
                 await browser.close()
                 return {"available": True, "matched": bool(hit.get("matched")),

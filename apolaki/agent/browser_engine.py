@@ -17,8 +17,211 @@ clearly-labelled empty result -- nothing is faked, and the rest of the platform 
 """
 from __future__ import annotations
 
+import asyncio
+from datetime import timezone
+import email.utils
 import json
+import math
 import os
+import threading
+import time
+from urllib.parse import urlparse
+
+
+RATE_POLICY_DEFAULT_MAX_SECONDS = 30.0
+RATE_POLICY_HARD_MAX_SECONDS = 300.0
+_RETRY_STATUSES = frozenset({429, 503})
+
+
+def _origin(url):
+    """Canonical origin key. Default and explicit default ports share a cooldown."""
+    try:
+        parsed = urlparse(str(url or ""))
+        scheme = (parsed.scheme or "").lower()
+        host = (parsed.hostname or "").lower()
+        if scheme not in ("http", "https") or not host:
+            return ""
+        port = parsed.port or (443 if scheme == "https" else 80)
+        host = "[%s]" % host if ":" in host and not host.startswith("[") else host
+        return "%s://%s:%d" % (scheme, host, port)
+    except (TypeError, ValueError):
+        return ""
+
+
+def retry_after_seconds(value, now=None):
+    """Parse RFC 9110 Retry-After delta-seconds or HTTP-date into a non-negative delay."""
+    raw = str(value or "").strip()
+    if not raw:
+        return None
+    try:
+        delay = float(raw)
+        if math.isfinite(delay) and delay >= 0:
+            return delay
+    except (TypeError, ValueError):
+        pass
+    try:
+        parsed = email.utils.parsedate_to_datetime(raw)
+        if parsed is None:
+            return None
+        if parsed.tzinfo is None:
+            parsed = parsed.replace(tzinfo=timezone.utc)
+        delay = parsed.timestamp() - (time.time() if now is None else float(now))
+        return max(0.0, delay)
+    except (TypeError, ValueError, OverflowError):
+        return None
+
+
+class TargetRatePolicy:
+    """A shared per-origin Retry-After deadline observed by sync and async transports.
+
+    This is deliberately not a scheduler and offers no simultaneity guarantee. Existing requests may
+    finish after one sibling receives a limiting response; every request that reaches the gate after
+    that response waits. Deadlines are monotonic, thread-safe, extend-only, and capped.
+    """
+
+    def __init__(self, max_wait=None, clock=None, wall_clock=None,
+                 async_sleep=None, sync_sleep=None):
+        self._explicit_max_wait = max_wait
+        self._clock = clock or time.monotonic
+        self._wall_clock = wall_clock or time.time
+        self._async_sleep = async_sleep or asyncio.sleep
+        self._sync_sleep = sync_sleep or time.sleep
+        self._deadlines = {}
+        self._lock = threading.Lock()
+
+    def _max_wait(self):
+        value = self._explicit_max_wait
+        if value is None:
+            value = os.environ.get("BBH_RETRY_AFTER_MAX_SECONDS", RATE_POLICY_DEFAULT_MAX_SECONDS)
+        try:
+            value = float(value)
+        except (TypeError, ValueError):
+            value = RATE_POLICY_DEFAULT_MAX_SECONDS
+        if not math.isfinite(value) or value < 0:
+            value = RATE_POLICY_DEFAULT_MAX_SECONDS
+        return min(value, RATE_POLICY_HARD_MAX_SECONDS)
+
+    def clear(self, url=None):
+        origin = _origin(url) if url else ""
+        with self._lock:
+            if origin:
+                self._deadlines.pop(origin, None)
+            else:
+                self._deadlines.clear()
+
+    def observe(self, url, status, headers):
+        """Record a target cooldown and return the bounded delay, or None when not applicable."""
+        try:
+            status = int(status or 0)
+        except (TypeError, ValueError):
+            return None
+        if status not in _RETRY_STATUSES:
+            return None
+        lowered = {str(k).lower(): v for k, v in dict(headers or {}).items()}
+        delay = retry_after_seconds(lowered.get("retry-after"), now=self._wall_clock())
+        origin = _origin(url)
+        if delay is None or not origin:
+            return None
+        delay = min(delay, self._max_wait())
+        deadline = self._clock() + delay
+        with self._lock:
+            self._deadlines[origin] = max(deadline, self._deadlines.get(origin, 0.0))
+        return delay
+
+    def remaining(self, url):
+        origin = _origin(url)
+        if not origin:
+            return 0.0
+        now = self._clock()
+        with self._lock:
+            deadline = self._deadlines.get(origin, 0.0)
+            remaining = max(0.0, deadline - now)
+            if not remaining and origin in self._deadlines:
+                self._deadlines.pop(origin, None)
+        return remaining
+
+    async def wait_async(self, url):
+        waited = 0.0
+        while True:
+            remaining = self.remaining(url)
+            if remaining <= 0:
+                return waited
+            await self._async_sleep(remaining)
+            waited += remaining
+
+    def wait_sync(self, url):
+        waited = 0.0
+        while True:
+            remaining = self.remaining(url)
+            if remaining <= 0:
+                return waited
+            self._sync_sleep(remaining)
+            waited += remaining
+
+
+target_rate_policy = TargetRatePolicy()
+
+
+def rate_limited_async_client(httpx_module, *args, rate_policy=None, **kwargs):
+    """Build an AsyncClient whose redirects and requests share the target policy.
+
+    ``rate_policy=False`` is reserved for callers that put the gate outside a
+    timing measurement and observe the response themselves. Existing httpx
+    hooks are preserved and run after the safety hooks.
+    """
+    if rate_policy is False:
+        return httpx_module.AsyncClient(*args, **kwargs)
+    policy = rate_policy or target_rate_policy
+    hooks = dict(kwargs.pop("event_hooks", {}) or {})
+    request_hooks = list(hooks.get("request", ()))
+    response_hooks = list(hooks.get("response", ()))
+
+    async def wait_for_target(request):
+        await policy.wait_async(str(request.url))
+
+    async def observe_target(response):
+        policy.observe(str(response.url), response.status_code, response.headers)
+
+    hooks["request"] = [wait_for_target, *request_hooks]
+    hooks["response"] = [observe_target, *response_hooks]
+    return httpx_module.AsyncClient(*args, event_hooks=hooks, **kwargs)
+
+
+async def _guard_playwright_page(page, policy):
+    """Install one request gate per real Playwright page, covering navigation subresources too."""
+    if getattr(page, "_apolaki_rate_guard", False):
+        return
+    route_method = getattr(page, "route", None)
+    if not callable(route_method):
+        return
+
+    async def gate(route, request):
+        try:
+            await policy.wait_async(request.url)
+        finally:
+            await route.continue_()
+
+    def observe(response):
+        try:
+            policy.observe(response.url, response.status, response.headers or {})
+        except Exception:
+            pass
+
+    await route_method("**/*", gate)
+    page.on("response", observe)
+    setattr(page, "_apolaki_rate_guard", True)
+
+
+async def rate_limited_goto(page, url, rate_policy=None, **kwargs):
+    """Playwright navigation guarded by the process-wide target policy."""
+    policy = rate_policy or target_rate_policy
+    await _guard_playwright_page(page, policy)
+    await policy.wait_async(url)
+    response = await page.goto(url, **kwargs)
+    if response is not None:
+        policy.observe(getattr(response, "url", None) or url,
+                       getattr(response, "status", 0), getattr(response, "headers", {}) or {})
+    return response
 
 # browser-as-SENSOR: one navigation, a full structured observation set.
 _OBSERVE_JS = r"""
@@ -79,6 +282,25 @@ export default async function ({ page }) {
 }
 """
 
+_SCREENSHOT_JS = r"""
+export default async function ({ page }) {
+  const target = %TARGET_JSON%;
+  const errors = [];
+  try { await page.goto(target, { waitUntil: "networkidle2", timeout: 25000 }); }
+  catch (e) { errors.push("goto: " + String(e).slice(0, 120)); }
+  if (errors.length) {
+    return { data: { png_b64: "", target, script_errors: errors }, type: "application/json" };
+  }
+  try {
+    const png = await page.screenshot({ type: "png", fullPage: %FULL_JSON%, encoding: "base64" });
+    return { data: { png_b64: png, target, script_errors: [] }, type: "application/json" };
+  } catch (e) {
+    return { data: { png_b64: "", target,
+      script_errors: ["screenshot: " + String(e).slice(0, 120)] }, type: "application/json" };
+  }
+}
+"""
+
 
 def _browser_url(browser_url=None):
     return (browser_url or os.environ.get("CDP_BROWSER_URL", "")).rstrip("/")
@@ -88,6 +310,72 @@ def _empty(target, note):
     return {"target": target, "browser": False, "note": note, "forms": [], "inputs": [], "links": [],
             "scripts": [], "runtime_api": [], "runtime_ws": [], "graphql": [], "framework": "",
             "storage": {"local": [], "session": []}, "cookies": [], "csp": ""}
+
+
+def _instrument_script(js, target_url):
+    """Wrap any browserless function so its main-frame response feeds the shared cooldown."""
+    code = str(js or "").replace("%TARGET_JSON%", json.dumps(target_url))
+    marker = "export default"
+    if marker not in code:
+        return code
+    user_code = code.replace(marker, "const __apolaki_user =", 1)
+    wrapper = r'''
+
+export default async function (__apolaki_ctx) {
+  const __apolaki_target = %APOLAKI_TARGET%;
+  let __apolaki_nav = { url: __apolaki_target, status: 0, headers: {} };
+  const __apolaki_deadlines = new Map(), __apolaki_events = [];
+  const __apolaki_max_wait = %APOLAKI_MAX_WAIT_MS%;
+  const __apolaki_origin = value => { try { return new URL(value).origin; } catch (e) { return ''; } };
+  const __apolaki_delay = value => {
+    if (value === undefined || value === null || value === '') return null;
+    if (/^\d+(?:\.\d+)?$/.test(String(value).trim())) return Number(value) * 1000;
+    const parsed = Date.parse(String(value));
+    return Number.isFinite(parsed) ? Math.max(0, parsed - Date.now()) : null;
+  };
+  try {
+    await __apolaki_ctx.page.setRequestInterception(true);
+    __apolaki_ctx.page.on('request', async request => {
+      try {
+        const deadline = __apolaki_deadlines.get(__apolaki_origin(request.url())) || 0;
+        const remaining = deadline - Date.now();
+        if (remaining > 0) await new Promise(resolve => setTimeout(resolve, remaining));
+      } catch (e) {}
+      try { await request.continue(); } catch (e) {}
+    });
+    __apolaki_ctx.page.on('response', response => { try {
+      const request = response.request();
+      if (request.isNavigationRequest() && request.frame() === __apolaki_ctx.page.mainFrame()) {
+        __apolaki_nav = { url: response.url(), status: response.status(), headers: response.headers() };
+      }
+      const status = response.status(), headers = response.headers();
+      if ((status === 429 || status === 503) && headers['retry-after'] !== undefined) {
+        const delay = __apolaki_delay(headers['retry-after']);
+        const origin = __apolaki_origin(response.url());
+        if (delay !== null && origin) {
+          const bounded = Math.min(delay, __apolaki_max_wait);
+          __apolaki_deadlines.set(origin, Math.max(Date.now() + bounded,
+            __apolaki_deadlines.get(origin) || 0));
+          __apolaki_events.push({ url: response.url(), status, headers });
+        }
+      }
+    } catch (e) {} });
+  } catch (e) {}
+  const __apolaki_result = await __apolaki_user(__apolaki_ctx);
+  try {
+    const __apolaki_data = (__apolaki_result && typeof __apolaki_result === 'object' &&
+      Object.prototype.hasOwnProperty.call(__apolaki_result, 'data'))
+      ? __apolaki_result.data : __apolaki_result;
+    if (__apolaki_data && typeof __apolaki_data === 'object') {
+      __apolaki_data._apolaki_navigation = __apolaki_nav;
+      __apolaki_data._apolaki_rate_events = __apolaki_events;
+    }
+  } catch (e) {}
+  return __apolaki_result;
+}
+'''.replace("%APOLAKI_TARGET%", json.dumps(target_url)).replace(
+        "%APOLAKI_MAX_WAIT_MS%", str(int(target_rate_policy._max_wait() * 1000)))
+    return user_code + wrapper
 
 
 def drive(target_url, js, browser_url=None, timeout=45):
@@ -100,7 +388,7 @@ def drive(target_url, js, browser_url=None, timeout=45):
         import httpx
     except Exception:
         return _empty(target_url, "httpx unavailable")
-    code = js.replace("%TARGET_JSON%", json.dumps(target_url))
+    code = _instrument_script(js, target_url)
     # Route the headless browser through the intercept proxy when one is configured, so every request the
     # browser makes is captured + rule-rewritable (browserless v2 accepts Chrome launch args via ?launch=).
     # ignoreHTTPSErrors is ALWAYS on. Staging, internal and lab targets routinely serve a self-signed or
@@ -118,12 +406,20 @@ def drive(target_url, js, browser_url=None, timeout=45):
         pass
     params = {"launch": json.dumps(launch)}
     try:
+        target_rate_policy.wait_sync(target_url)
         r = httpx.post(browser + "/function", headers={"Content-Type": "application/javascript"},
                        content=code, params=params or None, timeout=timeout)
         if r.status_code != 200:
             return _empty(target_url, "headless browser returned %s" % r.status_code)
         data = r.json()
-        return data.get("data", data) if isinstance(data, dict) else {}
+        result = data.get("data", data) if isinstance(data, dict) else {}
+        if isinstance(result, dict):
+            nav = result.pop("_apolaki_navigation", None) or {}
+            target_rate_policy.observe(nav.get("url") or target_url, nav.get("status"), nav.get("headers"))
+            for event in result.pop("_apolaki_rate_events", None) or []:
+                target_rate_policy.observe(event.get("url") or target_url,
+                                           event.get("status"), event.get("headers"))
+        return result
     except Exception as e:
         return _empty(target_url, "headless browser unreachable: %s" % str(e)[:80])
 
@@ -131,21 +427,21 @@ def drive(target_url, js, browser_url=None, timeout=45):
 def screenshot(target_url, browser_url=None, full=False, timeout=45):
     """Capture a PNG screenshot (base64) of the target via headless Chrome -- a PoC asset to attach to a
     finding. Labelled-empty dict when no browser is configured; never raises."""
-    browser = _browser_url(browser_url)
-    if not browser:
-        return {"browser": False, "note": "no headless browser configured", "png_b64": ""}
     try:
         import base64
-        import httpx
-    except Exception:
-        return {"browser": False, "note": "httpx unavailable", "png_b64": ""}
-    try:
-        r = httpx.post(browser + "/screenshot", json={"url": target_url, "options": {"fullPage": bool(full)}},
-                       timeout=timeout)
-        if r.status_code != 200:
-            return {"browser": False, "note": "screenshot returned %s" % r.status_code, "png_b64": ""}
-        return {"browser": True, "png_b64": base64.b64encode(r.content).decode(), "bytes": len(r.content),
-                "target": target_url}
+        script = _SCREENSHOT_JS.replace("%FULL_JSON%", json.dumps(bool(full)))
+        result = drive(target_url, script, browser_url=browser_url, timeout=timeout)
+        if not isinstance(result, dict) or result.get("browser") is False:
+            return {"browser": False, "note": (result or {}).get("note", "screenshot unavailable"),
+                    "png_b64": ""}
+        png = str(result.get("png_b64") or "")
+        if not png:
+            errors = result.get("script_errors") or []
+            return {"browser": False,
+                    "note": str(errors[0]) if errors else "screenshot returned no image",
+                    "png_b64": ""}
+        size = len(base64.b64decode(png, validate=True))
+        return {"browser": True, "png_b64": png, "bytes": size, "target": target_url}
     except Exception as e:
         return {"browser": False, "note": "unreachable: %s" % str(e)[:60], "png_b64": ""}
 
