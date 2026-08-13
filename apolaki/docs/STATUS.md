@@ -37,7 +37,7 @@ gate at `scripts/tier3_gate.sh` (LF-normalized and pinned via `.gitattributes`).
 
 | track | figure | denominator | FPR |
 |---|---:|---|---:|
-| Java v1.2 — **hybrid** (DAST + code-assisted SAST) | **61.1%** off. / **60.9%** prod. | 11-cat macro, full 2132 DAST + 975 SAST | **0.0%** |
+| Java v1.2 — **hybrid** (DAST + SAST) ⚠ **HARNESS-ONLY, see below** | **61.1%** off. / **60.9%** prod. | 11-cat macro, full 2132 DAST + 975 SAST | **0.0%** |
 | Java v1.2 — **DAST only** | **41.7%** off. / **41.5%** prod. | 11-cat macro, full suite | **0.0%** |
 | ~~Java v1.2 — earlier figures~~ | ~~41.3% / 34.9% @ 2.1%~~ | superseded by the full sealed run; the 2.1% FPR was the cross-family artifact, since fixed | — |
 | Python v0.1 — **hybrid** (DAST + code-assisted SAST) | **38.8%** | 14-cat macro, full 1230-case suite | **0.0%** |
@@ -185,3 +185,20 @@ Order that follows from the measurement:
 
 Q-001 session lifecycle invalidation — lowest effort of the six, every primitive already exists, and
 it appears in essentially every commercial pentest report.
+
+## ⚠ The hybrid figure is a HARNESS capability, not a product capability (Q-044)
+
+MEASURED 2026-08-13. `codeintel.review_source_tree()` — the analyser producing crypto/hash/weakrand
+at 100% / 0.0% FPR, and the entire gap between Java DAST-only 41.7% and hybrid 61.1% — has **one
+caller: `owasp_bench.py:231`**. `source_root` appears nowhere in `main.py` or `agent.py`, so a
+mission cannot supply a source tree. `GET /codereview?path=` is production-reachable but calls
+`codeintel.review()`, a *different, older* function.
+
+**So no client engagement can currently invoke the capability behind 61.1%.** The number is real and
+honestly measured; the path to it is benchmark-only. Same distinction the ledger already enforces
+between the 41.3% harness number and the 2-findings whole-product number — quote 61.1% as a harness
+result until Q-044 wires a production entry point.
+
+Also confirmed while checking: **semgrep is NOT wired** (zero hits in `agent/`). The semgrep run was
+a spike that proved the categories were reachable; the lane then built Apolaki's own analyser. The
+100% figures are ours, which is a stronger claim — but it does not make them reachable.

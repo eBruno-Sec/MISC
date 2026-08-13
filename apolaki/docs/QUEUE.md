@@ -58,6 +58,34 @@ Released files: `agent/tools.py` · `agent/cmdi_tool.py` · `agent/xss_tool.py` 
 **LEASED TO CODEX: Q-040 + B-010** from `aa8e26a`. `agent/sqli_tool.py` and its tests, plus all new
 Juliet paths, are Codex's until it returns. Claude does not spawn or resume into them.
 
+## Q-044 · The code-assisted lane is BENCHMARK-ONLY — 61.1% is not reachable in an engagement · **HIGH** · `ready`
+
+**MEASURED 2026-08-13.** `codeintel.review_source_tree()` — the Java+Python call-site analyser that
+scores **crypto 100% / hash 100% / weakrand 100% at 0.0% FPR**, and the entire difference between the
+Java DAST-only 41.7% and the hybrid 61.1% — has **exactly one caller: `owasp_bench.py:231`.**
+
+- `source_root` / `source_path` / `--source` appear **nowhere** in `agent/main.py` or `agent/agent.py`.
+  A mission cannot supply a source tree.
+- `GET /codereview?path=` exists and IS production-reachable, but it calls
+  `codeintel.review()` — the **older, different** general static review, not `review_source_tree()`.
+- No UI control, API parameter or planner step invokes the SAST lane.
+
+**So the hybrid figure describes a capability no client engagement can currently invoke.** The number
+is real and honestly measured; the path to it is benchmark-only. That is the island pattern for the
+sixth time — after `chase_capability` returning `[]`, `untested("service")` empty by construction,
+the graph planner executing nothing, `run_zap` never called in 150 missions, and `recon["zap"]` as a
+dead write.
+
+**Until this is wired, 61.1% must be described as a harness capability, not a product capability** —
+the same distinction the ledger already enforces between the 41.3% harness number and the
+2-findings whole-product number. Both ledgers and STATUS are being annotated accordingly.
+
+**The ticket**: give `review_source_tree` a production entry point — a mission-level source input
+and/or routing `/codereview` to it when the tree is Java/Python — and prove it with a real mission
+that produces a source-derived finding, not a harness call. Note it must compose with the proof
+gate: `proof_kind()` already returns `SOURCE_DERIVED` and `control_status()` already returns
+`NOT_APPLICABLE` for these, so the evidence contract is ready and waiting for a producer.
+
 ## Q-043 · Apolaki does not honour `Retry-After` — and the Coordinator asserted that it did · **HIGH** · `ready`
 
 **MEASURED by Codex lane 4**: with `Retry-After: 2` returned by the target, both concurrency widths
