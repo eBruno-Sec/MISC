@@ -235,6 +235,40 @@ def install_planner_census(batches):
     return holder
 
 
+def install_rate_census(census):
+    """Count what the target-rate policy actually did, so "more probing is not more pressure" is a
+    measurement rather than an assertion.
+
+    Every request the engines make goes through `_target_client`, which is bound to this same
+    singleton, so a run that adds an engine adds requests that pass the SAME gate. What the
+    artifact could not say is whether the gate ever engaged. `observe` returns a delay only for a
+    limiting status with a usable Retry-After; `wait_async` returns the seconds actually slept.
+    Both are recorded, and a run where `cooldowns` is 0 means the target never asked us to slow
+    down -- which is a different and weaker claim than "we honoured it", and is labelled as such.
+    """
+    import browser_engine as _be
+    pol = _be.target_rate_policy
+    orig_obs, orig_wait = pol.observe, pol.wait_async
+
+    def observe(url, status, headers):
+        out = orig_obs(url, status, headers)
+        census["observed"] = census.get("observed", 0) + 1
+        if out is not None:
+            census["cooldowns"] = census.get("cooldowns", 0) + 1
+            census["cooldown_s"] = round(census.get("cooldown_s", 0.0) + float(out), 2)
+        return out
+
+    async def wait_async(url):
+        waited = await orig_wait(url)
+        if waited:
+            census["waited_s"] = round(census.get("waited_s", 0.0) + float(waited), 2)
+            census["waits"] = census.get("waits", 0) + 1
+        return waited
+
+    pol.observe = observe
+    pol.wait_async = wait_async
+
+
 def install_sweep_census(census):
     """Record how many targets `sweep_targets` HAD to choose from, and how many it kept.
 
@@ -268,6 +302,8 @@ async def main():
     planner_state = install_planner_census(planner_batches)
     sweep_census = []
     install_sweep_census(sweep_census)
+    rate_census = {"observed": 0, "cooldowns": 0, "cooldown_s": 0.0, "waits": 0, "waited_s": 0.0}
+    install_rate_census(rate_census)
     print("phase attribution installed on %d method(s)" % len(wrapped_phases), flush=True)
     eng = scope_mod.ScopeEngine()
     eng.load_manual([TARGET], [], "owaspbench-q019-rerun")
@@ -407,6 +443,7 @@ async def main():
             "sweep_target_cap": getattr(agent_mod, "SWEEP_TARGET_CAP", None),
             "sweep_browser_cap": getattr(agent_mod, "SWEEP_BROWSER_CAP", None),
             "sweep_selection": sweep_census,
+            "rate_policy": dict(rate_census),
             "planner_batches": planner_batches,
             "planner_batches_n": len(planner_batches),
             "planner_would_schedule_more": would_more,
@@ -469,6 +506,7 @@ async def main():
     for c in sweep_census:
         print("sweep selection         : kept %s of %s candidate(s) at limit %s"
               % (c["kept"], c["candidates"], c["limit"]))
+    print("rate policy             : %s" % dict(rate_census))
     print("planner batches         : %d  sizes=%s" % (len(planner_batches), planner_batches[:24]))
     print("planner would schedule  : %s more step(s) at the final state (estimate)" % would_more)
     tot_c = sum(phase_calls.values()) or 1
