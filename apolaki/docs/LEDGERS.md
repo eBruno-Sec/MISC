@@ -261,6 +261,86 @@ Apolaki as a product.
 
 ---
 
+## ⚠ THE BLIND-SQLI ORACLE CONFIRMS ON WEAK-RANDOM NOISE — AT SCALE. 2026-08-14
+
+Bigger than the recall drop, and it means **Q-040's stability gate is incomplete**. Three strict xfails
+now pin it, each with a measurement:
+
+1. **`BenchmarkTest00494` still confirms** whenever both reference samples land in the same run of the
+   alternation — **fires on 3 of 4 form fields with the gate ON**.
+2. **`BenchmarkTest00023`, a `weakrand` case, is claimed as CWE-89 boolean-blind.** The body carries a
+   fresh PRNG value per response, and **the gate contributes nothing: FP/attempt 0.045 → 0.045.**
+3. **It is not a rare coincidence — 9.4% of ordered triples over 123 observed-shape bodies satisfy the
+   oracle.** A systematic false-positive mode.
+
+This explains both wrong-class claims from the rerun in one mechanism, and it means the 100.0% loose
+precision we just published is flattered by the loose convention. **A page that changes on its own can
+confirm blind SQLi**, which is precisely what Q-040 was meant to prevent and only partly does. Do not
+treat Q-040 as closed.
+
+**Candidate (3) for the recall drop is DEAD.** Breaker RUN A: *the run does not converge, it exhausts
+its budget.* So "it simply probed less before converging" is falsified — the run was budget-limited,
+not fixpoint-limited. Two candidates remain live: the stability gate's precision trade, and the rate
+policy reducing probe volume.
+
+## Q-023 — ZAP now runs, and it is deliberately lead-only. 2026-08-14
+
+**Proven by the artifact I demanded, not a unit test**: mission `49d413bb`, status complete,
+**`run_zap` tool_call rows: 1**. Result: 0 current alerts, 187 retained alerts excluded. First ZAP
+invocation in the platform's history — previously 0 across 150 missions and 25,619 tool calls.
+
+**The judgement call, and it is the right one:** ZAP stays **opt-in and lead-only**. *Scanner
+confidence cannot become deterministic Apolaki confirmation.* A ZAP alert arrives without the evidence
+the proof gate requires, so it is structurally a lead that an Apolaki oracle must independently
+confirm. The proof gate was **not** weakened to let alerts through.
+
+**The control is absence-of-bypass shaped**: an enabled mission that finishes **without** a persisted
+`run_zap` call now **fails visibly**. That is the check whose absence let this survive 150 missions.
+
+No-DoS held under the new traffic: the acceptance sent exactly one request, observed
+`429 Retry-After: 2`, **stopped all producers**, and returned with the shared cooldown active. All 19
+benchmark artifacts and `owasp_bench.py` byte-identical; every `tools.py` change confined to
+`_run_zap`, which no benchmark family invokes. 8/8 mutants killed.
+
+**Still unexplained, and recorded as such**: the four July-26 missions that carried `enable_zap=True`
+and produced zero `run_zap` calls. Targeted rescan remains unwired — it needs the Coordinator-owned
+planner, and no off-limits file was touched.
+
+## Q-021B — the version stops being computed and thrown away. 2026-08-14
+
+`fp.fingerprint({'Server':'nginx/1.18.0'})` returns `nginx 1.18.0`; `_run_fingerprint` persisted
+`['nginx']`. Now a durable **TechnologyFact**: vendor, product, component, version, confidence,
+evidence, source, auth state, timestamps.
+
+Design decisions worth keeping:
+- **`confidence` is deliberately NOT a parameter.** It is derived by `version_confidence(source)` and
+  fails closed to LOW — **a detector cannot assert its own trustworthiness.**
+- `tech_fact_key()` = `host|vendor|product|component` — **identity, never the version.**
+- `_KNOWN_PRODUCTS` is *derived* from the detection tables, so **the gate cannot drift from its
+  detector**.
+- Written to the **existing `component` node kind** with detail as props, following `observe_param`'s
+  instinct; graph confidence stops *below* `CONFIRMED` and `tested` stays `False` — **detection is not
+  a test**.
+- `intel_registry` deliberately untouched, with reasoning: it stages *internet intel*; a
+  TechnologyFact is a first-party observation. **Two trust models answering one question is the defect
+  Q-021A existed to fix.**
+
+**A control initially passed for the wrong reason** and the lane caught it: `M2_key_drops_product`
+survived because the nginx/PHP case was discriminated by the `_VENDOR` field, so the key could drop
+`product` entirely and stay green. Fixed with two products that have no vendor hint. **28 mutants, 28
+killed.**
+
+A second defect found in the same call: `_POWERED` yields `'a MultiJuicer Kubernetes cluste'` (31
+chars — the `{2,30}` bound plus its leading character) and `'nothing on.'`.
+
+**No benchmark number moved — measured, not argued**: 3927 cases compared across 17 header sets × 11
+cookies × 21 bodies, **0 differences** — and the lane verified its own differential harness *could*
+report a difference, because a negative control that cannot fail proves nothing.
+
+**The producer half is pending**: `tools.py:_run_fingerprint` was Codex's this cycle, so
+`recon["technology"]` is not yet populated in a live mission and the chain below it is inert. The
+patch is written up in `docs/handoff/tech_intel.md` §4 rather than applied across an ownership line.
+
 ## B-020 — JavaScript/Node in the code-assisted lane. Tier 3. 2026-08-14
 
 Third dialect. Weak hash, weak randomness, weak crypto — same finding shape and lane markers as Java
