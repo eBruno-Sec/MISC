@@ -1628,3 +1628,63 @@ the same lab, to fit inside one session. Contention can only ADD noise. If the c
 identical, the determinism conclusion is safe *a fortiori*. If they differ, the honest reading is
 "inconclusive between run-to-run variance and contention" unless the differences fall exactly on
 the unstable-body cases, and the right follow-up is a sequential repeat.
+
+## 3-two-a. RUN A — and the first thing the new record answers
+
+```
+=== WHOLE-PRODUCT RERUN, SEALED ===   (run A, frozen snapshot of HEAD 6c9907a)
+elapsed                 : 1903s        (sealed 08-13 rerun: 1893s)
+findings total          : 20           (sealed: 20)
+distinct cases claimed  : 18           (sealed: 19)
+by family : sqli 11 | ldap_injection 5 | dom_data_manipulation 1 | xpath_injection 1
+            sensitive_exposure 1 | weak_random 1
+plan steps              : 309 / cap 220
+EXIT REASON             : step_cap_exhausted
+tool calls              : 3659    (run_sqli 400, run_ldap 412, run_xpath 412, run_ssi 412,
+                                   run_sqli_structural 400, run_injection_probes 400,
+                                   run_css_injection 400, run_waf_bypass 400, run_xss 55,
+                                   run_dom_trace 42, run_dom_audit 18, http_probe 37, ...)
+surface urls            : 3022
+cases PROBED            : 373      cases TOUCHED : 517
+probed but not claimed  : 355      claimed but not probed : 0
+SEAL sha256             : 3ee7609d766836d40ef44547ad00b485a83cf26fe14b85b2be7278ce7f7fbfdd
+```
+
+**CANDIDATE 3's discriminator, answered directly: the run does NOT converge. It exhausts its
+budget.** `plan_steps = 309` against `MAX_STEPS = 220`, `exit_reason = step_cap_exhausted`. The
+brief's own test — "(3) dies immediately if the run hit a fixpoint rather than exhausting a budget"
+— resolves the other way. It ran out. Faster **is** less work here.
+
+(Noted in passing: 309 > 220. `MAX_STEPS` is checked at the top of the `while`, not inside the batch
+loop, so a batch that starts under the cap runs to completion past it. The cap is a floor on the
+overrun, not a bound. `agent/agent.py` is not mine.)
+
+**SECOND CORRECTION to 1d, again from measurement rather than reading.** I said the crawl's
+250-page budget was the ceiling. It is not: `surface_urls = 3022`, because the benchmark's index
+pages *link* every case and `_add_urls` records a link without fetching it (`http_probe` ran only
+37 times). The operative cap is `SWEEP_TARGET_CAP = 400` — `run_sqli` received exactly **400**
+distinct targets, `run_ldap`/`run_xpath`/`run_ssi` 412 (400 + the 12 form pages), and those 400-412
+targets resolve to **373 distinct benchmark cases**. So: 3022 URLs discovered, 400 selected, 373
+cases probed, 18 claimed.
+
+**That reframes the recall shortfall.** 355 cases had a payload delivered and produced nothing. The
+question "why is recall 1.3%?" is therefore not only "the sweep never got there" — it is *mostly*
+"the oracles were given the case and declined". The exact split against the key follows once run B
+is sealed, and it is the number `whole_product_score.py` now prints
+(`MISSED-AFTER-PROBING` vs `NEVER PROBED`).
+
+## 3-two-b. RUN A vs the sealed 08-13 rerun: **exactly one case moved, and it is the coin flip**
+
+```
+only in the sealed rerun : ['BenchmarkTest00023']
+only in run A            : []
+shared                   : 18
+```
+
+`BenchmarkTest00023` is the weakrand case — the stochastic false positive measured in TARGET 2 at
+**4.5% per attempt**. Prediction 2, written down before the run, said any difference should land
+exactly there. It did, and nothing else moved, across a four-commit code delta and a fresh run.
+
+**Consequence for the published number.** The sealed rerun's `precision 100.0% (19/19)` and
+`recall 1.34% (19/1415)` include a claim that is a coin flip. Run A, same target, same shape, gets
+**18/1415 = 1.27%**. The 19th claim is not a capability.
