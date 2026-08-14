@@ -298,7 +298,7 @@ def load_properties(root: str, max_files: int = 200) -> dict:
 # codebase, where the same three classes are 41.8% of the OWASP Benchmark Python suite and scored
 # 0.0%. A language gate on a language-independent analysis is a capability thrown away by an
 # extension check. Adding a language is a row here plus its rules in codereview.
-_SOURCE_EXTS = (".java", ".py", ".pyw")
+_SOURCE_EXTS = (".java", ".py", ".pyw", ".js", ".mjs", ".cjs", ".jsx", ".ts", ".tsx")
 
 
 def review_source_tree(root: str, max_file_bytes: int = 2_000_000) -> dict:

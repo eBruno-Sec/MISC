@@ -1290,6 +1290,11 @@ def review_source(text: str, source: str, props: dict = None, summaries: dict = 
         return review_java(text, source, props, summaries)
     if looks_like_python(text, source):
         return review_python(text, source, props, summaries)
+    # JS is checked LAST on purpose. Java and Python are recognised by extension or by a marker
+    # neither of the others can produce, so a file that reaches here is not one of them; putting
+    # the JS marker first would let `function (` in a docstring steal a Python file.
+    if looks_like_js(text, source):
+        return review_js(text, source, props)
     return []
 
 
@@ -1449,6 +1454,14 @@ def scan_entropy(text: str, threshold: float = 4.3) -> list:
 
 # ── Assemble findings for one source ─────────────────────────────
 def review(text: str, source: str) -> dict:
+    # THE PRECISE ANALYSIS RUNS FIRST so the lead generator can stand down where it has already
+    # answered. `scan_weak_crypto` is a substring matcher that reports `Math.random()` as a
+    # "candidate"; `review_source` reports the same line as a CONFIRMED call site with a CWE. Both
+    # in one report is the same defect described twice at two confidences, and a client reading it
+    # cannot tell that it is one finding. The lead is superseded, so it is dropped -- by LINE, not
+    # by family, because the two rules do not share a vocabulary.
+    precise = review_source(text, source)
+    precise_lines = {f.get("line") for f in precise if f.get("line")}
     findings = []
     for s in scan_secrets(text):
         findings.append({
@@ -1468,6 +1481,8 @@ def review(text: str, source: str) -> dict:
             "cwe": "CWE-94", "family": "code-review", "tags": ["sink", s["vuln"].split("/")[0].strip()],
             "confidence": "candidate"})
     for w in scan_weak_crypto(text):
+        if w["line"] in precise_lines:
+            continue                       # a confirmed call-site finding already covers this line
         findings.append({
             "title": f"Weak cryptography: {w['algorithm']}", "severity": "low", "target": source,
             "description": f"{w['algorithm']} referenced at line {w['line']} in {source}.",
@@ -1493,10 +1508,9 @@ def review(text: str, source: str) -> dict:
             "tags": ["secrets", "comment", "source-disclosure"],
         })
 
-    # CODE-ASSISTED lane. Fires on Java and Python source, so a mined JS bundle behaves exactly as
-    # before; these rules are call-site analyses of specific stdlib APIs and have nothing to say
-    # about a language whose APIs they do not name.
-    findings.extend(review_source(text, source))
+    # CODE-ASSISTED lane. Java, Python and now JavaScript/Node -- computed at the top of this
+    # function so the lead generator above could defer to it.
+    findings.extend(precise)
 
     comments = scan_comments(text)
     if comments:
@@ -3207,3 +3221,579 @@ def merge_summaries(per_file: list) -> dict:
                 seen[name] = verdict
             defined.add(name)
     return {k: v for k, v in seen.items() if v}
+
+
+# ══════════════════════════════════════════════════════════════════════════════════════════════
+# JAVASCRIPT / NODE — the same call-site discipline, a third set of traps
+# ══════════════════════════════════════════════════════════════════════════════════════════════
+# Java and Python are the benchmark's stacks. Node is the client's, which is why this dialect is
+# worth more than another Java CWE family. NOTHING here changes the other two: they measure
+# 100% TPR / 0.0% FPR on their mapped categories and a third language must cost them nothing.
+#
+# THIS IS TIER 3 (adversarial controls). There is no Node ground-truth corpus in the estate, so
+# there is no denominator and NO ACCURACY PERCENTAGE may be produced from it. What is claimed here
+# is control-by-control behaviour, nothing more.
+#
+# The two rules that made the other two languages work are carried forward verbatim:
+#
+#   the RECEIVER decides the verdict, not the method name
+#       crypto.randomBytes(32)          <- CSPRNG
+#       crypto.pseudoRandomBytes(32)    <- not, and it says so in the name
+#       Math.random()                   <- not
+#   and the value is BOUND, not pattern-matched
+#       const c = require('crypto'); c.createHash('md5')   <- must resolve through the alias
+#
+# That last one is Q-041's lesson applied as a PRECONDITION. In Python the aliased-module hole was
+# shipped and found later; here the aliased require is a mandatory control written before the rule.
+#
+# JS moves the masker's traps again. `//` is a comment (unlike Python) but `/` also starts a REGEX
+# LITERAL, and telling `/re/.test(s)` from `a / b / c` needs the previous significant token --
+# guess wrong and a division blanks the rest of the line, which is exactly the failure Python's
+# floor-division trap produces. A template literal is half text and half CODE, like an f-string.
+
+_JS_ESC = {"n": "\n", "t": "\t", "r": "\r", "b": "\b", "f": "\f", "v": "\v", "0": "\0",
+           "\\": "\\", "'": "'", '"': '"', "`": "`", "/": "/"}
+
+
+def _js_unescape(raw: str) -> str:
+    """JS escapes inside a literal. `'\\x6d\\x64\\x35'` is the string md5, and a rule that cannot
+    see that is trivially evaded."""
+    if "\\" not in raw:
+        return raw
+    out, i, n = [], 0, len(raw)
+    while i < n:
+        if raw[i] != "\\" or i + 1 >= n:
+            out.append(raw[i]); i += 1; continue
+        c = raw[i + 1]
+        if c == "u" and i + 2 < n and raw[i + 2] == "{":
+            j = raw.find("}", i + 3)
+            if j > 0:
+                try:
+                    out.append(chr(int(raw[i + 3:j], 16))); i = j + 1; continue
+                except ValueError:
+                    pass
+        if c in ("u", "x"):
+            width = 4 if c == "u" else 2
+            hexs = raw[i + 2:i + 2 + width]
+            if len(hexs) == width and all(h in "0123456789abcdefABCDEF" for h in hexs):
+                out.append(chr(int(hexs, 16))); i += 2 + width; continue
+        out.append(_JS_ESC.get(c, c)); i += 2
+    return "".join(out)
+
+
+# After these, a `/` is a REGEX. After an identifier, a number, `)` or `]` it is DIVISION.
+# `}` is treated as regex-allowed: a block end followed by a regex is ordinary, an object literal
+# divided by something is not.
+_JS_REGEX_KEYWORDS = {"return", "typeof", "instanceof", "in", "of", "new", "delete", "void",
+                      "throw", "case", "do", "else", "yield", "await"}
+
+
+def _js_regex_allowed(src: str, i: int) -> bool:
+    """True when the `/` at `i` opens a regex literal rather than dividing."""
+    j = i - 1
+    while j >= 0 and src[j] in " \t\r\n":
+        j -= 1
+    if j < 0:
+        return True
+    c = src[j]
+    if c in ")]":
+        return False
+    if c.isalnum() or c in "_$":
+        k = j
+        while k >= 0 and (src[k].isalnum() or src[k] in "_$"):
+            k -= 1
+        return src[k + 1:j + 1] in _JS_REGEX_KEYWORDS
+    return True
+
+
+def _js_regex_end(src: str, i: int) -> int:
+    """Index just past the regex literal opening at `i`. A `/` inside a character class is
+    literal, and a newline ends it -- an unterminated regex must cost one line, never the file."""
+    n = len(src)
+    j, in_class = i + 1, False
+    while j < n:
+        c = src[j]
+        if c == "\\":
+            j += 2; continue
+        if c == "\n":
+            return j
+        if c == "[":
+            in_class = True
+        elif c == "]":
+            in_class = False
+        elif c == "/" and not in_class:
+            j += 1
+            while j < n and src[j].isalpha():      # flags
+                j += 1
+            return j
+        j += 1
+    return n
+
+
+def mask_js_source(text: str):
+    """Blank comment bodies and string/template/regex literal bodies, preserving LENGTH and
+    newlines.
+
+    Same contract as `mask_source` and `mask_python_source`: `(skeleton, literals)`, the skeleton
+    character-for-character the same size as the input so any offset maps back to a real line, and
+    `literals` keyed by the index of the opening quote.
+
+    Three JS-specific rules:
+      - `//` and `/* */` are comments, but a bare `/` may open a REGEX LITERAL and the difference
+        is decided by the previous significant token;
+      - a template literal spans lines, and its `${...}` interpolations are CODE and stay in the
+        skeleton (masked recursively), while the text around them is blanked;
+      - a regex body is blanked entirely -- `/md5/` is a pattern, not a call.
+
+    Pure.
+    """
+    src = text or ""
+    n = len(src)
+    out = list(src)
+    lits: dict = {}
+    i = 0
+    while i < n:
+        c = src[i]
+        if c == "/" and i + 1 < n and src[i + 1] == "/":
+            j = src.find("\n", i)
+            j = n if j < 0 else j
+            for k in range(i, j):
+                out[k] = " "
+            i = j
+        elif c == "/" and i + 1 < n and src[i + 1] == "*":
+            j = src.find("*/", i + 2)
+            j = n if j < 0 else j + 2
+            for k in range(i, j):
+                if out[k] != "\n":
+                    out[k] = " "
+            i = j
+        elif c == "/" and _js_regex_allowed(src, i):
+            j = _js_regex_end(src, i)
+            for k in range(i + 1, j):
+                if out[k] != "\n":
+                    out[k] = _FILL
+            i = j
+        elif c == "`":
+            i = _js_mask_template(src, out, lits, i)
+        elif c in ("'", '"'):
+            j, buf = i + 1, []
+            while j < n:
+                if src[j] == "\\" and j + 1 < n:
+                    buf.append(src[j:j + 2]); j += 2; continue
+                if src[j] == c or src[j] == "\n":
+                    break                            # a newline ends it: never swallow the file
+                buf.append(src[j]); j += 1
+            end = min(j, n)
+            for k in range(i + 1, end):
+                out[k] = _FILL
+            lits[i] = _js_unescape("".join(buf))
+            i = end + 1 if end < n and src[end] == c else end
+        else:
+            i += 1
+    return "".join(out), lits
+
+
+def _js_mask_template(src, out, lits, i):
+    """Blank a template literal, leaving its `${...}` interpolations in the skeleton AS CODE.
+    Returns the index just past the closing backtick."""
+    n = len(src)
+    parts, j = [], i + 1
+    while j < n:
+        c = src[j]
+        if c == "\\" and j + 1 < n:
+            parts.append(src[j:j + 2])
+            out[j] = out[j + 1] = _FILL
+            j += 2
+            continue
+        if c == "`":
+            j += 1
+            break
+        if c == "$" and j + 1 < n and src[j + 1] == "{":
+            end = _close_of(src, j + 1, n)
+            sub_skel, sub_lits = mask_js_source(src[j + 2:max(j + 2, end - 1)])
+            out[j] = _FILL
+            out[j + 1] = " "
+            for off, ch in enumerate(sub_skel):
+                out[j + 2 + off] = ch
+            for key, val in sub_lits.items():
+                lits[j + 2 + key] = val
+            if end - 1 < n:
+                out[end - 1] = " "
+            j = end
+            continue
+        if c != "\n":
+            out[j] = _FILL
+        parts.append(c)
+        j += 1
+    lits[i] = _js_unescape("".join(parts))
+    return j
+
+
+# ── what each name in this module is BOUND to ────────────────────
+# `const c = require('crypto')` and `const { createHash } = require('crypto')` are the two shapes
+# a Node codebase actually uses, plus their ESM twins. A rule that matches the literal receiver
+# `crypto` sees neither of the aliased forms -- which is precisely the Q-041 defect, shipped in
+# Python and found later. Here the aliased require is a control written before the rule.
+_JS_REQUIRE_NAME = re.compile(
+    r"(?:const|let|var)\s+([A-Za-z_$][\w$]*)\s*=\s*require\s*\(")
+_JS_REQUIRE_DESTRUCT = re.compile(
+    r"(?:const|let|var)\s*\{([^}]*)\}\s*=\s*require\s*\(")
+_JS_IMPORT_STAR = re.compile(r"import\s*\*\s*as\s+([A-Za-z_$][\w$]*)\s+from\b")
+_JS_IMPORT_DEFAULT = re.compile(r"import\s+([A-Za-z_$][\w$]*)\s*(?:,\s*\{([^}]*)\}\s*)?from\b")
+_JS_IMPORT_NAMED = re.compile(r"import\s*\{([^}]*)\}\s*from\b")
+_JS_FUNC_DECL = re.compile(r"(?m)^[ \t]*(?:async\s+)?function\s*\*?\s*([A-Za-z_$][\w$]*)\s*\(")
+
+
+def _js_module_of(skel: str, lits: dict, pos: int, limit: int = 200):
+    """The module string literal that follows `pos` -- the argument of a `require(...)` or the
+    source of an `import ... from`."""
+    for k in sorted(lits):
+        if pos <= k < pos + limit:
+            mod = lits[k]
+            return mod[5:] if mod.startswith("node:") else mod
+    return None
+
+
+def _js_destructured(spec: str) -> list:
+    """`{ createHash, createHmac: hmac }` -> [(local, original), ...]"""
+    out = []
+    for part in (spec or "").split(","):
+        bits = [b.strip() for b in part.split(":")]
+        if not bits or not bits[0]:
+            continue
+        orig = bits[0]
+        local = bits[1] if len(bits) > 1 and bits[1] else orig
+        if re.fullmatch(r"[A-Za-z_$][\w$]*", orig) and re.fullmatch(r"[A-Za-z_$][\w$]*", local):
+            out.append((local, orig))
+    return out
+
+
+def _js_bindings(skel: str, lits: dict):
+    """What each name in this module is BOUND to.
+
+    Returns `(modules, symbols)` with the same meaning as `_py_imports`:
+      modules  {local name -> module}   from `require('m')` / `import * as x from 'm'`
+      symbols  {local name -> (module, original)}   from destructuring / named imports
+    """
+    modules, symbols = {}, {}
+    for m in _JS_REQUIRE_NAME.finditer(skel):
+        mod = _js_module_of(skel, lits, m.end())
+        if mod:
+            modules[m.group(1)] = mod
+    for m in _JS_REQUIRE_DESTRUCT.finditer(skel):
+        mod = _js_module_of(skel, lits, m.end())
+        if mod:
+            for local, orig in _js_destructured(m.group(1)):
+                symbols[local] = (mod, orig)
+    for m in _JS_IMPORT_STAR.finditer(skel):
+        mod = _js_module_of(skel, lits, m.end())
+        if mod:
+            modules[m.group(1)] = mod
+    for m in _JS_IMPORT_DEFAULT.finditer(skel):
+        mod = _js_module_of(skel, lits, m.end())
+        if mod:
+            modules[m.group(1)] = mod
+            for local, orig in _js_destructured(m.group(2) or ""):
+                symbols[local] = (mod, orig)
+    for m in _JS_IMPORT_NAMED.finditer(skel):
+        mod = _js_module_of(skel, lits, m.end())
+        if mod:
+            for local, orig in _js_destructured(m.group(1)):
+                symbols[local] = (mod, orig)
+    return modules, symbols
+
+
+# Node exposes the same object as `crypto`, `node:crypto` and `crypto.webcrypto`, and a browser
+# bundle reaches it as the global `crypto`. All of them are the same API surface.
+_JS_CRYPTO_MODULES = ("crypto", "node:crypto")
+
+
+def _js_crypto_names(modules: dict, symbols: dict) -> list:
+    """Every local name bound to Node's crypto module.
+
+    The permissive fallback matches the Python rule: with no import of that name at all, a
+    qualified `crypto.createHash(...)` that executes must have `crypto` bound somewhere (Node's
+    global, or a bundler's shim), and being permissive there costs no precision. What it must NOT
+    do is claim the bare name when it is demonstrably bound to something else -- a local
+    `const crypto = require('crypto-js')` is a DIFFERENT library with a different API.
+    """
+    names = {local for local, mod in modules.items() if mod in _JS_CRYPTO_MODULES}
+    shadowed = any(mod not in _JS_CRYPTO_MODULES for local, mod in modules.items()
+                   if local == "crypto")
+    if not shadowed and "crypto" not in symbols:
+        names.add("crypto")
+    return sorted(names)
+
+
+def _js_shadowed(skel: str, name: str) -> bool:
+    """A local `function md5(...)` shadows anything of that name -- calling it is the operator's
+    own function, not a library digest."""
+    return bool(_JS_FUNC_DECL.search(skel) and
+                re.search(r"(?m)^[ \t]*(?:async\s+)?function\s*\*?\s*%s\s*\(" % re.escape(name),
+                          skel))
+
+
+# JS has no `getProperty(key, default)` idiom -- the Node equivalent is
+# `process.env.ALG || 'md5'`, which is an ordinary expression whose literals `_expr_values`
+# already collects. The config branch is therefore deliberately inert for this dialect rather
+# than pointed at something that would misread it.
+_JS_NO_CONFIG = re.compile(r"(?!)")
+_JS_DIALECT = _Dialect(_JS_NO_CONFIG, _stmt_end)
+
+
+def _js_arg_values(src, skel, lits, s, e, props=None):
+    return _expr_values(src, skel, lits, s, e, props, 0, _JS_DIALECT)
+
+
+# ── JS weak hash (CWE-328) ───────────────────────────────────────
+# `crypto.createHash('sha256')` is the fix, not the bug, and it is the single most common call in
+# this family -- so the ALGORITHM decides, resolved from the argument, never the method name.
+_JS_HASH_METHODS = ("createHash", "createHmac", "createSign", "createVerify")
+# npm packages that ARE the digest. `const md5 = require('md5'); md5(data)` is a real Node idiom,
+# and it is what makes the "a user-defined md5() must not flag" control meaningful rather than
+# vacuous: the binding is what separates them.
+_JS_DIGEST_MODULES = {"md5": "MD5", "js-md5": "MD5", "sha1": "SHA1", "js-sha1": "SHA1",
+                      "crypto-js/md5": "MD5", "crypto-js/sha1": "SHA1"}
+
+
+def scan_js_hash(text: str, props: dict = None) -> list:
+    """Broken message digest selected at a real Node call site (CWE-328)."""
+    src = text or ""
+    skel, lits = mask_js_source(src)
+    modules, symbols = _js_bindings(skel, lits)
+    out, seen = [], set()
+
+    def _add(alg, why, api, idx, spec, origin):
+        line = _line_of(src, idx)
+        if (alg, line, api) in seen:
+            return
+        seen.add((alg, line, api))
+        out.append({"algorithm": alg, "why": why, "api": api, "line": line, "spec": spec,
+                    "resolved_from": origin, "cwe": "CWE-328"})
+
+    def _digest_site(method, api, idx, mac=False):
+        s, e = _arg_span(skel, idx)
+        args = _split_args(skel, s, e)
+        if not args:
+            return
+        for value, origin in _js_arg_values(src, skel, lits, args[0][0], args[0][1], props):
+            weak = _digest_weakness(value, mac)
+            if weak:
+                _add(weak[0], weak[1], api, idx, value, origin)
+
+    for local in _js_crypto_names(modules, symbols):
+        q = re.escape(local)
+        for method in _JS_HASH_METHODS:
+            for m in re.finditer(r"(?<![\w.$])%s\s*\.\s*%s\s*\(" % (q, method), skel):
+                _digest_site(method, "crypto.%s" % method, m.end() - 1, method == "createHmac")
+        # WebCrypto: crypto.subtle.digest('SHA-1', data) / crypto.webcrypto.subtle.digest(...)
+        for m in re.finditer(r"(?<![\w.$])%s\s*\.\s*(?:webcrypto\s*\.\s*)?subtle\s*\.\s*"
+                             r"digest\s*\(" % q, skel):
+            _digest_site("digest", "crypto.subtle.digest", m.end() - 1)
+
+    for local, (module, orig) in symbols.items():
+        if module in _JS_CRYPTO_MODULES and orig in _JS_HASH_METHODS and not _js_shadowed(skel, local):
+            for m in re.finditer(r"(?<![\w.$])%s\s*\(" % re.escape(local), skel):
+                _digest_site(orig, "crypto.%s" % orig, m.end() - 1, orig == "createHmac")
+
+    # A module that IS the digest.
+    for local, module in modules.items():
+        alg = _JS_DIGEST_MODULES.get(module)
+        if not alg or _js_shadowed(skel, local):
+            continue
+        weak = _digest_weakness(alg)
+        if not weak:
+            continue
+        for m in re.finditer(r"(?<![\w.$])%s\s*\(" % re.escape(local), skel):
+            _add(weak[0], weak[1], "require('%s')" % module, m.start(), alg, "module-name")
+    return out
+
+
+# ── JS weak randomness (CWE-330) ─────────────────────────────────
+# THE RECEIVER DECIDES. `crypto.randomBytes`, `crypto.randomUUID`, `crypto.randomInt` and
+# `getRandomValues` all read the OS CSPRNG and are never flagged -- they are the fix. What is
+# flagged is `Math.random()` (a fast non-crypto PRNG, V8's xorshift128+, whose internal state is
+# recoverable from a short run of outputs) and `crypto.pseudoRandomBytes`, whose own name says it.
+_JS_WEAK_RANDOM_METHODS = ("pseudoRandomBytes", "prng", "rng")
+_JS_MATH_RANDOM = re.compile(r"(?<![\w.$])Math\s*\.\s*random\s*\(\s*\)")
+_JS_RANDOM_WHY = ("Math.random() is a non-cryptographic PRNG (V8 uses xorshift128+); its internal "
+                  "state is recoverable from a short run of observed outputs")
+_JS_PSEUDO_WHY = ("crypto.pseudoRandomBytes is not a cryptographic source -- the name is the "
+                  "warning; use crypto.randomBytes")
+_JS_CLOCK = (r"(?:Date\s*\.\s*now\s*\(\s*\)|new\s+Date\s*\([^)]*\)\s*\.\s*getTime\s*\(\s*\)"
+             r"|performance\s*\.\s*now\s*\(\s*\))")
+_JS_CLOCK_TOKEN = re.compile(
+    r"(?<![\w.$])(\w*(?:token|session|nonce|otp|secret|salt|apikey|password|guid|uuid)\w*)"
+    r"\s*=[^;\n]{0,90}?" + _JS_CLOCK, re.I)
+
+
+def scan_js_random(text: str) -> list:
+    """Predictable randomness reaching a security value (CWE-330/CWE-337)."""
+    src = text or ""
+    skel, lits = mask_js_source(src)
+    modules, symbols = _js_bindings(skel, lits)
+    out, seen = [], set()
+
+    def _add(construct, why, idx, cwe="CWE-330"):
+        line = _line_of(src, idx)
+        if (construct, line) in seen:
+            return
+        seen.add((construct, line))
+        out.append({"construct": construct, "why": why, "api": construct, "line": line,
+                    "spec": construct, "resolved_from": "literal", "cwe": cwe})
+
+    for m in _JS_MATH_RANDOM.finditer(skel):
+        _add("Math.random()", _JS_RANDOM_WHY, m.start())
+    for local in _js_crypto_names(modules, symbols):
+        for method in _JS_WEAK_RANDOM_METHODS:
+            for m in re.finditer(r"(?<![\w.$])%s\s*\.\s*%s\s*\("
+                                 % (re.escape(local), method), skel):
+                _add("crypto.%s()" % method, _JS_PSEUDO_WHY, m.start())
+    for local, (module, orig) in symbols.items():
+        if module in _JS_CRYPTO_MODULES and orig in _JS_WEAK_RANDOM_METHODS \
+                and not _js_shadowed(skel, local):
+            for m in re.finditer(r"(?<![\w.$])%s\s*\(" % re.escape(local), skel):
+                _add("crypto.%s()" % orig, _JS_PSEUDO_WHY, m.start())
+    # Same head-noun and argument-list discipline as the Python and Java clock rules (Q-042).
+    for m in _clock_token_hits(skel, _JS_CLOCK_TOKEN):
+        _add("clock -> %s" % m.group(1),
+             "a security value derived from the clock is derivable by anyone who knows when it "
+             "was issued", m.start(), "CWE-337")
+    return out
+
+
+# ── JS weak crypto (CWE-327) ─────────────────────────────────────
+# Node names the cipher in a single string: 'aes-256-gcm', 'des-ede3-cbc', 'rc4', 'aes-128-ecb'.
+# THE BARE-`AES` ARGUMENT DOES NOT TRANSFER HERE. In Java `Cipher.getInstance("AES")` silently
+# means ECB, which is the disagreement we are deliberately keeping on Juliet; Node requires an
+# explicit mode and throws without one, so there is no implicit-ECB inference to make and none is
+# made. Only an explicit ECB is reported.
+_JS_MODES = {"ecb", "cbc", "cfb", "cfb1", "cfb8", "ofb", "ctr", "gcm", "ccm", "ocb", "xts", "wrap"}
+_JS_CIPHER_ALIAS = {"DES3": "DESEDE", "DESEDE3": "DESEDE", "DESEDE": "DESEDE", "DESX": "DES",
+                    "BF": "BLOWFISH", "ARCFOUR": "RC4", "RC4HMACMD5": "RC4"}
+_JS_CIPHER_METHODS = ("createCipheriv", "createDecipheriv")
+# `createCipher`/`createDecipher` (no iv) derive the key with EVP_BytesToKey and a single MD5
+# round, with no salt. Deprecated in Node for exactly that reason, and weak whatever cipher is
+# named -- so it is reported on the API, not on the algorithm.
+_JS_LEGACY_CIPHER = ("createCipher", "createDecipher")
+_JS_LEGACY_WHY = ("crypto.createCipher derives the key with a single unsalted MD5 round "
+                  "(EVP_BytesToKey); use createCipheriv with a random IV and a real KDF")
+
+
+def _js_cipher_weakness(spec: str):
+    """(label, why) when this Node cipher string is weak, else None."""
+    if not spec or not re.fullmatch(r"[A-Za-z0-9_-]{2,40}", spec):
+        return None                                   # prose, not a cipher name
+    parts = spec.lower().split("-")
+    mode = parts[-1] if parts[-1] in _JS_MODES else ""
+    family = [p for p in (parts[:-1] if mode else parts) if not p.isdigit()]
+    fam = _norm_alg("".join(family))
+    fam = _JS_CIPHER_ALIAS.get(fam, fam)
+    if fam in _WEAK_CIPHERS:
+        return (spec, _WEAK_CIPHERS[fam])
+    if mode == "ecb":
+        return (spec, "ECB mode — equal plaintext blocks yield equal ciphertext blocks")
+    return None
+
+
+def scan_js_crypto(text: str, props: dict = None) -> list:
+    """Weak or broken CIPHER selected at a real Node call site (CWE-327)."""
+    src = text or ""
+    skel, lits = mask_js_source(src)
+    modules, symbols = _js_bindings(skel, lits)
+    out, seen = [], set()
+
+    def _add(alg, why, api, idx, spec, origin):
+        line = _line_of(src, idx)
+        if (alg, line, api) in seen:
+            return
+        seen.add((alg, line, api))
+        out.append({"algorithm": alg, "why": why, "api": api, "line": line, "spec": spec,
+                    "resolved_from": origin, "cwe": "CWE-327"})
+
+    def _cipher_site(api, idx):
+        s, e = _arg_span(skel, idx)
+        args = _split_args(skel, s, e)
+        if not args:
+            return
+        for value, origin in _js_arg_values(src, skel, lits, args[0][0], args[0][1], props):
+            weak = _js_cipher_weakness(value)
+            if weak:
+                _add(weak[0], weak[1], api, idx, value, origin)
+
+    for local in _js_crypto_names(modules, symbols):
+        q = re.escape(local)
+        for method in _JS_CIPHER_METHODS:
+            for m in re.finditer(r"(?<![\w.$])%s\s*\.\s*%s\s*\(" % (q, method), skel):
+                _cipher_site("crypto.%s" % method, m.end() - 1)
+        for method in _JS_LEGACY_CIPHER:
+            for m in re.finditer(r"(?<![\w.$])%s\s*\.\s*%s\s*\(" % (q, method), skel):
+                _add("createCipher (unsalted MD5 KDF)", _JS_LEGACY_WHY, "crypto.%s" % method,
+                     m.start(), method, "method-name")
+    for local, (module, orig) in symbols.items():
+        if module not in _JS_CRYPTO_MODULES or _js_shadowed(skel, local):
+            continue
+        if orig in _JS_CIPHER_METHODS:
+            for m in re.finditer(r"(?<![\w.$])%s\s*\(" % re.escape(local), skel):
+                _cipher_site("crypto.%s" % orig, m.end() - 1)
+        elif orig in _JS_LEGACY_CIPHER:
+            for m in re.finditer(r"(?<![\w.$])%s\s*\(" % re.escape(local), skel):
+                _add("createCipher (unsalted MD5 KDF)", _JS_LEGACY_WHY, "crypto.%s" % orig,
+                     m.start(), orig, "method-name")
+    return out
+
+
+# ── assemble the code-assisted findings for one JS/TS source file ──
+_JS_MARKER = re.compile(
+    r"(?m)^[ \t]*(?:const|let|var)\s+[\w${}\s,]+=\s*require\s*\("
+    r"|^[ \t]*import\s+[\w*{},\s]+\s+from\s*['\"]"
+    r"|^[ \t]*(?:export\s+)?(?:async\s+)?function\s*\*?\s*[\w$]*\s*\("
+    r"|^[ \t]*module\.exports\b"
+    r"|^[ \t]*export\s+(?:default|const|class|function)\b")
+_JS_EXTS = (".js", ".mjs", ".cjs", ".jsx", ".ts", ".tsx")
+
+
+def looks_like_js(text: str, source: str = "") -> bool:
+    if str(source or "").lower().endswith(_JS_EXTS):
+        return True
+    return bool(_JS_MARKER.search(text or ""))
+
+
+def review_js(text: str, source: str, props: dict = None) -> list:
+    """CODE-ASSISTED (SAST) review of one JavaScript/TypeScript source file.
+
+    Deliberately the same three families and the same finding shape as `review_java` and
+    `review_python`: a consumer of this lane must not be able to tell which language produced a
+    finding, only which lane did.
+    """
+    out = []
+    for h in scan_js_crypto(text, props):
+        out.append(_source_finding(
+            source, "weak_crypto", "CWE-327", "Weak cryptographic algorithm: %s" % h["algorithm"],
+            h,
+            "Data encrypted with this algorithm does not have the confidentiality it appears to have.",
+            "Use crypto.createCipheriv with aes-256-gcm and a random per-message IV.",
+            "the source selects %r at a %s call site — definitionally CWE-327, no runtime "
+            "behaviour is in question" % (h.get("spec"), h.get("api")),
+            ["crypto"]))
+    for h in scan_js_hash(text, props):
+        out.append(_source_finding(
+            source, "weak_hash", "CWE-328", "Broken hash function: %s" % h["algorithm"], h,
+            "A digest with practical collisions cannot support integrity, signatures or password "
+            "storage.",
+            "Use crypto.createHash('sha256') for integrity; use bcrypt, scrypt or Argon2 for "
+            "passwords.",
+            "the source selects the digest %r at a %s call site — definitionally CWE-328"
+            % (h.get("spec"), h.get("api")),
+            ["crypto", "hash"]))
+    for h in scan_js_random(text):
+        out.append(_source_finding(
+            source, "weak_random", h["cwe"], "Predictable randomness: %s" % h["construct"], h,
+            "Any token, key, session id or nonce from this generator is reproducible by an "
+            "attacker who observes a few outputs.",
+            "Use crypto.randomBytes / crypto.randomUUID (Node) or crypto.getRandomValues "
+            "(browser) for every security-relevant value.",
+            "the source calls %s — a non-cryptographic source, observed at the call site and not "
+            "merely named" % h["construct"],
+            ["randomness"]))
+    return out

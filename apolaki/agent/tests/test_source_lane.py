@@ -577,9 +577,29 @@ def test_review_routes_python_source_into_the_code_assisted_lane():
                for f in res["findings"])
 
 
-def test_review_still_leaves_javascript_out_of_the_python_lane():
+def test_javascript_routes_to_the_JS_dialect_not_the_python_one():
+    """This used to assert that a JS file produced NO code-assisted finding, and that was correct
+    while the lane had no JS dialect -- the point was that the Python rules must not claim a file
+    they cannot read. B-020 added the dialect, so the fact changed; the assertion is inverted, not
+    deleted, and the anti-mis-routing intent is kept explicitly below.
+    """
     res = cr.review("import x from 'y';\nvar r = Math.random();\nel.innerHTML = r;\n", "app.js")
-    assert not any(f.get("lane") == "code-assisted" for f in res["findings"])
+    ca = [f for f in res["findings"] if f.get("lane") == "code-assisted"]
+    assert [f["cwe"] for f in ca] == ["CWE-330"]
+    # ...and it is the JS rule that produced it, not the Python one
+    assert cr.scan_python_random("var r = Math.random();\n") == []
+
+
+def test_the_lead_generator_stands_down_where_the_call_site_analysis_answered():
+    """`scan_weak_crypto` reports `Math.random()` as a low-confidence candidate and the JS rule
+    reports the same line as a confirmed CWE-330. Emitting both is one defect described twice at
+    two confidences, and a reader cannot tell it is one."""
+    res = cr.review("var r = Math.random();\n", "app.js")
+    assert [f["title"] for f in res["findings"] if "Weak cryptography" in f["title"]] == []
+    assert [f["cwe"] for f in res["findings"] if f.get("lane") == "code-assisted"] == ["CWE-330"]
+    # the lead still fires where no precise rule exists (a language the dialects do not cover)
+    php = cr.review("<?php $h = md5($p); ?>\n", "legacy.php")
+    assert any("Weak cryptography" in f["title"] for f in php["findings"])
 
 
 def test_every_python_source_finding_is_marked_source_derived():
