@@ -193,4 +193,57 @@ Targeted rescans remain unwired. The required change is in coordinator-owned `pl
 the one-per-host dedup key `run_zap:{host}` with a state/version-aware key after newly discovered
 routes or authenticated state, while preserving a bounded rescan budget. No planner file was touched.
 
-Full-suite, Tier-3, benchmark-identity, and commit measurements are in progress.
+## Full Suite
+
+Baseline: 2238 passed / 9 skipped. Final: baseline plus 18 passing ZAP controls and two explicitly
+opt-in live controls; no existing pass or skip moved.
+
+```text
+docker run --rm -v "C:/Users/voice/Desktop/GitHub/MISC-codex-lane7/apolaki/agent:/app" -w /app apolaki-agent python -m pytest tests/ -p no:cacheprovider
+
+2256 passed, 11 skipped, 9 warnings in 302.93s (0:05:02)
+```
+
+Full denominator: 2267 tests, all accounted for as 2256 passed plus 11 skipped. Failures: 0.
+
+## Tier-3 Gate
+
+The repository was mounted read-only. `TIER3_CURRENT` and `TIER3_GATE_ARTIFACT` were redirected to
+the disposable container's `/tmp`; neither the shared baseline nor its normal artifact directory was
+written.
+
+```text
+Tier-3: 33/33 controls passed across 15 classes; semantic_sha256=ae9f8a1bc998f97001d5c478304d1b0197c2472ee3619328cf431baad65968ee; artifact_sha256=48afcd998737a2b6b9bf54d0b121c9bad9daf7c2104b00ac303c448824813cf2
+gate_artifact_sha256=38a9119650c1ff53139479d9d283ee82f0f612de5829b969b5e443d1c96b9255
+33 Tier-3 control(s) pass; no regression against a baseline of 32
+```
+
+## Benchmark Identity
+
+No benchmark scan was rerun and no new score is claimed. That is deliberate: this lane changes only
+ZAP orchestration, while `owasp_bench.ENGINES` maps nine non-ZAP methods. A baseline-to-HEAD diff
+proved all 17 `tools.py` hunks lie inside `_run_zap` (current lines 8873-9085), with zero hunks
+outside it. `owasp_bench.py` and all 19 committed benchmark artifacts have unchanged Git blobs.
+Therefore the committed Java/Python benchmark inputs, raw rows, score semantics, and published
+numbers did not move; this is code-path identity, not a fabricated rerun.
+
+Representative blob identity:
+
+```text
+owaspbench_java_v12_DAST_FULL_20260811.jsonl  f6cd383a348aca7b42cb006c673e521b9a743460  same
+benchmarkpython_v01_DAST_20260811.jsonl        dc95c84f7ef8b027ba0731a1c28593f10a640b5a  same
+owaspbench_java_v12_CODEASSISTED_20260811.json 48017e2897981e303d83f802836631236c5705fd  same
+benchmarkpython_v01_CODEASSISTED_20260811.json bd29524618944bbe1fd13b74ea08a5eb6dec4f84  same
+agent/owasp_bench.py                           bc25d1fdfd573a43afbc5aab6fce5d839478beb8  same
+benchmark_paths_changed=0
+tools_diff_hunks_outside_run_zap=0
+```
+
+## Commits And Integration
+
+- Branch: `codex/zap-invocation`
+- Implementation commit: `114d36d` (`Wire ZAP execution with proof and rate guards`)
+- Changed only the seven leased paths listed at the top of this handoff.
+- No push or merge was performed. Cherry-pick the implementation commit and the final handoff-only
+  commit returned in the coordinator report. Its own hash is intentionally omitted here rather than
+  guessed before the commit exists.
