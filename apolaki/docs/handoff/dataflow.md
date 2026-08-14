@@ -264,9 +264,55 @@ only**), this file.
 
 Regression: full suite green in a clean container off the working tree, exit 0, 0 failures.
 
+---
+
+## Q-041 and Q-042 [MEASURED - both fixed, both cost the benchmark exactly 0]
+
+Both were strict xfails pinning measured defects. The markers are gone because the facts changed;
+every assertion the Breaker wrote is intact and four negative controls were added.
+
+**Q-041 - the binding was computed and thrown away.** `_py_imports` produced
+`modules['r'] = 'random'`, and every rule then matched a hard-coded literal receiver. So
+`from random import getrandbits as g` worked and `import random as r; r.getrandbits(32)` was
+invisible. Half a mechanism - the same shape this project keeps finding - and the missing half is
+the one real code is likelier to use. `_py_module_aliases` resolves the binding rather than only
+suppressing it.
+
+Widening the receiver must not widen the verdict, so the controls are the deliverable:
+`import numpy.random as r` and `from numpy import random` still report nothing, and
+`r.SystemRandom().getrandbits(32)` - the 113 clean twins, through an alias - is still a CSPRNG.
+
+**Q-042 - the rule matched a substring of a name.** `_PY_CLOCK_TOKEN` fired on any identifier
+merely CONTAINING a security word within 90 characters of a clock read. Fixed structurally, not
+with a longer word list:
+
+1. an assignment is at **paren depth 0** - `f(token=x)` is a keyword argument, not an assignment;
+2. a compound identifier means its **head noun** - `token_expiry` is an expiry, `session_start` is
+   a start, and `expiry_token` really is a token.
+
+The Java twin `_CLOCK_TOKEN` had the identical defect and got the identical fix.
+
+### Evidence
+
+| check | result |
+|---|---|
+| benchmark cost, both suites | **0 cases** - re-scan produced artifacts **byte-identical** to the sealed trustbound run (`239ff8e7...`, `8023e159...`), 0 differing cases of 2740 and 1230 |
+| the in-the-wild false positive | **gone**: CWE-337 across 5150 files of the container's own Python goes **1 -> 0**, and the one removed is exactly `token=` at `anthropic/lib/credentials/_workload.py:346` |
+| true positives lost | **none** - on the stdlib and on Apolaki's own `agent/` tree the only old/new difference is that single false positive |
+
+Byte-identical artifacts are a stronger claim than an unchanged score: the score *cannot* have
+moved, because the input to the scorer did not.
+
+**Honest note on Q-041's measured gain: it is zero on all four corpora, and that is the correct
+answer rather than a disappointment.** Only two stdlib files alias these modules, and the sole
+aliased digest call is `_hashlib.new(digestmod, ...)` in `hmac.py`, where the algorithm is a
+caller-supplied variable and no verdict is available. The fix is proven by construction and by unit
+tests, not by a corpus that happens to exercise it. Claiming a measured improvement here would be
+inventing one.
+
 ## Next in this lane
 
-Q-041 (aliased module imports invisible - `_py_imports` computes the binding and discards it) and
-Q-042 (`_PY_CLOCK_TOKEN` firing on any identifier merely containing a security word). Both are in
-`codereview.py`, both pinned by strict xfails, both cost the benchmark zero cases and are pure
-generality holes.
+**Q-044 is the one that matters now**: `codeintel.review_source_tree()` - this analyser, scoring
+100/100/100/100 - has exactly one caller, `owasp_bench.py`. No mission can supply a source tree and
+`/codereview` calls the older `codeintel.review()`. The capability is benchmark-only, which is why
+Q-042's false positive was theoretical; the moment it gets a production entry point, it stops being.
