@@ -1544,3 +1544,87 @@ over an index tree.
 
 The corrected statement: **the run probes what the crawl reached, the crawl reaches 250 of 2740
 pages, and nothing in the artifact recorded which 250.** `coverage.cases_probed` records it now.
+
+---
+
+# SESSION 4 — VERDICTS SO FAR (the eight checks, per claim)
+
+## Claim: "the blind-SQLi stability gate cost ~9 findings and that was the right trade"
+
+| check | result |
+|---|---|
+| 1. failed before the fix | n/a — this is a claim about a shipped change, not a new test |
+| 2. exact assertion kills the mutant | n/a |
+| 3. negative controls stay clean | **FAIL.** The gate still confirms on responses to identical requests: 00494 at 7.7-15.5% per attempt, 00023 at 4.5%. 400 ordered 4-tuples per field, 12 live samples. |
+| 4. false positives anywhere | The gate reduced FP rate but did not remove it; and `00023`, a NEW false positive of the same shape, appeared in the rerun. |
+| 5. deterministic replay | **PASS for the losses**: all four eligible cases fire gated in 3/3 independent trials. |
+| 6. clean environment | PASS. Throwaway container on `apolaki_default`, repo mounted `:ro`, no image rebuilt, no `docker cp`. |
+| 7. all surfaces agree | n/a |
+| 8. generalises | n/a |
+
+**VERDICT: REJECTED.** The gate rejects **0 of the 9** lost cases: 5 were confirmed by
+`quote_break_recovers`, which the gate cannot reach, and the other 4 have baseline
+self-similarity 1.0000 and confirm with the gate on. No trade was made, so none should be recorded.
+
+## Claim: "the target-rate policy cut requests per unit time"
+
+| check | result |
+|---|---|
+| 6. clean environment | PASS — read from the committed tree. |
+| the mechanism | **FAIL.** `TargetRatePolicy.observe` returns `None` for any status outside `{429, 503}` and for any response without a parseable `Retry-After`. It is a reactive cooldown, not a rate limiter, and it has no other pacing anywhere: the only `asyncio.sleep` on a target path in `tools.py` is GitHub-recon dork spacing. |
+| the arithmetic | **FAIL.** It can only ADD wall-clock time. The rerun's wall clock fell 64%. |
+
+**VERDICT: REJECTED**, twice over.
+
+## Claim: "the two sqli false positives are two coincidences"
+
+| check | result |
+|---|---|
+| 3. negative controls | Run and decisive — identical-request 4-tuples, 400 per field, gate on. |
+| 4. false positives | Measured per-attempt rates, and 0/400 on both stable true positives. |
+| 5. deterministic replay | The FP is stochastic *by construction*; that is the finding, and the negative control measures its rate instead of chasing a single fire. |
+| 8. generalises | The mechanism is "unstable response body", and an entire benchmark category (`weakrand`, ~493 cases, ~275 of them clean) has one by definition. |
+
+**VERDICT: one structural defect, CONFIRMED.** Not two coincidences. Pinned by three strict xfails
+in `agent/tests/test_sqli_boolean_noise_floor.py`.
+
+## Claim: "the rerun scored 100.0% precision"
+
+Arithmetically true and reproduced byte for byte. **But it includes `BenchmarkTest00023`, an sqli
+claim on a weakrand case**, credited as a true positive only because the LOOSE convention counts any
+claim on a genuinely-vulnerable case and this weakrand case happens to be vulnerable to weak
+randomness. The same oracle firing on any of the ~275 CLEAN weakrand cases would have scored a false
+positive. **The class-matched 89.5% is the honest number**, and the 10.5% gap is exactly
+`00023` (sqli on weakrand) and `00407` (dom_data_manipulation on cmdi).
+
+---
+
+# TARGET 3 PART TWO — is −3 variance? The measurement design, stated before the result
+
+Two whole-product runs of **identical code**, so the only thing that can differ is the run itself.
+
+* **Code frozen once**, copied out of the working tree at `HEAD = 6c9907a` into
+  `<scratch>/brk4/snap`, sha256 over the sorted per-file hashes of every `.py`:
+  `a02c4b318a3abe1f8a2443c0a6da90ad2c723d5fe46c8bf67d7e78c08d9d5f6d`. Both runs mount that
+  snapshot, not the repo — Codex is live in `agent/tools.py` / `main.py` / `zap_client.py` and a
+  mid-run edit would silently make the two runs different products.
+* Same harness (`wp_run.py` from the snapshot), same target, same mode, `BBH_DATA_DIR=/tmp/wpdata`
+  so neither touches the shared store, `/out` mounted to a **key-free** directory.
+* Neither container can see a key. The seal is computed by the harness at the end, as before.
+
+**Stated in advance, so it cannot be fitted afterwards.** Two predictions:
+
+1. The deterministic selection path is order-stable at every step I read
+   (`crawl.bfs_frontier` first-occurrence, `surface.build_inventory` explicit `order` list,
+   `_spread_by_shape` dict insertion order, `sweep_targets` documented "order-stable"). If the crawl
+   is stable too, the two claim sets should be **identical**.
+2. Against that, the boolean-blind oracle on an unstable body is **stochastic by measurement** —
+   `BenchmarkTest00023` fires at ~4.5% per attempt and 00494-shaped pages at 8-16%. So any claim
+   resting on an unstable body is a coin flip, and I expect the differences (if any) to be
+   concentrated exactly there.
+
+**Caveat recorded before the numbers, not after:** the two runs are executing CONCURRENTLY against
+the same lab, to fit inside one session. Contention can only ADD noise. If the claim sets come out
+identical, the determinism conclusion is safe *a fortiori*. If they differ, the honest reading is
+"inconclusive between run-to-run variance and contention" unless the differences fall exactly on
+the unstable-body cases, and the right follow-up is a sequential repeat.

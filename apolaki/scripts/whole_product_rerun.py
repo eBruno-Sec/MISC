@@ -28,6 +28,13 @@ So every run now also records EFFORT and COVERAGE:
 saw them and said no; cases never probed = the sweep never got there. One number separates an oracle
 regression from a coverage regression, and it costs nothing to record.
 
+KNOWN BOUND ON THE COUNT, stated rather than left to be discovered: this reads the event stream, so
+it sees every dispatch that goes through `BBHAgent._run_tool` (the planner batch, the graph actions
+and the planner-independent sweep at agent.py:3424 all do). Dispatches made through
+`_exec_internal` -- the auth artery and the service sweep -- yield no `tool_call` event and are NOT
+counted here. `cases_probed` is therefore a LOWER bound on coverage, which is the safe direction:
+it can never claim a case was tested when it was not.
+
 The SEAL is unchanged -- sha256 over the sorted distinct claimed case ids -- so artifacts from
 before this change stay comparable.
 """
