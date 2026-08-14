@@ -261,6 +261,53 @@ Apolaki as a product.
 
 ---
 
+## WHOLE-PRODUCT RERUN — recall did not move, it went DOWN. 2026-08-13
+
+The number the week was aimed at. Claims sealed in history at `8700c99` **before** the key was read;
+scored in a `--network none` container; the scorer recomputes the sha256 and refuses to score if the
+claims moved. Result at `689b3c9`.
+
+| metric | baseline `ebd96f45` | rerun | delta |
+|---|---:|---:|---|
+| **recall** (loose) | **1.55%** (22/1415) | **1.34%** (19/1415) | **−0.21 pt** |
+| recall (class-matched) | not computed | 1.20% (17/1415) | — |
+| **precision** (loose) | 95.7% (22/23) | **100.0%** (19/19) | **+4.3 pt** |
+| precision (class-matched) | not computed | 89.5% (17/19) | — |
+| elapsed | 5329 s | **1893 s** | **−64%** |
+
+Like-for-like is the loose pair, because the standing baseline is a loose number: **1.55% → 1.34%.**
+
+**Class coverage genuinely broadened — and it still lost.** ldapi **1 → 5**, xpathi **0 → 1**, exactly
+what the body-parameter work predicted, since those sinks take body input only. **The entire loss is
+sqli: 20 → 11.** Net −3.
+
+**Three candidate causes, ALL UNVERIFIED, listed so none is adopted by default:**
+1. the blind-SQLi stability gate is precision-motivated and would reject exactly the marginal blind
+   confirmations that made up much of the baseline's 20 — i.e. we may have **traded ~9 sqli findings
+   for 0 FP and it worked as designed**;
+2. the rate policy cuts requests per unit time, and probe is where sqli lives;
+3. the run simply probed less before converging.
+(3) is cheapest to discriminate and dies immediately if the run hit a fixpoint rather than a budget —
+**but the artifact records neither step count nor exit reason.** That harness gap is the first thing
+to close before the next rerun.
+
+**Two wrong-class claims worth chasing**: `BenchmarkTest00023` (key `weakrand`, we claimed sqli — an
+sqli oracle firing on a case with no sqli, **the same shape as `00494` and still live**) and
+`BenchmarkTest00407` (key `cmdi`, we claimed dom_data_manipulation). The 100.0% vs 89.5% gap is the
+honest cost of the loose convention.
+
+**Caveat the lane raised against its own number**: one run, stateful lab, and the baseline was taken
+through the API on a baked image. The class-mix shift is large enough that −3 should not be treated as
+a stable delta without a repeat. Determinism was verified for VAmPI, **not** for this target.
+
+**MY ORDERING CALL WAS WRONG.** I put schema above throughput and wrote at the time: *"if schema lands
+and recall still doesn't move, then throughput was the binding constraint all along and I'll have cost
+us a cycle."* Schema landed; recall did not move. But throughput was **also** measured and ruled out.
+So neither hypothesis was the constraint — and the class-mix shift shows schema *worked*, it just did
+not convert. The honest position is that **we still do not know what bounds whole-product recall**,
+and three of my hypotheses (payload repertoire, carrier delivery, parameter visibility) are now
+falsified by measurement.
+
 ## Q-044 CLOSED — the SAST lane is reachable from a real mission. 2026-08-13
 
 Island number six is closed. `/engage` now accepts `source_root`, and the proof is the one that was

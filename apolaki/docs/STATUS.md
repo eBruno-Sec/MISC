@@ -43,7 +43,20 @@ gate at `scripts/tier3_gate.sh` (LF-normalized and pinned via `.gitattributes`).
 | Python v0.1 — **hybrid** (DAST + code-assisted SAST) | **38.8%** | 14-cat macro, full 1230-case suite | **0.0%** |
 | Python v0.1 — DAST only | 24.5% | 14-cat macro, full suite | 0.0% |
 | ~~Python v0.1 — harness~~ | ~~34.8%~~ | superseded: 54 cases, ~4 per category | — |
-| **Whole-product mission — SCORED** | **precision 95.7%** · **recall 1.6%** | 22 TP / 1 FP / 1415 vulnerable | 1 cross-family FP |
+| **Whole-product — RERUN 2026-08-13, sealed** | **precision 100.0%** · **recall 1.34%** | 19 TP / 0 FP / 1415 vulnerable | **0 FP** |
+| ~~Whole-product — baseline `ebd96f45`~~ | ~~precision 95.7% · recall 1.55%~~ | 22 TP / 1 FP / 1415 | superseded |
+
+**RECALL WENT DOWN. −3 findings. A week of work did not raise it.** Precision reached a clean 100%
+and the run is 2.8× faster (5329 s → 1893 s), but the product finds *fewer* benchmark cases. Class
+coverage genuinely broadened — **ldapi 1 → 5, xpathi 0 → 1**, consistent with the body-parameter work
+reaching sinks that only take body input — and **the entire loss is sqli: 20 → 11**. Net −3.
+
+**My ordering call was wrong and I am recording it as wrong.** Two days ago I moved schema above
+throughput and said: *"if schema lands and recall still doesn't move, then throughput was the binding
+constraint all along and I'll have cost us a cycle."* Schema landed. Recall did not move. But
+throughput was **also** measured and ruled out ("build nothing"), so neither of my two hypotheses was
+the constraint. Both were wrong, and the class-mix shift proves schema *worked* — it just did not
+convert into net findings.
 | **NIST Juliet Java 1.3 — code-assisted (SAST)** | **precision 66.48%** · **recall 100%** · F1 79.87% | 329 methods, 0 skipped in denominator | **60 FP, all bare-`AES`** |
 
 **Juliet's 60 false positives are a ground-truth disagreement we are KEEPING.** Every one is a Juliet
