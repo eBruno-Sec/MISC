@@ -101,6 +101,11 @@ def finding_fp(f: dict) -> str:
     return f"{cls}|{fam}|{param}|{host}{path}"
 
 
+def _dep_intel():
+    import dependency_intel
+    return dependency_intel
+
+
 def snapshot(recon: dict = None, urls: list = None, findings: list = None) -> dict:
     """Compact, serialisable view of what a mission discovered — the unit stored
     in memory and diffed against. Deterministic (sorted, deduped)."""
@@ -110,12 +115,20 @@ def snapshot(recon: dict = None, urls: list = None, findings: list = None) -> di
 
     hosts = set()
     tech = set()
+    import fingerprint as _fp
     for h in (recon.get("live_hosts") or []):
         host = _host_of(h.get("url") or "") or _host(h.get("url") or "")
         if host:
             hosts.add(host)
         for t in (h.get("tech") or []):
-            if t:
+            # Q-021B: the DISPLAY list is ungated by design (narrowing `_POWERED` would change
+            # `fingerprint()` for every caller), so the identity gate is applied HERE, at the point
+            # of persistence. Six of thirteen live `tech` rows were sentence fragments the
+            # powered-by regex captured -- `'a MultiJuicer Kubernetes cluste'`, `'in safety mode.'`
+            # -- and a live run against Mutillidae produced `'and that the database username'`.
+            # Those are the strings a future feed lookup would send off as product names.
+            # No `source` is passed: a bare display string has none, so only the SHAPE rules apply.
+            if t and not _fp.name_rejection(t):
                 tech.add(str(t))
     import dns_recon
     # Never PERSIST DNS/parsing artifacts (SOA-RNAME hosts) into the target's warm-start memory,
@@ -171,6 +184,13 @@ def snapshot(recon: dict = None, urls: list = None, findings: list = None) -> di
         "subdomains": sorted(subs),
         "endpoints": endpoints,
         "tech": sorted(tech),
+        # Q-021B: the FACTS, kept whole. They live in the snapshot blob and deliberately NOT in
+        # `asset_pairs` -- `memory_assets` is keyed (target_key, kind, value) over TEXT, so a row
+        # keyed on a JSON blob carrying `last_seen` would insert a brand-new row every mission
+        # instead of updating one. Sorted by identity so two snapshots of the same world compare
+        # equal. `tech` above stays the display list every existing reader expects.
+        "technology": sorted((recon.get("technology") or []),
+                             key=lambda f: _dep_intel().tech_fact_key(f)),
         "findings": finds,
         "counts": {"hosts": len(hosts), "subdomains": len(subs),
                    "endpoints": len(endpoints), "findings": len(finds)},

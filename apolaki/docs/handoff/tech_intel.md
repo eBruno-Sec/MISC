@@ -42,7 +42,8 @@ product name.
 |---|---|---|
 | B1+B2 | `dependency_intel` fact model + ladder; `fingerprint` identity gate, `tech_facts()`, `record_facts()` | landed `82538c4` |
 | B3 | `asset_graph`: `observe_technology()` + `build_from_engagement` projection + save/load | landed `8b002aa` |
-| B4 | `tools._run_fingerprint` producer patch + gate exemption removed | landed, proved live |
+| B4 | `tools._run_fingerprint` producer patch + gate exemption removed | landed `883d879`, proved live |
+| B5 | `memory`/`main`: cross-mission persistence + warm-start re-seed (oracle 3) | landed, proved live |
 
 **`tools.py` was returned to this lane when Q-023 closed, so B4 is no longer a hand-off - the
 producer is wired and proved against real labs (section 4a).** The chain is live end to end.
@@ -52,6 +53,8 @@ producer is wired and proved against real labs (section 4a).** The chain is live
 | reference on this HEAD, without this lane | `2241 passed, 9 skipped, 3 xfailed` |
 | after B1+B2 (+44 tests) | `2285 passed, 9 skipped, 3 xfailed` |
 | after B3 (+15 tests) | `2300 passed, 9 skipped, 3 xfailed` |
+| after B4 (+15 tests) | `2338 passed, 11 skipped, 1 xfailed` |
+| after B5 (+14 tests) | `2351 passed, 11 skipped, 1 xfailed` |
 
 The session opened at `2238 passed, 9 skipped`; the Breaker and the source lane committed
 concurrently, which is where the other 3 passed and the 3 xfailed came from. No pre-existing test
@@ -232,6 +235,51 @@ Three things this run proves that no unit test could:
 
 Reproduce with `scripts`-free one-shot: mount `agent/` read-only into the agent image on
 `--network apolaki_default` and run the proof script; it exits non-zero if any check fails.
+
+## 4b. Cross-mission - the fact outlives the mission that found it
+
+Oracle 3. Without this, `first_seen` is a lie: every mission rediscovers the same Apache and calls
+it new, and no version history ever accumulates for Q-021C/D to reason over.
+
+* **`memory.snapshot()`** gains `"technology"` - the facts kept whole, sorted by identity so two
+  snapshots of the same world compare equal. They live in the snapshot BLOB and deliberately not in
+  `asset_pairs`: `memory_assets` is keyed `(target_key, kind, value)` over TEXT, so a row keyed on a
+  JSON blob carrying `last_seen` would insert a brand-new row every single mission instead of
+  updating one. `tech` stays the display list every existing reader expects.
+* **The identity gate now runs at the point of PERSISTENCE.** `snapshot()["tech"]` filters through
+  `fingerprint.name_rejection`. This is what purges the prose rows the ticket named: six of thirteen
+  live `tech` rows were sentence fragments, and the live proof produced a seventh. No `source` is
+  passed, because a bare display string has none - only the SHAPE rules apply.
+* **`main._warm_start_technology()`** re-seeds from the prior snapshot, scope-validated per fact
+  exactly as subdomains and endpoints already are (a warm start is not a scope bypass), and
+  **merges** rather than assigns, so a re-detection extends `last_seen` and keeps the ORIGINAL
+  `first_seen`.
+* Seeding runs **before** the `if not assets: return` exit. A prior mission that detected a
+  technology but recorded no subdomain or endpoint would otherwise be silently discarded - "no
+  assets" standing in for "nothing known" is the falsy-default shape this codebase has been bitten
+  by twice. The cold-start contract `{"seeded": False}` is preserved byte-for-byte when genuinely
+  nothing is known, because that summary's whole content is "nothing was known".
+
+### LIVE PROOF of oracle 3 - two real missions, one real database
+
+**10/10 checks passed.** Mission 1 fingerprints three labs and snapshots; mission 2 warm-starts.
+
+```
+MISSION 2 -- warm
+  warm_start -> {'seeded': True, ..., 'technology': 5, 'assets_known': 5}
+  recon['technology'] BEFORE any request: 5 fact(s)
+  apolaki-bwapp-1/apache  v2.4.7  first_seen=...522.704 (mission 1)  last_seen=...522.749 (mission 2)
+
+  [PASS] mission 2 warm-started with technology ALREADY present
+  [PASS] every re-observed fact KEPT mission 1's first_seen
+  [PASS] every re-observed fact ADVANCED its last_seen
+  [PASS] no identity was duplicated across missions
+  [PASS] no prose was persisted into the display memory
+```
+
+`snapshot['tech']` came back as `['Apache', 'PHP']` - Mutillidae's
+`'and that the database username'` was refused at persist time on live bytes. That is the
+memory-purge half of the ticket, measured rather than asserted.
 
 ### Still outstanding, in files this lane does NOT own
 

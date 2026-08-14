@@ -200,6 +200,36 @@ def _require_mission(sid: str) -> dict:
     return m
 
 
+def _warm_start_technology(scope: ScopeEngine, tools: ToolRegistry, prior: dict) -> int:
+    """Re-seed TechnologyFacts from the previous mission on this target. Returns how many.
+
+    This is what makes `first_seen` mean something. Without it every mission rediscovers the same
+    nginx and calls it new, so no version history ever accumulates and the whole Q-021 family has
+    nothing to reason over.
+
+    Scope-validated per fact, exactly as subdomains and endpoints already are: a since-narrowed
+    scope must silently drop stale intel. A warm start is not a scope bypass.
+
+    Merged, not assigned: `merge_tech_facts` folds this mission's later observations onto the
+    seeded facts by identity, so a re-detection extends `last_seen` and keeps the ORIGINAL
+    `first_seen` rather than restarting the clock.
+    """
+    facts = []
+    for f in ((prior or {}).get("technology") or []):
+        if not isinstance(f, dict) or not (f.get("product") or f.get("name")):
+            continue
+        host = str(f.get("host") or "")
+        if host and not scope.validate(host)[0]:
+            continue
+        facts.append(f)
+    if not facts:
+        return 0
+    import dependency_intel as _di
+    tools.recon["technology"] = _di.merge_tech_facts(
+        list(tools.recon.get("technology") or []) + facts)
+    return len(facts)
+
+
 def _warm_start(scope: ScopeEngine, tools: ToolRegistry, agent) -> dict:
     """Seed a new mission's surface from prior-mission memory on the same target.
 
@@ -209,8 +239,19 @@ def _warm_start(scope: ScopeEngine, tools: ToolRegistry, agent) -> dict:
     scope-validated here, so a since-changed scope silently drops stale intel."""
     tkey = memory_mod.target_key(scope.to_dict())
     assets = db.get_memory_assets(tkey)
+    prior = db.get_prior_snapshot(tkey) or {}
+    # Q-021B: technology is re-seeded BEFORE the no-assets exit. A prior mission that detected a
+    # technology but recorded no subdomain or endpoint would otherwise be discarded here -- the
+    # falsy-default shape ("no assets" standing in for "nothing known") this codebase has been
+    # bitten by twice. Facts come from the snapshot blob, not from memory_assets: see memory.py.
+    seeded_tech = _warm_start_technology(scope, tools, prior)
     if not assets:
-        return {"seeded": False}
+        # A first-ever scan is COLD, and `{"seeded": False}` is the exact contract that says so
+        # (test_bbh: "first-ever scan: cold"). Reporting `technology: 0` alongside it would be
+        # noise on a summary whose whole content is "nothing was known".
+        if not seeded_tech:
+            return {"seeded": False}
+        return {"seeded": True, "technology": seeded_tech}
 
     subs = [a["value"] for a in assets.get("subdomains", []) if scope.validate(a["value"])[0]]
     for s in subs:
@@ -226,11 +267,11 @@ def _warm_start(scope: ScopeEngine, tools: ToolRegistry, agent) -> dict:
     tools._add_urls(host_urls + ep_urls)      # each URL re-validated against scope
     seeded_urls = len(tools.urls) - before
 
-    prior = db.get_prior_snapshot(tkey)
     prior_findings = len(prior.get("findings", [])) if prior else 0
 
-    summary = {"seeded": bool(subs or seeded_urls), "subdomains": len(subs),
+    summary = {"seeded": bool(subs or seeded_urls or seeded_tech), "subdomains": len(subs),
                "endpoints": seeded_urls, "prior_findings": prior_findings,
+               "technology": seeded_tech,
                "assets_known": sum(len(v) for v in assets.values())}
     if summary["seeded"] or prior_findings:
         agent.memory_note = (
