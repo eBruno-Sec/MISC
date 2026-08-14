@@ -241,6 +241,28 @@ All five mandated controls are in the suite and each was verified failing before
 | no version => POTENTIALLY_AFFECTED, never proven | `test_versionless_detection_is_detected_only_and_potentially_affected`, `test_versionless_fact_stays_potentially_affected_even_with_a_behaviour_proof` |
 | no benchmark number moves | `test_fingerprint_return_shape_is_unchanged`, `test_prose_still_reaches_the_display_path_unchanged`, `test_record_facts_leaves_the_display_list_alone`, `test_legacy_component_nodes_still_count_as_versions` |
 
+### "No benchmark number moved" - measured, not argued
+
+A differential against the pre-ticket `fingerprint.py` (extracted from `82538c4~1`), over the
+cartesian product of 17 header sets x 11 `Set-Cookie` values x 21 bodies chosen to hit every
+detector branch:
+
+```
+cases compared: 3927   differences: 0
+RESULT: IDENTICAL
+```
+
+Both `fingerprint()` and `version_disclosures()` are byte-identical on all 3927. The harness was
+itself checked: the two modules are genuinely different builds (`record_facts` / `detect` exist in
+one and not the other), and the comparison does report a difference when given one.
+
+Supporting facts, all measured:
+
+* `agent/dependency_intel.py` across the whole ticket: **0 deleted lines**, purely additive.
+* `agent/asset_graph.py`: exactly two deleted lines, the old unconditional `has_versions`.
+* The only two `component`-node writers are `ingest_intel` (no `version` prop -> legacy branch,
+  unchanged) and `observe_technology` (new, and inert until the producer patch lands).
+
 28 mutants written, **28 killed**. The two that mattered most:
 
 * `M2_key_drops_product` initially **survived**. The nginx/PHP control passed on the `_VENDOR`
