@@ -18,6 +18,9 @@ Status legend: `[MEASURED]` a number I took - `[in progress]` running, no number
 | 85.5% of the recall shortfall never probed; 8.2% detection on probed | breaker 3-two-d |
 | published baseline `ebd96f45` cannot be re-derived from the store | `scripts/whole_product_score.py` BASELINE caveat |
 
+Row 4 is **superseded by this lane** - see 2c: the counts DO re-derive, under a path-less
+fingerprint. The seal string still does not.
+
 ---
 
 ## 1. First reading of the source, BEFORE any run [READ]
@@ -229,6 +232,27 @@ per-category FPR of 0.0% therefore does NOT imply zero false positives in a miss
 that happens to name `Math.random()` would be a cross-family confirmation the per-category harness
 could never see. If whole-product precision moves off 100%, this is the first place to look, and
 that is a reason to measure the change rather than to assume it.
+
+## 2f. PREDICTIONS, written before the baseline artifact exists
+
+Recorded so the account cannot be fitted to whatever comes back. Each is falsifiable by a single
+field of `wp_claims.json`.
+
+| # | prediction | falsified by |
+|---|---|---|
+| P1 | the `planner` phase is under 15% of tool dispatches and under 20% of tool-seconds | `effort.phase_calls` / `phase_seconds` |
+| P2 | the `sweep` phase is over 80% of tool dispatches | same |
+| P3 | `cases_unique_to_tool_n` is ~0 for all eight HTTP sweep engines - they ride ONE target list, so their cost is depth, not coverage | `coverage.cases_unique_to_tool_n` |
+| P4 | `sweep_selection` shows 400 kept out of well over 1000 candidates - the cap binds hard | `effort.sweep_selection` |
+| P5 | `run_web_probes` appears with roughly 25 dispatches (planner only), not 400 | `effort.tool_calls` |
+| P6 | the class-correctness table shows `pathtraver` / `securecookie` / `weakrand` with a large `probed` and a `by owner` at or near 0 | `wp_score.py` table |
+| P7 | the two browser engines are ~1.6% of dispatches and over 25% of tool-seconds | `effort.tool_seconds` |
+| P8 | `planner_would_schedule_more` is small; if it is 0 the step cap did not bind and lever 1 is dead without a run | `effort.planner_would_schedule_more` |
+
+If P1/P2 hold, **`MAX_STEPS` is not the coverage lever** and the ticket's lever 1 is answered
+without spending a run on it. If P3 holds, adding or removing engines does not change coverage at
+all - only `SWEEP_TARGET_CAP` does - and the ticket's "40% of the budget for 3% of the coverage"
+shape is really "100% of the budget for 0% of the marginal coverage, bought as depth".
 
 ## 3. Numbers
 
