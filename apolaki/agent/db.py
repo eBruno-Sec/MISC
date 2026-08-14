@@ -143,19 +143,39 @@ def delete_mission(mid: str) -> None:
 
 
 # ── Findings ─────────────────────────────────────────────────────
+#: The THREE invariants `findings_gate` states, named once so both writers below and the bypass
+#: controls in tests/test_gate_write_paths.py refer to the same list:
+#:   SCHEMA (#6)  `normalize`  — reproduction_steps is ALWAYS a list; safe defaults for always-read fields
+#:   SCOPE  (#8)  `off_scope`  — a provably out-of-scope target is never persisted (fail-open otherwise)
+#:   TRUTH  (#7)  `is_lead`    — a lead-confidence item goes to the leads list, never the findings table
+def _gate(mid: str, finding: dict):
+    """Evaluate all three invariants for a write of `finding` into mission `mid`.
+
+    Returns (verdict, finding) where verdict is "admit" | "reject" | "lead". ONE implementation, so a
+    write path cannot enforce two of three — which is exactly how `update_finding` came to enforce
+    none. Callers decide what "reject"/"lead" mean for their operation (INSERT vs UPDATE differ);
+    they do NOT get to decide whether the invariants are evaluated."""
+    import findings_gate as _fg
+    finding = _fg.normalize(finding)                     # SCHEMA (#6) — total, never rejects
+    scope = (get_mission(mid) or {}).get("scope") or {}
+    if _fg.off_scope(finding, scope):
+        return "reject", finding                         # SCOPE (#8)
+    if _fg.is_lead(finding):
+        return "lead", finding                           # TRUTH (#7)
+    return "admit", finding
+
+
 def add_finding(mid: str, finding: dict) -> str:
-    """Persist a CONFIRMED finding — the single write chokepoint, so the central finding-gate is
-    enforced here for EVERY producer (deterministic tools, the model's store_finding, API paths):
+    """Persist a CONFIRMED finding — a write chokepoint, so the central finding-gate is enforced here
+    for EVERY producer (deterministic tools, the model's store_finding, API paths):
       * schema-normalize (reproduction_steps -> list, safe defaults)   [#6]
       * REJECT a finding whose target is provably out of the mission scope (returns "" — not written) [#8]
       * ROUTE a lead-confidence finding to the mission's leads list, never the confirmed table          [#7]
     Fail-open on scope only when scope is absent / the target has no host (we block only proven-off-scope)."""
-    import findings_gate as _fg
-    finding = _fg.normalize(finding)
-    scope = (get_mission(mid) or {}).get("scope") or {}
-    if _fg.off_scope(finding, scope):
+    verdict, finding = _gate(mid, finding)
+    if verdict == "reject":
         return ""                                        # off-scope: refuse to persist (safety #8)
-    if _fg.is_lead(finding):
+    if verdict == "lead":
         return add_lead(mid, finding)                    # not a confirmed finding -> leads (truth #7)
     fid = finding.get("id") or uuid.uuid4().hex[:12]
     finding["id"] = fid
@@ -222,8 +242,31 @@ def get_finding(mid: str, fid: str):
 def update_finding(mid: str, fid: str, finding: dict) -> bool:
     """Update a finding ONLY within its own mission — the WHERE clause pins BOTH mission_id AND id so a
     finding id from one mission can never mutate another mission's row (tenant isolation, #10). Returns
-    True when a row was actually updated."""
+    True when a row was actually updated.
+
+    Q-013: this used to be a raw UPDATE. It reached the same table `add_finding` guards, so every
+    invariant `add_finding` enforces was bypassable in two calls — POST a clean finding, then PUT it
+    with a string `reproduction_steps`, an off-scope target, or `confidence: lead`. All three landed.
+    The gate is now evaluated HERE too, with the update-shaped consequence for each verdict:
+      * reject (#8 off-scope) -> the write does not happen at all; the stored row keeps its old target
+        and False is returned. Moving a finding out of scope is not an edit, it is a new finding at a
+        target we are not authorized to report.
+      * lead   (#7)           -> the row LEAVES the confirmed-findings table and is appended to the
+        mission's leads list. Rewriting the row in place would leave a lead sitting in the confirmed
+        table, which is the masquerade the invariant exists to prevent.
+      * admit                 -> normal UPDATE of the schema-normalized finding (#6)."""
+    verdict, finding = _gate(mid, finding)
     finding["id"] = fid
+    if verdict == "reject":
+        return False                                     # off-scope: refuse the write (safety #8)
+    if verdict == "lead":
+        # only reroute a row that actually belongs to this mission — never let a foreign fid create a
+        # lead here (tenant isolation #10 must hold on this branch too).
+        if get_finding(mid, fid) is None:
+            return False
+        delete_finding(mid, fid)
+        add_lead(mid, finding)                           # demoted out of the confirmed table (truth #7)
+        return True
     cur = _exec("UPDATE findings SET data=? WHERE mission_id=? AND id=?", (json.dumps(finding), mid, fid))
     return bool(getattr(cur, "rowcount", 0))
 
