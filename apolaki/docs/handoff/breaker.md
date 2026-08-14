@@ -1508,3 +1508,39 @@ not, −3 is noise. That is exactly the measurement in TARGET 3 PART TWO, in fli
 **Recorded for the harness owner:** `effort.plan_steps` vs `step_cap` will now say which of the two
 bounds actually bit — 220 steps or 25 endpoints — and `coverage.cases_probed` says which cases the
 ordering picked. Neither number existed before today.
+
+## 1d-CORRECTION — I named the wrong cap. The binding bound is the CRAWL, not `CAP_ENDPOINTS`.
+
+Committed at `a17b6f3` and wrong on one point, corrected here rather than edited away: I wrote that
+the sweep "probes the FIRST 25 parameterized endpoints". `CAP_ENDPOINTS = 25` bounds the
+**planner's** `param_eps` (`planner.py:434`) — but the sqli engine is not scheduled only from
+there. `agent.py:3424` runs a **planner-independent** deterministic sweep:
+
+```
+agent.py:182   SWEEP_TARGET_CAP = int(os.getenv("BBH_SWEEP_TARGETS", "400"))   # 400, not 25
+agent.py:188   _SWEEP_HTTP_ENGINES = ("run_sqli", "run_sqli_structural", "run_xpath", "run_ldap", ...)
+agent.py:3424  targets = sweep_targets(self.tools.urls, recon["forms"], in_scope, limit=SWEEP_TARGET_CAP)
+agent.py:3462  for _i, u in enumerate(targets): for tool in _SWEEP_HTTP_ENGINES: ...
+```
+
+`sweep_targets` (agent.py:238-295) takes every query-bearing URL, one representative per
+`(path, param-signature)`, **plus the page carrying each captured POST form**, then
+`_spread_by_shape(...)[:400]`. It is explicitly documented as order-stable. So run_sqli reaches up
+to 400 endpoints, not 25, and the boolean-blind POST-form lane is reached through the *form pages*
+half of that selection.
+
+**The real ceiling is one level up: the crawl.**
+
+```
+agent.py:1669-1670   BBH_SURFACE_DEPTH default 4, BBH_SURFACE_PAGES default 250
+```
+
+**250 pages** are fetched out of a 2740-case corpus, and `sweep_targets`, the form store and the
+inventory can only ever see pages that were fetched — the module's own docstring says exactly this
+("the entire mission's coverage was arithmetic on those 12 pages"). Which 250 the BFS reaches, in
+which order, decides which cases are testable at all. That is still candidate 3's mechanism, and it
+is a stronger one: a ~9% ceiling on reachable cases before any oracle runs, set by a BFS frontier
+over an index tree.
+
+The corrected statement: **the run probes what the crawl reached, the crawl reaches 250 of 2740
+pages, and nothing in the artifact recorded which 250.** `coverage.cases_probed` records it now.
