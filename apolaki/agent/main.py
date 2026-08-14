@@ -101,6 +101,9 @@ class EngageRequest(BaseModel):
     # IDS-evasion profile for Apolaki's OWN port scan (#113): off | polite | sneaky | paranoid.
     # Evasion, never DoS — slower timing, fragmentation, decoys, padding. Orthogonal to intensity.
     stealth: str = "off"
+    # Optional operator-authorized Java/Python source tree for the code-assisted SAST lane. This is
+    # deliberately separate from /codereview, whose legacy lead-producing contract is unchanged.
+    source_root: Optional[str] = None
 
 
 class EstimateRequest(BaseModel):
@@ -308,6 +311,127 @@ async def oob_hits(token: str):
 
 
 # ── mission lifecycle ────────────────────────────────────────────
+_SOURCE_REVIEW_TOOL = "codeintel.review_source_tree"
+
+
+def _source_review_state(source_root: Optional[str] = None) -> dict:
+    root = str(source_root or "").strip()
+    return {
+        "status": "pending" if root else "not_run",
+        "lane": "code-assisted",
+        "label": "code-assisted (SAST)",
+        "provenance": "source-derived",
+        "source_root": root,
+        "files_scanned": 0,
+        "findings": 0,
+        "stored_findings": 0,
+        "rejected_findings": 0,
+        "error": "" if root else "no source provided",
+    }
+
+
+def _canonical_source_finding(finding: dict) -> bool:
+    """Fail closed before a source result can enter reports under DAST semantics."""
+    if not isinstance(finding, dict):
+        return False
+    import proof_schema as _ps
+    return (
+        str(finding.get("provenance") or "").strip().lower() == "source-derived"
+        and str(finding.get("lane") or "").strip().lower() == "code-assisted"
+        and str(finding.get("analysis") or "").strip().lower() == "static-call-site"
+        and _ps.proof_kind(finding) == _ps.SOURCE_DERIVED
+    )
+
+
+async def _run_source_review(session_id: str, source_root: Optional[str]) -> dict:
+    """Run the existing code-assisted analyzer for one persisted production mission."""
+    state = _source_review_state(source_root)
+    root = state["source_root"]
+    if not root:
+        db.add_log(session_id, "tool_result", {
+            "tool": _SOURCE_REVIEW_TOOL,
+            "count": 0,
+            "output": "Skipped: code-assisted (SAST) - no source provided",
+            "lane": state["lane"],
+            "provenance": state["provenance"],
+        })
+        return state
+
+    import codeintel
+    db.add_log(session_id, "tool_call", {
+        "tool": _SOURCE_REVIEW_TOOL,
+        "input": {"source_root": root},
+        "lane": state["lane"],
+        "provenance": state["provenance"],
+    })
+    try:
+        result = await asyncio.to_thread(codeintel.review_source_tree, root)
+    except Exception as exc:
+        state.update(status="error", error="source review failed: %s" % str(exc))
+        db.add_log(session_id, "tool_error", {
+            "tool": _SOURCE_REVIEW_TOOL, "error": state["error"],
+            "lane": state["lane"], "provenance": state["provenance"],
+        })
+    else:
+        if not isinstance(result, dict):
+            state.update(status="error", error="source review returned a non-object result")
+        else:
+            findings = result.get("findings") or []
+            state["files_scanned"] = int(result.get("files_scanned") or 0)
+            state["findings"] = len(findings) if isinstance(findings, list) else 0
+            analyzer_error = str(result.get("error") or "").strip()
+            response_is_source = (
+                str(result.get("lane") or "").strip().lower() == "code-assisted"
+                and str(result.get("provenance") or "").strip().lower() == "source-derived"
+            )
+            valid_findings = (isinstance(findings, list)
+                              and all(_canonical_source_finding(f) for f in findings))
+            if analyzer_error:
+                state.update(status="error", error=analyzer_error)
+            elif not response_is_source or not valid_findings:
+                rejected = len(findings) if isinstance(findings, list) else 1
+                state.update(
+                    status="error",
+                    rejected_findings=rejected,
+                    error=("code-assisted analyzer returned %d finding(s) without canonical "
+                           "source-derived markers" % rejected),
+                )
+            else:
+                stored = sum(1 for finding in findings if db.add_finding(session_id, finding))
+                state["stored_findings"] = stored
+                if stored != len(findings):
+                    state.update(
+                        status="error",
+                        rejected_findings=len(findings) - stored,
+                        error=("source review persistence rejected %d of %d canonical finding(s)"
+                               % (len(findings) - stored, len(findings))),
+                    )
+                else:
+                    state["status"] = "complete"
+
+        if state["status"] == "complete":
+            db.add_log(session_id, "tool_result", {
+                "tool": _SOURCE_REVIEW_TOOL,
+                "count": state["stored_findings"],
+                "output": ("code-assisted (SAST): %d source-derived finding(s) from %d "
+                           "Java/Python source file(s)"
+                           % (state["stored_findings"], state["files_scanned"])),
+                "lane": state["lane"],
+                "provenance": state["provenance"],
+            })
+        else:
+            db.add_log(session_id, "tool_error", {
+                "tool": _SOURCE_REVIEW_TOOL, "error": state["error"],
+                "lane": state["lane"], "provenance": state["provenance"],
+            })
+
+    mission = db.get_mission(session_id)
+    context = dict((mission or {}).get("context") or {})
+    context["source_review"] = state
+    db.update_mission(session_id, context=context)
+    return state
+
+
 @app.post("/engage")
 async def engage(req: EngageRequest):
     # Resolve the execution strategy. DEFAULT IS DETERMINISTIC — the proof-first engine
@@ -420,7 +544,8 @@ async def engage(req: EngageRequest):
                "strategy": strategy, "max_ai_calls": agent.max_ai_calls,
                "enable_zap": enable_zap, "zap_policy": req.zap_policy,
                "zap_speed": req.zap_speed, "zap_aggression": req.zap_aggression,
-               "intensity": req.intensity}
+               "intensity": req.intensity,
+               "source_review": _source_review_state(req.source_root)}
     if req.parent_id and db.get_mission(req.parent_id):
         context["parent_id"] = req.parent_id   # archive parent/child linkage
     # Operator scoping travels WITH the scope, because that is what it is. The report reads
@@ -433,6 +558,7 @@ async def engage(req: EngageRequest):
     sessions[session_id] = {"scope": scope, "agent": agent, "tools": tools,
                             "stop_event": stop_event, "objective": objective,
                             "status": "created", "events": [], "task": None, "done": False}
+    source_review = await _run_source_review(session_id, req.source_root)
     # /engage only PREPARES the mission (status=created). An API/CLI caller that
     # stops here sees no progress forever; the UI hides this by opening /stream.
     # Tell every caller explicitly how to start the run.
@@ -440,6 +566,7 @@ async def engage(req: EngageRequest):
             "authenticated": bool(session_headers), "auth_note": auth_note,
             "parent_id": context.get("parent_id"), "warm_start": warm_start,
             "strategy": strategy, "max_ai_calls": agent.max_ai_calls,
+            "source_review": source_review,
             "status": "created", "started": False,
             "next_step": f"POST /run/{session_id} (or open GET /stream/{session_id}) to begin the scan",
             "run_url": f"/run/{session_id}", "stream_url": f"/stream/{session_id}"}
@@ -553,6 +680,7 @@ async def mission_detail(session_id: str):
         "playbook_stats": m["context"].get("playbook_stats", {}),
         "chains": m["context"].get("chains", []),
         "leads": m["context"].get("leads", []),
+        "source_review": m["context"].get("source_review", _source_review_state()),
     }
 
 
