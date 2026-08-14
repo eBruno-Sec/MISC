@@ -854,3 +854,66 @@ declared `type`/`required`/`method` straight from the spec, and `_forms_from_gra
 schedulable through the path already built and tested here -- no new code path. `surface.py`
 separately needs `requestBody` / `in: body` read and the method preserved (`surface.py:94-133`), which
 is the difference between importing 12 URLs and importing 12 operations with 9 typed parameters.
+
+---
+
+## Q-031 CLOSED -- the API half (`8eb42e8`)
+
+DVWA proved the mechanism on HTML forms. VAmPI is the case that matters for recall, because 100% of
+its parameter surface is declared in an OpenAPI spec and nothing survived the tool call.
+
+MEASURED on VAmPI, full mode, identical seed, two consecutive after-runs identical on every field:
+
+|                                    | before | after |
+|---|---:|---:|
+| body params delivered to the planner | **0** | **9** |
+| endpoints made schedulable           | **0** | **5** |
+| graph params by location             | `{}` | `{'body': 9, 'path': 4}` |
+| `run_stored_xss`                     | 0 | **5** |
+| `run_csrf`                           | 0 | **3** |
+| `run_race`                           | 0 | **3** |
+| `run_form_cmdi`                      | 10 | 15 |
+| tool dispatches (total)              | 100 | 116 |
+
+Nine declared body parameters, nine delivered, across `/books/v1`, `/users/v1/login`,
+`/users/v1/register`, `/users/v1/{username}/email`, `/users/v1/{username}/password`.
+
+Three changes, each in the smallest place that could hold it: one line in `tools.py` keeping the
+parsed spec; a NEW `surface.operations_from_openapi()` beside the untouched URL importer (which reads
+only `in == "query"`, collapses the method to a bool, and returns bare strings); and
+`agent._project_spec_params()` minting them through the SAME `observe_param` writer and `has_param`
+edges the form producer uses, so they become schedulable through the path already built and tested --
+no second code path.
+
+**A mutant survived and found a hole in my own tests.** Deleting the `tools.py` line that persists the
+spec killed NO test, because the end-to-end test injected `recon["openapi"]` by hand and never
+exercised the producer. A registered producer with no test that runs it is the island shape this
+ticket keeps finding -- this time inside its own fix.
+`test_fetch_openapi_actually_keeps_the_spec` drives `_fetch_openapi` with a stubbed transport; the
+mutant now dies.
+
+18 tests; the 6 new ones fail 5/6 pre-fix. 4 mutants killed here (spec not persisted, non-body
+locations collapsed into `body`, scope check removed) plus the 5 on the form half. Full suite in a
+throwaway container, `exit=0`.
+
+---
+
+## Whole-product rerun -- IN FLIGHT, no result yet
+
+`owaspbench-q019` shape against `https://owaspbench:8443/benchmark/`, active mode, driving the full
+`BBHAgent.run()` pipeline so it is comparable to mission `ebd96f45`.
+
+Baseline to beat, from `docs/LEDGERS.md`: **95.7% precision / 1.6% recall (22 TP / 1 FP / 1415
+vulnerable)**, 5329 s.
+
+**Status: running. No number exists yet, and none will be quoted until the claims are sealed and the
+key is read after sealing.** Rule 8b: an unmeasured row says `in progress`.
+
+Process note, because it changed mid-ticket: `apolaki-agent-1` bakes `/app` into the image (only
+`ui/` is bind-mounted), so the live container does NOT carry this lane's code. Rather than rebake or
+`docker cp` into a container two lanes collided in, this run uses a throwaway
+(`apolaki-wp-rerun`) with the repo's `agent/` mounted and its own `/out`. `curl -s
+localhost:8000/missions` showed no mission running before launch.
+
+`agent/wp_run.py` is the harness for this run and is NOT to be committed -- it is deleted once the
+run completes.
