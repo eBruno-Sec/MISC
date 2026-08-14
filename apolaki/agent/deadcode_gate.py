@@ -66,6 +66,11 @@ ALLOWED_UNUSED_QUALIFIED = {
                                 "only the passive harvest+analyze half",
     "saml_tool.wrap_assertion": "builds the XML-signature-wrapping variant; generating a forged "
                                 "assertion is not something to auto-fire. Same gate as confirm_bypass",
+    "fingerprint.record_facts": "Q-021B: the TechnologyFact persistence step. Its ONE production "
+                                "caller is tools._run_fingerprint, which is owned by another lane "
+                                "this cycle, so the two-line producer patch ships as a hand-off "
+                                "(docs/handoff/tech_intel.md). DELETE THIS ENTRY when that patch "
+                                "lands -- the gate flagging it again is the point",
 }
 
 

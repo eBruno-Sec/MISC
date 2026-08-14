@@ -35,6 +35,31 @@ CVE_ELIGIBLE = frozenset({CONFIRMED, HIGH})
 AFFECTED = "affected"                            # the CVE's own behaviour was observed on this target
 POTENTIALLY_AFFECTED = "potentially_affected"    # version falls in a published range; behaviour unprobed
 
+# ── Q-021B: the technology-intelligence proof ladder ─────────────────────────────────────────
+# DETECTION IS NEVER A VULNERABILITY. Reading "nginx/1.18.0" off a header creates a LEAD; only an
+# authorized deterministic test on this target proves anything. The rungs are named so no consumer
+# has to invent its own word for "we saw it" vs "we proved it", and so a jump can be spotted:
+#
+#   DETECTED_TECHNOLOGY     the product is present. No version, or a version we may not act on.
+#   VERSION_SUSPECTED       a version string was observed. SUSPECTED, because every version we can
+#                           read is something the target said about itself until an artifact proves it.
+#   ADVISORY_MATCHED        that version falls in a published range          (Q-021D)
+#   APPLICABILITY_CONFIRMED the advisory actually applies to this build/config (Q-021C)
+#   SAFELY_PROBED           a safe, scope-gated probe was run                (Q-021E)
+#   ORACLE_CONFIRMED        a CVE-specific behaviour differential fired and its negative control
+#                           did not                                          (`behaviour_proof_ok`)
+#
+# Q-021B tops out at VERSION_SUSPECTED by construction: nothing in this module can reach a higher
+# rung without evidence that does not exist yet.
+DETECTED_TECHNOLOGY = "detected_technology"
+VERSION_SUSPECTED = "version_suspected"
+ADVISORY_MATCHED = "advisory_matched"
+APPLICABILITY_CONFIRMED = "applicability_confirmed"
+SAFELY_PROBED = "safely_probed"
+ORACLE_CONFIRMED = "oracle_confirmed"
+TECH_PROOF_LADDER = (DETECTED_TECHNOLOGY, VERSION_SUSPECTED, ADVISORY_MATCHED,
+                     APPLICABILITY_CONFIRMED, SAFELY_PROBED, ORACLE_CONFIRMED)
+
 _VER = r"(\d+\.\d+(?:\.\d+)?(?:[-.]?(?:alpha|beta|rc)\d*)?)"
 
 
@@ -117,6 +142,170 @@ def canon_location(location: str) -> str:
 def make_component(name, version, source, confidence, evidence="", location=""):
     return {"name": (name or "").lower(), "version": version or "", "source": source,
             "confidence": confidence, "evidence": (evidence or "")[:300], "location": canon_location(location)}
+
+
+# ── Q-021B: the TechnologyFact ────────────────────────────────────────────────────────────────
+# One record type for "this product, this version, on this asset, proven this well". It is a
+# SUPERSET of the component record above -- `name` / `version` / `confidence` / `location` keep
+# their exact meanings, so `cve_eligible`, `assess_component` and `reconcile_components` read a
+# TechnologyFact with no second code path. The added fields are the ones the rest of the Q-021
+# family cannot be built without: vendor, component (plugin/theme/module), category, detector,
+# host, authentication state and first/last seen.
+
+# WHICH SOURCES MAY PROVE A VERSION. The distinction is not "how specific does the string look" but
+# "who said it". A `Server:` / `X-Powered-By:` / `<meta generator>` version is a CLAIM the target
+# makes about itself: one config line changes it, a reverse proxy rewrites it wholesale, and
+# hardened deployments lie on purpose. A library file that carries its own version banner is the
+# ARTIFACT declaring itself, and a versioned filename or CDN path is a label an operator can read
+# back. So only the latter two may pull CVEs; everything else is LOW and therefore, by
+# CVE_ELIGIBLE, never CVE-eligible. This is the single largest false-positive source in this class.
+_CONTENT_PROVEN = frozenset({"js-content-banner"})
+_PATH_PROVEN = frozenset({"script-filename", "cdn-path", "script src"})
+
+
+def version_confidence(source) -> str:
+    """How sure we are of the SERVED version, from the detection source. FAILS CLOSED: a source this
+    table does not know is LOW, so adding a detector can never silently create CVE eligibility."""
+    s = str(source or "").strip().lower()
+    if s in _CONTENT_PROVEN:
+        return CONFIRMED
+    if s in _PATH_PROVEN:
+        return HIGH
+    return LOW
+
+
+# CPE-style vendor hints for the products the detectors can actually name today. Deliberately tiny
+# and only where the vendor is unambiguous -- an unknown product yields "" and NEVER a guess, because
+# a wrong vendor is a wrong CPE and a wrong CPE silently matches someone else's CVEs. Canonical
+# identity (full CPE / PURL derivation) is Q-021C's job, not this one's.
+_VENDOR = {
+    "apache": "apache", "nginx": "nginx", "microsoft-iis": "microsoft", "iis": "microsoft",
+    "asp.net": "microsoft", "asp.net mvc": "microsoft", "php": "php", "wordpress": "wordpress",
+    "drupal": "drupal", "joomla": "joomla", "shopify": "shopify", "wix": "wix",
+    "litespeed": "litespeedtech", "jquery": "jquery", "jquery-ui": "jquery",
+    "django": "djangoproject", "laravel": "laravel", "openresty": "openresty",
+}
+
+
+def tech_proof_state(fact) -> str:
+    """The highest rung this fact reaches ON ITS OWN. A version gets it to VERSION_SUSPECTED; nothing
+    detection alone can observe gets it any higher."""
+    return VERSION_SUSPECTED if str((fact or {}).get("version") or "").strip() else DETECTED_TECHNOLOGY
+
+
+def tech_component_status(fact, behaviour_proof=None, cve_ids=()) -> str:
+    """AFFECTED only when a CVE-SPECIFIC behaviour differential fired on this target; otherwise
+    POTENTIALLY_AFFECTED. Routes through the same `behaviour_proof_ok` gate the SCA finding uses --
+    one definition of "proven", not two.
+
+    `cve_eligible` is checked FIRST and on purpose: a behaviour proof attached to a component whose
+    version we could not establish proves something about the target, but nothing about THIS
+    component, so it may not upgrade this fact."""
+    if not cve_eligible(fact):
+        return POTENTIALLY_AFFECTED
+    ok, _ = behaviour_proof_ok(behaviour_proof, cve_ids)
+    return AFFECTED if ok else POTENTIALLY_AFFECTED
+
+
+def make_tech_fact(product, *, version="", source="", detector="", vendor=None, component="",
+                   category="", evidence="", location="", host="", authenticated=False,
+                   now=None):
+    """One detected technology, with everything needed to act on it later and nothing invented.
+
+    `confidence` is NOT a parameter: it is derived from `source` by `version_confidence`, so a
+    detector cannot assert its own trustworthiness. A fact with no version is legal and normal --
+    it is a real observation that simply may not pull CVEs."""
+    import time as _time
+    ts = float(now) if now is not None else _time.time()
+    prod = str(product or "").strip()
+    conf = version_confidence(source)
+    fact = {
+        # identity
+        "vendor": (vendor if vendor is not None else _VENDOR.get(prod.lower(), "")),
+        "product": prod.lower(),
+        "component": str(component or "").strip().lower(),
+        "category": str(category or ""),
+        "label": prod,                       # display casing, for the UI/report
+        "name": prod.lower(),                # component-record alias: existing readers use `name`
+        # observation
+        "version": str(version or "").strip(),
+        "source": str(source or ""),
+        "detector": str(detector or ""),
+        "evidence": str(evidence or "")[:300],
+        "location": canon_location(location),
+        "host": str(host or ""),
+        "authenticated": bool(authenticated),
+        "first_seen": ts,
+        "last_seen": ts,
+        # what may be claimed about it
+        "confidence": conf,                  # component-record alias, read by `cve_eligible`
+        "version_confidence": conf,
+        "version_conflicts": [],
+    }
+    fact["proof_state"] = tech_proof_state(fact)
+    fact["component_status"] = tech_component_status(fact)
+    return fact
+
+
+def tech_fact_key(fact) -> str:
+    """The dedupe key: IDENTITY (which product, which sub-component, on which asset) -- deliberately
+    NOT the version. Two products that happen to report the same version string share nothing, and a
+    key that omitted the product would delete one of two real facts; a key that INCLUDED the version
+    would file every re-observation of the same nginx as a new technology."""
+    f = fact if isinstance(fact, dict) else {}
+    return "|".join([str(f.get("host") or "").lower(),
+                     str(f.get("vendor") or "").lower(),
+                     str(f.get("product") or f.get("name") or "").lower(),
+                     str(f.get("component") or "").lower()])
+
+
+def merge_tech_facts(facts) -> list:
+    """Collapse repeated OBSERVATIONS of one technology identity into one fact. Order-preserving,
+    pure, and junk-tolerant (a non-dict is skipped, never crashed on).
+
+    Merge rules, in the order they are applied:
+      * stronger version evidence replaces weaker  (the served file beats the filename -- the same
+        reconciliation `reconcile_components` performs for JS libraries);
+      * at equal strength a versioned reading beats a versionless one;
+      * at equal strength two DIFFERENT versions have no principled winner, so the first is kept and
+        the other is recorded in `version_conflicts` rather than silently dropped;
+      * `first_seen` is the earliest and `last_seen` the latest sighting;
+      * `authenticated` is true if the technology was EVER seen while authenticated.
+    """
+    best, order = {}, []
+    for f in (facts or []):
+        if not isinstance(f, dict):
+            continue
+        key = tech_fact_key(f)
+        cur = best.get(key)
+        if cur is None:
+            merged = dict(f)
+            merged["version_conflicts"] = list(f.get("version_conflicts") or [])
+            best[key] = merged
+            order.append(key)
+            continue
+        rank_new = _EVIDENCE_RANK.get(str(f.get("confidence") or "").lower(), -1)
+        rank_cur = _EVIDENCE_RANK.get(str(cur.get("confidence") or "").lower(), -1)
+        vnew, vcur = str(f.get("version") or ""), str(cur.get("version") or "")
+        if rank_new > rank_cur or (rank_new == rank_cur and vnew and not vcur):
+            conflicts = list(cur.get("version_conflicts") or [])
+            if vcur and vcur != vnew and vcur not in conflicts:
+                conflicts.append(vcur)
+            first, seen_auth = cur["first_seen"], cur.get("authenticated")
+            cur = dict(f)
+            cur["first_seen"] = first
+            cur["authenticated"] = bool(seen_auth) or bool(f.get("authenticated"))
+            cur["version_conflicts"] = conflicts
+            best[key] = cur
+        elif rank_new == rank_cur and vnew and vcur and vnew != vcur:
+            if vnew not in cur["version_conflicts"]:
+                cur["version_conflicts"].append(vnew)
+        cur["first_seen"] = min(cur["first_seen"], f.get("first_seen", cur["first_seen"]))
+        cur["last_seen"] = max(cur["last_seen"], f.get("last_seen", cur["last_seen"]))
+        cur["authenticated"] = bool(cur.get("authenticated")) or bool(f.get("authenticated"))
+        cur["proof_state"] = tech_proof_state(cur)
+        cur["component_status"] = tech_component_status(cur)
+    return [best[k] for k in order]
 
 
 def extract_script_srcs(html):
