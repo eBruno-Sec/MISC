@@ -1738,3 +1738,27 @@ which cases it picks** — `sweep_targets` is order-stable given the same surfac
 built by the crawl, and the crawl's output is what the week's work altered. `coverage.cases_probed`
 now records the selection on every run, so the very next rerun can diff it in one command instead
 of re-deriving all of this.
+
+## 3-two-d. Run A scored — and the number nobody had
+
+```
+PRECISION : 18/18 = 100.0%      RECALL : 18/1415 = 1.27%      ELAPSED 1903s
+plan steps 309 / cap 220        EXIT REASON step_cap_exhausted
+
+=== WHERE THE RECALL WENT ===
+cases PROBED (payload dispatched): 373      cases TOUCHED: 517
+probed but NOT claimed           : 355      claimed but NOT probed: 0
+
+MISSED-AFTER-PROBING (detection shortfall): 202
+NEVER PROBED         (coverage shortfall): 1195
+  -> 85.5% of the misses were never tested at all
+```
+
+**85.5% of the recall shortfall is cases that never received a payload.** Of the 1415 vulnerable
+cases, 220 were probed and 18 confirmed — an 8.2% detection rate on cases the oracles actually saw,
+against a 15.5% coverage rate on the corpus. This is the split the harness could not produce
+yesterday and it says plainly where the next order of magnitude is: **selection, not oracles.**
+
+It also bounds the −9 argument. Even a perfect sqli oracle on the 220 probed vulnerable cases could
+not have produced the baseline's extra 9 unless those 9 were *selected*, which is the coverage half
+again.
