@@ -261,6 +261,49 @@ Apolaki as a product.
 
 ---
 
+## B-020 — JavaScript/Node in the code-assisted lane. Tier 3. 2026-08-14
+
+Third dialect. Weak hash, weak randomness, weak crypto — same finding shape and lane markers as Java
+and Python. **26 adversarial controls, all failing before the dialect existed. No accuracy percentage
+is claimed and none may be: there is no Node ground-truth corpus, so this is Tier 3.**
+
+**The masker was the ticket, and the regex literal is JS's floor-division trap — controlled in BOTH
+directions**: `/md5|sha1/.test(x)` must not read as a call site, *and* `a / b / c` must not blank the
+code between the slashes. Template literals mask their text and keep `${…}` as code, exactly as the
+Python f-string handling does.
+
+**Q-041 shipped as a precondition rather than as a later defect.** Aliased `require` resolves on
+arrival — `const c = require('crypto')`, `node:crypto`, destructured and renamed-destructured, all
+three ESM forms. And because widening the receiver must not widen the verdict,
+**`require('crypto-js')` — a different library with a different API — resolves to nothing.**
+
+**A dialect difference recorded rather than copied**: the Juliet bare-`AES` disagreement **does not
+transfer.** Java's `Cipher.getInstance("AES")` silently means ECB; Node requires an explicit mode and
+throws without one, so no implicit-ECB inference is made and a control pins that. `createCipher` is
+reported on the **API**, not the algorithm — it derives its key with one unsalted MD5 round, so
+`aes-256-cbc` through it is still wrong.
+
+**Real-world sweep, 108 files of Juice Shop: 7 findings, all true call sites, zero misidentified.**
+The MD5 at `insecurity.ts:41` and `Math.random()` as the JWT secret at `:53`. Both mandatory negative
+controls confirmed in the wild — `crypto.randomBytes` in `utils.ts` not flagged, and
+`createHmac('sha256')` at `insecurity.ts:42` **not flagged on the line immediately after the MD5 that
+is.** Adjacent lines, one file, opposite verdicts, on code nobody wrote for this test.
+
+**A duplicate the dialect exposed**: `review()` emitted the substring lead *and* the confirmed
+call-site finding for the same line — one defect described twice at two confidences, which a client
+cannot untangle. The lead now stands down by line where the precise analysis answered, and still fires
+for languages the dialects do not cover.
+
+**Two pieces of self-discipline worth keeping as standards:**
+- The lane caught itself **mounting the scratchpad — which held the answer keys — into the scanner**,
+  and redid the sweep with 0 key files reachable. Blindness is a property you verify, not assume.
+- Artifacts were **not** byte-identical this time (`files_scanned` 2763 → 2766), so it made the
+  **weaker accurate claim** instead of reusing the stronger phrasing from Q-041/Q-042. Zero differing
+  case rows, every number reproduced in a `--network none` container: Java 36.4%, Python 21.4%, all
+  four categories 100.0%/0.0%.
+
+`test_source_lane.py`'s "javascript stays out of the lane" assertion was **inverted, not deleted**.
+
 ## WHOLE-PRODUCT RERUN — recall did not move, it went DOWN. 2026-08-13
 
 The number the week was aimed at. Claims sealed in history at `8700c99` **before** the key was read;
