@@ -1,0 +1,136 @@
+{
+  "baseline": {
+    "claimed": 23,
+    "elapsed": 5329,
+    "fp": 1,
+    "precision": 0.9565217391304348,
+    "recall": 0.015547703180212015,
+    "tp": 22
+  },
+  "claimed": 19,
+  "elapsed_s": 1893,
+  "fp": 0,
+  "key_entries": 2740,
+  "precision": 1.0,
+  "recall": 0.01343,
+  "rows": [
+    [
+      "BenchmarkTest00018",
+      "TP",
+      "sqli",
+      "89"
+    ],
+    [
+      "BenchmarkTest00023",
+      "TP",
+      "weakrand",
+      "330"
+    ],
+    [
+      "BenchmarkTest00033",
+      "TP",
+      "sqli",
+      "89"
+    ],
+    [
+      "BenchmarkTest00192",
+      "TP",
+      "sqli",
+      "89"
+    ],
+    [
+      "BenchmarkTest00193",
+      "TP",
+      "sqli",
+      "89"
+    ],
+    [
+      "BenchmarkTest00194",
+      "TP",
+      "sqli",
+      "89"
+    ],
+    [
+      "BenchmarkTest00195",
+      "TP",
+      "sqli",
+      "89"
+    ],
+    [
+      "BenchmarkTest00196",
+      "TP",
+      "sqli",
+      "89"
+    ],
+    [
+      "BenchmarkTest00198",
+      "TP",
+      "sqli",
+      "89"
+    ],
+    [
+      "BenchmarkTest00199",
+      "TP",
+      "sqli",
+      "89"
+    ],
+    [
+      "BenchmarkTest00203",
+      "TP",
+      "sqli",
+      "89"
+    ],
+    [
+      "BenchmarkTest00204",
+      "TP",
+      "sqli",
+      "89"
+    ],
+    [
+      "BenchmarkTest00407",
+      "TP",
+      "cmdi",
+      "78"
+    ],
+    [
+      "BenchmarkTest00630",
+      "TP",
+      "ldapi",
+      "90"
+    ],
+    [
+      "BenchmarkTest00695",
+      "TP",
+      "ldapi",
+      "90"
+    ],
+    [
+      "BenchmarkTest01242",
+      "TP",
+      "ldapi",
+      "90"
+    ],
+    [
+      "BenchmarkTest01490",
+      "TP",
+      "ldapi",
+      "90"
+    ],
+    [
+      "BenchmarkTest01568",
+      "TP",
+      "ldapi",
+      "90"
+    ],
+    [
+      "BenchmarkTest02189",
+      "TP",
+      "xpathi",
+      "643"
+    ]
+  ],
+  "seal_sha256": "1acebaa7c38042ffdf61f3a7712b83fb0be5d987079f6d92fa64c3b950b436d9",
+  "tp": 19,
+  "unknown": 0,
+  "vulnerable_total": 1415
+}

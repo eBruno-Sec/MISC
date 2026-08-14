@@ -917,3 +917,85 @@ localhost:8000/missions` showed no mission running before launch.
 
 `agent/wp_run.py` is the harness for this run and is NOT to be committed -- it is deleted once the
 run completes.
+
+---
+
+## Whole-product rerun -- SCORED. Recall did not move; it went DOWN.
+
+`owaspbench-q019` shape, `https://owaspbench:8443/benchmark/`, active mode, full `BBHAgent.run()`,
+current code in a throwaway container with the repo mounted. Claims **sealed in history at `8700c99`
+before the key was read**; scored in a `--network none` container. The scorer re-verifies the sha256
+and refuses to score if the claims moved.
+
+| metric | baseline `ebd96f45` | this rerun | delta |
+|---|---:|---:|---|
+| **Recall** (loose) | **1.55%** (22/1415) | **1.34%** (19/1415) | **-0.21 pt** |
+| **Recall** (class-matched) | not computed then | **1.20%** (17/1415) | -- |
+| **Precision** (loose) | 95.7% (22/23) | **100.0%** (19/19) | **+4.3 pt**, the FP is gone |
+| **Precision** (class-matched) | not computed then | 89.5% (17/19) | -- |
+| elapsed | 5329 s | **1893 s** | **-64%** |
+
+**Both conventions are reported because they answer different questions.** LOOSE credits any claim on
+a genuinely vulnerable case; STRICT requires the claimed class to match the key's category. The
+baseline number in `LEDGERS.md` is a LOOSE number, so the like-for-like comparison is 1.55% -> 1.34%.
+
+### The honest headline
+
+**A week of work that broadened parameter visibility did not raise whole-product recall. It fell.**
+Precision rose to a clean 100% loose (zero false positives -- the `BenchmarkTest00494` cross-family FP
+from the baseline is gone) and the run is 2.8x faster, but the product finds *fewer* benchmark cases.
+
+### Where it moved, by class
+
+| class | baseline | rerun | delta |
+|---|---:|---:|---|
+| sqli | 20 | 11 | **-9** |
+| ldapi | 1 | 5 | +4 |
+| xpathi | 0 | 1 | +1 |
+| cmdi | 1 | 1 | 0 |
+| weakrand | 0 | 1 (wrong class) | +1 |
+
+Class *coverage* genuinely broadened -- ldapi 5x, xpathi from nothing -- which is consistent with the
+form/body-parameter work reaching injection sinks that only take body input. **The whole of the loss
+is sqli: -9.** Net -3.
+
+### What I will NOT claim
+
+Three candidate explanations for the sqli collapse, all **UNVERIFIED**, listed so nobody adopts one by
+default:
+
+1. the blind-SQLi baseline-stability gate that landed this week is precision-motivated and would
+   reject exactly the marginal blind confirmations that made up much of the baseline's 20;
+2. the target-rate policy reduces requests per unit time, and the probe phase is where sqli lives;
+3. the run finished in 36% of the wall clock, so it may simply have probed less before converging.
+
+(3) is testable cheapest and would discriminate: if the run converged on a fixpoint rather than
+exhausting a budget, faster is not less work and (3) dies. The artifact does not record the step count
+or the exit reason, which is a gap in the harness worth closing before the next rerun.
+
+### Two wrong-class claims, both worth chasing
+
+- `BenchmarkTest00023` -- key `weakrand`, we claimed **sqli**. An sqli oracle fired on a case with no
+  sqli. Same defect shape the ledger already flagged on `BenchmarkTest00494`, still present.
+- `BenchmarkTest00407` -- key `cmdi`, we claimed **dom_data_manipulation**.
+
+Under LOOSE both are credited because the cases are genuinely vulnerable; under STRICT both are wrong.
+That gap (100.0% vs 89.5%) is the honest cost of the loose convention and is why both are printed.
+
+### Artifacts and reproduction
+
+- `docs/benchmarks/owaspbench_q019_rerun_20260813_sealed.json` -- claims + seal, committed BEFORE the
+  key was read (`8700c99`).
+- `docs/benchmarks/owaspbench_q019_rerun_20260813_score.json` -- the score.
+- `scripts/whole_product_rerun.py` / `scripts/whole_product_score.py` -- the harness, now versioned
+  instead of left untracked in the tree. It is mounted into `/app` rather than living in `agent/`, so
+  the package stays clean:
+
+```
+docker run -d --name apolaki-wp-rerun --network apolaki_default \
+  -v "<repo>/agent:/app" -v "<repo>/scripts/whole_product_rerun.py:/app/wp_run.py" \
+  -v "<outdir>:/out" -w /app \
+  -e WP_TARGET=https://owaspbench:8443/benchmark/ -e WP_MODE=active \
+  apolaki-agent python -u wp_run.py
+docker run --rm --network none -v "<outdir>:/out" -w /out apolaki-agent python wp_score.py
+```
