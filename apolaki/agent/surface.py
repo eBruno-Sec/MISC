@@ -134,6 +134,84 @@ def endpoints_from_openapi(spec, base_url: str) -> list:
     return list(dict.fromkeys(out))
 
 
+_SPEC_METHODS = ("get", "post", "put", "delete", "patch")
+
+
+def _spec_base(spec, base_url: str) -> str:
+    """The spec's base PATH anchored to base_url's host. Scope-safe: only the path is borrowed from
+    `servers` / `basePath`; the host is always base_url, never a host the spec declares."""
+    bp = ""
+    servers = spec.get("servers")
+    if isinstance(servers, list) and servers and isinstance(servers[0], dict):
+        u = servers[0].get("url", "") or ""
+        bp = urlparse(u).path if u.startswith("http") else (u if u.startswith("/") else "")
+    if not bp:
+        bp = spec.get("basePath", "") or ""
+    return (base_url.rstrip("/") + bp).rstrip("/")
+
+
+def operations_from_openapi(spec, base_url: str) -> list:
+    """Every operation a spec declares, WITH its typed parameters and its method.
+
+    Q-031. `endpoints_from_openapi` (above) answers "what URLs can I fetch" and is deliberately left
+    alone -- it has callers and a stable contract. It cannot answer "what parameters does this API
+    take", because it reads only `in == "query"`, collapses the method to a bool, and returns bare
+    strings. MEASURED on VAmPI: 14 operations / 0 query params / 9 BODY params in, 12 URLs and 0
+    parameters out. Body parameters are the largest untested surface class on any JSON API, and the
+    planner could not name one.
+
+    Returns [{url, path, method, content_type, params: [{name, location, type, required}]}] covering
+    OpenAPI 3 (`requestBody.content.<ct>.schema`) and Swagger 2 (`parameters[in=body].schema`), plus
+    query / header / path / cookie parameters. `$ref` is NOT resolved -- an unresolved schema yields
+    no properties rather than a guess, which is why `params` can legitimately be empty. Pure.
+    """
+    if not isinstance(spec, dict) or not isinstance(spec.get("paths"), dict):
+        return []
+    root = _spec_base(spec, base_url)
+    out = []
+    for path, methods in spec["paths"].items():
+        if not isinstance(methods, dict):
+            continue
+        shared = [p for p in (methods.get("parameters") or []) if isinstance(p, dict)]
+        for m, op in methods.items():
+            if m.lower() not in _SPEC_METHODS or not isinstance(op, dict):
+                continue
+            params, ctype = [], ""
+            for p in shared + [q for q in (op.get("parameters") or []) if isinstance(q, dict)]:
+                loc = str(p.get("in") or "").lower()
+                name = p.get("name")
+                if not name:
+                    continue
+                if loc == "body":                      # Swagger 2 body parameter
+                    sch = p.get("schema") or {}
+                    req = set(sch.get("required") or [])
+                    for pn, meta in (sch.get("properties") or {}).items():
+                        params.append({"name": str(pn), "location": "body",
+                                       "type": str((meta or {}).get("type") or ""),
+                                       "required": pn in req})
+                    ctype = ctype or "application/json"
+                elif loc in ("query", "header", "path", "cookie"):
+                    params.append({"name": str(name), "location": loc,
+                                   "type": str(((p.get("schema") or {}).get("type"))
+                                                or p.get("type") or ""),
+                                   "required": bool(p.get("required"))})
+            body = op.get("requestBody") or {}         # OpenAPI 3
+            for ct, media in ((body.get("content") or {}) if isinstance(body, dict) else {}).items():
+                sch = (media or {}).get("schema") or {}
+                req = set(sch.get("required") or [])
+                for pn, meta in (sch.get("properties") or {}).items():
+                    params.append({"name": str(pn), "location": "body",
+                                   "type": str((meta or {}).get("type") or ""),
+                                   "required": pn in req})
+                if (sch.get("properties") or ct) and not ctype:
+                    ctype = str(ct)
+            concrete = re.sub(r"\{[^}]+\}", "1", str(path))
+            out.append({"url": root + "/" + concrete.lstrip("/"), "path": str(path),
+                        "method": m.upper(), "content_type": ctype,
+                        "params": params})
+    return out
+
+
 def surface_stats(inventory: list) -> dict:
     hosts = {e["host"] for e in inventory}
     params = set()

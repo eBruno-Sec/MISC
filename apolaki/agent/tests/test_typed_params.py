@@ -232,3 +232,121 @@ def test_projection_is_idempotent_and_deterministic():
     first = (g.stats()["nodes"], g.stats()["edges"], a._graph_primary_state(g)[2]["forms"])
     a._seed_and_project_graph(g)
     assert (g.stats()["nodes"], g.stats()["edges"], a._graph_primary_state(g)[2]["forms"]) == first
+
+
+# ── the API half: a spec's typed parameters ──────────────────────────────────────────
+
+SPEC = {
+    "openapi": "3.0.0",
+    "servers": [{"url": "/"}],
+    "paths": {
+        "/users/v1/login": {"post": {"requestBody": {"content": {"application/json": {"schema": {
+            "type": "object", "required": ["username"],
+            "properties": {"username": {"type": "string"}, "password": {"type": "string"}}}}}}}},
+        "/users/v1/{username}": {
+            "parameters": [{"name": "username", "in": "path", "required": True,
+                            "schema": {"type": "string"}}],
+            "get": {}, "delete": {}},
+        "/books/v1": {"get": {"parameters": [{"name": "q", "in": "query",
+                                              "schema": {"type": "string"}}]}},
+    },
+}
+SWAGGER2 = {
+    "swagger": "2.0", "basePath": "/api",
+    "paths": {"/thing": {"post": {"parameters": [
+        {"name": "body", "in": "body", "schema": {
+            "type": "object", "required": ["a"],
+            "properties": {"a": {"type": "integer"}, "b": {"type": "string"}}}}]}}},
+}
+
+
+def test_operations_from_openapi_reads_body_params_and_keeps_the_method():
+    """NEGATIVE CONTROL for the importer. `endpoints_from_openapi` -- still the URL importer, still
+    unchanged -- returns bare strings with no body parameter and no method, which is why every
+    parameter on a JSON API was invisible."""
+    import surface
+    ops = surface.operations_from_openapi(SPEC, BASE)
+    body = [(o["method"], p["name"], p["type"], p["required"])
+            for o in ops for p in o["params"] if p["location"] == "body"]
+    assert sorted(body) == [("POST", "password", "string", False),
+                            ("POST", "username", "string", True)], body
+    assert {o["method"] for o in ops} == {"POST", "GET", "DELETE"}
+
+    # the old importer, on the same spec, carries none of it
+    urls = surface.endpoints_from_openapi(SPEC, BASE)
+    assert urls and all("username" not in u and "password" not in u for u in urls), urls
+
+
+def test_operations_from_openapi_reads_swagger2_body_and_basepath():
+    import surface
+    ops = surface.operations_from_openapi(SWAGGER2, BASE)
+    assert len(ops) == 1 and ops[0]["url"] == BASE + "/api/thing", ops
+    got = {(p["name"], p["type"], p["required"]) for p in ops[0]["params"]}
+    assert got == {("a", "integer", True), ("b", "string", False)}, got
+
+
+def test_path_and_query_params_keep_their_own_location():
+    """Guard against collapsing everything into `body` to make the numbers look better."""
+    import surface
+    ops = surface.operations_from_openapi(SPEC, BASE)
+    locs = {(p["name"], p["location"]) for o in ops for p in o["params"]}
+    assert ("username", "path") in locs and ("q", "query") in locs and ("password", "body") in locs
+
+
+def test_an_unresolved_ref_yields_no_parameter_rather_than_a_guess():
+    import surface
+    ref = {"openapi": "3.0.0", "paths": {"/x": {"post": {"requestBody": {"content": {
+        "application/json": {"schema": {"$ref": "#/components/schemas/Thing"}}}}}}}}
+    ops = surface.operations_from_openapi(ref, BASE)
+    assert ops and ops[0]["params"] == [], ops
+
+
+def test_a_fetched_spec_becomes_typed_graph_params_and_reaches_the_planner():
+    """End to end: the spec `_fetch_openapi` now keeps becomes body params the planner can schedule,
+    through the SAME `_forms_from_graph` path the HTML-form producer uses -- no second code path."""
+    tools = _Tools(forms=[], urls=[BASE + "/users/v1/login"])
+    tools.recon["openapi"] = {BASE: SPEC}
+    a, g = _projected(tools)
+    body = {n["label"] for n in g.params_at("body")}
+    assert body == {"username", "password"}, body
+    assert {n["label"] for n in g.params_at("path")} == {"username"}
+    node = next(n for n in g.params_at("body") if n["label"] == "username")
+    assert (node["props"]["method"], node["props"]["required"]) == ("POST", True), node["props"]
+    _roots, _eps, recon = a._graph_primary_state(g)
+    assert [f["action"] for f in recon["forms"]] == [BASE + "/users/v1/login"], recon["forms"]
+    assert sorted(recon["forms"][0]["fields"]) == ["password", "username"]
+
+
+def test_a_spec_declaring_an_out_of_scope_host_is_not_projected():
+    """Scope-safety: the operation URL is anchored to the scanned base, and anything that resolves
+    outside scope is dropped rather than probed."""
+    tools = _Tools(forms=[], urls=[BASE + "/"])
+    tools.recon["openapi"] = {"http://evil.example": SPEC}
+    _a, g = _projected(tools)
+    assert g.params_at("body") == [], [n["key"] for n in g.params_at("body")]
+
+
+def test_fetch_openapi_actually_keeps_the_spec():
+    """The producer itself, not a stand-in.
+
+    Caught by a mutation: deleting the one line in `_fetch_openapi` that persists the spec killed NO
+    test, because `test_a_fetched_spec_becomes_typed_graph_params_and_reaches_the_planner` injects
+    `recon["openapi"]` by hand and so never exercises the producer. A registered producer with no test
+    that runs it is precisely the island shape this ticket keeps finding -- including in its own fix.
+    """
+    import json as _json
+    import tools as tools_mod
+    eng = scope_mod.ScopeEngine()
+    eng.load_manual([BASE + "/"], [], "P")
+    reg = tools_mod.ToolRegistry(eng, mission_id=None, lab_mode=True)
+
+    async def _fake_http(url, method="GET", **kw):
+        return {"body": _json.dumps(SPEC), "final_url": BASE + "/openapi.json", "status": 200}
+
+    reg._http = _fake_http
+    res = asyncio.new_event_loop().run_until_complete(
+        reg._fetch_openapi({"url": BASE + "/openapi.json"}))
+    assert res.success, res.error
+    assert reg.recon.get("openapi"), "fetch_openapi did not keep the spec it just parsed"
+    assert BASE in reg.recon["openapi"], sorted(reg.recon["openapi"])
+    assert reg.recon["openapi"][BASE]["paths"].get("/users/v1/login"), "a different object was stored"

@@ -2696,6 +2696,50 @@ class BBHAgent:
                 return _ag._nid("endpoint", k)
         return cls._graph_host_node(g, s)
 
+    def _project_spec_params(self, g) -> None:
+        """Project a fetched OpenAPI/Swagger spec's TYPED parameters into the graph.
+
+        Q-031, the API half. `_fetch_openapi` now keeps the parsed spec in `recon["openapi"]` instead
+        of garbage-collecting it, so the declared parameters survive the tool call for the first time.
+        MEASURED on VAmPI before this: 14 operations, 9 body parameters, 0 of them anywhere in the
+        graph -- 100% of that API's testable parameter surface invisible to the planner.
+
+        Deliberately the SAME node/edge vocabulary and the same `observe_param` writer the form
+        producer uses, so `_forms_from_graph` makes these schedulable through the path already built
+        and tested. No second code path, which is the whole point of putting location on the param.
+        """
+        import surface as _surface
+        from urllib.parse import urlparse as _up
+        for base_url, spec in (self.tools.recon.get("openapi") or {}).items():
+            try:
+                ops = _surface.operations_from_openapi(spec, str(base_url))
+            except Exception as _e:
+                self.tools._swallow(_e, "project_spec_params", str(base_url))
+                continue
+            for op in ops:
+                if not op.get("params"):
+                    continue
+                u = op["url"]
+                try:
+                    p = _up(u)
+                except Exception:
+                    continue
+                if not p.netloc or not self.scope.validate(u)[0]:
+                    continue
+                ep_key = p.netloc + (p.path or "/")
+                eid = g.observe("endpoint", ep_key, label=(p.path or "/"), source="openapi")
+                hid = self._graph_host_node(g, u)
+                if hid:
+                    g.link(hid, eid, "serves", source="openapi")
+                for prm in op["params"]:
+                    pid = g.observe_param(ep_key, prm["name"], location=prm["location"],
+                                          ptype=prm.get("type") or "",
+                                          required=prm.get("required"),
+                                          method=op["method"],
+                                          content_type=op.get("content_type") or "",
+                                          source="openapi")
+                    g.link(eid, pid, "has_param", source="openapi")
+
     def _project_body_params(self, g) -> None:
         """Project captured FORM fields into the graph as typed `body` parameter nodes.
 
@@ -2711,6 +2755,7 @@ class BBHAgent:
         endpoint attaches to that node rather than minting a second identity for it.
         """
         from urllib.parse import urlparse as _up
+        self._project_spec_params(g)
         for fm in (self.tools.recon.get("forms") or []):
             act = str((fm or {}).get("action") or "").strip()
             if not act:

@@ -3793,6 +3793,13 @@ class ToolRegistry:
             return ToolResult("fetch_openapi", url, False, "", [], "Response is not valid JSON (not an OpenAPI spec)")
         base = urlparse(r["final_url"] or url)
         base_url = f"{base.scheme}://{base.netloc}"
+        # KEEP THE SPEC (Q-031). Everything below reduces it to a list of URL strings, which throws
+        # away every typed BODY parameter it declares — MEASURED on VAmPI: 14 operations, 0 query
+        # parameters, 9 body parameters, and `endpoints_from_openapi` returns 12 URLs carrying none of
+        # them, so 100% of that API's testable parameter surface was invisible to the planner. The spec
+        # used to be a local that was garbage-collected on return, so no downstream projector could
+        # recover it. `_project_body_params` reads this to mint typed `param` nodes.
+        self.recon.setdefault("openapi", {})[base_url] = spec
         endpoints = surface_mod.endpoints_from_openapi(spec, base_url)
         endpoints = [e for e in endpoints if self.scope.validate(e)[0]]
         self._add_urls(endpoints)
