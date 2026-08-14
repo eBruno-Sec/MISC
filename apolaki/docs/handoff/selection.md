@@ -53,11 +53,82 @@ To be tested, not assumed:
 3. wall-clock per tool - `[in progress]`
 4. whether the planner is at fixpoint when the cap bites - `[in progress]`
 
+## 1b. The second reading, and it is a bigger finding than the cap [READ]
+
+`agent/owasp_bench.py:46` already declares which SHIPPING engine owns each benchmark category. It
+is the map the per-category harness uses to decide which engine is even allowed to score a
+category, so it cannot be accused of being chosen to flatter anything:
+
+| category | Java cases | owning engine | in `_SWEEP_HTTP_ENGINES`? |
+|---|---:|---|---|
+| sqli | 504 | `run_sqli` | YES |
+| xss | 455 | `run_xss` | browser tier only - **30 of 400 targets** |
+| weakrand | 493 | `run_web_probes` | **NO** |
+| pathtraver | 268 | `run_web_probes` | **NO** |
+| cmdi | 251 | `run_form_cmdi` | **NO** |
+| securecookie | 67 | `run_web_probes` | **NO** |
+| ldapi | 59 | `run_ldap` | YES |
+| xpathi | 35 | `run_xpath` | YES |
+
+`_SWEEP_HTTP_ENGINES` (`agent/agent.py:188`) is
+`run_sqli, run_sqli_structural, run_xpath, run_ldap, run_ssi, run_css_injection, run_waf_bypass,
+run_injection_probes`. Three of the eight own a Java category; the other five own none of them.
+
+**`run_web_probes` - the platform's traversal + IDOR + cookie-flag engine - is dispatched by the
+PLANNER only**, `planner.py:494`, over `CAP_ENDPOINTS = 25` parameterized endpoints. Verified by
+grep: its only other dispatch site is the graph action map (`agent.py:3007`,
+`arbitrary_file_read`). So the mission's coverage-guarantee sweep guarantees that every discovered
+parameterized endpoint is tested for SQLi, XPath, LDAP, SSI, CSS-injection, WAF bypass and
+CORS/redirect - and guarantees **nothing** for path traversal, IDOR, insecure cookies or command
+injection.
+
+**This is general, not benchmark-shaped.** On any target, a discovered `?file=` parameter receives
+seven engines that cannot read a file and not the one that can. The engine exists, ships, is
+HTTP-only and is already scored at 65.4% on `pathtraver` by the per-category harness.
+
+**And it reframes the 202 "MISSED-AFTER-PROBING".** The coverage record scores a case as PROBED
+when ANY payload-bearing tool was dispatched at its URL. A `pathtraver` case that received
+`run_sqli`, `run_ldap`, `run_xpath` and `run_ssi` is "probed" and was never tested for traversal.
+Its miss is booked as a DETECTION shortfall and it is a SELECTION shortfall. How much of the 202
+this accounts for is the number `whole_product_score.py`'s new class-correctness table prints, and
+it is the first thing my baseline run will answer.
+
 ## 2. Harness
 
-`scripts/whole_product_rerun.py` extended (additively; the SEAL is unchanged so older artifacts
-stay comparable) to record phase attribution, per-tool case sets and per-tool wall clock.
+`scripts/whole_product_rerun.py` and `whole_product_score.py` extended (additively; the SEAL is
+unchanged so older artifacts stay comparable). Committed `2eba60c`.
+
+**How the instrument is guarded, since it lives in `scripts/` and the suite container mounts only
+`agent/`.** No pytest can see these files, and a test that self-skips is not a pass. So both
+scripts fail LOUDLY at startup instead: `check_probe_tools()` refuses to run when a tracked tool
+name is not in the live registry, and `install_phases()` refuses when a wrapped method name no
+longer exists on `BBHAgent`. Both run on every measurement rather than in a suite. Verified once
+by throwaway-container smoke test: 16 methods wrapped, async-generator and coroutine kinds both
+preserved, phase pops correctly when the wrapped generator raises, planner census records exactly
+one entry per call and keeps the original callable.
+
+## 2b. The targeted test, failing FIRST [MEASURED]
+
+`agent/tests/test_sweep_class_coverage.py` drives the REAL `_inject_sweep_surface` with a recording
+`_run_tool` and asserts what was DISPATCHED, not what a tuple declares. Asserting
+`"run_web_probes" in _SWEEP_HTTP_ENGINES` would be a guard that checks a declaration - it passes on
+a tuple no code path iterates.
+
+On unmodified HEAD, in a throwaway container:
+
+```
+3 passed, 2 failed
+FAILED test_every_swept_target_is_also_tested_for_traversal_and_idor
+        12 of 12 swept target(s) were never handed to run_web_probes
+FAILED test_the_traversal_engine_is_not_restricted_to_the_browser_budget
+        run_web_probes reached 0 target(s), at or below the browser cap 30
+```
+
+The three that pass are the non-vacuity control (the sweep does reach all 12 parameterized URLs
+with `run_sqli`), the budget bound (whatever is added must still respect `SWEEP_TARGET_CAP`) and
+determinism (two identical sweeps dispatch identically). They pass BEFORE the change, so they
+cannot be credited to it.
 
 ## 3. Numbers
 
-None yet.
+Baseline run in progress. Nothing measured yet.
