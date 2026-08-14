@@ -243,6 +243,59 @@ class AssetGraph:
                             method=(str(method).upper() or None) if method else None,
                             content_type=(str(content_type) or None), **props)
 
+    # Detection strength (dependency_intel's CONFIRMED/HIGH/LOW) -> the graph's PLANNING confidence.
+    # It deliberately stops below the graph's CONFIRMED (1.0), which means VERIFIED: a fingerprint is
+    # an OBSERVATION, and no amount of detection is a test. `tested` stays False for the same reason,
+    # so a technology node lands on the planner's untested worklist rather than looking settled.
+    _TECH_CONF = {"confirmed": HIGH, "high": MEDIUM, "low": LOW}
+
+    def observe_technology(self, fact: dict, *, scope_asset: str = "", source: str = "fingerprint") -> str:
+        """THE single writer for a detected technology. Returns the node id, or "" for a fact with no
+        product identity (refused rather than stored as an empty node).
+
+        The node kind is the EXISTING `component`, with vendor / version / version_confidence /
+        detector / evidence / auth-state as PROPS. Same instinct as `observe_param` putting
+        `location` on the param rather than inventing a `schema` kind: a dimension on an existing
+        node is schedulable through the path already built and tested; a new kind is not.
+
+        The key is `dependency_intel.tech_fact_key` -- identity, never the version -- so one
+        technology re-observed across a mission is one node whose `last_seen` moves, and two products
+        that happen to share a version string are two nodes.
+        """
+        import dependency_intel as _di
+        f = fact if isinstance(fact, dict) else {}
+        product = str(f.get("product") or f.get("name") or "").strip()
+        if not product:
+            return ""
+        version = str(f.get("version") or "")
+        label = str(f.get("label") or product)
+        host = str(f.get("host") or "")
+        conf = self._TECH_CONF.get(str(f.get("version_confidence") or f.get("confidence") or "").lower(), LOW)
+        nid = self.observe(
+            "component", _di.tech_fact_key(f),
+            label=("%s %s" % (label, version)).strip(), source=source, confidence=conf,
+            scope_asset=scope_asset or host,
+            vendor=str(f.get("vendor") or ""), product=product.lower(),
+            component=str(f.get("component") or ""), category=str(f.get("category") or ""),
+            version=version, version_confidence=str(f.get("version_confidence") or ""),
+            version_conflicts=list(f.get("version_conflicts") or []),
+            # `detection_source` is which HTTP artifact proved the technology (a Server header, a
+            # script filename). The node-level `sources` list is a different thing -- which PHASE of
+            # the engagement contributed the node -- and `observe`'s own `source=` argument owns it.
+            detection_source=str(f.get("source") or ""), detector=str(f.get("detector") or ""),
+            evidence=str(f.get("evidence") or ""), source_url=str(f.get("location") or ""),
+            host=host, authenticated=bool(f.get("authenticated")),
+            # the DETECTION timestamps, distinct from the node's own first_seen/last_seen (which are
+            # when THIS graph instance saw it, and reset when a graph is rebuilt or warm-started).
+            observed_first=f.get("first_seen"), observed_last=f.get("last_seen"),
+            cve_eligible=_di.cve_eligible(f),
+            proof_state=str(f.get("proof_state") or _di.tech_proof_state(f)),
+            component_status=str(f.get("component_status") or _di.tech_component_status(f)))
+        if host:
+            hid = self.observe("host", host, source=source, scope_asset=scope_asset or host)
+            self.link(hid, nid, "runs", source=source)
+        return nid
+
     def params_at(self, location: str = None) -> list:
         """Parameter nodes, optionally filtered by location. The reader the planner gating needs;
         a param written before this change has no `location` prop and reads as `query`."""
@@ -285,8 +338,16 @@ class AssetGraph:
         obs = set()
         if self.nodes("object"):
             obs.add("has_object_id")
-        if self.nodes("component"):
-            obs.add("has_versions")
+        for c in self.nodes("component"):
+            # `has_versions` must mean a version is actually KNOWN. A technology fact with an empty
+            # version is a real detection (`Server: nginx`) that would otherwise assert the planner
+            # knows something it does not. A component node with NO `version` prop is a legacy
+            # `ingest_intel` node, whose KEY is the harvested version string -- requiring the prop
+            # would have silently switched that long-standing observation off.
+            props = c.get("props") or {}
+            if "version" not in props or str(props.get("version") or "").strip():
+                obs.add("has_versions")
+                break
         if self.nodes("coupon"):
             obs.add("has_coupon")
         caps = {n["key"] for n in self.nodes("capability")}
@@ -541,6 +602,13 @@ def build_from_engagement(mission_id: str, *, recon: dict = None, urls: list = N
             # through observe_param so the key rule and the role classifier live in one place.
             pid = g.observe_param((host + path) if host else path, p, location="query", source="recon")
             g.link(eid, pid, "has_param", source="recon")
+
+    # detected technology (Q-021B). `recon` already reached this function; before the TechnologyFact
+    # it carried nothing but display strings, so there was nothing here to project. The display list
+    # `live_hosts[i]["tech"]` is deliberately NOT read: it is a bare-string rendering that would only
+    # add weaker, version-less duplicates of facts that now arrive with their evidence.
+    for fact in (recon.get("technology") or []):
+        g.observe_technology(fact, scope_asset=scope_asset)
 
     # findings + what they unlock
     for f in findings:
