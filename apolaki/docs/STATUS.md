@@ -37,7 +37,7 @@ gate at `scripts/tier3_gate.sh` (LF-normalized and pinned via `.gitattributes`).
 
 | track | figure | denominator | FPR |
 |---|---:|---|---:|
-| Java v1.2 — **hybrid** (DAST + SAST) ⚠ **HARNESS-ONLY, see below** | **61.1%** off. / **60.9%** prod. | 11-cat macro, full 2132 DAST + 975 SAST | **0.0%** |
+| Java v1.2 — **hybrid** (DAST + SAST) ✅ **now mission-reachable (Q-044)** | **61.1%** off. / **60.9%** prod. | 11-cat macro, full 2132 DAST + 975 SAST | **0.0%** |
 | Java v1.2 — **DAST only** | **41.7%** off. / **41.5%** prod. | 11-cat macro, full suite | **0.0%** |
 | ~~Java v1.2 — earlier figures~~ | ~~41.3% / 34.9% @ 2.1%~~ | superseded by the full sealed run; the 2.1% FPR was the cross-family artifact, since fixed | — |
 | Python v0.1 — **hybrid** (DAST + code-assisted SAST) | **38.8%** | 14-cat macro, full 1230-case suite | **0.0%** |

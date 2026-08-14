@@ -261,6 +261,30 @@ Apolaki as a product.
 
 ---
 
+## Q-044 CLOSED — the SAST lane is reachable from a real mission. 2026-08-13
+
+Island number six is closed. `/engage` now accepts `source_root`, and the proof is the one that was
+demanded: **a real production mission persisted a confirmed CWE-327 finding** carrying
+`provenance: source-derived`, `lane: code-assisted`, `control_status: not_applicable` — not a harness
+call, not a unit test.
+
+So **61.1% is no longer a harness-only figure.** It still may never be compared against a published
+DAST score, and it is still labelled code-assisted (SAST) at every surface — but a client engagement
+can now invoke the capability behind it.
+
+**No benchmark number moved, and that is the point of this ticket**: artifacts byte-identical before
+and after — Java SAST 560 TP / 855 FN / **0 FP** / 1325 TN at macro 36.4%; Python SAST 188 TP /
+264 FN / **0 FP** / 778 TN at macro 21.4%. Wiring, not detection. Six semantic mutants killed.
+
+The controls that make it trustworthy are absence-of-bypass shaped, which is the form that would have
+caught the original island: **malformed analyser output cannot enter a report as DAST**, and legacy
+`/codereview` behaviour is byte-unchanged for existing callers — that endpoint also serves source the
+recon phase reconstructs from a target's own leaks, and that path had to keep working. Missing source
+reports **"no source provided"** and is recorded as *skipped*, never as a clean result: an absent
+input is not a passing scan.
+
+Unsupported source-analysis categories stay honestly at zero recall.
+
 ## Q-031 CLOSED — an API spec's typed body parameters now reach the planner. 2026-08-13
 
 VAmPI, full mode, identical seed, two consecutive after-runs identical on every field:
