@@ -1372,3 +1372,139 @@ divergence leg uses. Two independent strengthenings, both cheap:
 
 Both are 1-3 extra requests per field. Neither weakens the oracle: the four lost true positives and
 `00033` all pass both.
+
+---
+
+# TARGET 3 — is −3 real? PART ONE: **the baseline it is measured against is not reproducible.**
+
+Before asking whether the rerun varies, ask whether the "before" number can be re-derived. It
+cannot. `docs/LEDGERS.md` (lines 147-186) records mission `ebd96f45` as:
+
+```
+total findings: 25   by family: {'sqli': 21, 'ldap_injection': 1, 'dom_data_manipulation': 1,
+                                 'sensitive_exposure': 1, 'vulnerable_component': 1}
+distinct cases claimed: 23    SEAL sha256: a95670f9c7560b227a234ebeb23c0fba0872cb3100f87e52d0c4d878988660f5
+TRUE POSITIVES: 22   FALSE POSITIVES: 1
+```
+
+The agent store returns something else for that same mission id today
+(`curl -s http://localhost:8000/missions/ebd96f45`, MEASURED 2026-08-14):
+
+```
+findings: 29   by family: {'sqli': 21, 'ldap_injection': 5, 'dom_data_manipulation': 1,
+                           'sensitive_exposure': 1, 'vulnerable_component': 1}
+distinct cases claimed (harness's own case_ids extractor): 27
+seal over those 27: fab8a46e13633f6a418a05742b4a49a588acd8e5fb34aa00ceb03f0dedeb9051
+```
+
+Everything matches except `ldap_injection`: **1 in the ledger, 5 in the store.** The store's five
+are on `BenchmarkTest00630 / 00695 / 01242 / 01490 / 01568`, and the mission's own log has
+`run_ldap` executing at `00:47:13` and `00:48:21` inside the mission window, so they are that
+mission's findings, not something appended later. Checked and ruled out:
+
+* **Dedup does not explain it.** `memory.finding_fp` over the 29 findings yields **29 distinct
+  fingerprints** — nothing collapses, and the five ldap findings differ in both param and path.
+* **A later mission did not write into it.** No mission in the store carries
+  `parent_id = ebd96f45`; the mission is `status: complete, phase: report, recon_cycles: 1`.
+* **The seal does not reconcile.** Brute-forced every removal of up to 5 cases from the 27; none
+  reproduces `a95670f9`. The recorded seal is not the seal of any near-subset of what the mission
+  holds, so the two numbers cannot be reconciled by "the capture dropped these four".
+
+**Why this matters for the −3.** The rerun's headline gain is `ldapi 1 -> 5 (+4)` — offered as
+evidence that "class coverage genuinely BROADENED". The baseline mission has all five. On the
+store's numbers the comparison is **27 claimed -> 19 claimed**, the ldapi "gain" is zero, and the
+loss is **−8, not −3**. On the ledger's numbers it is −4/−3 with a +4 ldapi gain. One of those two
+is wrong and nothing in the repository can currently say which.
+
+**This is the most important thing in this section.** Every published whole-product delta rests on
+a baseline that cannot be re-derived from the artifact it names. The rerun side is fine — it is
+sealed, hashed, and I reproduced its score byte for byte. The baseline side is a number in a
+markdown table. `scripts/whole_product_score.py` now carries that provenance and caveat in the
+`BASELINE` dict and in the JSON it writes, so nothing downstream can quote 22/23 without it.
+
+**Owner action (`docs/LEDGERS.md` is not mine):** either re-extract the baseline from the store and
+restate it as 27 claimed / 26 TP (which makes the delta −8 and removes the ldapi gain), or record
+exactly what the 08-11 capture filtered out and why. Until one of those happens, "recall fell by 3"
+is a claim about two numbers produced by two different procedures.
+
+## 3-aside. What "class coverage broadened" actually reduces to
+
+With the baseline mission's real family counts in hand, the claimed broadening is:
+
+```
+ldapi   baseline 5 (00630 00695 01242 01490 01568)  ->  rerun 5 (the same five)   +0
+xpathi  baseline 0                                  ->  rerun 1 (02189)           +1
+```
+
+The rerun's five ldapi cases are **the baseline's five ldapi cases**, case for case. So the
+broadening the body-parameter work is credited with is **one xpathi case**, not five ldapi plus one
+xpathi. That does not make the work wrong — `xpathi` genuinely went 0 -> 1 and those sinks do take
+body input only — but the evidence for it is one case, and the other four-fifths of the claim is
+the ledger discrepancy above.
+
+---
+
+# TARGET 2 (cont.) — `BenchmarkTest00407`: the third shape, and it is one this project already fixed once
+
+Both runs claim `dom_data_manipulation` on `BenchmarkTest00407`, a `cmdi` case. Read the producer
+(`agent/dom_trace.py:158-161`, `classify`):
+
+```python
+if s.get("in_attr") or s.get("in_text"):
+    where = s.get("in_attr") or "DOM text"
+    hits.append({"family": "dom_data_manipulation", ...,
+                 "evidence": "%s reflects into rendered DOM content at runtime (%s)" % (...)})
+```
+
+and `finding()` — "Build a CONFIRMED finding from a trace hit" — stamps `CWE-79` on it
+(`_CWE["dom_data_manipulation"] = "CWE-79"`). The stored evidence on both runs is exactly
+`query parameter 'BenchmarkTest00407' reflects into rendered DOM content at runtime (DOM text)`.
+
+**The signal is reflection and nothing else.** No breakout, no execution, no sink beyond "the text
+appeared". That is the same signal that made the path-traversal oracle a false-positive generator,
+and commit `0233574` fixed it there by demoting a reflection-only hit to `confidence=lead,
+severity=info` (verified CONFIRMED in session 3, 45/45 cross-family claims correctly demoted). The
+DOM lane still stamps `confirmed` + `CWE-79` on the same evidence class. Every OWASP Benchmark case
+that echoes its parameter — which is most of them — is eligible.
+
+**Verdict: PLAUSIBLE, not CONFIRMED.** The code path and the stored evidence are measured and
+unambiguous, and the parallel to `0233574` is exact. I did not run the live DOM sweep across
+categories to measure how many cases it fires on, because a browser sweep against the lab would
+have perturbed the variance runs in flight (TARGET 3). That breadth measurement is the missing
+check. `agent/dom_trace.py` is not mine.
+
+---
+
+# TARGET 1 (cont.) — 1d. Candidate 3 has a *mechanism*, and it is a hard cap of 25
+
+Reading the deterministic sweep end to end (`agent/planner.py`, `agent/surface.py`, `agent.py`):
+
+```
+planner.py:38-46   CAP_HOSTS = 30   CAP_ENDPOINTS = 25   CAP_REST = 30   CAP_FORM_PAGES = 10
+                   CAP_JS = 40      CAP_DOM = 6          CAP_SQLMAP = 8
+planner.py:434     param_eps = [e for e in inv if e.get("parameterized")][:CAP_ENDPOINTS]
+planner.py:486-498 per endpoint: run_xss, run_sqli, run_nosqli, run_injection_probes,
+                                 run_web_probes (+ run_ssrf / run_cmdi when the param name matches)
+agent.py:3160      MAX_STEPS = 220
+agent.py:1670      BBH_SURFACE_PAGES default 250, BBH_SURFACE_DEPTH default 4
+```
+
+So against a 2740-case corpus one deterministic cycle crawls **at most 250 pages**, keeps the
+**first 25 parameterized endpoints** `surface.build_inventory` returns, and fetches **10** pages for
+form discovery. `build_inventory` preserves the INSERTION ORDER of `tools.urls`
+(`surface.py:55-77`, an `order` list, not a set), and `tools._add_urls` appends in discovery order,
+so **which 25 endpoints get probed is decided entirely by crawl order**.
+
+That is the ceiling on whole-product recall — 25 endpoints against 1415 vulnerable cases is at most
+~1.8% before any oracle runs — and it is also the mechanism candidate 3 needs. Nine specific sqli
+cases did not "stop being detectable"; they are 9 cases outside the 25/10 this run's ordering
+selected. Consistent with the loss shape: the survivors are the front of `sqli-00` and the losses
+are its tail.
+
+**What this does NOT yet settle** is whether crawl order is stable between two runs of the same
+code. If it is, the −3 is a real consequence of a code change that shifted the ordering; if it is
+not, −3 is noise. That is exactly the measurement in TARGET 3 PART TWO, in flight now.
+
+**Recorded for the harness owner:** `effort.plan_steps` vs `step_cap` will now say which of the two
+bounds actually bit — 220 steps or 25 endpoints — and `coverage.cases_probed` says which cases the
+ordering picked. Neither number existed before today.
