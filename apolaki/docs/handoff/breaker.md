@@ -1151,3 +1151,224 @@ outstanding rejection is now about a surface that describes a finding rather tha
 found it. That is where the next honest-numbers failure will come from.
 
 
+
+---
+---
+
+# SESSION 4 (2026-08-14) — the whole-product −3
+
+Brief: discriminate three candidate causes for `recall 22/1415 -> 19/1415`, close the harness gap
+that makes candidate (3) unanswerable, reproduce two live sqli false positives, and decide whether
+−3 is a stable delta or run-to-run variance.
+
+Written incrementally. Everything below is MEASURED unless it says otherwise.
+
+## Environment for this session
+
+Lab up (`apolaki-owaspbench-1`, 15 h). Baseline mission `ebd96f45` still in the agent store and
+readable over the API. No image rebuilt, nothing `docker cp`'d into `apolaki-agent-1`. All analysis
+runs in throwaway `--network none` containers with a **key-free** work dir
+(`<scratch>/brk4`) mounted at `/w` — the session scratchpad root holds `key.csv` and
+`wpout/key.csv` and is therefore never mounted anywhere a scanner or a scored run can see it.
+
+---
+
+# TARGET 1 — the three candidates. RESULT: (1) and (2) are DEAD ON ARITHMETIC. (3) survives.
+
+## 1a. The −9 sqli is NOT one oracle. It is 5 error-recovery + 4 boolean-blind.
+
+The brief's proposed shortcut ("take the baseline's 20 sqli confirmations and ask whether the
+stability gate would now reject them") assumes the 20 are boolean-blind confirmations. **They are
+not.** Pulled the baseline mission's raw findings straight from the store and split them by oracle
+tag — no summary trusted:
+
+```
+$ curl -s http://localhost:8000/missions/ebd96f45   ->  29 findings
+by family        : {'sqli': 21, 'ldap_injection': 5, 'dom_data_manipulation': 1,
+                    'sensitive_exposure': 1, 'vulnerable_component': 1}
+sqli oracle split: {'error-recovery': 15, 'boolean-blind': 6}
+```
+
+The 15 error-recovery confirmations all arrive through the **request-header carrier**
+(`GET .../sqli-00/BenchmarkTestNNNNN [request header BenchmarkTestNNNNN]`, evidence
+`HTTP 200 (benign) -> 500 (single quote) -> 200 (doubled quote)`). The 6 boolean-blind arrive
+through the **POST-form-field carrier**.
+
+Diffing the baseline claim set against the sealed rerun claim set, with the harness's own
+`case_ids()` extractor on both sides:
+
+```
+LOST   (in baseline, not in rerun): 00335 00337 00339 00341 00342   <- error-recovery, header carrier
+                                    00428 00429 00433 00438         <- boolean-blind, POST-form carrier
+                                    00494                           <- boolean-blind, THE false positive
+GAINED (in rerun, not in baseline): 00023 (weakrand case)  02189 (xpathi case)
+KEPT: 17
+```
+
+So the nine lost sqli-category cases are **five error-recovery + four boolean-blind**.
+
+**CANDIDATE 1 (the blind-SQLi stability gate) — REJECTED, and it cannot be rescued.**
+`sqli_tool.analyze_boolean` is the *only* function the gate touches. `quote_break_recovers` — the
+oracle behind 15 of the baseline's 21 sqli findings and 5 of the 9 losses — takes three integers
+(`base_status`, `single_status`, `double_status`) and has no baseline-repeat parameter, no body
+comparison and no reference to the gate at all. **The gate is arithmetically incapable of removing
+more than 4 of the 9.** "We traded ~9 findings for 0 FP" is false on the artifact alone; at most
+4 findings were even eligible, and 1b below shows the gate does not reject those four either.
+
+**CANDIDATE 2 (the target-rate policy) — REJECTED on the code and on the clock.**
+`browser_engine.TargetRatePolicy` is not a throughput limiter. Read in full: it is a purely
+*reactive* per-origin cooldown that adds delay only when a response carries a status in
+`_RETRY_STATUSES = frozenset({429, 503})` **and** a parseable `Retry-After` header
+(`observe()` returns `None` on any other status). With no 429/503+Retry-After from the target it
+adds exactly zero seconds and cannot cut request volume. Two independent reasons it cannot be the
+cause:
+  * it can only ever ADD wall-clock time, and the rerun's wall clock went **down 64%**
+    (5329 s -> 1893 s). A policy that slowed the run cannot also have shortened it.
+  * probe volume is not scheduled against a rate; the loop is bounded by steps, not by seconds.
+
+**CANDIDATE 3 (the run simply probed less) — SURVIVES, and the shape of the loss supports it.**
+The five lost error-recovery cases are a contiguous later block of `sqli-00`
+(00335/337/339/341/342) while the ten survivors are the earlier block (00018, 00192-00204). The
+four lost boolean-blind cases (00428-00438) are later still. The rerun kept the *front* of the
+sqli-00 case list and lost the *tail* — that is what a truncated sweep looks like, not what an
+oracle change looks like. An oracle change would remove cases by their response shape, not by
+their position in the queue.
+
+## 1b. The gate does not reject the four eligible losses. It rejects ZERO of nine.
+
+The brief's pure-function test, run properly: replay the PRODUCTION POST-form lane
+(`tools._run_sqli` step 4 — GET the case page, `form_xss.parse_forms`, POST the field's OWN value
+twice for `fbody`/`fbody_repeat`, then POST each `boolean_payloads` pair) against the live lab, and
+evaluate BOTH forms of the decision on the same bodies:
+
+```
+ungated = analyze_boolean(fbody, true, false)
+gated   = analyze_boolean(fbody, true, false, baseline_repeat=fbody_repeat)
+```
+
+`<scratch>/brk4/bb_gate.py`, run in a throwaway on `apolaki_default`, repo mounted `:ro`,
+3 independent trials per case:
+
+| case | in rerun? | baseline stability | ungated | GATED |
+|---|---|---:|---|---|
+| BenchmarkTest00033 | kept | 1.0000 | True 3/3 | **True 3/3** |
+| BenchmarkTest00428 | **LOST** | 1.0000 | True 3/3 | **True 3/3** |
+| BenchmarkTest00429 | **LOST** | 1.0000 | True 3/3 | **True 3/3** |
+| BenchmarkTest00433 | **LOST** | 1.0000 | True 3/3 | **True 3/3** |
+| BenchmarkTest00438 | **LOST** | 1.0000 | True 3/3 | **True 3/3** |
+| BenchmarkTest00494 | LOST (was the FP) | 0.9091 / **1.0000** | True | **True on 3 of 4 fields** |
+
+**The gate rejects 0 of the 4 eligible cases.** Every one of them has a byte-identical baseline on
+repeat (`similar(b1,b2) = 1.0000`), which is precisely the condition the gate passes. The four
+losses are therefore NOT the gate, and the five error-recovery losses were never reachable by it.
+
+**Candidate 1 final: REJECTED. 0 of 9, not ~9 of 9.** There is no "deliberate trade" to record —
+nothing was traded. The gate is still worth having (see 2b) but it did not buy the precision and it
+did not cost the recall.
+
+## 1c. Corollary the gate's authors will want: it does not fix `BenchmarkTest00494` either
+
+`BenchmarkTest00494` still returns **CONFIRMED with the gate on**, on 3 of its 4 form fields, in
+trial 0 and trial 1 above. The gate was session 1's recommended minimal fix for exactly this case,
+and it does not close it — because 00494's instability is a two-state alternation that arrives in
+runs, so two consecutive baselines usually land in the SAME state and look perfectly stable.
+Quantified in TARGET 2 below: taking one extra sample halves the false-positive rate, it does not
+remove it.
+
+---
+
+# TARGET 2 — the two sqli false positives. VERDICT: **STRUCTURAL, one shared cause, not two coincidences.**
+
+Oracle variant, both times: **`boolean-blind`**, via the **POST-form-field carrier**. Not
+error-recovery, not UNION, not quote-recovery. (`BenchmarkTest00023` rerun claim row:
+`sqli | SQL injection (boolean-blind) in 'BenchmarkTest00023' | .../weakrand-00/BenchmarkTest00023`.)
+
+## 2a. The shared cause, in one line: **a response body that changes between IDENTICAL requests.**
+
+Dumped three responses to three byte-identical POSTs (`<scratch>/brk4/bodies.py`):
+
+```
+BenchmarkTest00023  (key: weakrand, VULNERABLE)
+  [0] 'Floyd00023 has been remembered with cookie: rememberMe00023 whose value is: 99437195<br/>
+       Weak Randomness Test java.util.Random.nextFloat() executed'
+  [1] '... whose value is: 7079971<br/> ...'
+  [2] '... whose value is: 4957906<br/> ...'
+
+BenchmarkTest00494  (key: cmdi, CLEAN)
+  two alternating DNS-failure strings, session 1's measurement, still live
+```
+
+`00023` is a **weak-randomness case**. Its whole point is to emit a fresh `java.util.Random` value
+on every response. The body is 147-150 bytes and the varying digit run moves
+`SequenceMatcher.ratio()` around **0.9495-0.9766** — straddling the oracle's 0.95 threshold. So the
+app's own noise is the same size as the signal the oracle is looking for.
+
+That is the identical mechanism as `00494` (non-deterministic resolver text, 0.9091). **One defect,
+two spellings.** It is not a coincidence and it is not two bugs.
+
+## 2b. Negative control: the oracle CONFIRMS SQLi on responses to identical requests, gate on
+
+The honest negative control is to hand the oracle four responses to the SAME request with the SAME
+value and no payload at all. Every `True` is a false positive by construction. 12 identical POSTs
+per field, all 400 ordered 4-tuples (`<scratch>/brk4/bb_negctl.py`):
+
+```
+case                 field                  n  distinct  pairwise sim        FP/attempt ungated  GATED
+BenchmarkTest00023   productID             12    12      0.9495..0.9764          0.045          0.045
+BenchmarkTest00023   secure/foo/00023      12    12      0.9530..0.9766          0.000          0.000
+BenchmarkTest00494   secure                12     2      0.9091..1.0000          0.203          0.090
+BenchmarkTest00494   productID             12     2      0.9091..1.0000          0.225          0.150
+BenchmarkTest00494   foo                   12     2      0.9091..1.0000          0.280          0.155
+BenchmarkTest00494   BenchmarkTest00494    12     2      0.9091..1.0000          0.235          0.077
+BenchmarkTest00428   email/password/00428  12     1      1.0000..1.0000          0.000          0.000
+BenchmarkTest00033   secure/productID/...  12     1      1.0000..1.0000          0.000          0.000
+```
+
+Read it as three facts:
+
+1. **The gate helps and does not fix.** `0.203 -> 0.090`, `0.280 -> 0.155`, `0.235 -> 0.077`. It
+   roughly halves the rate because `00494`'s two states arrive in runs, so one extra sample agrees
+   with the first about half the time. `0.045 -> 0.045` on `00023`: for a body that is different
+   every single time but only *slightly*, the extra sample lands above 0.95 as often as the
+   baseline does, and the gate contributes **nothing at all**.
+2. **The true positives pay nothing.** `00428` and `00033` are byte-identical across 12 requests
+   (1 distinct body) and score **0/400** in every field, ungated and gated. Baseline stability
+   separates the true positives from the false positives perfectly, exactly as session 1 found —
+   it is just that a *two-sample* test is not a strong enough estimator of it.
+3. **This is a per-attempt rate, and the engine takes many attempts.** 4 boolean contexts x every
+   text field on the form. On `00494` that is ~16 attempts at 8-16% each; a confirmation is close
+   to certain over a full field sweep, which is why it fired in the baseline mission and fires
+   again today.
+
+## 2c. Why this is bigger than two cases: an entire benchmark category is exposed
+
+`weakrand` cases emit a fresh pseudo-random value per response **by definition**. That is 493 cases
+in the Java suite of which roughly 275 are CLEAN. The boolean-blind oracle has a systematic
+cross-family false-positive exposure across the whole category, and which field it lands on is
+chance — in my 3 live trials the fire moved between `foo`, `productID` and neither.
+
+**This downgrades the rerun's headline.** `precision 100.0% (19/19)` includes `BenchmarkTest00023`,
+which is an sqli claim on a weakrand case with no sqli in it. It scored as a TRUE POSITIVE only
+because the LOOSE convention credits any claim on a genuinely-vulnerable case and this particular
+weakrand case happens to be vulnerable *to weak randomness*. Had the same coin landed on any of the
+~275 clean weakrand cases, the rerun would have scored a false positive and the 100.0% would not
+exist. The class-matched 89.5% is the honest number and the 10.5% gap is exactly this.
+
+## 2d. The fix that would actually work (owner's call — `agent/sqli_tool.py` is mine to write, but
+## this changes a shipped oracle's behaviour, so it is proposed, not adopted)
+
+The two-sample gate estimates stability with n=2 and compares against the *same* constant the
+divergence leg uses. Two independent strengthenings, both cheap:
+
+* **Sample the baseline more than twice and require the observed noise floor to be BELOW the
+  divergence being claimed.** The correct predicate is not "baseline repeats" but
+  `similar(true,false) < min(pairwise baseline similarity)` — i.e. the payload must move the page
+  by MORE than the page moves on its own. On `00494` the noise floor is 0.9091 and the claimed
+  divergence is 0.9091: identical, so the claim is worth nothing. On `00428` the floor is 1.0000
+  and the divergence is 0.9373: a real difference. This one predicate separates all six cases
+  measured above with no threshold tuning.
+* **Re-send the FALSE payload and require the divergence to reproduce.** Kills any single-sample
+  straddle.
+
+Both are 1-3 extra requests per field. Neither weakens the oracle: the four lost true positives and
+`00033` all pass both.
