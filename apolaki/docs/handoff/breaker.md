@@ -1688,3 +1688,53 @@ exactly there. It did, and nothing else moved, across a four-commit code delta a
 **Consequence for the published number.** The sealed rerun's `precision 100.0% (19/19)` and
 `recall 1.34% (19/1415)` include a claim that is a coin flip. Run A, same target, same shape, gets
 **18/1415 = 1.27%**. The 19th claim is not a capability.
+
+## 3-two-c. RUN B — and the answer: **−3 is NOT variance. Variance is zero.**
+
+```
+                elapsed  findings  claims  steps    exit                 probed  seal
+sealed 08-13     1893s      20       19    (none)   (unrecorded)         (none)  1acebaa7c380
+run A            1903s      20       18    309/220  step_cap_exhausted    373    3ee7609d7668
+run B            1944s      20       18    309/220  step_cap_exhausted    373    3ee7609d7668
+
+run A vs run B : same 18, only_in_A [], only_in_B []      jaccard = 1.000   SEALS IDENTICAL
+sealed vs A    : same 18, only_in_sealed ['BenchmarkTest00023']   jaccard = 0.947
+sealed vs B    : same 18, only_in_sealed ['BenchmarkTest00023']   jaccard = 0.947
+```
+
+Two independent full runs of identical code produced **the same 18 claims, the same seal, the same
+309 plan steps, the same 3659 tool calls and the same 373 probed cases**. Elapsed differed by 41 s
+(they ran concurrently, so that is contention). The deterministic pipeline is **exactly
+reproducible** — jaccard 1.000, not 0.95.
+
+**So the −3 is real, not run-to-run noise.** The measured variance of the claim set is **zero**
+outside one case, and that one case is `BenchmarkTest00023`, the weakrand false positive whose
+per-attempt rate I measured at 4.5%. Variance is confined precisely to the unstable-body claims,
+exactly as predicted in advance.
+
+Both predictions written down before the runs held:
+
+* prediction 1 (order-stable selection ⇒ identical claim sets): **PASS**, jaccard 1.000.
+* prediction 2 (any difference lands on the unstable-body cases): **PASS**, the single difference is
+  `00023` and nothing else moved.
+
+The concurrency caveat resolves in the safe direction: the two runs agreed *despite* contention, so
+contention cannot be hiding a difference.
+
+### What that means for the three candidates, finally
+
+| candidate | verdict | on what |
+|---|---|---|
+| 1. blind-SQLi stability gate | **REJECTED** | rejects 0 of 9; 5 losses are unreachable by it, 4 confirm gated 3/3 |
+| 2. target-rate policy | **REJECTED** | reactive 429/503 cooldown only; can only add time, and time fell 64% |
+| 3. the run probed less before converging | **the run did not converge** — `exit_reason = step_cap_exhausted`, 309/220. It ran out of budget. The half of (3) that is true is "probed less"; the half that is false is "before converging". |
+
+**And the honest remainder: none of the three explains the −9 by itself.** Runs A and B probe 373
+cases and claim 18. The sealed rerun probed an unrecorded number and claimed 19. The baseline
+mission's 9 extra sqli cases (`00335 00337 00339 00341 00342 00428 00429 00433 00438`) are not
+rejected by any oracle change I could find, are not lost to rate policy, and are not noise. The
+remaining explanation consistent with every measurement is that the **400-target selection changed
+which cases it picks** — `sweep_targets` is order-stable given the same surface, but the surface is
+built by the crawl, and the crawl's output is what the week's work altered. `coverage.cases_probed`
+now records the selection on every run, so the very next rerun can diff it in one command instead
+of re-deriving all of this.
