@@ -1762,3 +1762,127 @@ yesterday and it says plainly where the next order of magnitude is: **selection,
 It also bounds the −9 argument. Even a perfect sqli oracle on the 220 probed vulnerable cases could
 not have produced the baseline's extra 9 unless those 9 were *selected*, which is the coverage half
 again.
+
+---
+
+# Q-040 FIXED — the reference must REPRODUCE, not merely resemble
+
+`agent/sqli_tool.py`, `analyze_boolean`. The old gate was
+`similar(baseline, baseline_repeat) >= thresh` — a threshold on how much noise is tolerable. It is
+now a test for the ABSENCE of noise: **the reference responses must be byte-identical.**
+
+## The reasoning, since a default was not wanted
+
+The reference requests are identical by construction — same URL, same method, same body, same
+value, no payload. On any endpoint this oracle can measure at all they MUST return the same bytes.
+A difference between them is not "a bit of noise to threshold", it is direct evidence that the
+output is not a function of the input — and on such an endpoint a similarity differential cannot
+tell "the payload changed the result set" from "the page changed on its own". So the honest answer
+is to decline, not to threshold.
+
+Why this rather than the two alternatives I weighed:
+
+* **More samples.** Rejected as the primary rule. Sampling a run-structured alternation more times
+  is a weak estimator: 00494's states arrive in runs, so N consecutive draws agree far more often
+  than independence would predict. More draws buys less than it looks like it should.
+* **A variance floor over N draws** (`similar(true,false)` below the minimum pairwise baseline
+  similarity). Rejected as the primary rule because it does not close 00023 — MEASURED, the floor
+  over the observed samples is ~0.9495 and the live confirmations sat at 0.9495-0.9498, i.e. *at*
+  the floor, so the comparison is a coin flip on the last decimal. It also reintroduces a free
+  parameter (how many draws) for a rule that should have none.
+* **Byte equality.** No free parameter, and it fails closed: an endpoint that does not reproduce is
+  refused rather than guessed at. It is also the only one of the three that is a statement about
+  the oracle's *precondition* rather than about a tolerance.
+
+## Measured, on the live lab, before and after
+
+```
+NEGATIVE CONTROL (12 identical POSTs per field, all 400 ordered 4-tuples, no payload at all)
+                                        FP/attempt BEFORE   AFTER
+  BenchmarkTest00023  secure                 0.000           0.000
+  BenchmarkTest00023  productID              0.045          *0.000*
+  BenchmarkTest00023  foo                    0.000           0.000
+  BenchmarkTest00023  BenchmarkTest00023     0.000           0.000
+  BenchmarkTest00494  secure                 0.090           0.090
+  BenchmarkTest00494  productID              0.150           0.155
+  BenchmarkTest00494  foo                    0.155           0.125
+  BenchmarkTest00494  BenchmarkTest00494     0.077           0.100
+  BenchmarkTest00428  (true positive)        0.000           0.000
+  BenchmarkTest00033  (true positive)        0.000           0.000
+```
+
+**The coordinator's bar: `00023` moves off 0.045 to 0.000, on every field.** A body carrying fresh
+PRNG output per response can no longer confirm — it can never present two identical references.
+(00494's row moves within its sampling error; equality and the 0.95 threshold are the SAME
+predicate on a page with exactly two states 0.9091 apart, so no change there was expected. See the
+residual.)
+
+## The capability cost: MEASURED ZERO on this lab
+
+Live replay of the production POST-form lane, 3 independent trials per case, after the change:
+
+```
+BenchmarkTest00033  gated=True 3/3     BenchmarkTest00429  gated=True 3/3
+BenchmarkTest00428  gated=True 3/3     BenchmarkTest00433  gated=True 3/3
+                                       BenchmarkTest00438  gated=True 3/3
+```
+
+All five genuine boolean-blind confirmations survive, unchanged, because all five return ONE
+distinct body over 12 identical requests. **No sqli detection was traded for this.** The last trade
+cost ~9 findings; this one costs 0 on the benchmark.
+
+**Off the benchmark the cost is real and is deliberate.** Any endpoint carrying a per-response CSRF
+token, timestamp, request id or rotating banner will now be DECLINED by the boolean-blind oracle.
+On such a page a boolean confirmation was never evidence — TARGET 2 measured what it actually was,
+an 8-16% coin flip. A false negative there is cheaper than a false positive, and it is now visible
+as a decline rather than invisible as a guess. I have no measured number for how many real-world
+endpoints that is; nothing in this repository can produce one, and I am not going to estimate it.
+
+## The residual, and why it is a PROOF rather than a to-do
+
+`BenchmarkTest00494` still confirms when both reference samples land in the same run of the
+alternation, and **it is not closable inside `analyze_boolean`.** The tuple `(A, A, A, B)` is
+produced by both of:
+
+* a genuine injection on a deterministic page — baseline `A`, TRUE returns the baseline result set
+  `A`, FALSE returns the empty result set `B`; and
+* an alternating page that flipped state after the third request.
+
+Identical inputs, opposite ground truth. No function of those four strings can separate them.
+`test_the_00494_shape_is_undecidable_at_the_two_sample_signature` asserts exactly that, so the one
+remaining strict xfail is now labelled with its proof instead of with a promise.
+
+**It needs one more observation, and `analyze_boolean` already accepts both forms** (each with a
+passing test):
+
+* `baseline_samples=[...]` — further responses to the unprobed request. Supply at least one taken
+  AFTER the true/false pair and the two routes to a confirmation become mutually exclusive: either
+  the page held one state across the probe window (so TRUE and FALSE are in it too, and there is no
+  divergence) or it flipped (and the after-probe sample no longer reproduces).
+* `false_repeat=...` — the FALSE payload sent again. A real differential reproduces.
+
+**`agent/tools.py` is not this lane's file and I have not touched it.** The change it needs is two
+extra requests per field at each of the two call sites: take one more reference sample AFTER the
+true/false pair and re-send the FALSE payload, then pass them as `baseline_samples=[<existing
+repeat>, <after-probe sample>]` and `false_repeat=<second FALSE body>` instead of
+`baseline_repeat=<existing repeat>`. Both arguments are optional and additive, so `tools.py` keeps
+working untouched; adopting them is what turns the last xfail green.
+
+## Suite
+
+```
+docker run --rm --network none -v <repo>/agent:/app -w /app apolaki-agent \
+  python -m pytest tests/ -p no:cacheprovider -q
+  EXIT=0    2359 passed, 11 skipped, 1 xfailed, 0 failed, 0 xpassed
+```
+
+My own delta is exact: `tests/test_sqli_boolean_noise_floor.py` goes **4 passed / 3 xfailed ->
+9 passed / 1 xfailed**, and no other test changed behaviour. The remaining passed-count difference
+against the coordinator's 2318 baseline is another lane's in-flight `agent/main.py` +
+`agent/memory.py` work and its new `tests/test_tech_memory.py`, which are in the working tree.
+
+**One transient to record so nobody inherits it:** an earlier full-suite run showed
+`tests/test_bbh.py::test_graph_and_memory_endpoints_via_testclient` failing on a `technology` key
+the assertion did not expect. It is **not mine** — verified by running that test with
+`sqli_tool.py` restored from HEAD (passes) and again on the current tree (passes). It was a moment
+mid-edit in that other lane's `main.py`/`memory.py`, and it is green now.

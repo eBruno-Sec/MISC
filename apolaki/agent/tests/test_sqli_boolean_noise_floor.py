@@ -120,34 +120,96 @@ def test_the_gate_still_rejects_when_the_two_reference_samples_disagree():
 
 
 # ── the defects, pinned ───────────────────────────────────────────────────────
-@pytest.mark.xfail(strict=True, reason="LIVE DEFECT: BenchmarkTest00494 still confirms whenever "
-                                       "both reference samples land in the same run of the "
-                                       "alternation. MEASURED 2026-08-14: fires on 3 of 4 form "
-                                       "fields with the gate on.")
+@pytest.mark.xfail(strict=True, reason="RESIDUAL, and PROVABLY not closable in analyze_boolean: at "
+                                       "the two-sample signature the tuple (A, A, A, B) is produced "
+                                       "both by a genuine injection on a deterministic page and by "
+                                       "an alternating page that flipped after the third request. "
+                                       "See test_the_00494_shape_is_undecidable_at_the_two_sample_"
+                                       "signature. Closing it needs tools._run_sqli to pass "
+                                       "baseline_samples (one taken AFTER the probes) or "
+                                       "false_repeat -- both already accepted by analyze_boolean, "
+                                       "and both covered by passing tests below. agent/tools.py is "
+                                       "not this lane's file.")
 def test_an_unstable_page_must_not_confirm_when_both_reference_samples_agree():
     assert not sqli.analyze_boolean(NOISE_A, NOISE_A, NOISE_B, baseline_repeat=NOISE_A)
 
 
-@pytest.mark.xfail(strict=True, reason="LIVE DEFECT: BenchmarkTest00023, a weakrand case, is "
-                                       "claimed as CWE-89 boolean-blind. The body carries a fresh "
-                                       "PRNG value per response; the gate contributes nothing "
-                                       "(FP/attempt 0.045 -> 0.045).")
 def test_a_weak_random_page_must_not_confirm_blind_sqli():
+    """FIXED (Q-040). Was a strict xfail; the marker is gone because the oracle now refuses an
+    endpoint whose reference does not reproduce. MEASURED FP/attempt on this field: 0.045 -> 0.000.
+    """
     # base/true/false are three responses to the SAME endpoint; the value the page prints is the
     # only thing that differs, and the payload is never echoed. st=0.9697, stf=0.9495.
     base, true_, false_ = _wr("99437195"), _wr("4957906"), _wr("38381881")
     assert sqli.similar(base, true_) >= 0.95, "fixture: TRUE tracks the baseline"
     assert sqli.similar(true_, false_) < 0.95, "fixture: FALSE 'diverges' -- on noise alone"
+    # the reference sample is a SECOND response to the same unprobed request, so on this page it
+    # carries a different random value -- which is exactly the evidence the oracle now acts on
     assert not sqli.analyze_boolean(base, true_, false_, baseline_repeat=_wr("7079971"))
 
 
-@pytest.mark.xfail(strict=True, reason="LIVE DEFECT: the same weakrand noise confirms on a large "
-                                       "fraction of sample triples, not as a rare coincidence. "
-                                       "MEASURED: 9.4% of ordered triples over 123 observed-shape "
-                                       "bodies satisfy the oracle.")
 def test_weak_random_noise_must_not_confirm_at_scale():
+    """FIXED (Q-040). Was a strict xfail at 9.4% of ordered triples over 123 observed-shape bodies.
+
+    The reference sample must be a DIFFERENT response from the baseline -- two responses to
+    identical requests, which on this page are never equal (MEASURED: 12 distinct bodies in 12
+    requests). The earlier fixture reused the baseline string itself as the repeat, which is a
+    shape the transport can never produce.
+    """
     vals = ["%d" % v for v in (99437195, 7079971, 4957906, 38381881, 485838843, 601151017,
                                630799660, 101164292, 12345678, 3141592, 80661234, 55512340)]
-    fires = sum(1 for a, b, c in itertools.permutations(vals, 3)
-                if sqli.analyze_boolean(_wr(a), _wr(b), _wr(c), baseline_repeat=_wr(a)))
+    fires = 0
+    for a, b, c in itertools.permutations(vals, 3):
+        repeat = _wr(next(v for v in vals if v not in (a, b, c)))
+        if sqli.analyze_boolean(_wr(a), _wr(b), _wr(c), baseline_repeat=repeat):
+            fires += 1
     assert fires == 0, "%d confirmations on responses that contain no injection at all" % fires
+
+
+def test_an_after_probe_reference_sample_closes_the_alternating_page():
+    """The residual above is closable with ONE more observation, and this is it.
+
+    `baseline_samples` carries further responses to the same unprobed request; supplying one taken
+    AFTER the true/false pair makes the reference span the probe window. On BenchmarkTest00494 the
+    two ways to reach a confirmation then become mutually exclusive: either the page held one state
+    across the window -- in which case TRUE and FALSE are in it too and there is no divergence -- or
+    it flipped, and the after-probe sample no longer reproduces.
+    """
+    # the page flipped after the probes: before-probe references agree, the after-probe one does not
+    assert not sqli.analyze_boolean(NOISE_A, NOISE_A, NOISE_B,
+                                    baseline_samples=[NOISE_A, NOISE_B])
+    # a genuinely deterministic page is unaffected by the extra sample
+    base = "<html><body>" + ", ".join("row-%02d" % i for i in range(24)) + "</body></html>"
+    false_ = "<html><body>" + ", ".join("row-%02d" % i for i in range(20)) + "</body></html>"
+    assert sqli.analyze_boolean(base, base, false_, baseline_samples=[base, base])
+
+
+def test_a_divergence_that_does_not_reproduce_is_not_a_result():
+    """`false_repeat`: the second observation on the other side. A real boolean differential
+    reproduces; a state flip usually does not."""
+    base = "<html><body>" + ", ".join("row-%02d" % i for i in range(24)) + "</body></html>"
+    false_ = "<html><body>" + ", ".join("row-%02d" % i for i in range(20)) + "</body></html>"
+    assert sqli.analyze_boolean(base, base, false_, baseline_repeat=base, false_repeat=false_)
+    # re-sending FALSE returned the baseline page -- the divergence was a one-off
+    assert not sqli.analyze_boolean(base, base, false_, baseline_repeat=base, false_repeat=base)
+    # an attempted-but-failed re-send proves nothing and must not confirm
+    assert not sqli.analyze_boolean(base, base, false_, baseline_repeat=base, false_repeat=None)
+
+
+def test_the_00494_shape_is_undecidable_at_the_two_sample_signature():
+    """Why the xfail above is a PROOF and not a to-do.
+
+    The same four strings arise from a genuine injection on a deterministic page and from an
+    alternating page that flipped. Identical inputs, opposite ground truth -- so no function of
+    those four strings can separate them, and the remaining xfail is not closable by any change to
+    `analyze_boolean` alone. It needs the transport to make one more observation.
+    """
+    # (1) genuine: a deterministic page whose FALSE result set is the shorter body
+    genuine = (NOISE_A, NOISE_A, NOISE_B)
+    # (2) noise: the alternating page, both references drawn from the same run of the alternation
+    noise = (NOISE_A, NOISE_A, NOISE_B)
+    assert genuine == noise, "the two situations present the oracle with the SAME input"
+    assert (sqli.analyze_boolean(*genuine, baseline_repeat=NOISE_A)
+            == sqli.analyze_boolean(*noise, baseline_repeat=NOISE_A)), (
+        "a pure function cannot return different answers for identical arguments -- which is the "
+        "proof that this shape needs another observation, not a better threshold")

@@ -98,25 +98,92 @@ def similar(a: str, b: str) -> float:
 
 
 BOOLEAN_BASELINE_SAMPLE_COUNT = 2
-_MISSING_BASELINE_REPEAT = object()
+_MISSING = object()
+_MISSING_BASELINE_REPEAT = _MISSING      # kept: existing callers/tests import this name
 
 
 def analyze_boolean(baseline: str, true_body: str, false_body: str, thresh: float = 0.95,
-                    *, baseline_repeat=_MISSING_BASELINE_REPEAT) -> bool:
-    """Injectable when a stable reference and TRUE agree while FALSE diverges.
+                    *, baseline_repeat=_MISSING, baseline_samples=None,
+                    false_repeat=_MISSING) -> bool:
+    """Injectable when a REPRODUCIBLE reference and TRUE agree while FALSE diverges.
 
-    Shipping callers always provide ``baseline_repeat``.  The omitted form remains
-    only for older deterministic helper fixtures; a source ratchet and transport
-    controls pin both production call sites to the sampled form.
+    THE REFERENCE MUST REPRODUCE EXACTLY, NOT MERELY SIMILARLY (Q-040).
+    ----------------------------------------------------------------------
+    The reference requests are identical by construction -- same URL, same method, same
+    body, same value, no payload. On an endpoint this oracle can measure at all, they
+    MUST come back byte-identical. Any difference between them is direct evidence that
+    the endpoint's output is not a function of its input, and on such an endpoint a
+    similarity differential cannot distinguish "the payload changed the result set" from
+    "the page changed on its own". So a non-reproducing reference is refused outright.
+
+    The previous gate accepted ``similar(b1, b2) >= thresh``, which is a threshold on
+    noise rather than a test for its absence, and MEASURED against the OWASP Benchmark
+    lab it let two live false positives through (breaker.md SESSION 4, TARGET 2):
+
+        BenchmarkTest00023  weakrand, a fresh java.util.Random value in every response
+                            12 distinct bodies in 12 identical requests, pairwise
+                            0.9495..0.9766 -- every pair cleared a 0.95 threshold, so the
+                            gate contributed NOTHING: FP/attempt 0.045 -> 0.045.
+                            Requiring reproduction takes it to 0.000.
+        BenchmarkTest00494  two alternating resolver strings at 0.9091. See the residual
+                            note below -- equality does not close this one, and it is not
+                            closable at this call signature.
+
+    Cost, measured on the same lab: NONE. All five genuine boolean-blind confirmations
+    (00033/00428/00429/00433/00438) return ONE distinct body over 12 identical requests,
+    so they reproduce exactly and are unaffected. Off the benchmark the cost is real and
+    is a deliberate false negative: an endpoint carrying a per-response CSRF token,
+    timestamp or request id will now be declined by this oracle rather than guessed at.
+    That is the intended direction -- on such a page a boolean confirmation was never
+    evidence, it was a coin flip whose bias nobody had measured.
+
+    THE RESIDUAL, stated because it is provable rather than merely unfixed.
+    ----------------------------------------------------------------------
+    With only (baseline, one repeat, true, false) the ``BenchmarkTest00494`` shape is
+    UNDECIDABLE, not merely undetected. The tuple ``(A, A, A, B)`` is produced both by
+      * a genuine injection on a deterministic page -- baseline A, TRUE returns the
+        baseline result set A, FALSE returns the empty result set B; and
+      * a page alternating A/B whose state happened to flip after the third request.
+    Identical inputs, opposite ground truth: no function of those four strings can
+    separate them. Separating them requires ANOTHER OBSERVATION, which is what the two
+    optional arguments below are for. ``test_sqli_boolean_noise_floor`` carries this as
+    an executable proof.
+
+    ``baseline_samples``  further responses to the same unprobed request. Supply at least
+                          one taken AFTER the true/false pair: the reference then spans
+                          the probe window, and the two ways of getting a confirmation
+                          become mutually exclusive -- either the page held one state
+                          across the window (so TRUE and FALSE are in it too, and there is
+                          no divergence to report) or it flipped (and the after-probe
+                          sample no longer reproduces, so the oracle declines).
+    ``false_repeat``      the FALSE payload sent a second time. A real differential
+                          reproduces; a state flip usually does not.
+
+    Both are optional and additive, so callers that cannot supply them keep working.
+    ``None`` means "the request was attempted and failed", and is refused -- the same
+    convention ``baseline_repeat=None`` already had. Omitted means "not attempted".
     """
-    if baseline_repeat is not _MISSING_BASELINE_REPEAT:
-        # An unstable or failed reference invalidates both predicate outcomes. Prefer
-        # a false negative to asserting SQLi from ordinary response instability.
-        if baseline_repeat is None or similar(baseline, baseline_repeat) < thresh:
+    refs = None
+    if baseline_samples is not None:
+        refs = [baseline] + list(baseline_samples)
+    elif baseline_repeat is not _MISSING:
+        refs = [baseline, baseline_repeat]
+    if refs is not None:
+        # A failed reference request proves nothing either way; refuse rather than guess.
+        if len(refs) < 2 or any(r is None for r in refs):
+            return False
+        # THE TEST FOR NON-DETERMINISM, not a threshold on how much of it is tolerable.
+        if any(r != refs[0] for r in refs):
             return False
     st = similar(baseline, true_body)
     stf = similar(true_body, false_body)
-    return st >= thresh and stf < thresh
+    if not (st >= thresh and stf < thresh):
+        return False
+    if false_repeat is not _MISSING:
+        # The divergence has to happen twice. A one-off state change is not a result.
+        if false_repeat is None or similar(true_body, false_repeat) >= thresh:
+            return False
+    return True
 
 
 # ── time-based blind ─────────────────────────────────────────────
