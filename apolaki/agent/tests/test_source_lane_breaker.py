@@ -134,45 +134,81 @@ def test_usedforsecurity_false_does_not_excuse_a_second_call_on_the_same_line():
 
 
 # ══════════════════════════════════════════════════════════════════════════════════
-# MEASURED DEFECTS -- strict xfail. Remove the marker when the owner fixes the rule.
+# MEASURED DEFECTS -- FIXED (Q-041, Q-042). These were strict xfails; the markers are gone
+# because the facts they pinned changed, not because the assertions were relaxed. Every
+# assertion below is the one the Breaker wrote, unchanged in substance.
+#
+# Q-041, the binding was computed and discarded. `_py_imports` produced modules['r'] = 'random'
+# and every rule then matched a hard-coded literal receiver, so `from X import Y as Z` worked and
+# `import X as Y` did not. `_py_module_aliases` resolves the binding instead of merely
+# suppressing it.
+#
+# Q-042, the rule matched a substring of a name. Fixed by deciding on what the identifier IS --
+# its head noun -- and on whether the `=` is an assignment at all rather than a keyword argument.
 # ══════════════════════════════════════════════════════════════════════════════════
 
-@pytest.mark.xfail(strict=True, reason=(
-    "DEFECT 1 (Breaker session 3): an aliased MODULE import is invisible. _py_imports() computes "
-    "modules['r'] = 'random' and the binding is then thrown away -- _py_binds_module can only "
-    "SUPPRESS a name, never resolve one, and _PY_RANDOM_CALL hard-codes the literal receiver "
-    "`random`. The `from X import Y as Z` half is handled correctly. Costs the benchmark nothing "
-    "(0 aliased imports in the suite); it is a generality hole."))
 def test_an_aliased_random_module_import_is_still_the_stdlib_generator():
     hits = cr.scan_python_random("import random as r\ndef token():\n    return r.getrandbits(32)\n")
     assert hits, "r.getrandbits(32) after `import random as r` is a Mersenne Twister"
 
 
-@pytest.mark.xfail(strict=True, reason=(
-    "DEFECT 1, hash half: _PY_HASHLIB_CALL hard-codes the receiver `hashlib`, so "
-    "`import hashlib as hl; hl.md5(d)` is never seen."))
 def test_an_aliased_hashlib_import_is_still_the_stdlib_digest():
     hits = cr.scan_python_hash("import hashlib as hl\ndef h(d):\n    return hl.md5(d).hexdigest()\n")
     assert hits, "hl.md5(d) after `import hashlib as hl` is hashlib.md5"
 
 
-@pytest.mark.xfail(strict=True, reason=(
-    "DEFECT 2 (Breaker session 3): _PY_CLOCK_TOKEN fires on any identifier merely CONTAINING a "
-    "security word when a clock read appears within 90 characters, so an audit or expiry "
-    "timestamp is reported as CWE-337 'a security value derived from the clock'. Confirmed in "
-    "the wild: the single CWE-337 in 5139 files of the container's stdlib is this bug firing on "
-    "the keyword argument `token=` in anthropic/lib/credentials/_workload.py:346. Costs the "
-    "benchmark nothing (0 occurrences of the shape in the suite)."))
+def test_an_alias_does_not_resurrect_a_foreign_module():
+    """The negative control for Q-041. Resolving an alias must not make the rule credulous: a
+    name bound to something OTHER than the stdlib module is still not the stdlib module."""
+    assert cr.scan_python_random("import numpy.random as r\nx = r.random()\n") == []
+    assert cr.scan_python_random("from numpy import random\nx = random.random()\n") == []
+
+
+def test_an_aliased_system_random_is_still_a_csprng():
+    """The 113 clean twins, through an alias. `r.SystemRandom().getrandbits(32)` reads
+    os.urandom, and widening the receiver must not widen the verdict."""
+    assert cr.scan_python_random(
+        "import random as r\nx = r.SystemRandom().getrandbits(32)\n") == []
+
+
 def test_a_timestamp_named_after_a_session_is_not_weak_randomness():
     assert cr.scan_python_random("import time\ndef begin():\n"
                                  "    session_start = time.time()\n    return session_start\n") == []
 
 
-@pytest.mark.xfail(strict=True, reason="DEFECT 2, expiry spelling. See the test above.")
 def test_a_token_expiry_timestamp_is_not_weak_randomness():
     assert cr.scan_python_random("import time\ndef issue():\n"
                                  "    token_expiry = time.time() + 3600\n"
                                  "    return token_expiry\n") == []
+
+
+def test_a_keyword_argument_named_token_is_not_an_assignment():
+    """The in-the-wild case: the only CWE-337 across 5139 files of the container's own stdlib was
+    this rule firing on `token=` inside a call's argument list."""
+    assert cr.scan_python_random(
+        "import time\ndef refresh(c):\n"
+        "    return c.fetch(token=c.value, issued_at=time.time())\n") == []
+
+
+def test_the_head_noun_decides_not_the_substring():
+    assert cr._identifier_head("token_expiry") == "expiry"
+    assert cr._identifier_head("session_start") == "start"
+    assert cr._identifier_head("sessionStart") == "start"
+    assert cr._identifier_head("expiry_token") == "token"
+    assert cr._identifier_head("CSRF_TOKEN") == "token"
+    assert cr._identifier_head("token") == "token"
+    # an identifier whose head noun IS the security word is still reported
+    hits = cr.scan_python_random("import time\nexpiry_token = str(time.time())\n")
+    assert [h["cwe"] for h in hits] == ["CWE-337"]
+
+
+def test_the_java_clock_rule_got_the_same_fix():
+    """The two rules are twins; a defect measured in one is a defect in the other."""
+    assert cr.scan_java_random(
+        "class C { void f() { long tokenExpiry = System.currentTimeMillis() + 3600; } }") == []
+    hits = cr.scan_java_random(
+        "class C { void f() { String token = Long.toString(System.currentTimeMillis()); } }")
+    assert [h["cwe"] for h in hits] == ["CWE-337"]
 
 
 def test_a_security_value_actually_derived_from_the_clock_is_still_reported():

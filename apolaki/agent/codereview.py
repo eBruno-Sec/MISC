@@ -562,7 +562,10 @@ def scan_java_random(text: str) -> list:
     for rx, construct, why in _RANDOM_SITES:
         for m in rx.finditer(skel):
             _add(construct, why, m.start())
-    for m in _CLOCK_TOKEN.finditer(skel):
+    # Same head-noun and argument-list checks as the Python rule. The two rules are twins and a
+    # defect measured in one is a defect in the other; leaving Java on the old form would mean
+    # `long tokenExpiry = System.currentTimeMillis() + 3600` reads as a predictable secret.
+    for m in _clock_token_hits(skel, _CLOCK_TOKEN):
         _add("System.currentTimeMillis() -> %s" % m.group(1),
              "a security value derived from the clock is derivable by anyone who knows when it was "
              "issued", m.start(), "CWE-337")
@@ -909,6 +912,25 @@ def _py_imports(skel: str):
     return modules, symbols
 
 
+def _py_module_aliases(modules: dict, symbols: dict, target: str) -> list:
+    """Every local name bound to the stdlib module `target`.
+
+    `_py_imports` already computed this binding and the rules then THREW IT AWAY, matching a
+    hard-coded literal receiver instead. So `from random import getrandbits as g` was handled
+    correctly and `import random as r; r.getrandbits(32)` was invisible -- half a mechanism, and
+    the half that was missing is the one a real codebase is more likely to use.
+
+    The permissive fallback is kept deliberately: with no import of that name at all, a qualified
+    `random.x()` that executes must have `random` bound somewhere, and being permissive there costs
+    no precision. What it must NOT do is claim the bare name when the name is demonstrably bound to
+    something else -- `import numpy.random as random`, or `from numpy import random`.
+    """
+    names = {local for local, dotted in modules.items() if dotted == target}
+    if _py_binds_module(modules, symbols, target):
+        names.add(target)
+    return sorted(names)
+
+
 def _py_binds_module(modules: dict, symbols: dict, name: str) -> bool:
     """False when `name` is demonstrably bound to something OTHER than the stdlib module of that
     name. Absent any import at all this returns True: a qualified `random.random()` that executes
@@ -970,9 +992,12 @@ def scan_python_hash(text: str, props: dict = None) -> list:
         if weak:
             _add(weak[0], weak[1], api, idx, name, origin)
 
-    for m in _PY_HASHLIB_CALL.finditer(skel):
-        s, e = _arg_span(skel, m.end() - 1)
-        _digest_call(m.group(1), "hashlib.%s" % m.group(1), m.start(), s, e)
+    # The RECEIVER is whatever `hashlib` was bound to in this module, which is not always the
+    # word "hashlib". `import hashlib as hl; hl.md5(d)` is the stdlib digest.
+    for local in _py_module_aliases(_modules, symbols, "hashlib"):
+        for m in re.finditer(r"(?<![\w.])%s\s*\.\s*([A-Za-z0-9_]+)\s*\(" % re.escape(local), skel):
+            s, e = _arg_span(skel, m.end() - 1)
+            _digest_call(m.group(1), "hashlib.%s" % m.group(1), m.start(), s, e)
 
     for local, (module, orig) in symbols.items():
         if _py_shadowed(skel, local):
@@ -1034,6 +1059,58 @@ _PY_CLOCK_TOKEN = re.compile(
 _PY_RANDOM_WHY = ("the `random` module is a Mersenne Twister, not a cryptographic generator; its "
                   "output is reproducible from a short run of observed values")
 
+# ── CWE-337: what the identifier IS, not what it MENTIONS ────────
+# The clock->security-value rule used to fire on any identifier merely CONTAINING a security word
+# within 90 characters of a clock read. So `token_expiry = time.time() + 3600` and
+# `session_start = time.time()` -- both plain timestamps -- were reported as predictable secrets,
+# and the single CWE-337 this lane found across 5139 files of the container's own stdlib was the
+# rule firing on a KEYWORD ARGUMENT, `token=`, in anthropic/lib/credentials/_workload.py:346.
+#
+# Two structural facts fix it, and neither is a longer word list:
+#
+#   1. `f(token=x)` is a keyword argument, not an assignment. An assignment is at bracket depth 0.
+#   2. A compound identifier's meaning is its HEAD NOUN -- the last segment. `token_expiry` is an
+#      expiry, `session_start` is a start, and `expiry_token` really is a token. Requiring the head
+#      noun to be the security word keeps every genuine case and drops the timestamps.
+#
+# Same discipline as the rest of this lane: decide on what the name BINDS, not on a substring of it.
+_SECURITY_HEADS = {"token", "session", "nonce", "otp", "secret", "salt", "apikey", "password",
+                   "passwd", "pwd", "guid", "uuid", "key", "seed", "cookie", "csrf", "sessionid"}
+
+
+def _identifier_head(name: str) -> str:
+    """The last segment of a snake_case or camelCase identifier, lowercased."""
+    parts = [p for p in re.split(r"_+|(?<=[a-z0-9])(?=[A-Z])", name or "") if p]
+    return parts[-1].lower() if parts else ""
+
+
+def _paren_depth(skel: str, idx: int) -> int:
+    """Parenthesis nesting at `idx` -- i.e. "is this inside an argument list".
+
+    Only PARENTHESES, deliberately. Braces are block delimiters in Java and would make every
+    statement inside a method read as nested; braces and square brackets are literals in Python.
+    The question this answers is narrow and the same in both languages: is this `=` binding a
+    keyword argument rather than a variable? Literal bodies are already masked, so a bracket
+    inside a string cannot skew the count.
+    """
+    depth = 0
+    for ch in skel[:idx]:
+        if ch == "(":
+            depth += 1
+        elif ch == ")":
+            depth -= 1
+    return depth
+
+
+def _clock_token_hits(skel: str, rx):
+    """Matches of a clock->security-value rule that survive both structural checks."""
+    for m in rx.finditer(skel):
+        if _identifier_head(m.group(1)) not in _SECURITY_HEADS:
+            continue
+        if _paren_depth(skel, m.start(1)) > 0:
+            continue
+        yield m
+
 
 def scan_python_random(text: str) -> list:
     """Predictable randomness reaching a security value (CWE-330/CWE-337).
@@ -1059,13 +1136,17 @@ def scan_python_random(text: str) -> list:
         _add("random.seed(<clock>)",
              "seeded from the wall clock — the seed is guessable to within a few thousand values",
              m.start(), "CWE-337")
-    stdlib = _py_binds_module(modules, symbols, "random")
-    if stdlib:
-        for m in _PY_RANDOM_CALL.finditer(skel):
+    # The receiver decides the verdict, and the receiver is whatever `random` was BOUND to here --
+    # `random`, or `r` after `import random as r`. `random.SystemRandom()` is still excluded by
+    # construction: SystemRandom is not in _PY_RANDOM_METHODS and the ctor pattern requires
+    # `Random(` immediately after the dot, so the CSPRNG's own methods never match.
+    for local in _py_module_aliases(modules, symbols, "random"):
+        q = re.escape(local)
+        for m in re.finditer(r"(?<![\w.])%s\s*\.\s*(%s)\s*\(" % (q, _PY_RANDOM_METHODS), skel):
             if m.group(1) == "seed" and _line_of(src, m.start()) in clock_lines:
                 continue                             # already reported as the stronger CWE-337
             _add("random.%s()" % m.group(1), _PY_RANDOM_WHY, m.start())
-        for m in _PY_RANDOM_CTOR.finditer(skel):
+        for m in re.finditer(r"(?<![\w.])%s\s*\.\s*Random\s*\(" % q, skel):
             _add("random.Random()", _PY_RANDOM_WHY, m.start())
     for local, (module, orig) in symbols.items():
         if module != "random" or orig not in _PY_RANDOM_SET or _py_shadowed(skel, local):
@@ -1074,7 +1155,7 @@ def scan_python_random(text: str) -> list:
             if orig == "seed" and _line_of(src, m.start()) in clock_lines:
                 continue
             _add("random.%s()" % orig, _PY_RANDOM_WHY, m.start())
-    for m in _PY_CLOCK_TOKEN.finditer(skel):
+    for m in _clock_token_hits(skel, _PY_CLOCK_TOKEN):
         _add("clock -> %s" % m.group(1),
              "a security value derived from the clock is derivable by anyone who knows when it "
              "was issued", m.start(), "CWE-337")
