@@ -198,6 +198,38 @@ Killed by the intended assertion, with the mechanism in the message. Noted hones
 12-URL fixture is under the browser cap. Neither test catches it alone; the pair does, and that is
 why both exist.
 
+## 2e. What the sweep guarantees, and what it leaves to a 25-endpoint budget [READ]
+
+Written down before the numbers so it cannot be fitted afterwards. Dispatch-site census by grep
+(`_step("<tool>"` in `planner.py`, membership in the two sweep tiers, `_run_tool("<tool>"` in
+`agent.py`):
+
+| class | engine | guaranteed by the sweep? | otherwise reachable via |
+|---|---|---|---|
+| SQLi | `run_sqli`, `run_sqli_structural` | yes, `SWEEP_TARGET_CAP` | planner |
+| XPath / LDAP / SSI | `run_xpath` `run_ldap` `run_ssi` | yes | planner, HTML-page sweep |
+| CORS / redirect / SSTI | `run_injection_probes` | yes | planner |
+| CSS injection / WAF bypass | `run_css_injection` `run_waf_bypass` | yes | - |
+| **traversal / IDOR / cookies / PRNG** | **`run_web_probes`** | **NO** | planner only, `CAP_ENDPOINTS = 25` |
+| XSS | `run_xss` | partial - `SWEEP_BROWSER_CAP = 30` | planner (25), `_promote_leads` |
+| command injection | `run_cmdi` / `run_form_cmdi` | NO | planner only |
+| NoSQL / SSRF / XXE / deser / upload / race / stored-XSS | 8 engines | NO | planner only, 1 step site each |
+
+**This lane changes ONE row** - `run_web_probes` - because it owns the largest share of the
+corpus's testable classes (`pathtraver` 268 + `securecookie` 67 + `weakrand` 493) AND is HTTP-only,
+so it fits the cheap tier. `run_form_cmdi` (251 cases) and `run_xss` beyond 30 targets are the same
+defect and are NAMED here as follow-ups rather than bundled: `run_xss` costs ~10 s per URL and
+cannot join the cheap tier at all, and `run_form_cmdi` sends OS-command payloads in POST bodies,
+which deserves its own measured ticket rather than a ride on this one.
+
+**A risk this run will measure for the first time.** `owasp_bench.py` runs each engine only on the
+cases of the category it owns, so `run_web_probes` has never been measured against `sqli`, `xss`,
+`cmdi` or `xpathi` pages. In the sweep it will run on all 400 targets regardless of category. Its
+per-category FPR of 0.0% therefore does NOT imply zero false positives in a mission - a `sqli` page
+that happens to name `Math.random()` would be a cross-family confirmation the per-category harness
+could never see. If whole-product precision moves off 100%, this is the first place to look, and
+that is a reason to measure the change rather than to assume it.
+
 ## 3. Numbers
 
 Baseline run in progress. Nothing measured yet.
