@@ -1,5 +1,37 @@
 # QUEUE — the one canonical, dependency-ordered work queue
 
+## STATE SWEEP — 2026-08-14. The headings below had rotted; this is authoritative.
+
+I let ticket state drift while writing ledger entries. Several items below still read `ready` or
+`proposed` and are **closed**. Corrected here rather than by editing forty headings, because the
+sweep itself is the useful artifact.
+
+**CLOSED, with the commit** — ignore any `ready`/`proposed` marker on these:
+`Q-000` 5af0af8 · `Q-00A` 65970da · `Q-001` fc91bb0 · `Q-019` fc91bb0 · `Q-022` 837b1f0 ·
+`Q-031` 8eb42e8 · `Q-040` (Codex lane 3) · `Q-041`/`Q-042` 9f8707a · `Q-043` c02208d ·
+`Q-044` aa3a139 · `B-001`/`B-002`/`B-003` (Codex lane 1) · `B-010` Juliet (Codex lane 2)
+
+**IN FLIGHT**: whole-product rerun (orchestration lane) · `B-020` JavaScript/Node (dataflow lane)
+
+**OPEN, ranked by value — this is the real backlog:**
+
+| ticket | what | why it matters |
+|---|---|---|
+| **Q-023** | ZAP has never executed in any mission — 0 calls across 150 missions, 25,619 tool calls | a whole integrated scanner, wired and never invoked. Three flags do not explain the July-26 four |
+| **Q-013** | `PUT /findings` bypasses all three `findings_gate` invariants | a write path around the proof gate |
+| **Q-014** | operator lead-confirmation is silently re-demoted; gate-routed leads cannot be confirmed at all | the human override does not work |
+| **Q-021B–F** | Technology Intelligence chain: persist TechnologyFacts → identity/ranges → feeds → orchestration → honest UI | detected tech still drives no testing |
+| **Q-032/033/034** | credential→session→persona, multi-persona differentials, report chronology | the architecture programme; `session_headers` is still one global raw dict at 50 sites |
+| **Q-002/003/004** | WebSockets/CSWSH · `postMessage` source · API4 resource consumption | genuine zero-engine classes |
+| **Q-011/012** | second phantom capability; six ASVS engine names resolving to nothing | declaration-vs-fact defects |
+| **Q-015/016/017** | `risk_signals` unfiltered twin · `_read_controls` returns `[]` on failure · `get_logs` oldest-first | smaller, all real |
+| **Q-005/006** | server-side prototype pollution (gated) · request smuggling (detection tiers only) | deliberately constrained |
+| **Q-030/035/036** | canonical cycle design · the model A/B experiment · fold the 15 architecture defects in | Q-030 is designed, not built |
+| **B-011+** | Juliet C/C++ (**UNSUPPORTED — no C/C++ analysis**), SARD subsets, remaining language ecosystems | matrix programme |
+
+Roughly **30 open**, of which Q-023 and Q-013/Q-014 are the highest-value unstarted work.
+
+
 **Only the Coordinator (QUEUE agent) changes state in this file.** Everyone else proposes; the
 Coordinator ranks, dedupes, assigns and moves. One owner per ticket. No two agents editing the same
 files concurrently.
