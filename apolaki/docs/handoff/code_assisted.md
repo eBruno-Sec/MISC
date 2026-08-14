@@ -334,3 +334,100 @@ Numbers to fold into the ledger, with the labels attached:
 Files owned and changed by this lane: `agent/codereview.py`, `agent/codeintel.py`,
 `agent/tests/test_source_lane.py`, `docs/benchmarks/benchmarkpython_v01_CODEASSISTED*.json`,
 this file. Nothing else was touched. `agent/owasp_bench.py` was CALLED, never modified.
+
+---
+
+# B-020: JavaScript / Node, the third dialect [TIER 3 - controls only, NO percentage]
+
+Java and Python are the benchmark's stacks. **Node is the client's**, which is why this dialect is
+worth more than another Java CWE family.
+
+**There is no Node ground-truth corpus in the estate, so there is no denominator and this section
+produces NO accuracy figure.** What is claimed is control-by-control behaviour and a verified
+real-world sweep. If a maintained, pinnable Node corpus with real clean twins turns up, it should
+be queued as Tier 1 separately rather than manufactured here.
+
+## The controls: 26, all failing before the dialect existed
+
+Across the eight control kinds. The ones that carry the weight:
+
+| kind | control |
+|---|---|
+| safe | `crypto.randomBytes` / `randomUUID` / `randomInt` / `getRandomValues` never flag |
+| safe | `createHash('sha256'\|'sha384'\|'sha512'\|'sha3-256'\|'blake2b512')` never flags |
+| safe | `aes-256-gcm`, `chacha20-poly1305`, `aes-256-cbc` never flag; HMAC-SHA1 is not "broken" |
+| noise | "md5"/"random" in a line comment, block comment, string or template body is not a call |
+| **noise** | **a regex literal `/md5|sha1/` is a pattern, and the call AFTER it is still found** |
+| **noise** | **`a / b / c` is division and must not blank the line between the slashes** |
+| ambiguous | `const c = require('crypto')`, `require('node:crypto')`, destructured + renamed destructured, and all three ESM import forms all resolve |
+| ambiguous | `require('crypto-js')` is a DIFFERENT library and resolves to nothing |
+| ambiguous | a user-defined `function md5()` is not a digest; `require('md5')` is |
+| filtered | a bare `aes` argument is NOT inferred to be ECB (see below) |
+| regression | the Java and Python analyzers are asserted unchanged in the same file |
+
+**The regex literal is this dialect's `//`-is-floor-division.** Guess it wrong in one direction and
+a pattern reads as a call site; guess it wrong in the other and a division blanks real code and the
+file reports clean. Both directions are controls, not one.
+
+## One dialect difference recorded rather than copied
+
+**The Juliet bare-`AES` disagreement does not transfer.** Java's `Cipher.getInstance("AES")`
+silently means ECB, which is the disagreement we are deliberately keeping on Juliet. **Node requires
+an explicit mode and throws without one**, so there is no implicit-ECB ambiguity to argue about and
+none is inferred. There is a control pinning that.
+
+`createCipher` (no IV) is reported on the **API**, not the algorithm: it derives the key with a
+single unsalted MD5 round (`EVP_BytesToKey`), so `aes-256-cbc` through it is still wrong.
+
+## Q-041 applied as a precondition, not discovered as a defect
+
+The aliased-module hole shipped in Python and the Breaker found it later. Here the aliased require
+is a **control written before the rule**. Widening the receiver must not widen the verdict, so
+`require('crypto-js')` resolving to nothing is a control too - the same discipline as
+`from numpy import random`.
+
+## Real-world sweep [MEASURED behaviour, still no percentage]
+
+108 files of OWASP Juice Shop (`routes/`, `lib/`, `models/`), a real Node/TypeScript codebase with
+no relationship to this lane:
+
+| file:line | finding | verified |
+|---|---|---|
+| `lib/insecurity.ts:41` | MD5 | real call site, `crypto.createHash('md5')` |
+| `lib/insecurity.ts:53` | `Math.random()` | real, and serious - it is the JWT secret |
+| `routes/captcha.ts:14-19` | `Math.random()` x5 | real call sites |
+
+**7 findings on 108 files, all true call sites, zero misidentified.** And the two mandatory negative
+controls are confirmed in the wild:
+
+- `lib/utils.ts:139` `crypto.randomBytes(...)` - **not flagged**;
+- `lib/insecurity.ts:42` `createHmac('sha256', ...)` - **not flagged**, on the line immediately
+  after the MD5 that *is* flagged. Adjacent lines in one file, opposite verdicts, on code nobody
+  wrote for this test.
+
+## A duplicate the dialect exposed, and fixed
+
+`review()` was emitting the substring lead (`Weak cryptography: Math.random()`, confidence
+*candidate*) **and** the confirmed call-site finding for the same line - one defect described twice
+at two confidences, which a client reading the report cannot untangle. The lead now stands down **by
+line** where the precise analysis answered, and still fires for languages the dialects do not cover
+(there is a control using PHP).
+
+`test_source_lane.py`'s "javascript stays out of the lane" assertion is **inverted, not deleted**. It
+was correct while no JS dialect existed; its real intent - the Python rules must not claim a file
+they cannot read - is now asserted explicitly.
+
+## No regression on the measured suites
+
+`.js`/`.ts` in `_SOURCE_EXTS` puts 3 more files in scope per suite. A **blind** re-scan (verified 0
+key files reachable by the scanner) gives **zero differing case rows** on both suites, and scoring in
+a `--network none` container reproduces every number exactly:
+
+```
+Java   crypto 100.0/0.0  hash 100.0/0.0  weakrand 100.0/0.0  trustbound 100.0/0.0  macro 36.4%
+Python hash   100.0/0.0  weakrand 100.0/0.0  trustbound 100.0/0.0                  macro 21.4%
+```
+
+The artifacts are **not** byte-identical this time - `files_scanned` moved 2763->2766 and
+1236->1239 - so the weaker but accurate claim is made instead of the stronger one used for
+Q-041/Q-042.
