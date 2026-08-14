@@ -187,9 +187,16 @@ def add_finding(mid: str, finding: dict) -> str:
 def add_lead(mid: str, lead: dict) -> str:
     """Append an UNPROVEN lead to the mission's leads list (mission context), NOT the confirmed-findings
     table. Keeps leads first-class + surfaced in the report's Unconfirmed-Leads section without ever being
-    counted as a confirmed finding. Bounded to the most-recent 200. Returns the lead id."""
-    lid = lead.get("id") or uuid.uuid4().hex[:12]
+    counted as a confirmed finding. Bounded to the most-recent 200. Returns the lead id.
+
+    Q-014: the id is stamped under BOTH `id` and `_lid`. `main._record_execution` writes `_lid` and the
+    confirm/dismiss endpoints and `ui/index.html` both address leads by it, so a lead created here — a
+    lead the TRUTH invariant (#7) itself produced — was unreachable: the API 404'd it and the UI
+    rendered it with no buttons at all. Same value under both keys, so nothing that reads either
+    spelling has to change."""
+    lid = lead.get("id") or lead.get("_lid") or uuid.uuid4().hex[:12]
     lead["id"] = lid
+    lead["_lid"] = lead.get("_lid") or lid
     m = get_mission(mid)
     if not m:
         return lid

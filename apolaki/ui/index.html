@@ -250,6 +250,9 @@ footer{background:var(--surface);border-top:1px solid var(--border);display:flex
 .leads-sec{margin-top:1.2rem;border-top:1px dashed var(--border2);padding-top:.8rem}
 .leads-sec>h4{font-size:.9rem;color:var(--text-bright);margin:.2rem 0 .6rem}
 .lead-card{opacity:.92}
+/* an operator attestation is its own provenance, not a confirmation — render it as a distinct block */
+.lead-attest{margin-top:.6rem;padding:.5rem .6rem;border-left:3px solid var(--accent);
+  background:color-mix(in srgb,var(--accent) 8%,transparent);font-size:.86rem;border-radius:0 4px 4px 0}
 .lead-chip{display:inline-block;min-width:1.2rem;text-align:center;background:color-mix(in srgb,var(--warn) 20%,transparent);
   border:1px solid color-mix(in srgb,var(--warn) 45%,transparent);color:var(--warn);border-radius:999px;
   padding:.05rem .5rem;font-size:.72rem;font-weight:700}
@@ -1503,13 +1506,24 @@ function renderLeadCard(l,i){
   const sev=(l.severity||"info").toLowerCase(); const col=SEV_HEX[sev]||SEV_HEX.info;
   const rt=/^https?:\/\//i.test(l.target||"")?`<button type="button" class="btn ghost sm link-act" onclick="testLeadIdx(${i})">Run in cURL →</button>`:"";
   const how=(l.how_to_confirm||[]).map(s=>`<li>${esc(String(s))}</li>`).join("");
-  const acts=l._lid?`<button class="btn sm lead-confirm" onclick="confirmLead('${esc(l._lid)}')">✓ Confirm as finding</button>
-      <button class="btn ghost sm lead-dismiss" onclick="dismissLead('${esc(l._lid)}')">✕ Not a finding</button>`:"";
+  // Q-014a: address the lead by _lid OR id. A lead the write-gate rerouted (findings_gate #7) carried
+  // only `id`, so this rendered NO buttons at all and the operator had no way to act on it.
+  const lid=l._lid||l.id||"";
+  const acts=lid?`<button class="btn sm lead-confirm" onclick="confirmLead('${esc(lid)}')">✓ Confirm as finding</button>
+      <button class="btn ghost sm lead-dismiss" onclick="dismissLead('${esc(lid)}')">✕ Not a finding</button>`:"";
+  // Q-014b: an operator attestation is a DISTINCT provenance, not a `confirmed`. Render it as itself,
+  // with the machine-proof gap, so an attested lead is visibly acted-on rather than looking untouched.
+  const at=l.operator_attestation;
+  const att=at?`<div class="lead-attest"><b>Operator attested</b> by ${esc(at.operator||"")} ${esc(String(at.attested_at||"").slice(0,19))}
+      <div class="muted">${esc(at.rationale||"")}</div>
+      ${at.machine_proof?`<div class="muted">Machine proof: satisfied.</div>`
+        :`<div class="muted">No machine proof — missing: ${esc((at.proof_gap||[]).join(", "))}</div>`}</div>`:"";
   return `<div class="card lead-card" style="--c:${col}">
-    <h4><span class="chip sev" style="--c:${col}">${esc(sev.toUpperCase())}</span>${esc(l.title||"Lead")} <span class="pill" style="--c:var(--sev-info)">${esc(l.confidence||"candidate")}</span></h4>
+    <h4><span class="chip sev" style="--c:${col}">${esc(sev.toUpperCase())}</span>${esc(l.title||"Lead")} <span class="pill" style="--c:var(--sev-info)">${esc(l.confidence||"candidate")}</span>${at?` <span class="pill" style="--c:var(--accent)">attested</span>`:""}</h4>
     <div class="kv"><span>Target <code>${esc(l.target||"")}</code></span>${l.cwe?`<span>CWE ${esc(l.cwe)}</span>`:""}</div>
     ${l.description?`<div class="muted">${esc(l.description)}</div>`:""}
     ${how?`<details open><summary>How to confirm</summary><ol>${how}</ol></details>`:""}
+    ${att}
     <div class="lead-foot">${rt}${acts}</div></div>`;
 }
 function testLeadIdx(i){const l=leads[i];if(!l)return;const p=/^https?:\/\//i.test(l.target||"")?l.target:"";prefillCurl("GET",p,{},"",`Lead — ${l.title||""}`);}
@@ -1518,8 +1532,22 @@ async function refreshFindingsAndLeads(){
   try{leads=(await(await fetch(`${API}/leads/${sessionId}`)).json()).leads||leads;}catch(e){}
   renderFindings();
 }
+// Q-014b. Confirming is an ATTESTATION: it needs an attester and grounds, and the server's verdict is
+// SHOWN. The old version sent an empty POST and threw the response away, so a re-demotion (or a
+// refusal) was invisible — the operator saw the click succeed and the report say "lead".
 async function confirmLead(lid){ if(!sessionId)return;
-  try{await fetch(`${API}/leads/${sessionId}/${encodeURIComponent(lid)}/confirm`,{method:"POST"});}catch(e){}
+  const operator=(prompt("Confirming is an attestation Apolaki records. Who is confirming? (your name/handle)")||"").trim();
+  if(!operator)return;
+  const rationale=(prompt("On what grounds? This is stored with your name and shown in the report.")||"").trim();
+  if(!rationale)return;
+  let r={};
+  try{
+    const res=await fetch(`${API}/leads/${sessionId}/${encodeURIComponent(lid)}/confirm`,
+      {method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({operator,rationale})});
+    r=await res.json();
+    if(!res.ok){alert(r.detail||"Confirmation refused.");return;}
+  }catch(e){alert("Confirmation failed to reach the server; nothing was changed.");return;}
+  if(r.note)alert(r.note);                 // promoted OR attested-without-machine-proof — never silent
   await refreshFindingsAndLeads(); }
 async function dismissLead(lid){ if(!sessionId)return;
   try{await fetch(`${API}/leads/${sessionId}/${encodeURIComponent(lid)}/dismiss`,{method:"POST"});}catch(e){}

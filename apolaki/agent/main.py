@@ -154,6 +154,17 @@ class NoteRequest(BaseModel):
     body: str
 
 
+class LeadConfirmRequest(BaseModel):
+    """An operator's ATTESTATION on a lead (Q-014). `operator` and `rationale` are required — the
+    endpoint refuses an unsigned claim rather than minting one. Note what is NOT here: a `confidence`
+    field. `confidence` is the oracle's verdict; an operator cannot set it from the request body, which
+    is what makes a gate-demoted lead un-re-confirmable by writing it back."""
+    operator: str = ""             # WHO takes responsibility for this claim
+    rationale: str = ""            # WHY — the grounds, in the operator's own words
+    notes: str = ""                # optional free text kept alongside the attestation
+    exchange_ids: list = []        # optional: ids of exchanges APOLAKI recorded in THIS mission
+
+
 class ProxyRulesRequest(BaseModel):
     rules: list = []               # match-and-replace rules the mitm addon applies in flight
 
@@ -761,6 +772,26 @@ def _execution(m) -> dict:
 
 def _leads(m) -> list:
     return (m.get("context", {}) or {}).get("leads", [])
+
+
+# ── lead identity (Q-014a) ───────────────────────────────────────
+# A lead reaches ctx["leads"] by two routes that stamped DIFFERENT id keys:
+#   `_record_execution`  -> "_lid": "L0", "L1", ...   (agent-side candidate signals, at teardown)
+#   `db.add_lead`        -> "id": <hex>               (the TRUTH invariant #7 rerouting a lead-confidence
+#                                                      finding, DURING the run)
+# confirm/dismiss matched only `_lid`, so every lead the gate itself created 404'd — the gate produced
+# leads no operator could act on. `db.add_lead` now stamps both keys; these helpers accept either, so
+# leads persisted by the OLD code (id only) stay addressable after an upgrade.
+def _lead_key(lead) -> str:
+    return str((lead or {}).get("_lid") or (lead or {}).get("id") or "")
+
+
+def _find_lead(leads, lid: str):
+    lid = str(lid)
+    for l in leads or []:
+        if str((l or {}).get("_lid") or "") == lid or str((l or {}).get("id") or "") == lid:
+            return l
+    return None
 
 
 def _project_cloud_postures(g, m) -> list:
@@ -2327,23 +2358,37 @@ def _record_execution(session_id: str) -> None:
                             "ai_note": getattr(agent, "ai_note", "")}
         # Unconfirmed leads (candidate/static signals) live separately from findings
         # so the report stays bounty-trustworthy. Dedup + cap.
+        #
+        # Q-014a: this MERGES; it used to rebuild ctx["leads"] from `agent.leads` alone, which clobbered
+        # every lead `db.add_lead` had written DURING the run — i.e. every lead the TRUTH invariant (#7)
+        # produced. Those leads were not merely unconfirmable, they were gone from the report by
+        # teardown. Context first so an already-persisted lead keeps its id (and any attestation an
+        # operator already recorded on it); agent-side candidates append after.
         leads, seen = [], set()
-        for lead in getattr(agent, "leads", []):
+        for lead in list(ctx.get("leads") or []) + list(getattr(agent, "leads", [])):
             key = (lead.get("title", ""), lead.get("target", ""))
             if key in seen:
                 continue
             seen.add(key)
             # carry the fields the operator needs to CONFIRM a lead (how-to steps, evidence) + a stable
             # id so the confirm/dismiss actions can address it after the run.
-            leads.append({"_lid": "L%d" % len(leads), "title": lead.get("title", ""),
-                          "severity": lead.get("severity", "info"), "target": lead.get("target", ""),
-                          "confidence": lead.get("confidence", "candidate"),
-                          "family": lead.get("family", ""), "cwe": lead.get("cwe", ""),
-                          "tags": lead.get("tags", []),
-                          "description": lead.get("description", "") or lead.get("detail", "") or lead.get("evidence", ""),
-                          "evidence": lead.get("evidence", ""),
-                          "how_to_confirm": lead.get("reproduction_steps", []),
-                          "analyst_notes": lead.get("analyst_notes", "")})
+            lid = lead.get("_lid") or lead.get("id") or "L%d" % len(leads)
+            row = {"_lid": lid, "id": lead.get("id") or lid, "title": lead.get("title", ""),
+                   "severity": lead.get("severity", "info"), "target": lead.get("target", ""),
+                   "confidence": lead.get("confidence", "candidate"),
+                   "family": lead.get("family", ""), "cwe": lead.get("cwe", ""),
+                   "tags": lead.get("tags", []),
+                   "description": lead.get("description", "") or lead.get("detail", "") or lead.get("evidence", ""),
+                   "evidence": lead.get("evidence", ""),
+                   # `impact` is part of the proof contract proof_schema.validate_confirmed reads. The
+                   # projection used to drop it, so a lead could never be released even when its own
+                   # engine evidence was complete.
+                   "impact": lead.get("impact", ""),
+                   "how_to_confirm": lead.get("reproduction_steps", []) or lead.get("how_to_confirm", []),
+                   "analyst_notes": lead.get("analyst_notes", "")}
+            if lead.get("operator_attestation"):          # an operator decision already on this lead
+                row["operator_attestation"] = lead["operator_attestation"]
+            leads.append(row)
         ctx["leads"] = leads[:80]
         db.update_mission(session_id, context=ctx)
     except Exception:
@@ -3359,25 +3404,99 @@ async def get_leads(session_id: str):
 
 
 @app.post("/leads/{session_id}/{lid}/confirm")
-async def confirm_lead(session_id: str, lid: str):
-    """Promote an unconfirmed lead to a CONFIRMED finding (the operator verified it), then drop it from
-    the lead list. The report updates automatically. Confirmation can't be automated -- this is the
-    human saying 'I proved this'."""
+async def confirm_lead(session_id: str, lid: str, req: LeadConfirmRequest = None):
+    """Record an OPERATOR ATTESTATION on a lead: who took responsibility, when, and on what grounds.
+
+    Q-014. This used to write `confidence: "confirmed"` straight into storage and return `{"ok": true}`.
+    Every presentation surface reads through `db.get_findings_gated` -> `proof_schema.demote_unproven`,
+    which re-ran `validate_confirmed` and wrote `"lead"` back. The operator saw success; the report
+    showed a lead. Their decision was discarded with no signal at all.
+
+    THE RULE, and the reason for it. An operator attestation is a DISTINCT PROVENANCE on its own axis —
+    who / when / why — and is never a value of `confidence`. `confidence` stays the ORACLE's verdict.
+    A lead is released to `confirmed` if and only if the lead's OWN, engine-produced evidence already
+    satisfies `validate_confirmed`; the operator's typed prose is recorded as attestation text and is
+    NEVER fed into that check. That asymmetry is load-bearing: `validate_confirmed` is a substring
+    contract over evidence prose, so feeding operator text into it would mint `confirmed` for writing
+    the right words — a guard checking a declaration instead of a fact. An oracle's evidence string is
+    emitted by code that actually issued the request; an operator's is typed into a box, and the two are
+    indistinguishable to a substring check.
+
+    Three outcomes, all of them visible to the operator:
+      400  no attester or no stated grounds, or a cited exchange this mission never recorded. Nothing
+           is written. An unsigned attestation is exactly the thing we decline to mint.
+      200  promoted=True,  provenance="operator-released"  — the lead's own evidence proves it; the
+           operator released it. It survives get_findings_gated, which is where the old path lost it.
+      200  promoted=False, provenance="operator-attested" — the attestation is recorded ON the lead,
+           which stays a lead, and `proof_gap` tells the operator exactly what machine proof is missing.
+    """
     m = _require_mission(session_id)
     ctx = dict(m["context"])
     leads = list(ctx.get("leads", []))
-    lead = next((l for l in leads if l.get("_lid") == lid), None)
+    lead = _find_lead(leads, lid)
     if not lead:
         raise HTTPException(404, "lead not found")
-    finding = {"title": lead.get("title", ""), "severity": lead.get("severity", "info"),
-               "url": lead.get("target", ""), "family": lead.get("family", ""), "cwe": lead.get("cwe", ""),
-               "confidence": "confirmed", "confirmed": True,
-               "evidence": lead.get("evidence", "") or lead.get("description", ""),
-               "reproduction_steps": lead.get("how_to_confirm", []),
-               "analyst_notes": ("Operator-confirmed from a lead. " + (lead.get("analyst_notes", "") or "")).strip(),
-               "tags": (lead.get("tags") or []) + ["operator-confirmed"]}
+
+    req = req or LeadConfirmRequest()
+    operator, rationale = (req.operator or "").strip(), (req.rationale or "").strip()
+    missing = [n for n, v in (("operator", operator), ("rationale", rationale)) if not v]
+    if missing:
+        raise HTTPException(400, "operator confirmation requires %s. An attestation with no attester or "
+                                 "no stated grounds is an unsigned claim and Apolaki will not record "
+                                 "one. Nothing was changed." % " and ".join(missing))
+    # A cited exchange makes the attestation checkable: it must be traffic APOLAKI recorded in THIS
+    # mission, not a reference to something nobody can look at.
+    cited = [str(x) for x in (req.exchange_ids or [])]
+    known = {str(e.get("id")) for e in (db.get_exchanges(session_id) or [])}
+    unknown = [x for x in cited if x not in known]
+    if unknown:
+        raise HTTPException(400, "exchange id(s) not recorded in this mission: %s. An attestation may "
+                                 "only cite traffic Apolaki captured here. Nothing was changed."
+                                 % ", ".join(unknown))
+
+    # The oracle's question, asked of the LEAD's OWN evidence: if this were labelled confirmed, would
+    # the proof gate accept it? Nothing from `req` reaches this dict.
+    candidate = {"title": lead.get("title", ""), "severity": lead.get("severity", "info"),
+                 "url": lead.get("target", ""), "target": lead.get("target", ""),
+                 "family": lead.get("family", ""), "cwe": lead.get("cwe", ""),
+                 "confidence": "confirmed",
+                 "evidence": lead.get("evidence", "") or lead.get("description", ""),
+                 "impact": lead.get("impact", ""),
+                 "reproduction_steps": lead.get("how_to_confirm", []) or lead.get("reproduction_steps", [])}
+    try:
+        import proof_schema as _ps
+        machine_proof, gaps = _ps.validate_confirmed(candidate)
+    except Exception:                      # proof gate unavailable -> never release on a guess
+        machine_proof, gaps = False, ["proof_gate_unavailable"]
+
+    attestation = {"operator": operator, "rationale": rationale, "notes": (req.notes or "").strip(),
+                   "attested_at": db._now(), "lead_id": _lead_key(lead), "exchange_ids": cited,
+                   "machine_proof": bool(machine_proof), "proof_gap": [] if machine_proof else list(gaps)}
+
+    if not machine_proof:
+        # The attestation is recorded ON the lead, which stays a lead. Not a demotion of the human:
+        # it is strictly more than `confirmed` ever carried (who + why + when), and it is the only form
+        # that stays true for a reader who did not run the scan.
+        lead["operator_attestation"] = attestation
+        lead["tags"] = list(dict.fromkeys((lead.get("tags") or []) + ["operator-attested"]))
+        ctx["leads"] = leads
+        db.update_mission(session_id, context=ctx)
+        return {"ok": True, "promoted": False, "provenance": "operator-attested",
+                "machine_proof": False, "proof_gap": attestation["proof_gap"],
+                "lead_id": _lead_key(lead), "title": lead.get("title", ""),
+                "note": ("Attestation recorded for %s. The lead STAYS a lead: Apolaki has no machine "
+                         "proof for it (%s). `confirmed` means an Apolaki oracle observed the proof, so "
+                         "an assertion cannot produce one — supply the missing evidence on the lead, or "
+                         "report it as operator-attested." % (operator, ", ".join(attestation["proof_gap"])))}
+
+    finding = dict(candidate)
+    finding["confirmed"] = True
+    finding["operator_attestation"] = attestation
+    finding["analyst_notes"] = ("Operator-released from a lead by %s: %s | %s"
+                                % (operator, rationale, lead.get("analyst_notes", "") or "")).strip(" |")
+    finding["tags"] = list(dict.fromkeys((lead.get("tags") or []) + ["operator-confirmed"]))
     fid = db.add_finding(session_id, finding)
-    ctx["leads"] = [l for l in leads if l.get("_lid") != lid]
+    ctx["leads"] = [l for l in leads if _lead_key(l) != _lead_key(lead)]
     db.update_mission(session_id, context=ctx)
     try:                                   # attack-chain memory: this class WORKED here
         import attack_chain
@@ -3385,7 +3504,10 @@ async def confirm_lead(session_id: str, lid: str):
                             "confirmed", evidence=lead.get("title", ""), session=session_id, name=lead.get("title", ""))
     except Exception:
         pass
-    return {"ok": True, "finding_id": fid, "promoted": lead.get("title", "")}
+    return {"ok": True, "promoted": True, "provenance": "operator-released", "machine_proof": True,
+            "proof_gap": [], "finding_id": fid, "title": lead.get("title", ""),
+            "note": ("Released to a confirmed finding: the lead's own engine evidence satisfies the "
+                     "proof gate, and %s took responsibility for reporting it." % operator)}
 
 
 @app.post("/leads/{session_id}/{lid}/dismiss")
@@ -3394,10 +3516,10 @@ async def dismiss_lead(session_id: str, lid: str):
     m = _require_mission(session_id)
     ctx = dict(m["context"])
     leads = list(ctx.get("leads", []))
-    lead = next((l for l in leads if l.get("_lid") == lid), None)
+    lead = _find_lead(leads, lid)                         # `_lid` OR `id` (Q-014a)
     if not lead:
         raise HTTPException(404, "lead not found")
-    ctx["leads"] = [l for l in leads if l.get("_lid") != lid]
+    ctx["leads"] = [l for l in leads if _lead_key(l) != _lead_key(lead)]
     dm = list(ctx.get("dismissed_leads", []))
     dm.append(lead.get("title", ""))
     ctx["dismissed_leads"] = dm[:100]
