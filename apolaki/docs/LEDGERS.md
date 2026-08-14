@@ -261,6 +261,88 @@ Apolaki as a product.
 
 ---
 
+## trustbound — MAPPED, 100.0% TPR at 0.0% FPR on both suites. 2026-08-13
+
+The category deliberately left unmapped now earns the mapping, and the mutant is the proof — not the
+score.
+
+| suite | TP | FN | FP | TN | TPR | **FPR** |
+|---|---:|---:|---:|---:|---:|---:|
+| Java v1.2 | 83 | 0 | 0 | 43 | 100.0% | **0.0%** |
+| Python v0.1 | 18 | 0 | 0 | 19 | 100.0% | **0.0%** |
+
+Code-assisted macro: **Java 27.3% → 36.4%**, **Python 14.3% → 21.4%** — exactly additive (100/11,
+100/14). crypto/hash/weakrand unchanged at 100.0%/0.0%. Official macro equals product macro on both;
+cross-family FPs zero.
+
+**M1 is the result.** The plausible implementation — *flag the sink* — has **identical recall** (83
+and 18 TPs, every positive assertion passing) and scores **0.0%**, because it flags all 43 Java and
+all 19 Python clean twins, and costs the product macro half its value via 275 / 227 cross-family FPs.
+The corpus supplied that control free: **619 of 2740 Java cases carry a session sink and only 126 are
+`trustbound`** — the rest is `rememberMe` boilerplate storing a class name and a `SecureRandom`
+output. A sink-matcher passes every positive test and is worthless.
+
+**The standing claim was corrected while implementing against it.** Collection laundering: confirmed
+and *understated* — the clean twin reads the **tainted** key first, so "does `get("keyB")` appear"
+flags both twins. Constant-folded ternary: confirmed, sharpest discriminator. **StringBuilder: WRONG
+for this category** — all 19 are built from `param`, so it is a propagator, and treating it as a
+launderer would cause false *negatives*. Encoders were pre-registered as non-sanitizing in `39573bc`
+**before any key was fetched**; the key agreed, and treating them as sanitizers would have cost 19 TPs.
+
+Two defects and a setup error the measurement found:
+- **Arity** — `thing.doSomething(param)` inlined into the file's own `doSomething(request, param)`,
+  binding taint to the wrong parameter. All 16 first-run misses were this one shape; fixing it took
+  Java 80.7% → 100.0%.
+- **`merge_summaries` treated "undecided" as agreement**, letting one accidental constant helper vouch
+  for every same-named method tree-wide.
+- **A harness error worth more than either**: a first export omitted `src/main/resources`, so
+  `properties_resolved` was 0 and every `getProperty(key, DEFAULT)` fell back to its literal — reading
+  as crypto 23.3% FPR and hash 69.0% TPR **in two categories the change never touched**. A row-for-row
+  diff over 2763 files showed **0 code differences**, which proved the code innocent and sent the hunt
+  to the harness. **Check the resolved-input count, not just the file count.**
+
+`test_source_lane.py`'s "trustbound stays unmapped" assertion was **inverted, not deleted** — the
+mapping may exist only while a discriminating detector does.
+
+## Typed parameters — the planner could only ever see a URL. 2026-08-13
+
+Q-031 built and measured. Two defects, both the drop-at-a-handoff shape, each with its own control.
+
+**1. No producer could write a non-query parameter.** A `param` node could only ever *mean* a query
+parameter. `crawl.extract_forms` already returns each field's name, default value and input type into
+`tools.recon["forms"]` — the knowledge existed and had nowhere to be recorded.
+
+**2. The graph→planner handoff dropped forms entirely — unpredicted.** `_graph_primary_state` returned
+a recon dict keyed exactly `['domain','live_hosts','subdomains','target']`. Every form-driven planner
+branch reads `state["recon"]["forms"]`, so in the deterministic executor it read `[]` regardless of
+what the crawl captured: **2 forms captured, 0 delivered.** `run_stored_xss`, `run_csrf` and
+`run_race` **never fired at all**. Three other form engines survived only via unrelated fallback
+branches that re-discover forms from login-ish paths — **which is exactly what masked the hole.** A
+test asserting "form engines run" would have passed the entire time.
+
+Measured on DVWA (full mode, warm):
+
+| | before | after |
+|---|---:|---:|
+| forms delivered to the planner | **0** | **1** |
+| body params delivered to the planner | **0** | **4** |
+| graph params by location | `{'query': 0}` | `{'body': 4}` |
+| `run_stored_xss` / `run_csrf` / `run_race` | **0 / 0 / 0** | **1 / 1 / 1** |
+| tool dispatches | 111 | 115 |
+
+`+4` dispatches accounts for exactly the new work; two consecutive runs identical. Pre-fix: 10 of 11
+new tests failed (the survivor is a key-stability guard that must pass both sides); 5 mutants, 5
+killed.
+
+**An anomaly chased rather than reported**: a cold pass showed forms 2→1 and dispatches 36→23, reading
+as a regression. It was DVWA's own state — the cold run hit `/setup.php` with a fresh DB. Warm, the
+change is strictly additive.
+
+**Still blocked, one line**: `_fetch_openapi` (`tools.py:3766-3781`) garbage-collects the parsed spec,
+so VAmPI's 9 body params stay invisible. `self.recon.setdefault("openapi", {})[base_url] = spec` feeds
+them through the path already built and tested. `surface.py:94-133` separately needs `requestBody` /
+`in: body` read with the method preserved.
+
 ## Throughput — DIAGNOSED, and the answer is "do not build it". 2026-08-13
 
 The 8.5 s/tool-call figure has been quoted for three days and was never diagnosed. Now it is, and the
