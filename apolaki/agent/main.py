@@ -2535,6 +2535,26 @@ def _sanitize_error(e: Exception) -> str:
     return f"Run error ({type(e).__name__}): {msg[:300]}"
 
 
+def _missing_zap_invocation(session_id: str) -> dict | None:
+    """Fail closed when an opted-in mission reaches the end without running ZAP."""
+    mission = db.get_mission(session_id) or {}
+    context = mission.get("context") or {}
+    if not context.get("enable_zap"):
+        return None
+    ran = any(
+        row.get("type") == "tool_call" and row.get("tool") == "run_zap"
+        for row in db.get_logs(session_id, limit=100000)
+    )
+    if ran:
+        return None
+    return {
+        "type": "tool_error",
+        "tool": "run_zap",
+        "error": ("ZAP was enabled but no run_zap tool_call was persisted; "
+                  "the mission cannot claim ZAP execution."),
+    }
+
+
 async def _drive_mission(session_id: str) -> None:
     """Run the agent to completion in a BACKGROUND task, independent of any SSE
     connection. Events are persisted (DB logs) and buffered on the session so
@@ -2575,6 +2595,12 @@ async def _drive_mission(session_id: str) -> None:
         sess["done"] = True
         return
     final = "stopped" if stop_event.is_set() else "complete"
+    if final == "complete":
+        zap_error = _missing_zap_invocation(session_id)
+        if zap_error is not None:
+            db.add_log(session_id, "tool_error", zap_error)
+            sess["events"].append(zap_error)
+            final = "failed"
     _finalize_mission(session_id)
     sess["status"] = final
     db.update_mission(session_id, status=final)

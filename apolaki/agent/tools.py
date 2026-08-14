@@ -8891,18 +8891,74 @@ class ToolRegistry:
         # otherwise overloads the shared ZAP and its API read-times-out).
         await zap.stop_all()
         name = f"bbh-{self.mission_id or 'x'}-{os.urandom(2).hex()}"
+        degraded = []
+        rate_event = None
         try:
             ctx_id = await zap.new_context(name)
             for rx in zc.include_regexes(self.scope):
                 await zap.include_in_context(name, rx)
+            # ZAP originates target traffic in its own process, outside the
+            # shared httpx hooks. The daemon-side rule must exist as a verified
+            # fact before any API below is allowed to drive target traffic.
+            scope_hosts = sorted({e.value.lstrip("*.") for e in self.scope.in_scope if e.value})
+            safety = await zap.configure_target_safety(url, hosts=scope_hosts)
+            cursor = await zap.history_cursor()
+            alert_cursor = cursor
+            rate_policy = _browser_engine.target_rate_policy
+
+            async def _rate_guard(stop_fn=None):
+                nonlocal cursor, rate_event
+                cursor, observed = await zap.observe_rate_limits(
+                    cursor, url, rate_policy, allowed_hosts=scope_hosts)
+                if observed is None:
+                    return False
+                rate_event = observed
+                if stop_fn is not None:
+                    try:
+                        await stop_fn()
+                    except Exception:
+                        pass
+                # A target cooldown is an environment stop, not a clean scan.
+                await zap.stop_all()
+                return True
+
+            def _rate_error():
+                return ToolResult(
+                    "zap", url, False, "", [],
+                    "ZAP stopped on target rate limit: HTTP %s at %s; Retry-After %.3fs. "
+                    "No clean or vulnerability verdict was produced."
+                    % (rate_event["status"], rate_event["url"],
+                       rate_event["retry_after_seconds"]))
+
             # seed the context: start URL + discovered in-scope URLs on the same host
-            await zap.access_url(url)
+            seed_serial = 0
+
+            async def _seed(seed_url):
+                nonlocal seed_serial, rate_event
+                seed_serial += 1
+                request_id = f"{name}-{seed_serial}"
+                await rate_policy.wait_async(seed_url)
+                sent = await zap.access_url(seed_url, request_id=request_id)
+                rows = (sent or {}).get("sendRequest") or []
+                observation = zc.message_observation(rows[0]) if rows else None
+                if observation is None:
+                    raise RuntimeError("ZAP seed response was not observable")
+                delay = rate_policy.observe(
+                    observation["url"], observation["status"], observation["headers"])
+                if delay is None:
+                    return False
+                rate_event = {**observation, "retry_after_seconds": delay}
+                await zap.stop_all()
+                return True
+
+            # sendRequest returns this exact transaction. Decide its response
+            # directly instead of trusting a global, interleaved history cursor.
+            if await _seed(url):
+                return _rate_error()
             base = urlparse(url)
             for s in [u for u in self.urls if urlparse(u).netloc == base.netloc][:40]:
-                try:
-                    await zap.access_url(s)
-                except Exception:
-                    pass
+                if await _seed(s):
+                    return _rate_error()
             # policy: passive (spider + passive scan, NO active scan) | safe_active
             # (rate-limited active scan) | thorough_active (deeper active scan).
             policy = (inp.get("policy") or getattr(self, "zap_policy", "safe_active"))
@@ -8910,23 +8966,34 @@ class ToolRegistry:
                 policy = "safe_active"
             ascan_err = ""      # set if the active scan degrades but passive alerts survive
             # spider -> ajax spider (SPA) — always run (feeds the passive scanner too)
+            await rate_policy.wait_async(url)
             sid = await zap.spider(url, context=name)
             if sid is not None:
-                await zap.wait_int(lambda: zap.spider_status(sid),
-                                   cap=int(inp.get("spider_seconds", 180)), stop_event=self.stop_event)
+                spider_ok = await zap.wait_int(
+                    lambda: zap.spider_status(sid),
+                    cap=int(inp.get("spider_seconds", 180)), interval=0.25,
+                    stop_event=self.stop_event,
+                    guard=lambda: _rate_guard(lambda: zap.spider_stop(sid)))
+                if rate_event is not None or await _rate_guard():
+                    return _rate_error()
+                if not spider_ok:
+                    await zap.spider_stop(sid)
+                    degraded.append("traditional spider incomplete or timed out")
             try:
+                await rate_policy.wait_async(url)
                 await zap.ajax_start(url, context=name)
-                await zap.wait_str(lambda: zap.ajax_status(), cap=120, stop_event=self.stop_event)
-            except Exception:
-                pass
-            if policy == "passive":
-                # passive scanning runs automatically as ZAP processes the crawled
-                # traffic; drain its queue (remaining==0 -> "100% done"), then
-                # collect alerts. No active scan.
-                async def _pscan_done():
-                    return 100 if (await zap.pscan_remaining()) == 0 else 0
-                await zap.wait_int(_pscan_done, cap=90, stop_event=self.stop_event)
-            else:
+                ajax_ok = await zap.wait_str(
+                    lambda: zap.ajax_status(), cap=120, interval=0.25,
+                    stop_event=self.stop_event,
+                    guard=lambda: _rate_guard(zap.ajax_stop))
+                if rate_event is not None or await _rate_guard():
+                    return _rate_error()
+                if not ajax_ok:
+                    await zap.ajax_stop()
+                    degraded.append("AJAX spider incomplete or timed out")
+            except Exception as exc:
+                degraded.append("AJAX spider degraded: %s: %s" % (type(exc).__name__, exc))
+            if policy != "passive":
                 # active scan — two INDEPENDENT dials:
                 #  SPEED = request pacing (delay + threads + parallel hosts): turtle
                 #    is slow/polite for fragile/production targets; fast maximises
@@ -8937,15 +9004,18 @@ class ToolRegistry:
                 #    how fast. e.g. turtle+demon = slow on the wire, brutal per param.
                 speed = (inp.get("speed") or getattr(self, "zap_speed", "normal"))
                 aggr = (inp.get("aggression") or getattr(self, "zap_aggression", "normal"))
-                _SPEED = {"turtle": (1200, 1, 1, 900), "normal": (200, 2, 2, None),
-                          "fast": (0, 6, 6, 900)}
+                # The verified daemon rule is the aggregate rate bound. One
+                # worker prevents a completed 429/503 response from racing a
+                # newly-started request before the observer stops the scan.
+                _SPEED = {"turtle": (1200, 900), "normal": (200, None),
+                          "fast": (0, 900)}
                 _AGGR = {"low": ("LOW", "HIGH"), "normal": ("MEDIUM", None),
                          "demon": ("HIGH", "LOW")}
-                delay_ms, threads, hosts, cap_override = _SPEED.get(speed, _SPEED["normal"])
+                delay_ms, cap_override = _SPEED.get(speed, _SPEED["normal"])
                 strength, threshold = _AGGR.get(aggr, _AGGR["normal"])
                 setups = [zap.add_scan_header(), zap.set_injectable(),
-                          zap.set_scan_rate(delay_ms=delay_ms, threads_per_host=threads),
-                          zap.set_hosts_per_scan(hosts),
+                          zap.set_scan_rate(delay_ms=delay_ms, threads_per_host=1),
+                          zap.set_hosts_per_scan(1),
                           zap.set_attack_strength(strength, threshold)]
                 oast = inp.get("oast_service") or os.getenv("ZAP_OAST_SERVICE", "")
                 if oast:
@@ -8959,19 +9029,42 @@ class ToolRegistry:
                 # thorough_active on a slow live target), keep the passive alerts already
                 # gathered rather than discarding the whole ZAP result.
                 try:
+                    await rate_policy.wait_async(url)
                     asid = await zap.ascan(url, context_id=ctx_id, policy=inp.get("scan_policy") or None)
                     if asid is not None:
                         cap = int(inp.get("scan_seconds", cap_override or (300 if policy == "safe_active" else 600)))
-                        await zap.wait_int(lambda: zap.ascan_status(asid), cap=cap, stop_event=self.stop_event)
+                        ascan_ok = await zap.wait_int(
+                            lambda: zap.ascan_status(asid), cap=cap, interval=0.25,
+                            stop_event=self.stop_event,
+                            guard=lambda: _rate_guard(lambda: zap.ascan_stop(asid)))
+                        if rate_event is not None or await _rate_guard():
+                            return _rate_error()
+                        if not ascan_ok:
+                            await zap.ascan_stop(asid)
+                            ascan_err = "active scan incomplete or timed out"
                 except Exception as _ae:
                     ascan_err = f"{type(_ae).__name__}: {_ae}".strip(": ")
-            raw = zc.dedup_alerts(await zap.alerts(baseurl=f"{base.scheme}://{base.netloc}"))
+            # Passive analysis continues while spider/active traffic is being
+            # processed. Drain it for every policy before collecting alerts.
+            async def _pscan_done():
+                return 100 if (await zap.pscan_remaining()) == 0 else 0
+            pscan_ok = await zap.wait_int(_pscan_done, cap=90, stop_event=self.stop_event)
+            if not pscan_ok:
+                degraded.append("passive scan queue incomplete or timed out")
+            if await _rate_guard():
+                return _rate_error()
+            current_alerts, retained_alert_count = await zap.alerts_since(
+                alert_cursor, baseurl=f"{base.scheme}://{base.netloc}")
+            raw_count = len(current_alerts)
+            stale_count = retained_alert_count - raw_count
+            if stale_count:
+                degraded.append(f"{stale_count} retained alert(s) excluded")
+            raw = zc.dedup_alerts(current_alerts)
         except Exception as e:
             return ToolResult("zap", url, False, "", [], f"ZAP scan error: {type(e).__name__}: {e}".strip(": "))
 
         findings = [zc.alert_to_finding(a) for a in raw]
         findings = [f for f in findings if f["severity"] in ("critical", "high", "medium", "low")]
-        self.recon.setdefault("zap", []).extend(findings)
         # the note starts with a policy token so the report/ledger can render the
         # exact state ("ZAP Executed — Passive Only / Safe Active / Thorough Active");
         # speed is included for the methodology (turtle / normal / demon pacing).
@@ -8982,10 +9075,13 @@ class ToolRegistry:
         else:
             _dials = (f"speed={inp.get('speed') or getattr(self, 'zap_speed', 'normal')}; "
                       f"aggression={inp.get('aggression') or getattr(self, 'zap_aggression', 'normal')}")
-        _degraded = f" [active scan degraded, passive alerts kept: {ascan_err}]" if ascan_err else ""
+        if ascan_err:
+            degraded.append("active scan degraded, passive alerts kept: %s" % ascan_err)
+        _degraded = " [" + "; ".join(degraded) + "]" if degraded else ""
         return ToolResult("zap", url, True,
-                          f"policy={policy}; {_dials}; {len(findings)} ZAP alert(s) "
-                          f"[{_plabel}] (from {len(raw)} raw){_degraded}", findings)
+                          f"policy={policy}; {_dials}; target-rate<={safety['requests_per_second']:g}rps; "
+                          f"{len(findings)} ZAP alert(s) "
+                          f"[{_plabel}] (from {raw_count} current raw){_degraded}", findings)
 
     async def _run_dalfox(self, inp: dict) -> ToolResult:
         url = inp["url"]
