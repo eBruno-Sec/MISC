@@ -166,9 +166,16 @@ def detect(headers: dict, set_cookie: str, body: str) -> list:
     return _dedup([t for t in techs if t.get("name")])
 
 
+def public_view(records: list) -> list:
+    """`detect()` records projected onto the four keys `fingerprint()` has always returned. Exposed
+    so a caller that needs BOTH the display list and the evidence-carrying records can run the
+    detection once, without a second copy of the key tuple drifting out of step with this one."""
+    return [{k: t.get(k, "") for k in _PUBLIC_KEYS} for t in (records or [])]
+
+
 def fingerprint(headers: dict, set_cookie: str, body: str) -> list:
     """Return a deduped list of {name, version, source, category} technologies."""
-    return [{k: t.get(k, "") for k in _PUBLIC_KEYS} for t in detect(headers, set_cookie, body)]
+    return public_view(detect(headers, set_cookie, body))
 
 
 def version_disclosures(techs: list) -> list:

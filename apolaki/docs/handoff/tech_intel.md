@@ -41,8 +41,11 @@ product name.
 | slice | what | state |
 |---|---|---|
 | B1+B2 | `dependency_intel` fact model + ladder; `fingerprint` identity gate, `tech_facts()`, `record_facts()` | landed `82538c4` |
-| B3 | `asset_graph`: `observe_technology()` + `build_from_engagement` projection + save/load | landed, suite green |
-| B4 | `_run_fingerprint` producer patch (Codex-owned file) | **hand-off only, section 4** |
+| B3 | `asset_graph`: `observe_technology()` + `build_from_engagement` projection + save/load | landed `8b002aa` |
+| B4 | `tools._run_fingerprint` producer patch + gate exemption removed | landed, proved live |
+
+**`tools.py` was returned to this lane when Q-023 closed, so B4 is no longer a hand-off - the
+producer is wired and proved against real labs (section 4a).** The chain is live end to end.
 
 | suite | result |
 |---|---|
@@ -140,73 +143,100 @@ changed state at any point.
   and inert until the producer patch lands). `technique_planner.py:106` derives `has_versions` on
   the flat path independently and is untouched.
 
-### 3d. One shared-file edit, declared
+### 3d. The gate exemption, taken and then RETURNED
 
-`agent/deadcode_gate.py` gained ONE `ALLOWED_UNUSED_QUALIFIED` entry for `fingerprint.record_facts`.
-The gate was right: a persistence function whose only production caller lives in another lane's file
-is an island until that patch lands. **Delete that entry when the producer patch lands** - the gate
-flagging it again is the point. Nothing else in that file was touched.
+While `tools.py` belonged to another lane, `agent/deadcode_gate.py` carried one
+`ALLOWED_UNUSED_QUALIFIED` entry for `fingerprint.record_facts` - a persistence function whose only
+production caller lived in a file this lane could not edit is an island, and the gate was right to
+say so. Its own reason said to delete it when the patch landed.
+
+**It is deleted.** The qualified dead-code count is back to exactly **37**, the pre-ticket baseline,
+with no exemption carrying the difference. A gate exemption that outlives its cause is a declaration
+that no longer matches the fact, which is the failure shape this project has recorded twice.
 
 ---
 
-## 4. HAND-OFF: the producer patch, for the owner of `agent/tools.py`
+## 4. The producer - LANDED in `tools._run_fingerprint`
 
-**Not applied by this lane.** `agent/tools.py` is Codex's this cycle (Q-023). Until it lands,
-`recon["technology"]` is never populated in a live mission and the whole chain below it is inert -
-that is the honest state of Q-021B, and it is why the dead-code gate entry above exists.
-
-Everything else is in place: the fact model, the ladder, the identity dedupe, the rejection ledger
-and the graph projection are all built, tested and reachable from `recon`.
-
-### The patch - ONE line, in `tools._run_fingerprint` (currently at `agent/tools.py:3637`)
-
-Immediately after the existing `for ... else:` block that updates `live_hosts` (i.e. after `final`
-is defined and before `findings = []`), add:
-
-```python
-        # Q-021B: persist the version/source/evidence that the display projection above discards.
-        # `record_facts` mutates recon: recon["technology"] gains identity-deduped TechnologyFacts
-        # and recon["technology_rejected"] records every refused detection with a reason.
-        fp.record_facts(self.recon, final, r.get("headers", {}), set_cookie, r.get("body", ""),
-                        authenticated=bool(self.session_headers))
-```
-
-Nothing above it changes. `techs`, `names`, `lh["tech"]`, `fp.version_disclosures(techs)`, the
-summary string and the `{"technologies": techs}` payload all keep their exact current values -
-`fingerprint()` is byte-identical to what it returned before this ticket.
-
-**Optional, only if the second regex pass over the body is worth removing** (it is one extra pass
-per live host, capped at `CAP_HOSTS = 30` per mission): call `fp.detect(...)` once and hand the
-records to both consumers.
+`fingerprint()` is called, its four-key projection feeds `live_hosts[i]["tech"]` exactly as before,
+and then the facts are persisted. The detection now runs **once**: `detect()` produces the
+evidence-carrying records, `public_view()` projects them onto the four keys the display path has
+always used, so the two cannot disagree.
 
 ```python
         detected = fp.detect(r.get("headers", {}), set_cookie, r.get("body", ""))
-        fp.record_facts(self.recon, r.get("final_url") or url, r.get("headers", {}), set_cookie,
-                        r.get("body", ""), techs=detected, authenticated=bool(self.session_headers))
-        techs = [{k: t.get(k, "") for k in ("name", "version", "source", "category")}
-                 for t in detected]
+        techs = fp.public_view(detected)
+        ...                                   # live_hosts merge, unchanged
+        fp.record_facts(self.recon, final, r.get("headers", {}), set_cookie, r.get("body", ""),
+                        techs=detected, authenticated=bool(self.session_headers))
 ```
 
-If you take this form, `techs=` **must** receive `detect()` records, not `fingerprint()` records -
-the latter have no `evidence` key and the facts would persist with empty evidence. Passing nothing
-is always safe.
+`recon` also now DECLARES `"technology": []` and `"technology_rejected": []` at construction rather
+than creating them on first write, so no consumer has to tell "nothing was detected" from "the key
+does not exist yet". A mutant deleting that declaration initially SURVIVED, because the test said
+`in (None, [])`; the test now asserts both keys exist and are empty.
 
-### Two things NOT to do
+**`self.graph` is deliberately not written.** That is the graph the PLANNER reads
+(`technique_planner:135` unions `graph.to_observations()`), so a technology node there would change
+which techniques get scheduled. Q-021B is recon persistence, not detection - orchestration is
+Q-021E. The report-time `build_from_engagement` projection already carries the facts to the durable
+graph without touching the plan. `test_the_live_planning_graph_is_deliberately_untouched` pins it.
 
-* Do **not** feed `lh["tech"]` (the bare display strings) into a fact. It is where the six prose
-  rows in `memory_assets` came from, and a fact built from it has no version, no source and no
-  evidence.
+### Two things NOT to do to this code later
+
+* Do **not** feed `lh["tech"]` (the bare display strings) into a fact. It is where the prose rows in
+  `memory_assets` came from, and a fact built from it has no version, no source and no evidence.
 * Do **not** widen `authenticated` to "a session existed at some point in the mission". It is the
   auth state OF THIS RESPONSE; an authenticated re-detection is a genuinely different observation
-  and Q-021E depends on being able to tell them apart.
+  and Q-021E depends on telling them apart.
 
-### Also outstanding, in files this lane does not own
+### 4a. LIVE PROOF - real labs, real transport, real dispatch
+
+Not a unit test. `ToolRegistry.execute("run_fingerprint", ...)` - the same dispatch `planner.py`
+schedules per live host - against four authorized local labs on `apolaki_default`, through the real
+HTTP transport, then the real report-time projection saved to disk and read back. **12/12 checks
+passed.**
+
+```
+1. REAL dispatch
+  http://apolaki-dvwa-1:80/            success=True   stack: Apache 2.4.25
+  http://apolaki-juice-shop-1:3000/    success=True   stack: none
+  http://apolaki-mutillidae-1:80/      success=True   stack: Apache 2.4.7, PHP 5.5.9, and that the database username
+  http://apolaki-bwapp-1:80/           success=True   stack: Apache 2.4.7, PHP 5.5.9
+
+2. recon['technology'] -- 5 TechnologyFacts, versioned 5/5, CVE-eligible 0/5
+  apolaki-dvwa-1/apache         2.4.25  low  evidence='Server: Apache/2.4.25 (Debian)'
+  apolaki-mutillidae-1/apache   2.4.7   low  evidence='Server: Apache/2.4.7 (Ubuntu)'
+  apolaki-mutillidae-1/php      5.5.9   low  evidence='X-Powered-By: PHP/5.5.9-1ubuntu4.25'
+  apolaki-bwapp-1/apache        2.4.7   low  evidence='Server: Apache/2.4.7 (Ubuntu)'
+  apolaki-bwapp-1/php           5.5.9   low  evidence='X-Powered-By: PHP/5.5.9-1ubuntu4.14'
+
+6. graph -> JSON -> reload: 5 component nodes, 5 host--runs-->component edges, versions intact
+```
+
+Three things this run proves that no unit test could:
+
+1. **The banner control fires on genuinely ancient real software.** PHP 5.5.9 and Apache 2.4.7 are
+   real and long EOL. Apolaki records the version, quotes the header verbatim, and still reports
+   `cve_eligible=False` / `potentially_affected`, because a version read off a header is a claim.
+   A scanner that emitted CVEs here would look more productive and be less honest. Upgrading these
+   is exactly what Q-021C/D/E are for - an advisory match plus a probe, not a banner.
+2. **The prose gate fired on live bytes, and the display path did not.** Mutillidae's
+   database-offline page produced `'and that the database username'` from the powered-by regex. The
+   same run shows it PRESENT in `live_hosts[i]["tech"]` (unchanged, by design) and ABSENT from
+   `recon["technology"]`, with `reason=prose_leading_stopword detector=fingerprint.body.prose`
+   recorded. That is the display path proven untouched and the fact path proven clean, in one run.
+3. **Juice Shop returned a real zero.** Its root document is an Angular shell that ships no
+   identifying header and no inline library, so zero facts and zero refusals - control (c), on a
+   live target, distinguishing an honest zero from a broken detector.
+
+Reproduce with `scripts`-free one-shot: mount `agent/` read-only into the agent image on
+`--network apolaki_default` and run the proof script; it exits non-zero if any check fails.
+
+### Still outstanding, in files this lane does NOT own
 
 | where | what | owner |
 |---|---|---|
-| `agent/tools.py:3637` | the patch above | Codex (Q-023) |
-| `agent/main.py` `_warm_start` | re-seed `recon["technology"]` from `memory_assets` so a second mission starts with the facts (oracle 3's cross-mission half) | main.py owner |
-| `agent/memory.py` | persist facts, and let the identity gate purge the 6 prose rows on next write | unassigned |
 | `scripts/liveness.sh` CHECKS | an entry that fails when `recon["technology"]` is empty against a target with a known banner | Coordinator |
 | `agent/report.py` | a technology inventory; today only the delta section shows `("tech", "New Technology")` | Q-021F |
 

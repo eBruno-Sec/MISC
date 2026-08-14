@@ -1079,6 +1079,10 @@ class ToolRegistry:
             "target": dom, "domain": dom, "subdomains": [], "live_hosts": [],
             "nuclei": [], "dir_bust": {}, "misc": [], "takeover_candidates": [],
             "http": {}, "nmap": {"open_ports": []},
+            # Q-021B. Declared here rather than created on first write, so a consumer never has to
+            # tell "no technology detected" apart from "the key does not exist yet" -- the falsy
+            # -default shape that has bitten this codebase twice.
+            "technology": [], "technology_rejected": [],
         }
         self.urls: list = []
         # Session-DESTROYING endpoints discovered anywhere on the surface (logout / signout / deauth).
@@ -3645,7 +3649,11 @@ class ToolRegistry:
             if k.lower() == "set-cookie":
                 set_cookie = v
                 break
-        techs = fp.fingerprint(r.get("headers", {}), set_cookie, r.get("body", ""))
+        # ONE detection pass. `detected` carries the EVIDENCE for each hit (the exact header, cookie
+        # name or matched signature); `techs` is the four-key display projection this method has
+        # always produced. Both come from the same records, so they cannot disagree.
+        detected = fp.detect(r.get("headers", {}), set_cookie, r.get("body", ""))
+        techs = fp.public_view(detected)
         # merge tech names into recon live_hosts for the guidance engine
         names = [t["name"] for t in techs]
         final = r.get("final_url") or url
@@ -3656,6 +3664,21 @@ class ToolRegistry:
         else:
             self.recon["live_hosts"].append({"url": final, "status": r.get("status"),
                                               "title": "", "tech": names, "webserver": None})
+        # Q-021B: PERSIST what the line above renders away. `names` is a display string; the version,
+        # the source and the byte that proved it were computed here and discarded one line later,
+        # which is why nothing downstream could ever turn a detected technology into a test.
+        # record_facts merges TechnologyFacts by IDENTITY into recon["technology"] and records every
+        # refused detection -- prose captured by the powered-by regex -- into
+        # recon["technology_rejected"] with a reason, so a real zero stays distinguishable from a
+        # silent drop.
+        #
+        # Deliberately NOT written into `self.graph`: that is the graph the PLANNER reads
+        # (technique_planner unions graph.to_observations()), so a technology node there would change
+        # which techniques get scheduled. This ticket is recon persistence, not detection --
+        # orchestration is Q-021E. The report-time build_from_engagement projection already reads
+        # recon["technology"], so the facts reach the durable graph without touching the plan.
+        fp.record_facts(self.recon, final, r.get("headers", {}), set_cookie, r.get("body", ""),
+                        techs=detected, authenticated=bool(self.session_headers))
         findings = []
         for t in fp.version_disclosures(techs):
             findings.append({
