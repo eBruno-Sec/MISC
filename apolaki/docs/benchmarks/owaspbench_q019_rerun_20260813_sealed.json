@@ -1,0 +1,101 @@
+{
+  "by_family": {
+    "dom_data_manipulation": 1,
+    "ldap_injection": 5,
+    "sensitive_exposure": 1,
+    "sqli": 12,
+    "xpath_injection": 1
+  },
+  "claim_rows": [
+    "dom_data_manipulation | Reflected DOM data manipulation in 'BenchmarkTest00407' | https://owaspbench:8443/benchmark/cmdi-00/BenchmarkTest00407?username=",
+    "ldap_injection | LDAP injection in form field 'BenchmarkTest00630' | https://owaspbench:8443/benchmark/ldapi-00/BenchmarkTest00630",
+    "ldap_injection | LDAP injection in form field 'BenchmarkTest00695' | https://owaspbench:8443/benchmark/ldapi-00/BenchmarkTest00695",
+    "ldap_injection | LDAP injection in form field 'BenchmarkTest01242' | https://owaspbench:8443/benchmark/ldapi-00/BenchmarkTest01242",
+    "ldap_injection | LDAP injection in form field 'BenchmarkTest01490' | https://owaspbench:8443/benchmark/ldapi-00/BenchmarkTest01490",
+    "ldap_injection | LDAP injection in form field 'BenchmarkTest01568' | https://owaspbench:8443/benchmark/ldapi-00/BenchmarkTest01568",
+    "sensitive_exposure | Credential exposed in a source comment | https://owaspbench:8443/benchmark/js/jquery.min.js",
+    "sqli | SQL injection (boolean-blind) in 'BenchmarkTest00023' | https://owaspbench:8443/benchmark/weakrand-00/BenchmarkTest00023",
+    "sqli | SQL injection (boolean-blind) in 'BenchmarkTest00033' | https://owaspbench:8443/benchmark/sqli-00/BenchmarkTest00033",
+    "sqli | SQL injection (error-recovery) in 'header:BenchmarkTest00018 | https://owaspbench:8443/benchmark/sqli-00/BenchmarkTest00018",
+    "sqli | SQL injection (error-recovery) in 'header:BenchmarkTest00192 | https://owaspbench:8443/benchmark/sqli-00/BenchmarkTest00192",
+    "sqli | SQL injection (error-recovery) in 'header:BenchmarkTest00193 | https://owaspbench:8443/benchmark/sqli-00/BenchmarkTest00193",
+    "sqli | SQL injection (error-recovery) in 'header:BenchmarkTest00194 | https://owaspbench:8443/benchmark/sqli-00/BenchmarkTest00194",
+    "sqli | SQL injection (error-recovery) in 'header:BenchmarkTest00195 | https://owaspbench:8443/benchmark/sqli-00/BenchmarkTest00195",
+    "sqli | SQL injection (error-recovery) in 'header:BenchmarkTest00196 | https://owaspbench:8443/benchmark/sqli-00/BenchmarkTest00196",
+    "sqli | SQL injection (error-recovery) in 'header:BenchmarkTest00198 | https://owaspbench:8443/benchmark/sqli-00/BenchmarkTest00198",
+    "sqli | SQL injection (error-recovery) in 'header:BenchmarkTest00199 | https://owaspbench:8443/benchmark/sqli-00/BenchmarkTest00199",
+    "sqli | SQL injection (error-recovery) in 'header:BenchmarkTest00203 | https://owaspbench:8443/benchmark/sqli-00/BenchmarkTest00203",
+    "sqli | SQL injection (error-recovery) in 'header:BenchmarkTest00204 | https://owaspbench:8443/benchmark/sqli-00/BenchmarkTest00204",
+    "xpath_injection | XPath injection in form field 'BenchmarkTest02189' | https://owaspbench:8443/benchmark/xpathi-00/BenchmarkTest02189"
+  ],
+  "claims": [
+    "BenchmarkTest00018",
+    "BenchmarkTest00023",
+    "BenchmarkTest00033",
+    "BenchmarkTest00192",
+    "BenchmarkTest00193",
+    "BenchmarkTest00194",
+    "BenchmarkTest00195",
+    "BenchmarkTest00196",
+    "BenchmarkTest00198",
+    "BenchmarkTest00199",
+    "BenchmarkTest00203",
+    "BenchmarkTest00204",
+    "BenchmarkTest00407",
+    "BenchmarkTest00630",
+    "BenchmarkTest00695",
+    "BenchmarkTest01242",
+    "BenchmarkTest01490",
+    "BenchmarkTest01568",
+    "BenchmarkTest02189"
+  ],
+  "distinct_cases_claimed": 19,
+  "elapsed_s": 1893,
+  "findings_total": 20,
+  "leads_total": 4,
+  "mode": "active",
+  "phases": [
+    [
+      1,
+      "recon",
+      0
+    ],
+    [
+      4,
+      "recon",
+      0
+    ],
+    [
+      63,
+      "enum",
+      0
+    ],
+    [
+      66,
+      "probe",
+      1
+    ],
+    [
+      107,
+      "scan",
+      1
+    ],
+    [
+      107,
+      "probe",
+      1
+    ],
+    [
+      442,
+      "enum",
+      1
+    ],
+    [
+      471,
+      "probe",
+      1
+    ]
+  ],
+  "seal_sha256": "1acebaa7c38042ffdf61f3a7712b83fb0be5d987079f6d92fa64c3b950b436d9",
+  "target": "https://owaspbench:8443/benchmark/"
+}
