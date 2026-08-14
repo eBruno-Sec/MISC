@@ -129,6 +129,58 @@ with `run_sqli`), the budget bound (whatever is added must still respect `SWEEP_
 determinism (two identical sweeps dispatch identically). They pass BEFORE the change, so they
 cannot be credited to it.
 
+## 2c. THE BASELINE DISCREPANCY, mechanically explained [MEASURED]
+
+The ticket says not to anchor on the ledgered baseline because it cannot be re-derived. It can be
+re-derived. The breaker checked `memory.finding_fp` as it exists TODAY, got 29 distinct
+fingerprints, and correctly concluded that today's dedup does not explain it. The dedup that
+explains it is one WITHOUT THE URL PATH.
+
+MEASURED against the live store (`apolaki-agent-1:/app/data/bbh.db`, mission `ebd96f45`, 29 rows,
+all created between 00:20:33 and 01:37:17 on 2026-08-11, i.e. inside the mission window):
+
+```
+fingerprint                       distinct   by family
+memory.finding_fp today
+  cls|fam|param|host+PATH             29     sqli 21, ldap 5, dom 1, sensitive 1, component 1
+same key with the PATH removed
+  cls|fam|param|host                  25     sqli 21, ldap 1, dom 1, sensitive 1, component 1
+```
+
+The second line is the ledgered line character for character (`docs/LEDGERS.md:151-153`), and the
+case ids over those 25 findings number exactly **23** - the ledgered claim count.
+
+**The mechanism.** `finding_fp` derives `param` from the title by `rsplit(" in '", 1)`. The sqli
+titles are `... in 'header:BenchmarkTest00018'`, so each gets a distinct param and survives any
+dedup. The LDAP titles are `LDAP injection in form field 'BenchmarkTest00630'` - `" in '"` does not
+occur, so `param` is EMPTY for all five. With the path in the key they stay distinct; without it,
+all five collapse to `cwe-90|ldap_injection||owaspbench`. That is why the collapse hits `ldapi`
+alone and leaves `sqli 21` untouched, which is the exact asymmetry the ledger shows.
+
+The ledgered `by (key category, is_vulnerable)` split is consistent with the same 23-case set:
+21 sqli findings = 20 sqli-true + `00494` (cmdi-false, the known FP), plus `00407` and `00630`.
+
+**What this settles.** The ledgered baseline is NOT a different run and is NOT missing findings. It
+is the SAME 29 findings counted under a coarser fingerprint. Therefore:
+
+* the store's **27 claimed cases** is the honest baseline claim count for `ebd96f45`;
+* the 08-13 rerun's headline `ldapi 1 -> 5` "class broadening" is **zero** - the baseline already
+  had all five;
+* the whole-product comparison is **27 claimed -> 18**, and the loss is **-9, not -3**.
+
+**What it does NOT settle, stated rather than glossed.** The recorded seal
+`a95670f9c756...` still does not reproduce. I hashed the reconstructed 23-case list under ten
+serializations (newline, trailing newline, comma, space, concat, json, repr, lower, upper, both for
+the 23-set and the 27-set) and brute-forced every field subset up to size 4 over both the 29-row and
+the 25-row bases - **no match**. The 08-11 sealing script was never committed (commit `1cd6df9`
+carries only its printed output), so its exact serialization is unrecoverable. The COUNTS reconcile
+exactly and reproducibly; the seal STRING does not, and I am not going to claim it does.
+
+**Owner action** (`docs/LEDGERS.md` is not this lane's file): the `BASELINE` dict in
+`scripts/whole_product_score.py` should read 27 claimed, not 23, once an owner accepts this
+derivation. I have not changed it, because a baseline constant is exactly the kind of number that
+must not move on one lane's say-so.
+
 ## 3. Numbers
 
 Baseline run in progress. Nothing measured yet.
