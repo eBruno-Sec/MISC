@@ -181,6 +181,31 @@ exactly and reproducibly; the seal STRING does not, and I am not going to claim 
 derivation. I have not changed it, because a baseline constant is exactly the kind of number that
 must not move on one lane's say-so.
 
+## 2d. Mutation check on the new test [MEASURED]
+
+The obvious mutant (drop the engine) is already covered - the tests failed that way before the fix.
+The non-obvious one is putting the engine in the WRONG TIER, which looks like a fix and silently
+applies the guarantee to the first 30 targets:
+
+```
+MUTANT: run_web_probes moved from _SWEEP_HTTP_ENGINES to _SWEEP_BROWSER_ENGINES
+  -> FAILED test_the_traversal_engine_is_not_restricted_to_the_browser_budget
+     "run_web_probes reached 30 target(s), at or below the browser cap 30"
+```
+
+Killed by the intended assertion, with the mechanism in the message. Noted honestly:
+`test_every_swept_target_is_also_tested_for_traversal_and_idor` PASSES on that mutant, because its
+12-URL fixture is under the browser cap. Neither test catches it alone; the pair does, and that is
+why both exist.
+
 ## 3. Numbers
 
 Baseline run in progress. Nothing measured yet.
+
+### Operational note for whoever runs this next
+
+Do NOT `docker run -v <repo>/agent:/app -v <somefile>:/app/x.py`. Docker creates the second mount
+point INSIDE the first, which means it creates the file in the repo's `agent/` on the host. It left
+`agent/smoke.py`, `agent/smoke2.py` and `agent/wp_run.py` in my working tree. Removed, and verified
+against history that none was ever staged - every commit in this lane used explicit paths, never
+`git add -A`. Mount helper scripts into a directory that is not itself a host mount.
