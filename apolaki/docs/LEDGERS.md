@@ -261,6 +261,97 @@ Apolaki as a product.
 
 ---
 
+## ★ WHAT BOUNDS RECALL, ANSWERED: SELECTION. 2026-08-14
+
+After four of my hypotheses died, the harness that was built to discriminate them answered on its
+first use:
+
+```
+exit_reason = step_cap_exhausted        309 steps against a cap of 220
+85.5% of the recall shortfall was NEVER PROBED
+detection on probed vulnerable cases    = 8.2%
+```
+
+**The next order of magnitude is selection, not oracles.** We do not fail to confirm what we test; we
+never test most of it, and the run is cut off by a step cap it exceeds by 40%. Every engine, payload,
+carrier and oracle improvement of the past week was optimising the 14.5% we reach.
+
+**Falsified, in order, all mine**: payload repertoire · carrier delivery · parameter visibility ·
+throughput · and now the stability-gate trade below. Five hypotheses, five measurements, five deaths.
+The one that survived came from instrumenting the run instead of theorising about it.
+
+**RETRACTION — the "we traded 9 findings for 0 FP" story was WRONG.** I recorded it yesterday as the
+leading candidate. Measured: the 21 baseline sqli findings split 15 `error-recovery` / 6
+`boolean-blind`; the 9 lost are 5 + 4; `quote_break_recovers` takes three integers so the gate cannot
+reach it; and **the 4 eligible cases have baseline self-similarity 1.0000 and confirm WITH the gate on,
+3/3 trials. The gate rejects 0 of 9. There was no trade.** The rate policy is also rejected — it is a
+reactive 429/503 cooldown that can only *add* time, and the clock fell 64%.
+
+**−3 IS REAL. Variance is zero.** Two full runs of frozen identical code: **jaccard 1.000, identical
+seals, identical 309 steps / 3659 tool calls / 373 probed cases.** The only case separating them from
+the sealed rerun is `BenchmarkTest00023` — the coin flip. Both predictions were written down before
+the runs and both held.
+
+**⚠ THE PUBLISHED BASELINE CANNOT BE RE-DERIVED, AND THIS CONTAMINATES A CLAIM I MADE.** The store
+returns **29 findings / 27 cases / ldapi 5** for mission `ebd96f45`, against the ledgered 22/23 with
+`ldapi 1`. No dedup explains it; no subset reproduces the seal. **On the store's numbers the
+"ldapi 1 → 5 broadening" is ZERO and the loss is −8, not −3.** So the "class coverage genuinely
+broadened" line I wrote is **unproven and possibly false**. Treat every comparison against `ebd96f45`
+as suspect until its provenance is reconciled. Open.
+
+## Q-040 REALLY FIXED — the reference must REPRODUCE, not merely resemble. 2026-08-14
+
+The two-sample gate was defeated by run-structured alternation: two draws from an alternating source
+agree half the time by construction. The fix requires the reference to reproduce **byte-identically**.
+
+Chosen over more samples (alternation defeats consecutive draws) and over a variance floor (measured —
+`00023`'s floor is ~0.9495 and the fires sat *at* it, a coin flip on the last decimal, plus a free
+parameter). **Byte equality has no free parameter and fails closed.**
+
+- **`00023`: FP/attempt 0.045 → 0.000**, every field, live negative control.
+- **Capability cost on this lab: zero.** All five genuine confirmations still fire 3/3.
+- Off-benchmark cost is real and deliberate: pages with per-response tokens are now declined rather
+  than guessed at. No estimate offered, because none is available.
+
+**The `00494` residual is PROVED UNDECIDABLE at the two-sample signature** — `(A, A, A, B)` arises
+from both a genuine injection and a flipped alternation, so **no function of those strings can
+separate them.** That is a proof, not a punt. Two additive optional arguments close it and both have
+passing tests; the two-call-site patch is in the handoff rather than applied across an ownership line.
+
+`test_sqli_boolean_noise_floor.py`: 4 passed / 3 xfailed → **9 passed / 1 xfailed.**
+
+## Q-021B CLOSED — the fact survives a real mission, and outlives it. 2026-08-14
+
+The producer landed, so the island is closed rather than authored. `_run_fingerprint` runs **one**
+detection pass — `fp.detect()` yields evidence-carrying records, `fp.public_view()` projects the four
+display keys — so the two cannot disagree and no second copy of the key tuple can drift. `recon`
+**declares** `technology` at construction instead of creating it on first write.
+
+**Proved live: producer 12/12 across four labs, oracle 3 at 10/10 across two real missions and one
+real sqlite DB.** 5 facts, versioned 5/5, **CVE-eligible 0/5**.
+
+Three things no stub could have shown:
+- **PHP 5.5.9 and Apache 2.4.7 are long EOL. Apolaki records the version, quotes the header verbatim,
+  and still says `cve_eligible=False`** — because the confidence ladder says a banner is LOW. *Emitting
+  CVEs there would look more productive and be less honest.*
+- Mutillidae's database-offline page produced `'and that the database username'` — **present** in the
+  display path (unchanged by design) and **absent** from the facts with `reason=prose_leading_stopword`
+  recorded, in one run.
+- Juice Shop returned a real zero: zero facts *and* zero refusals.
+- Warm start: mission 2 began with 5 facts already present, each keeping mission 1's `first_seen` to
+  the microsecond while advancing `last_seen`.
+
+`self.graph` is deliberately **not** written — that is the graph the planner reads, so technology there
+would change which techniques get scheduled. Q-021E's job, and it would move numbers. A test pins it.
+
+**The gate exemption was returned**: qualified dead-code back to exactly **37**, the pre-ticket
+baseline, with nothing carrying the difference.
+
+**Two mutants survived first and both mattered**: `recon-keys-not-declared` (the test said
+`in (None, [])`, which passes whether or not the keys exist) and `warm-start-overwrites-instead-of-
+merging` (indistinguishable *today* because `recon` is empty when warm-start runs — a latent trap, now
+pinned). **41 mutants across the ticket, 41 killed.**
+
 ## ⚠ THE BLIND-SQLI ORACLE CONFIRMS ON WEAK-RANDOM NOISE — AT SCALE. 2026-08-14
 
 Bigger than the recall drop, and it means **Q-040's stability gate is incomplete**. Three strict xfails
