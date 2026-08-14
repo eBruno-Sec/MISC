@@ -261,6 +261,66 @@ Apolaki as a product.
 
 ---
 
+## Q-031 CLOSED — an API spec's typed body parameters now reach the planner. 2026-08-13
+
+VAmPI, full mode, identical seed, two consecutive after-runs identical on every field:
+
+| | before | after |
+|---|---:|---:|
+| body params delivered to the planner | **0** | **9** |
+| endpoints made schedulable | **0** | **5** |
+| graph params by location | `{}` | `{'body': 9, 'path': 4}` |
+| `run_stored_xss` / `run_csrf` / `run_race` | **0 / 0 / 0** | **5 / 3 / 3** |
+| `run_form_cmdi` | 10 | 15 |
+| tool dispatches | 100 | 116 |
+
+All nine declared body parameters delivered. Three engine classes went from **never firing** to 5/3/3.
+The DVWA half proved it on HTML forms; this is the half that matters for recall, because 100% of an
+API's parameter surface was previously invisible.
+
+Built in the smallest places that could hold it: one line in `tools.py` keeping the parsed spec; a
+**new** `surface.operations_from_openapi()` beside the untouched URL importer (which reads only
+`in == "query"`, collapses method to a bool and returns bare strings); and `_project_spec_params()`
+minting through the **same** `observe_param` writer and `has_param` edges the form producer uses.
+That reuse is the payoff for putting `location` on the param rather than inventing a `schema` kind.
+
+**A mutant survived and exposed a hole in the lane's own tests.** Deleting the `tools.py` line that
+persists the spec killed *no* test — the end-to-end test injected `recon["openapi"]` by hand and never
+exercised the producer. **A registered producer with no test that runs it is the island shape this
+very ticket exists to find, reproduced inside its own fix.** Fixed by driving `_fetch_openapi` with a
+stubbed transport; the mutant now dies.
+
+## Q-041 / Q-042 CLOSED — and zero xfails remain. 2026-08-13
+
+All four strict markers removed **by fixing what they pinned**, which is the only legitimate way.
+
+**Q-041 — the binding was computed and discarded.** `_py_imports` produced `modules['r'] = 'random'`
+and every rule then matched a hard-coded literal receiver, so `from random import getrandbits as g`
+worked while `import random as r; r.getrandbits(32)` was invisible. Widening the receiver must not
+widen the verdict, so the controls are the deliverable: `import numpy.random as r` still reports
+nothing, and **`r.SystemRandom().getrandbits(32)` — the 113 clean twins, through an alias — is still
+a CSPRNG.**
+
+**Q-042 — fixed by binding, not by a longer word list.** Two structural facts: an assignment is at
+**paren depth 0**, so `f(token=x)` is a keyword argument and not an assignment; and a compound
+identifier means its **head noun**, so `token_expiry` is an expiry while `expiry_token` really is a
+token. The Java twin `_CLOCK_TOKEN` had the identical defect and took the identical fix.
+
+| check | result |
+|---|---|
+| benchmark cost | **0 cases** — re-scan artifacts **byte-identical** to the sealed trustbound run, 0 differing cases of 2740 and 1230 |
+| in-the-wild FP | **gone** — CWE-337 across 5150 files of the container's own Python goes **1 → 0**, and the one removed is exactly `token=` at `anthropic/lib/credentials/_workload.py:346` |
+| true positives lost | **none** |
+
+**Byte-identical artifacts are a stronger claim than an unchanged score**: the score *cannot* have
+moved, because the scorer's input did not.
+
+**Q-041's measured gain is zero on all four corpora, and that is the correct answer.** Only two stdlib
+files alias these modules, and the sole aliased digest call is `_hashlib.new(digestmod, …)` in
+`hmac.py`, where the algorithm is a caller-supplied variable — no verdict is available and reporting
+nothing is right. The lane checked those two files specifically rather than accepting "0 new findings"
+as evidence the fix worked. **A fix proven by construction, not by a corpus that happens to exercise it.**
+
 ## trustbound — MAPPED, 100.0% TPR at 0.0% FPR on both suites. 2026-08-13
 
 The category deliberately left unmapped now earns the mapping, and the mutant is the proof — not the
