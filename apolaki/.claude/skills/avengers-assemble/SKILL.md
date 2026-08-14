@@ -83,6 +83,14 @@ greps every handoff for hash-shaped strings and status claims before committing 
 agents still died to one limit. Every cycle the Coordinator must read what landed, repair what
 half-landed, and commit what was left green but uncommitted.
 
+**9b · Codex is a metered weekly budget, not a spare lane. Check it before leasing.** It resets weekly
+and runs out. **Do not lease it work a Claude lane can do** — spend it only where an outside agent is
+genuinely better: independent verification of the Coordinator's own claims, and self-contained tickets
+in files no live lane holds. Its two highest-value returns were both of that kind — it caught a
+fabricated `tools.py:3296` citation I had repeated in five prompts, and an unimplemented `Retry-After`
+policy the documentation asserted. Neither was capability; both were *independence*. When the budget is
+low, Claude lanes take the ordinary work and Codex is saved for the check nobody inside can perform.
+
 **10 · Re-decide the shape each cycle.** If a Builder lane returns half-done twice, implementation is
 the wrong shape for an agent on that task — take it back to the main thread. The squad shape is a
 hypothesis, not a ritual.
