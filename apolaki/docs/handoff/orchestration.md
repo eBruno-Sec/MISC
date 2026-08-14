@@ -735,3 +735,122 @@ with this caveat: row 4's diagnosis was one layer off when checked against the c
 was wrong (corrected in `7ffc576`). Two of the three things this lane checked in Section 2 were
 inaccurate, so the remaining rows should be verified against the code before anything is built on
 them, not taken as given.
+
+---
+
+## Typed parameters BUILT -- representation, producer, consumer
+
+Two defects, each with its own negative control. Both are the drop-at-a-handoff shape.
+
+### Defect 1: no producer could write a non-query parameter
+
+A `param` node could only ever mean a QUERY parameter. The only writers were `ingest_intel` (bare
+names, no endpoint, post-loop) and `build_from_engagement` (report-time, fed by
+`surface.build_inventory`, which unions query strings). **No body parameter had ever reached the
+graph from any producer at any point in a mission.** The knowledge was not missing --
+`crawl.extract_forms` already returns each field's name, default value AND input type, and it lands in
+`tools.recon["forms"]`. It simply had nowhere to be recorded.
+
+### Defect 2: the graph -> planner handoff dropped forms entirely -- MEASURED
+
+`_graph_primary_state` returned a recon dict whose keys were exactly
+`['domain', 'live_hosts', 'subdomains', 'target']`. Every form-driven branch in the planner reads
+`state["recon"]["forms"]`, so in the deterministic executor it read `[]` no matter what the crawl had
+captured:
+
+```
+forms captured in tools.recon      : 2
+recon dict keys handed to planner  : ['domain', 'live_hosts', 'subdomains', 'target']
+forms surviving to the planner     : 0
+
+FORM-DRIVEN STEPS EMITTED           CONTROL (same planner, forms present)
+   run_stored_xss     0                run_stored_xss     2
+   run_csrf           0                run_csrf           2
+   run_race           0                run_race           2
+   run_auth_sqli      8                run_auth_sqli      8
+   run_form_nosqli    8                run_form_nosqli    8
+   run_form_cmdi      3                run_form_cmdi      3
+```
+
+Three engine classes never fired at all. The other three survived **only** because unrelated fallback
+branches re-discover forms from login-ish paths and page URLs -- which is exactly what masked the
+hole, and why the negative control asserts on those three specifically. A test asserting "form engines
+run" would have passed the entire time.
+
+### What was built
+
+- `asset_graph.observe_param()` -- THE single writer for a parameter fact, carrying `location`
+  (`query`/`body`/`header`/`path`/`cookie`, OpenAPI's own `in` vocabulary), `ptype`, `required`,
+  `method`, `content_type` and provenance. No new node kind and no parallel store: same `param` kind,
+  same `has_param` edge, location is a prop. `params_at(location)` is the reader.
+  **Key rule is deliberately two rules:** a query param keeps the exact `{endpoint}?{name}` key
+  `build_from_engagement` has always minted, because changing it moves node identities under the
+  report -- the D12 defect this repo already paid for. Everything else is `{endpoint}#{location}:{name}`.
+- `asset_graph.param_role()` -- extracted from inside `ingest_intel`, which meant a parameter learned
+  anywhere else could never earn a role, and `to_observations` reads role, not location. A form's
+  `file` field now yields `has_file_upload`.
+- `to_observations()` emits **`has_body_params`** -- the observation planner gating needs.
+- `agent._project_body_params()` -- the live-loop producer that never existed. Form fields become typed
+  `body` params attached to their endpoint. A **GET** form's fields are recorded as `query`, not
+  `body`: claiming body for both would schedule body engines against a query surface and read as
+  coverage that is not real (there is a test for exactly that).
+- `agent._forms_from_graph()` -- rebuilds `recon["forms"]` **from the graph's parameter nodes**, not by
+  passing `tools.recon` through. The executor's contract is that the planner's world-state is
+  graph-derived (an empty graph must yield no actions), and this also makes it the ONE place a body
+  parameter becomes schedulable surface -- an HTML form today, an OpenAPI `requestBody` the moment a
+  producer records one, with no second code path.
+
+### MEASURED on a real target -- DVWA, full mode, warm
+
+Juice Shop and VAmPI could not show this: Juice Shop is an Angular SPA and its crawl captures **0**
+HTML forms, and VAmPI's body parameters are declared only in its OpenAPI spec, which is still
+destroyed inside `_fetch_openapi` (see the handoff note below). DVWA has real POST forms.
+
+|                                          | before | after |
+|---|---|---|
+| forms captured by the crawl              | 1 | 1 |
+| **forms delivered to the planner**       | **0** | **1** |
+| **body params delivered to the planner** | **0** | **4** |
+| graph `param` nodes                      | 0 | 4 |
+| graph params by location                 | `{'query': 0}` | `{'body': 4}` |
+| `run_stored_xss` / `run_csrf` / `run_race` | **0 / 0 / 0** | **1 / 1 / 1** |
+| `run_form_cmdi` / `run_auth_sqli` / `run_form_nosqli` | 10 / 8 / 8 | 11 / 8 / 8 |
+| tool dispatches (total)                  | 111 | 115 |
+
+**Parameters visible to the planner: 0 -> 4.** **Engines that became schedulable: 3**, each of which
+actually ran. `+4` dispatches accounts for exactly the new work; nothing was lost.
+
+**Determinism:** two consecutive after-runs identical on every field above.
+
+**An anomaly I chased rather than reported:** a first cold pass showed forms 2 -> 1 and dispatches
+36 -> 23, which looks like a regression. It was DVWA's own state -- the cold run hit `/setup.php`
+(fresh DB) and captured its form, and after the DB exists that page behaves differently. Re-run warm,
+before and after both capture the same single form and the change is strictly additive (111 -> 115).
+The numbers in the table are all from the warm, controlled pass.
+
+### Verification
+
+- **Pre-fix run of the 11 new tests: 10 failed, 1 passed.** The survivor is
+  `test_query_param_keys_did_not_move`, the D12 invariant guard, which must pass on both sides.
+- **5 mutants, 5 killed by the intended assertion:** body claimed for GET forms (caught by the
+  GET-is-query test); the handoff delivering `[]` again; `_forms_from_graph` passing `tools.recon`
+  through instead of deriving from the graph; the `location` prop dropped; the location-qualified key
+  used for query params too (caught by the D12 guard).
+- Full suite in a throwaway container, `exit=0` -- no failures.
+
+### Still blocked, and it is one line in someone else's file
+
+VAmPI's 9 body parameters remain invisible, because `_fetch_openapi` (`tools.py:3766-3781`) parses the
+spec into a local, converts it to URLs and returns -- the spec is garbage-collected. `agent/tools.py`
+is **Codex's**; not taken. The patch:
+
+```python
+# _fetch_openapi, after `spec = json.loads(r["body"])`
+self.recon.setdefault("openapi", {})[base_url] = spec
+```
+
+With that one line, `_project_body_params` reads `recon["openapi"]`, mints `body` params with the
+declared `type`/`required`/`method` straight from the spec, and `_forms_from_graph` makes them
+schedulable through the path already built and tested here -- no new code path. `surface.py`
+separately needs `requestBody` / `in: body` read and the method preserved (`surface.py:94-133`), which
+is the difference between importing 12 URLs and importing 12 operations with 9 typed parameters.
