@@ -123,6 +123,112 @@ if coverage.get("cases_probed"):
         print("  -> %.1f%% of the misses were never tested at all"
               % (100 * len(miss_unprobed) / denom))
 
+# ── MARGINAL VALUE OF EACH BUDGET CONSUMER (2026-08-14, selection lane) ──────────────────────
+# "Which tools consume the budget, and how many distinct VULNERABLE cases does each dispatch
+# actually reach?" needs the key, so it lives here rather than in the rerun harness. Three columns
+# decide a reallocation and no two of them are interchangeable:
+#   reach_v   vulnerable cases this tool sent a payload at        (what the spend bought)
+#   unique    cases NO other tool reached                         (coverage vs depth)
+#   s/vuln    tool-seconds per vulnerable case reached            (the price)
+# A tool with a large reach_v and 0 unique is riding a target list someone else also rides: its
+# cost is depth, and cutting it costs detection, not coverage. A tool with a large unique is the
+# only way those cases are tested at all.
+cases_by_tool = {k: set(v) for k, v in (coverage.get("cases_by_tool") or {}).items()}
+tool_seconds = (effort.get("tool_seconds") or {})
+tool_calls_by = (effort.get("tool_calls") or {})
+claimset = set(claims)
+if cases_by_tool:
+    print()
+    print("=== MARGINAL VALUE PER BUDGET CONSUMER ===")
+    print("%-24s %7s %8s %8s %8s %7s %8s %8s"
+          % ("tool", "calls", "tool_s", "reach", "reach_v", "unique", "claimed", "s/vuln"))
+    for name in sorted(cases_by_tool, key=lambda k: -tool_seconds.get(k, 0.0)):
+        got = cases_by_tool[name]
+        others = set().union(*[v for j, v in cases_by_tool.items() if j != name] or [set()])
+        reach_v = {c for c in got if (key.get(c) or {}).get("vulnerable")}
+        secs = tool_seconds.get(name, 0.0)
+        print("%-24s %7d %8.1f %8d %8d %7d %8d %8s"
+              % (name, tool_calls_by.get(name, 0), secs, len(got), len(reach_v),
+                 len(got - others), len(got & claimset),
+                 ("%.2f" % (secs / len(reach_v))) if reach_v else "-"))
+    tot_s = sum(tool_seconds.values()) or 1.0
+    print("total tool-seconds: %.0f of %ds elapsed (%.0f%%); the rest is crawl/projection/report"
+          % (tot_s, d["elapsed_s"], 100.0 * tot_s / max(1, d["elapsed_s"])))
+
+# ── WAS THE CASE PROBED BY AN ENGINE THAT COULD DETECT ITS CLASS? ────────────────────────────
+# "probed" in the coverage record means SOME payload-bearing tool was dispatched at the case URL.
+# That is the right definition for a coverage/detection split, and it is too weak for a detection
+# claim: a pathtraver case that received run_sqli, run_ldap, run_xpath and run_ssi was probed by
+# four engines, none of which can observe path traversal. Counting its miss as a DETECTION
+# shortfall blames the oracle for a selection decision.
+#
+# The owning engine per category is NOT invented here -- it is `owasp_bench.ENGINES`, the map the
+# per-category benchmark harness already uses to decide which engine is even allowed to score a
+# category. Reusing it means this table cannot flatter the sweep by choosing a friendlier mapping.
+OWNER = {}
+try:
+    import sys
+    sys.path.insert(0, "/app")
+    import owasp_bench as _ob
+    OWNER = {cat: meth.lstrip("_") for cat, meth in (_ob.ENGINES or {}).items()}
+except Exception as _e:
+    print("(owasp_bench.ENGINES unavailable: %s -- class-correctness table skipped)" % type(_e).__name__)
+
+if OWNER and cases_by_tool:
+    probed_all = set(coverage.get("cases_probed") or [])
+    per = {}
+    for case, k in key.items():
+        if not k["vulnerable"]:
+            continue
+        cat = k["category"]
+        r = per.setdefault(cat, {"vuln": 0, "probed": 0, "owned": 0, "claimed": 0,
+                                 "engine": OWNER.get(cat)})
+        r["vuln"] += 1
+        if case in probed_all:
+            r["probed"] += 1
+        eng = OWNER.get(cat)
+        if eng and case in cases_by_tool.get(eng, set()):
+            r["owned"] += 1
+        if case in claimset:
+            r["claimed"] += 1
+    print()
+    print("=== CLASS-CORRECT PROBING: did the OWNING engine ever run on the case? ===")
+    print("%-14s %-20s %7s %8s %8s %8s" % ("category", "owning engine", "vuln", "probed",
+                                            "by owner", "claimed"))
+    for cat in sorted(per, key=lambda c: -per[c]["vuln"]):
+        r = per[cat]
+        print("%-14s %-20s %7d %8d %8d %8d"
+              % (cat, r["engine"] or "(unmapped)", r["vuln"], r["probed"], r["owned"], r["claimed"]))
+    tot_v = sum(r["vuln"] for r in per.values())
+    tot_p = sum(r["probed"] for r in per.values())
+    tot_o = sum(r["owned"] for r in per.values())
+    print("%-14s %-20s %7d %8d %8d %8d" % ("TOTAL", "", tot_v, tot_p, tot_o,
+                                            sum(r["claimed"] for r in per.values())))
+    print()
+    print("Of %d vulnerable cases, %d received SOME payload and %d received the engine that owns"
+          % (tot_v, tot_p, tot_o))
+    print("their class. Cases probed ONLY by engines that cannot detect them: %d -- a SELECTION"
+          % (tot_p - tot_o))
+    print("miss, recorded by the recall split as a DETECTION miss.")
+
+phase_calls = (effort.get("phase_calls") or {})
+phase_seconds = (effort.get("phase_seconds") or {})
+cases_by_phase_n = (coverage.get("cases_by_phase_n") or {})
+if phase_calls:
+    print()
+    print("=== WHERE THE BUDGET GOES, BY PIPELINE PHASE ===")
+    tc = sum(phase_calls.values()) or 1
+    ts = sum(phase_seconds.values()) or 1.0
+    print("%-26s %8s %7s %10s %7s %8s" % ("phase", "calls", "%calls", "tool_s", "%time", "cases"))
+    for ph in sorted(phase_calls, key=lambda k: -phase_seconds.get(k, 0.0)):
+        print("%-26s %8d %6.1f%% %10.1f %6.1f%% %8d"
+              % (ph, phase_calls[ph], 100.0 * phase_calls[ph] / tc, phase_seconds.get(ph, 0.0),
+                 100.0 * phase_seconds.get(ph, 0.0) / ts, cases_by_phase_n.get(ph, 0)))
+    print("planner batches      :", (effort.get("planner_batches") or [])[:20])
+    print("planner would_more   :", effort.get("planner_would_schedule_more"),
+          "(steps the planner would still schedule at the final state -- 0 means the cap did NOT bind)")
+    print("sweep selection      :", effort.get("sweep_selection"))
+
 print()
 by = {}
 for _c, verdict, cat, _cwe in rows:
@@ -140,6 +246,16 @@ json.dump({"tp": tp, "fp": fp, "unknown": unknown, "claimed": len(claims),
            "effort": effort,
            "coverage_split": {"missed_after_probing": len(miss_probed),
                               "never_probed": len(miss_unprobed),
-                              "missed_after_probing_cases": sorted(miss_probed)[:200]}},
+                              "missed_after_probing_cases": sorted(miss_probed)[:200]},
+           "marginal_value": {
+               name: {"calls": tool_calls_by.get(name, 0),
+                      "tool_seconds": tool_seconds.get(name, 0.0),
+                      "reach": len(got),
+                      "reach_vulnerable": len([c for c in got if (key.get(c) or {}).get("vulnerable")]),
+                      "unique": len(got - set().union(
+                          *[v for j, v in cases_by_tool.items() if j != name] or [set()])),
+                      "claimed": len(got & claimset)}
+               for name, got in sorted(cases_by_tool.items())},
+           "class_correct_probing": (per if OWNER and cases_by_tool else None)},
           open("/out/wp_score.json", "w"), indent=2, sort_keys=True, default=str)
 print("\nwrote /out/wp_score.json")
