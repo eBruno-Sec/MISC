@@ -1,0 +1,255 @@
+"""`validated_on` - is it a measurement or a string somebody typed? (VALIDATED BREAKER lane, #123)
+
+MEASURED ANSWER: it is typed. An `ast` walk over the tree finds 54 production producers, all of them
+literal `_t(validated_on=[...])` keyword arguments. Nothing derives the value from a run. The
+liveness machinery writes a SEPARATE, honest artifact (`tests/liveness_baseline.json`), and
+`techniques.technique_status()` correctly reads THAT for the UI's "proven" stat.
+
+The defect is that the fix stopped there. Three other modules still run the old
+`"proven" if validated_on` rule, so the same product reports 48 and 16 as "proven", and a hand-typed
+string reorders 40 of 42 techniques in a live scan plan.
+
+WHAT THIS FILE IS
+-----------------
+Two kinds of test, kept apart on purpose:
+
+  * PASSING tests pin the COUPLING that is genuinely intended (score is a function of lab count) and
+    the parts of the honesty model that already work (technique_status, the claimed/proven split).
+    They must keep passing after any fix.
+
+  * STRICT XFAILS are the measured defects, executable rather than prose in a hand-off. Each asserts
+    the property that SHOULD hold. The day a Builder fixes one it XPASSes, the suite goes red, and
+    the marker has to be removed deliberately - the defect cannot be quietly forgotten. This is the
+    same device used by test_sweep_class_coverage.py (Q-047) and test_sqli_boolean_noise_floor.py.
+
+NOTHING HERE WEAKENS AN EXISTING GATE. The five existing per-lab guards are left untouched; they are
+measured, not modified. See docs/handoff/validated.md for the full census.
+"""
+from __future__ import annotations
+
+import ast
+import json
+import os
+
+import pytest
+
+import techniques as T
+import technique_model as TM
+import technique_planner as TP
+
+_HERE = os.path.dirname(os.path.abspath(__file__))
+_AGENT = os.path.dirname(_HERE)
+
+# The fabricated claim: two lab ids that name nothing, anywhere, ever.
+FABRICATED = {
+    "id": "fabricated_negative_control",
+    "vuln_class": "sql_injection", "cwe": "CWE-89", "owasp": "A03:2021",
+    "permission": T.ACTIVE, "transferable": True,
+    "summary": "negative control", "detect": "n/a", "exploit": "n/a", "oracle": "n/a",
+    "validated_on": ["fabricated_lab_9000", "fabricated_lab_9001"],
+}
+
+
+def _claims():
+    """{technique id -> validated_on} for every record that claims one."""
+    return {t["id"]: list(t["validated_on"]) for t in T.TECHNIQUES.values() if t.get("validated_on")}
+
+
+def _known_lab_ids():
+    """Every lab id the agent's own registries can resolve to a real target definition."""
+    import bench_all as BA
+    import benchmark as B
+    import labs as L
+    return set(BA.LAB_URLS) | set(B.MANIFESTS) | set(L.LABS)
+
+
+# ══════════════════════════════════════════════════════════════════════════════════════════
+# PASSING - the measurement itself, and the parts that already work
+# ══════════════════════════════════════════════════════════════════════════════════════════
+
+def test_every_production_producer_of_validated_on_is_a_hand_typed_literal():
+    """THE CORE MEASUREMENT. Walk techniques.py with `ast` and confirm no value is ever computed.
+
+    Structure matters here and a regex would lie: a keyword argument, a dict-literal key and a
+    subscript store are three different producers. If a Builder later derives the field from the
+    liveness ledger, this test fails - and that failure is the good news, not a regression.
+    """
+    src = open(os.path.join(_AGENT, "techniques.py"), encoding="utf8").read()
+    tree = ast.parse(src)
+    literal, computed = [], []
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Call):
+            continue
+        for kw in node.keywords:
+            if kw.arg != "validated_on":
+                continue
+            try:
+                ast.literal_eval(kw.value)
+                literal.append(kw.value.lineno)
+            except Exception:
+                computed.append(kw.value.lineno)
+    assert literal, "no validated_on producers found - the census would be vacuous"
+    assert len(literal) >= 50, len(literal)
+    assert computed == [], (
+        "A validated_on value is now COMPUTED at lines %s. If that computation reads the liveness "
+        "ledger, the defect this file pins is fixed: delete this test and the xfails below." % computed)
+
+
+def test_the_liveness_ledger_is_the_only_run_derived_record():
+    """The honest artifact exists and is disjoint in kind from the typed field: liveness_baseline.json
+    is WRITTEN BY A RUN, validated_on is written by a human. Both name techniques; only one is earned."""
+    base = json.load(open(os.path.join(_HERE, "liveness_baseline.json"), encoding="utf8"))
+    live = set(base.get("live") or [])
+    assert live, "empty liveness baseline would make every claim below vacuous"
+    claims = _claims()
+    # every liveness-earned id also carries a typed claim -> the two ledgers do not contradict,
+    # the typed one is simply a superset. That is the honesty debt, and it is reportable.
+    assert live <= set(claims), sorted(live - set(claims))
+    assert len(claims) > len(live), (len(claims), len(live))
+
+
+def test_technique_status_is_the_fixed_rule_and_still_holds():
+    """Q-012 applied correctly. NOT a defect - pinned so a later change cannot quietly undo it."""
+    v = T.taxonomy_view("owasp")
+    assert v["proven"] == len(T._liveness_verified() & set(T.TECHNIQUES))
+    assert v["claimed"] == len(_claims())
+    assert v["unverified"] == v["claimed"] - v["proven"]
+    assert v["claimed"] > v["proven"], "the gap IS the honesty debt; collapsing it would hide the defect"
+
+
+def test_planner_confidence_is_a_function_of_lab_COUNT():
+    """The intended coupling, pinned. `registry_seed` ranks by how many labs a technique names.
+    That rule is fine; what is not fine is that the input is typed (see the xfails)."""
+    seed = {s["id"]: s for s in TP.registry_seed()}
+    for tid, labs in _claims().items():
+        exp = 60 if len(set(labs)) >= 2 else 40
+        assert seed[tid]["confidence"]["score"] == exp, (tid, labs)
+    for tid in set(T.TECHNIQUES) - set(_claims()):
+        assert seed[tid]["confidence"]["score"] == 20, tid
+
+
+def test_the_existing_per_lab_guards_only_fail_on_REMOVAL():
+    """The five existing guards assert `lab in validated_on`. That is a MEMBERSHIP test: it fails when
+    a claim is deleted and cannot fail when one is added. Demonstrated directly, so the direction is
+    recorded as a fact rather than as an opinion in a document."""
+    tid = "modbus_exposed"            # guarded by test_ics_real_stack.py:188
+    rec = T.TECHNIQUES[tid]
+    original = list(rec["validated_on"])
+    try:
+        # ADDING a fabricated lab: the existing guard's assertion still holds.
+        rec["validated_on"] = original + ["fabricated_lab_9000"]
+        assert "conpot" in rec["validated_on"], "the existing guard's exact assertion"
+        # REMOVING the real one: only now does it fail.
+        rec["validated_on"] = ["fabricated_lab_9000"]
+        assert "conpot" not in rec["validated_on"]
+    finally:
+        rec["validated_on"] = original
+    assert T.TECHNIQUES[tid]["validated_on"] == original, "registry must be restored"
+
+
+# ══════════════════════════════════════════════════════════════════════════════════════════
+# STRICT XFAILS - the measured defects. Each XPASSes the moment it is fixed.
+# ══════════════════════════════════════════════════════════════════════════════════════════
+
+_Q_VOCAB = ("MEASURED: validated_on has no vocabulary. techniques.all_labs() derives the set of valid "
+            "lab ids FROM the field itself, so 'is this a real lab?' answers 'yes, you typed it'. "
+            "4 of 13 ids (domsource, natas, openfmb, sessionlife) resolve to no target definition the "
+            "agent owns; sessionlife has no compose service and no tracked source at HEAD.")
+
+
+@pytest.mark.xfail(strict=True, reason=_Q_VOCAB)
+def test_every_validated_on_lab_id_names_a_target_the_agent_can_resolve():
+    """A capability claim must name something that exists. Fails today on 4 ids."""
+    known = _known_lab_ids()
+    unknown = sorted({lab for labs in _claims().values() for lab in labs} - known)
+    assert unknown == [], "validated_on names targets no lab registry knows: %s" % unknown
+
+
+@pytest.mark.xfail(strict=True, reason=_Q_VOCAB)
+def test_a_fabricated_validated_on_is_rejected_by_the_canonical_model():
+    """THE NEGATIVE CONTROL. Two invented lab ids currently yield status='proven', confidence 90/100
+    in the HIGH tier, a two-entry evidence list, generalized=True, and a CLEAN schema validation.
+
+    Measured:
+        is_generalized       -> True
+        from_registry status -> proven
+        confidence           -> 90 high
+        evidence             -> [{'lab': 'fabricated_lab_9000', ...}, {'lab': 'fabricated_lab_9001', ...}]
+        TM.validate(t)       -> []
+    """
+    t = TM.from_registry(FABRICATED)
+    assert t["status"] != "proven", "a technique nothing ever ran is not 'proven'"
+    assert t["confidence"]["tier"] != "high", t["confidence"]
+    assert t["evidence"] == [], "fabricated lab ids became evidence entries: %r" % t["evidence"]
+    assert not T.is_generalized(FABRICATED), "two invented strings should not confer 'generalized'"
+
+
+@pytest.mark.xfail(strict=True, reason=(
+    "MEASURED: the Q-012 fix was never propagated. techniques.technique_status() reads the liveness "
+    "ledger, but technique_model.from_registry:256, technique_planner.registry_seed:172 and "
+    "main.py:/packs:2129 all still run the old 'proven if validated_on' rule."))
+def test_one_rule_for_proven_across_every_module():
+    """Three modules must not disagree with techniques.technique_status() about the same technique."""
+    seed = {s["id"]: s for s in TP.registry_seed()}
+    disagree = []
+    for tid, rec in T.TECHNIQUES.items():
+        truth = T.technique_status(rec)
+        if seed[tid]["status"] == "proven" and truth != "proven":
+            disagree.append((tid, "technique_planner", truth))
+        if TM.from_registry(rec)["status"] == "proven" and truth != "proven":
+            disagree.append((tid, "technique_model", truth))
+    assert disagree == [], "%d modules-vs-truth disagreements, e.g. %s" % (len(disagree), disagree[:4])
+
+
+@pytest.mark.xfail(strict=True, reason=(
+    "MEASURED: /packs sums 'proven' as len(validated_on)>0 = 48; /techniques reports the "
+    "liveness-earned 16. The same product publishes two 'proven' numbers differing by 32."))
+def test_packs_and_techniques_report_the_same_proven_number():
+    """Reproduces agent/main.py:2129 arithmetic exactly, without needing the HTTP app up."""
+    by_class = {}
+    for t in T.TECHNIQUES.values():
+        by_class.setdefault(t["vuln_class"], []).append(t)
+    packs_proven = sum(sum(1 for t in ts if t.get("validated_on")) for ts in by_class.values())
+    assert packs_proven == T.taxonomy_view("owasp")["proven"], (packs_proven,)
+
+
+@pytest.mark.xfail(strict=True, reason=(
+    "MEASURED: 34 of 48 claims are named by no test assertion at all; widening 'backed' to include the "
+    "liveness ledger still leaves 30 of 48 with nothing behind them - all 24 juiceshop claims and both "
+    "dvwa claims among them. The beyond-web claims ARE backed by recorded replies; the web side is not."))
+def test_every_validated_on_claim_is_backed_by_a_recorded_artifact():
+    """Backed = confirmed by a liveness run, or replayed by a test that names the id on a
+    validated_on line. Anything else is a claim with nothing behind it."""
+    backed = set(T._liveness_verified())
+    for fn in os.listdir(_HERE):
+        if not fn.endswith(".py") or fn == os.path.basename(__file__):
+            continue
+        text = open(os.path.join(_HERE, fn), encoding="utf8", errors="replace").read()
+        if "validated_on" not in text:
+            continue
+        tree = ast.parse(text)
+        for node in ast.walk(tree):
+            if isinstance(node, ast.For) and "validated_on" in ast.dump(node):
+                for sub in ast.walk(node.iter):
+                    if isinstance(sub, ast.Constant) and sub.value in T.TECHNIQUES:
+                        backed.add(sub.value)
+        for line in text.splitlines():
+            if "validated_on" in line:
+                for tid in T.TECHNIQUES:
+                    if '"%s"' % tid in line or "'%s'" % tid in line:
+                        backed.add(tid)
+    unbacked = sorted(set(_claims()) - backed)
+    assert unbacked == [], "%d claims with no recorded proof: %s" % (len(unbacked), unbacked[:6])
+
+
+@pytest.mark.xfail(strict=True, reason=(
+    "MEASURED: capability_matrix.py:63 states 'Cross-lab generalization' as live_proven citing "
+    "'validated_on across juiceshop/dvwa/ginandjuice', but no generalized technique involves dvwa. "
+    "validate() checks evidence is a non-empty STRING, never that the string is true."))
+def test_capability_matrix_generalization_row_cites_only_real_labs():
+    import capability_matrix as CM
+    real = {lab for tid in T.generalized() for lab in T.TECHNIQUES[tid]["validated_on"]}
+    for c in CM.CAPABILITIES:
+        if "generaliz" in c["name"].lower():
+            assert set(c["labs"]) <= real, "cites labs backing no generalized technique: %s" % (
+                sorted(set(c["labs"]) - real),)
