@@ -456,6 +456,34 @@ failed to confirm, **only 33 were ever tested for the thing they are**. The reca
 selection at both ends: 1195 cases never reached, and 113 of the 220 reached but handed to the
 wrong engines.
 
+## 7. THE CHANGE, and six more predictions written before its artifact exists
+
+**Change:** `run_web_probes` added to `_SWEEP_HTTP_ENGINES` (`agent/agent.py`). One line, plus the
+comment block correcting the two things this lane measured: the engine ran ZERO times (not 25), and
+the eight HTTP engines cost 1.70 s/URL (not the 1.1 s recorded from a single-URL sample in 08-10).
+
+**Why this and not the cap.** Lever 1 is dead (2 steps). Raising `SWEEP_TARGET_CAP` is a real lever
+- it is the ONLY thing that moves coverage - but it buys more cases at the same 23% class-correct
+rate, i.e. it multiplies a known misallocation. Fixing the misallocation first is strictly cheaper:
+it needs no extra targets, no extra crawl, and no longer run except this engine's own cost.
+
+Predictions, falsifiable, recorded before `wp1` finishes:
+
+| # | prediction | falsified by |
+|---|---|---|
+| Q1 | `run_web_probes` is dispatched exactly 400 times (sweep), still 0 from the planner | `effort.tool_phase_calls` |
+| Q2 | `cases_probed` stays **373** - the target list is untouched, so COVERAGE does not move at all; only class-correctness does | `coverage.cases_probed_n` |
+| Q3 | `by owner` goes 0 -> 18 / 16 / 22 for weakrand / pathtraver / securecookie | class-correctness table |
+| Q4 | elapsed rises by 400 x the engine's per-call cost; I estimate 1-3 s/call, so **+400 to +1200 s (+21% to +64%)** | `elapsed_s` |
+| Q5 | the gain skews to **weakrand and securecookie**; `pathtraver` UNDER-performs its 65.4% suite figure, because the suite harness passes `lab_mode=True` and the sweep deliberately does not - the mission gets `TRAVERSAL_SAFE_PAYLOADS` only, no `/etc/passwd` reads | per-category claims |
+| Q6 | precision stays **18+/18+ = 100.0%**; any claim on a clean case falsifies it, and the first place to look is a cross-family PRNG or cookie confirmation on a `sqli`/`xss` page - a combination `owasp_bench.py` can never test because it runs each engine only on its own category | `wp_score.py` FP count |
+
+**Q5 and Q6 are the honest ones.** If the gain is mostly `weakrand`, it is largely a suite-specific
+signal - `docs/handoff/measure.md` records that the Benchmark's weakrand handler ANNOUNCES its own
+generator and that the 86.7% DAST score does not transfer. `securecookie` (raw `Set-Cookie`
+analysis), `pathtraver` and `idor` do transfer. Any recall number from this change must be reported
+split that way or it is a lab-fitted number wearing a product number's clothes.
+
 ### Operational note for whoever runs this next
 
 Do NOT `docker run -v <repo>/agent:/app -v <somefile>:/app/x.py`. Docker creates the second mount
