@@ -1,17 +1,31 @@
 # QUEUE — the one canonical, dependency-ordered work queue
 
-## STATE SWEEP — 2026-08-14. The headings below had rotted; this is authoritative.
+## STATE SWEEP — 2026-08-14 (second pass, same day). Authoritative.
 
-I let ticket state drift while writing ledger entries. Several items below still read `ready` or
-`proposed` and are **closed**. Corrected here rather than by editing forty headings, because the
-sweep itself is the useful artifact.
+**The first sweep went stale in under a day** — five more tickets closed while it sat. Sweeping again
+is treating the symptom, so the rule that fixes the cause: **closing a ticket includes updating this
+block in the same commit.** A queue whose state cannot be trusted is the same declaration-vs-fact
+defect we keep finding in the code, and it is the one artifact every lane reads before choosing work.
 
-**CLOSED, with the commit** — ignore any `ready`/`proposed` marker on these:
-`Q-000` 5af0af8 · `Q-00A` 65970da · `Q-001` fc91bb0 · `Q-019` fc91bb0 · `Q-022` 837b1f0 ·
-`Q-031` 8eb42e8 · `Q-040` (Codex lane 3) · `Q-041`/`Q-042` 9f8707a · `Q-043` c02208d ·
-`Q-044` aa3a139 · `B-001`/`B-002`/`B-003` (Codex lane 1) · `B-010` Juliet (Codex lane 2)
+**CLOSED, with the commit** — ignore any `ready`/`proposed` marker further down:
+`Q-000` 5af0af8 · `Q-00A` 65970da · `Q-001` fc91bb0 · `Q-013` *(in flight, see below)* ·
+**`Q-014` a1cdb8d** · `Q-019` fc91bb0 · `Q-022` 837b1f0 · **`Q-023` Codex lane 7 / 2ae0007** ·
+`Q-031` 8eb42e8 · **`Q-040` cbcba79 (the real fix; the first was incomplete)** · `Q-041`/`Q-042` 9f8707a ·
+`Q-043` c02208d · `Q-044` aa3a139 · **`Q-021B` 1f342c9** ·
+`B-001`/`B-002`/`B-003` Codex lane 1 · `B-010` Juliet Codex lane 2 · **`B-020` a7aa700**
 
-**IN FLIGHT**: whole-product rerun (orchestration lane) · `B-020` JavaScript/Node (dataflow lane)
+**IN FLIGHT**: `Q-013` `PUT /findings` bypass (gate lane) · **selection / step-cap** (selection lane —
+no ticket number yet; it is the successor to the whole-product rerun and outranks everything below)
+
+**NEW AND UNASSIGNED — raised by the rerun, currently nobody's:**
+- **The published whole-product baseline cannot be re-derived.** The store returns 29 findings /
+  27 cases / `ldapi 5` for `ebd96f45` against the ledgered 22/23 / `ldapi 1`; no dedup explains it and
+  no subset reproduces the seal. On the store's numbers the loss is **−8, not −3**, and the "class
+  coverage broadened" claim is unproven. **Every comparison against that mission is suspect.**
+- **The `00494` two-call-site patch** — written up, not applied; closes the proved-undecidable residual
+  by adding an after-probe sample rather than guessing from two.
+- **The `_POWERED` regex yields garbage product names** (`'a MultiJuicer Kubernetes cluste'`,
+  `'nothing on.'`) — found in passing during Q-021B, never ticketed.
 
 **OPEN, ranked by value — this is the real backlog:**
 
