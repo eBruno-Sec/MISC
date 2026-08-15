@@ -1,5 +1,23 @@
 # QUEUE — the one canonical, dependency-ordered work queue
 
+## LANE OWNERSHIP — cycle 4, assigned 2026-08-15. Declared BEFORE spawning.
+
+Cycle 3's three lanes were all killed by one session limit; each had committed a slice first and all
+of it was recovered. Same shape again, re-aimed at what is actually open. `tools.py` is the perennial
+bottleneck, so exactly ONE lane holds it.
+
+| owner | files it may WRITE | ticket |
+|---|---|---|
+| **Builder · massassign** | `agent/mass_assign_tool.py` (new) · `agent/tools.py` · `agent/engine_descriptor.py` · `agent/wstg_catalog.py` · `agent/tests/test_mass_assign_tool.py` (new) · `docs/handoff/massassign.md` | **Q-011** — `mass_assignment` is declared in three catalogs and implemented nowhere |
+| **Builder · asvsproducers** | `agent/asvs_model.py` · `agent/tests/test_asvs_model.py` · `docs/handoff/asvsproducers.md` | **Q-048** — an objective whose `violated_by` family has no producer can never FAIL |
+| **Breaker · fp42** | `docs/handoff/fp42.md` · `agent/tests/test_traversal_state_fp.py` (new) | the `00042` traversal FP: reproduces in a mission, not standalone |
+| **Coordinator (main thread)** | `docs/QUEUE.md` · `docs/STATUS.md` · `docs/LEDGERS.md` · `docs/benchmarks/` · `agent/report.py` · `agent/main.py` · `agent/db.py` · `agent/web_security.py` · `agent/agent.py` · `scripts/` | score wp3 against its pre-registered conditions, ledgers, sequencing |
+
+Note `agent/web_security.py` is Coordinator-held this cycle: the fp42 lane will likely want the
+traversal oracle, and it must hand me the patch rather than apply it.
+
+---
+
 ## LANE OWNERSHIP — cycle 3, assigned 2026-08-15. Declared BEFORE spawning.
 
 Disjoint write sets, docs included. Cross-lane needs go to `docs/handoff/<lane>.md`, never here.
