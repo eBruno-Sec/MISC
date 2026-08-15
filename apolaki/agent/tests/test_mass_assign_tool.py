@@ -51,7 +51,7 @@ def _confirming_case(**over):
     case = {"field": "admin", "sent_value": True,
             "baseline": {"ran": True, "found": True, "value": False},
             "after": {"found": True, "value": True},
-            "control": _ctl(), "reread_ran": True}
+            "control": _ctl(), "reread_ran": True, "write_accepted": True}
     case.update(over)
     return case
 
@@ -72,7 +72,8 @@ def test_confirms_the_measured_juice_shop_shape():
     found, val = MA.read_field(obj, "role")
     v = MA.evaluate(field="role", sent_value="admin",
                     baseline={"ran": True, "found": True, "value": "customer"},
-                    after={"found": found, "value": val}, control=_ctl(), reread_ran=True)
+                    after={"found": found, "value": val}, control=_ctl(), reread_ran=True,
+                    write_accepted=True)
     assert v["verdict"] == MA.CONFIRMED, v["reason"]
 
 
@@ -107,8 +108,18 @@ def test_a_role_that_was_always_user_is_clean():
     """The ticket's own example, in string form: `role: user` that was always `user`."""
     v = MA.evaluate(field="role", sent_value="user",
                     baseline={"ran": True, "found": True, "value": "user"},
-                    after={"found": True, "value": "user"}, control=_ctl(), reread_ran=True)
+                    after={"found": True, "value": "user"}, control=_ctl(), reread_ran=True,
+                    write_accepted=True)
     assert v["verdict"] == MA.CLEAN
+
+
+def test_a_rejected_write_is_clean_not_a_lead():
+    """A 400 on `{"admin": true}` is the API VALIDATING its accepted properties -- the good outcome.
+    Reading it as "untested" would file a lead against every correctly-built endpoint on the target."""
+    v = MA.evaluate(**_confirming_case(write_accepted=False, reread_ran=False,
+                                       after={"found": False, "value": None}))
+    assert v["verdict"] == MA.CLEAN, v["reason"]
+    assert "REJECTED" in v["reason"]
 
 
 def test_a_control_that_did_not_run_caps_the_verdict_at_a_lead():
@@ -231,6 +242,139 @@ def test_body_from_params_honours_the_declared_types_and_ignores_non_body_params
 def test_body_from_params_returns_empty_when_the_operation_declares_no_body():
     assert MA.body_from_params([]) == {}
     assert MA.body_from_params([{"name": "q", "location": "query", "type": "string"}]) == {}
+
+
+def test_email_and_password_fields_get_values_their_own_validation_accepts():
+    """A registration endpoint that 400s on `email: "apolaki_email"` yields NO object, and no object
+    means the engine reports clean through a false negative. MEASURED: Juice Shop's POST /api/Users
+    validates the e-mail format."""
+    body = MA.body_from_params([
+        {"name": "email", "location": "body", "type": "string"},
+        {"name": "password", "location": "body", "type": "string"},
+    ], marker="apolaki_ma_abc")
+    assert "@" in body["email"] and body["email"].startswith("apolaki_ma_abc")
+    pw = body["password"]
+    assert len(pw) >= 12 and any(c.isupper() for c in pw) and any(c.isdigit() for c in pw) \
+        and any(not c.isalnum() for c in pw)
+
+
+# ══ identifying the object we created ══════════════════════════════════════════════════════════
+
+def test_object_key_prefers_a_natural_key():
+    assert MA.object_key({"email": "a@b.c", "username": "u1", "bio": "a much longer string"}) \
+        == ("username", "u1")
+
+
+def test_object_key_falls_back_to_the_longest_string_field():
+    f, v = MA.object_key({"note": "short", "body": "a considerably longer value"})
+    assert (f, v) == ("body", "a considerably longer value")
+
+
+def test_object_key_never_keys_on_a_credential():
+    """No sane read view returns a password, and matching on one would mean matching on a
+    credential."""
+    assert MA.object_key({"password": "a very long password value"}) == ("", "")
+    assert MA.object_key({"password": "xx", "title": "t"}) == ("title", "t")
+
+
+def test_personalize_makes_every_attempt_locatable_and_distinct():
+    """Without this the re-read either finds nothing (every verdict degrades to a lead) or finds the
+    PREVIOUS attempt's object -- which reads back the previous attempt's injected value. That second
+    failure is a false positive carrying a real, replayable-looking artifact."""
+    base = {"username": "u", "password": "p", "email": "a@b.c"}
+    b1, k1, v1 = MA.personalize(base, MA.new_marker())
+    b2, k2, v2 = MA.personalize(base, MA.new_marker())
+    assert k1 == k2 == "username"
+    assert v1 != v2
+    assert b1["email"] != b2["email"], "a fixed e-mail makes the second attempt 'already registered'"
+    assert MA.locate_object(json.dumps([b1, b2]), k1, v1) == b1
+
+
+def test_personalize_leaves_fields_it_has_no_knowledge_of_alone():
+    """Which values the endpoint's validation accepts is knowledge we do not have. Overwriting a
+    field we were handed can turn every write into a 400 and every verdict into a clean."""
+    body, _, _ = MA.personalize({"username": "u", "country": "DE", "qty": 3}, "mk")
+    assert body["country"] == "DE" and body["qty"] == 3
+
+
+def test_personalize_is_deterministic_so_a_typed_body_passes_through_unchanged():
+    typed = MA.body_from_params([{"name": "username", "location": "body", "type": "string"},
+                                 {"name": "email", "location": "body", "type": "string"}],
+                                marker="apolaki_ma_fixed")
+    again, key, val = MA.personalize(typed, "apolaki_ma_fixed")
+    assert again == typed
+    assert (key, val) == ("username", typed["username"])
+
+
+def test_personalize_declines_when_nothing_can_identify_the_object():
+    assert MA.personalize({}, "mk") == ({}, "", "")
+    assert MA.personalize("not json", "mk") == ({}, "", "")
+    body, key, val = MA.personalize({"qty": 3}, "mk")
+    assert (key, val) == ("", "")
+
+
+def test_object_key_of_a_body_with_no_string_field_is_empty():
+    assert MA.object_key({"count": 3, "flag": True}) == ("", "")
+    assert MA.object_key("not json") == ("", "")
+
+
+# ══ ranking the re-read views ══════════════════════════════════════════════════════════════════
+
+# The GET operations VAmPI's OWN OpenAPI spec declares -- MEASURED via surface.operations_from_openapi.
+VAMPI_GETS = ["/", "/books/v1", "/books/v1/{book_title}", "/createdb", "/me", "/users/v1",
+              "/users/v1/_debug", "/users/v1/{username}"]
+
+
+def test_the_confirming_vampi_view_is_reached_from_the_spec_with_no_lab_knowledge():
+    """`/users/v1/_debug` is the only VAmPI view that exposes `admin`, and it is declared in the
+    API's own spec. It must be reachable by ranking, never by a hardcoded path."""
+    views = MA.read_views("/users/v1/register", VAMPI_GETS,
+                          key_field="username", key_value="apolaki_ma_aabbcc")
+    assert "/users/v1/_debug" in views
+    assert "/users/v1/apolaki_ma_aabbcc" in views       # the template, filled with OUR key
+    assert "/users/v1" in views
+
+
+def test_views_that_cannot_hold_the_object_are_not_probed():
+    """A `/books` view can never hold a `/users` object. Probing it is pure cost, and a view that
+    locates nothing is indistinguishable from one proving the object is gone."""
+    views = MA.read_views("/users/v1/register", VAMPI_GETS,
+                          key_field="username", key_value="apolaki_ma_aabbcc")
+    assert not [v for v in views if v.startswith("/books")]
+    assert "/me" not in views and "/" not in views and "/createdb" not in views
+
+
+def test_a_template_naming_something_we_cannot_supply_is_skipped_not_guessed():
+    """`{book_title}` filled with a username locates nothing and burns a request."""
+    assert MA.read_views("/books/v1", ["/books/v1/{book_title}"],
+                         key_field="username", key_value="u1") == []
+    assert MA.read_views("/books/v1", ["/books/v1/{book_title}"],
+                         key_field="book_title", key_value="t1") == ["/books/v1/t1"]
+
+
+def test_an_id_placeholder_is_filled_from_the_created_object_id():
+    assert MA.read_views("/api/Users", ["/api/Users/{id}"], object_id="24") == ["/api/Users/24"]
+    assert MA.read_views("/api/Users", ["/api/Users/{userId}"], object_id="24") == ["/api/Users/24"]
+    assert MA.read_views("/api/Users", ["/api/Users/{id}"]) == []      # no id observed -> no guess
+
+
+def test_the_view_ranking_is_stable_across_attempts_so_a_chosen_view_can_be_refilled():
+    """`ToolRegistry._ma_views` picks a view against the BASELINE object and then re-fills that same
+    view for each injected attempt. That only works if the ranking depends on the path templates and
+    not on the key -- otherwise the driver would re-read the BASELINE object after every injected
+    write and report its values as the injected object's."""
+    a = MA.read_views("/users/v1/register", VAMPI_GETS, "username", "apolaki_ma_aaa", "1")
+    b = MA.read_views("/users/v1/register", VAMPI_GETS, "username", "apolaki_ma_bbb", "2")
+    assert len(a) == len(b)
+    # same positions, same templates -- only the substituted key differs
+    assert [p.replace("apolaki_ma_aaa", "K") for p in a] == \
+           [p.replace("apolaki_ma_bbb", "K") for p in b]
+
+
+def test_no_observed_get_operations_yields_no_views_rather_than_an_invented_one():
+    assert MA.read_views("/users/v1/register", []) == []
+    assert MA.read_views("", VAMPI_GETS) == []
+    assert MA.read_views("/users/v1/register", VAMPI_GETS, limit=0) == []
 
 
 # ══ locating OUR object in a re-read ═══════════════════════════════════════════════════════════

@@ -39,6 +39,17 @@ MUTANTS = [
                             "attribute would confirm as mass assignment",
      r'if control\.get\("found"\):', 'if False:',
      "tests/test_mass_assign_tool.py::test_an_endpoint_that_echoes_the_control_attribute_is_clean"),
+    # Q-011, the SECOND guard the engine rests on, and the one with a MEASURED live victim. Juice
+    # Shop creates every user with `isActive: true`; inject `isActive: true` and the re-read shows
+    # exactly the confirming shape. Only the baseline object -- created without the injection, read
+    # through the same view -- separates "we set this" from "it was always this". Drop this and
+    # Apolaki reports a mass assignment on Juice Shop's `isActive` today. Measured 2026-08-15:
+    # verdicts {'confirmed': 1, 'clean': 1}; the clean IS this guard firing on `isActive`.
+    ("mass_assign_tool.py", "evaluate: drop the baseline control — a field that ALREADY held the "
+                            "injected value would confirm as mass assignment",
+     r'if baseline\.get\("found"\) and same_value\(sent_value, baseline\.get\("value"\)\):',
+     'if False:',
+     "tests/test_mass_assign_tool.py::test_a_field_that_already_held_the_value_is_clean"),
     # Q-002. Added when ws_tool.py landed, so the confirmed-producer ceiling stays 46 by EARNING it
     # rather than by raising it. This is the guard that separates CSWSH from "a WebSocket exists":
     # drop it and a socket pushing PUBLIC data confirms as a hijack, which is precisely the class of

@@ -524,9 +524,19 @@ CLAUDE_TOOLS = [
      "input_schema": {"type": "object", "properties": {
          "url": {"type": "string", "description": "The write endpoint"},
          "method": {"type": "string", "description": "POST (default), PUT or PATCH"},
-         "body": {"type": "string", "description": "Base JSON body the endpoint accepts"},
-         "read_url": {"type": "string", "description": "Where to re-read the object; defaults to url"},
-         "key_field": {"type": "string", "description": "Field identifying our object in the re-read"},
+         "body": {"type": "string", "description": "Base JSON body the endpoint accepts (a body the "
+                                                   "endpoint REJECTS proves nothing, so this or "
+                                                   "`params` is required)"},
+         "params": {"type": "array", "items": {"type": "object"},
+                    "description": "Typed OpenAPI body parameters for this operation "
+                                   "(surface.operations_from_openapi -> params), used to build a "
+                                   "valid body and to know which fields the endpoint already offers"},
+         "read_paths": {"type": "array", "items": {"type": "string"},
+                        "description": "GET paths the mission observed (from the API spec/crawl). The "
+                                       "re-read view is ranked from these; templates like "
+                                       "/users/v1/{username} are filled with the created object's key"},
+         "read_url": {"type": "string", "description": "An explicit re-read URL, tried first. May "
+                                                       "contain {marker} or {id}"},
          "limit": {"type": "integer", "description": "How many privileged fields to try (default 4)"}},
          "required": ["url"]}},
     {"name": "run_ws_hijack",
@@ -5787,14 +5797,66 @@ class ToolRegistry:
         return ToolResult("content_discovery", base_url, True,
                           f"{len(hits)} paths probed, {len(findings)} validated hits", findings)
 
-    async def _run_mass_assign(self, inp: dict) -> ToolResult:
-        """ACTIVE: test a JSON write endpoint for mass assignment (CWE-915), one attribute at a time.
+    # Mass assignment (Q-011). Every cap is a safety limit, not tuning: this engine WRITES, so each
+    # candidate field costs one more object created on the target.
+    _MA_MAX_VIEWS = 5
 
-        The oracle lives in `mass_assign_tool` and is pure; this is the transport that feeds it. Per
-        candidate field, FOUR requests: baseline read, the injected write, a SEPARATE re-read, and an
-        invented-control write. `200 OK` is never the oracle -- APIs routinely accept and ignore
-        unknown attributes -- so a run that cannot re-read its own object emits a LEAD and says which
-        half is missing.
+    def _ma_views(self, origin: str, write_path: str, explicit: str, read_paths,
+                  key_f: str, key_v: str, oid: str) -> list:
+        """[(tag, url)] -- the re-read views for an object we just created, most specific first.
+
+        `tag` is STABLE across attempts (a spec path template, or a named construction rule) while
+        `url` is filled with THIS attempt's key. That split is load-bearing: the baseline picks a
+        view by tag, and every later attempt re-fills the SAME tag with its own object's key. Reusing
+        the baseline's concrete URL instead would re-read the BASELINE object after each injected
+        write and report its values as the injected object's -- a false negative on a vulnerable
+        endpoint, and a false positive the moment two attempts share a key.
+        """
+        import mass_assign_tool as _ma
+        out = []
+        if explicit:
+            out.append(("explicit",
+                        explicit.replace("{marker}", str(key_v)).replace("{id}", str(oid or ""))))
+        if oid:
+            # The REST convention, and the only view Juice Shop offers: POST /api/Users -> /api/Users/24.
+            out.append(("<write>/<id>", origin + write_path.rstrip("/") + "/" + str(oid)))
+        ranked = _ma.read_views(write_path, read_paths, key_f, key_v, oid, limit=self._MA_MAX_VIEWS)
+        raw_of = {}
+        for raw in (read_paths or []):
+            one = _ma.read_views(write_path, [raw], key_f, key_v, oid, limit=1)
+            if one:
+                raw_of.setdefault(one[0], raw)          # recover the TEMPLATE behind the filled path
+        for filled in ranked:
+            out.append((raw_of.get(filled, filled), origin + filled))
+        out.append(("<write>", origin + write_path))     # the collection listing, as a last resort
+        seen, uniq = set(), []
+        for tag, u in out:
+            if u in seen:
+                continue
+            seen.add(u)
+            uniq.append((tag, u))
+        return uniq[:self._MA_MAX_VIEWS]
+
+    async def _run_mass_assign(self, inp: dict) -> ToolResult:
+        """INTRUSIVE (writes): mass assignment (CWE-915, OWASP API3:2023 BOPLA, WSTG-INPV-20).
+
+        The oracle lives in `mass_assign_tool` and is pure; this is the transport that feeds it, and
+        it is a THREE-OBJECT protocol, not a single request:
+
+          A. a BASELINE object created from the same body with NO injected attribute, re-read through
+             every candidate view. Which view can answer for which field is decided HERE, against an
+             object that carries no injected value -- picking the view that happens to show
+             `role: admin` would be result-shopping.
+          B. an IGNORED-FIELD control object carrying an invented `apolaki_probe_<nonce>` attribute
+             that cannot pre-exist on the server. If it comes back, the endpoint round-trips anything
+             and nothing it persists is evidence of privilege binding.
+          C. one object per candidate field, each carrying exactly ONE extra attribute, each re-read
+             through the view chosen for that field in (A).
+
+        `200 OK` is never the oracle -- APIs routinely accept and ignore unknown attributes -- so a
+        run that cannot re-read its own object emits a LEAD naming the missing half. Non-destructive
+        by construction: every object written to is one this engine created, and the summary lists
+        them all so an operator can undo the state.
 
         Q-011 exists because `mass_assignment` was declared in three catalogs (engine_descriptor,
         asvs_model ATHZ-04, wstg_catalog WSTG-INPV-20) and implemented nowhere: the only code that
@@ -5803,97 +5865,189 @@ class ToolRegistry:
         is dispatched rather than merely defined -- `tests/test_engine_reachability.py` enforces that.
         """
         import json as _json
+        from urllib.parse import urlparse as _up
+        import create_object_idor as _co
         import mass_assign_tool as _ma
 
-        url = inp["url"]
-        if not self.scope.validate(url)[0]:
+        url = str(inp.get("url") or "")
+        if not url or not self.scope.validate(url)[0]:
             return ToolResult("mass_assign", url, False, "", [], "SCOPE BLOCK")
         method = str(inp.get("method") or "POST").upper()
         if method not in ("POST", "PUT", "PATCH"):
             return ToolResult("mass_assign", url, False, "", [], "unsupported write method %s" % method)
-        read_url = inp.get("read_url") or url
-        key_field = str(inp.get("key_field") or "")
-        base_body = inp.get("body")
-        if isinstance(base_body, str):
+        pr = _up(url)
+        origin, write_path = "%s://%s" % (pr.scheme, pr.netloc), (pr.path or "/")
+        read_paths = [str(p) for p in (inp.get("read_paths") or []) if str(p).startswith("/")]
+        explicit_read = str(inp.get("read_url") or "")
+        params = inp.get("params") or []
+
+        seed = inp.get("body")
+        if isinstance(seed, str):
             try:
-                base_body = _json.loads(base_body)
+                seed = _json.loads(seed or "")
             except Exception as exc:
                 self._swallow(exc, "mass_assign.body", url)
-                base_body = {}
-        base_body = base_body if isinstance(base_body, dict) else {}
-        hdrs = {"Content-Type": "application/json"}
-        findings, tried = [], []
+                seed = None
+        if not isinstance(seed, dict) or not seed:
+            # Q-031's typed OpenAPI body parameters: the API's own declaration of what this write
+            # accepts, which is also the list of fields that are NOT mass assignment.
+            seed = _ma.body_from_params(params, "apolaki")
+        if not seed:
+            return ToolResult("mass_assign", url, True, _json.dumps({
+                "ran": False, "note": "no base body -- neither an explicit body nor typed OpenAPI "
+                                      "body parameters were supplied, and a body invented from "
+                                      "nothing would be rejected and read as a clean"}), [])
+        offered = sorted(str(k) for k in seed)
+        hdrs = {"Content-Type": "application/json", "Accept": "application/json"}
+        objects_created = []
 
-        async def _json_of(u):
+        def _ok(r):
+            return bool(r) and 200 <= int((r or {}).get("status") or 0) < 300
+
+        def _oid_of(r):
+            h = (r or {}).get("headers") or {}
+            loc = h.get("location") or h.get("Location") or ""
+            return _co.extract_id((r or {}).get("status"), (r or {}).get("body") or "", loc)
+
+        async def _write(payload):
+            r = await self._http(url, method, hdrs, payload, capture=True)
+            if r.get("error"):
+                self._swallow(RuntimeError(r["error"]), "mass_assign.write", url)
+                return None
+            return r
+
+        async def _locate(u, key_f, key_v, oid):
+            if not u or not self.scope.validate(u)[0]:
+                return None
             r = await self._http(u, "GET", hdrs, capture=False)
             if r.get("error"):
+                self._swallow(RuntimeError(r["error"]), "mass_assign.read", u)
                 return None
-            try:
-                return _json.loads(r.get("body") or "")
-            except Exception:
-                return None
+            text = r.get("body") or ""
+            obj = _ma.locate_object(text, key_f, key_v)
+            return obj if obj is not None else _ma.locate_object(text, "id", oid)
 
-        # The baseline is read through the SAME view the re-read uses. Reading it any other way would
-        # compare two different projections of the object and call the difference a vulnerability.
-        base_payload = await _json_of(read_url)
-        offered = sorted(base_body.keys())
-        for cand in _ma.privileged_candidates(offered_fields=offered, limit=int(inp.get("limit") or 4)):
-            field, value = cand["field"], cand["value"]
-            tried.append(field)
+        # ── A. the BASELINE object ─────────────────────────────────────────────────────────────
+        b_marker = _ma.new_marker()
+        b_body, b_key, b_val = _ma.personalize(seed, b_marker)
+        if not b_key:
+            return ToolResult("mass_assign", url, True, _json.dumps({
+                "ran": False, "note": "the base body carries no field that could identify the created "
+                                      "object on a re-read, so no write was sent"}), [])
+        b_w = await _write(_json.dumps(b_body))
+        if not _ok(b_w):
+            return ToolResult("mass_assign", url, True, _json.dumps({
+                "ran": False, "note": "the endpoint rejected the UN-injected baseline body (HTTP %s), "
+                                      "so the body shape is wrong and a rejected injection would "
+                                      "prove nothing" % (b_w or {}).get("status")}), [])
+        objects_created.append({"role": "baseline", "key": b_key, "value": b_val})
+        b_oid = _oid_of(b_w)
+        located = []
+        for tag, u in self._ma_views(origin, write_path, explicit_read, read_paths, b_key, b_val, b_oid):
+            obj = await _locate(u, b_key, b_val, b_oid)
+            if obj is not None:
+                located.append((tag, u, obj))
+        baseline_ran = bool(located)
+
+        # Per field, the FIRST view that exposes it on the baseline. Chosen before any injected value
+        # exists anywhere, so the choice cannot depend on the answer.
+        cands = _ma.privileged_candidates(offered_fields=offered, limit=int(inp.get("limit") or 4))
+        chosen = {}
+        for c in cands:
+            pick = next((x for x in located if _ma.exposed_fields(x[2], [c["field"]])), None) \
+                or (located[0] if located else None)
+            if pick is None:
+                chosen[c["field"]] = ("", False, None)
+            else:
+                found, val = _ma.read_field(pick[2], c["field"])
+                chosen[c["field"]] = (pick[0], found, val)
+
+        # ── B. the IGNORED-FIELD control ───────────────────────────────────────────────────────
+        c_field = _ma.control_field(_ma.new_nonce())
+        c_ran = c_found = False
+        c_marker = _ma.new_marker()
+        c_body, c_key, c_val = _ma.personalize(seed, c_marker)
+        c_payload = _ma.body_with(c_body, c_field, _ma.CONTROL_VALUE)
+        c_w = await _write(c_payload) if c_payload else None
+        if _ok(c_w):
+            objects_created.append({"role": "ignored-field control", "key": c_key, "value": c_val})
+            c_oid = _oid_of(c_w)
+            for tag, u in self._ma_views(origin, write_path, explicit_read, read_paths,
+                                         c_key, c_val, c_oid):
+                obj = await _locate(u, c_key, c_val, c_oid)
+                if obj is None:
+                    continue
+                c_ran = True                     # the control is only "run" once its object is READ
+                if _ma.read_field(obj, c_field)[0]:
+                    c_found = True
+                    break
+        ctl_ev = ("the identical write carrying the invented attribute %r was accepted and the "
+                  "attribute %s on the re-read" % (c_field, "CAME BACK" if c_found else
+                                                   "did NOT come back")) if c_ran else \
+                 ("the ignored-field control did not run: its object could not be created or "
+                  "re-read (HTTP %s)" % (c_w or {}).get("status"))
+
+        # ── C. one object per candidate field, ONE extra attribute each ────────────────────────
+        findings, per_field = [], []
+        tally = {_ma.CONFIRMED: 0, _ma.LEAD: 0, _ma.CLEAN: 0, _ma.UNTESTED: 0}
+        for c in cands:
+            field, value = c["field"], c["value"]
+            tag, b_found, b_fval = chosen.get(field, ("", False, None))
             marker = _ma.new_marker()
-            body = _ma.body_with({**base_body, **_ma.body_from_params({}, marker=marker)}, field, value)
-            w = await self._http(url, method, hdrs, body, capture=True)
-            if w.get("error"):
-                self._swallow(RuntimeError(w["error"]), "mass_assign.write", url)
+            body, key, kval = _ma.personalize(seed, marker)
+            payload = _ma.body_with(body, field, value)
+            if not payload:
                 continue
-
-            after_payload = await _json_of(read_url)
-            obj = _ma.locate_object(after_payload, key_field, marker) if key_field else None
-            if obj is None:
-                obj = _ma.locate_object(after_payload, "marker", marker)
-            reread_ran = obj is not None
-            a_found, a_val = _ma.read_field(obj, field) if reread_ran else (False, None)
-
-            # The invented control: if an attribute that CANNOT pre-exist comes back, the endpoint
-            # round-trips arbitrary input and nothing it persists is evidence of privilege binding.
-            nonce = _ma.new_nonce()
-            c_field = _ma.control_field(nonce)
-            c_marker = _ma.new_marker()
-            c_body = _ma.body_with({**base_body, **_ma.body_from_params({}, marker=c_marker)},
-                                   c_field, nonce)
-            c = await self._http(url, method, hdrs, c_body, capture=False)
-            c_ran = not c.get("error")
-            c_obj = _ma.locate_object(await _json_of(read_url), key_field or "marker", c_marker) if c_ran else None
-            c_found = bool(_ma.read_field(c_obj, c_field)[0]) if c_obj is not None else False
-
-            b_obj = _ma.locate_object(base_payload, key_field, "") if key_field else None
-            b_found, b_val = _ma.read_field(b_obj, field) if b_obj is not None else (False, None)
+            w = await _write(payload)
+            accepted = _ok(w)
+            obj, read_u = None, ""
+            if accepted:
+                objects_created.append({"role": "injected %s" % field, "key": key, "value": kval})
+                read_u = dict(self._ma_views(origin, write_path, explicit_read, read_paths,
+                                             key, kval, _oid_of(w))).get(tag, "")
+                obj = await _locate(read_u, key, kval, _oid_of(w))
+            a_found, a_val = _ma.read_field(obj, field) if obj is not None else (False, None)
             verdict = _ma.evaluate(field=field, sent_value=value,
-                                   baseline={"ran": base_payload is not None,
-                                             "found": b_found, "value": b_val},
+                                   baseline={"ran": baseline_ran, "found": b_found, "value": b_fval},
                                    after={"found": a_found, "value": a_val},
                                    control={"ran": c_ran, "field": c_field, "found": c_found},
-                                   reread_ran=reread_ran)
-            ctl_ev = ("control attribute %r %s on the re-read" %
-                      (c_field, "CAME BACK" if c_found else "did not come back")) if c_ran \
-                else "the control write did not run"
-            base_ev = ("baseline read %s" % ("found %r" % (b_val,) if b_found else "did not carry the field")) \
-                if base_payload is not None else "no baseline was read"
+                                   reread_ran=obj is not None, write_accepted=accepted)
+            tally[verdict["verdict"]] = tally.get(verdict["verdict"], 0) + 1
+            # Per field, WHICH verdict and WHY. A tally alone cannot tell an operator whether a
+            # `clean` came from the endpoint validating its input, from the baseline control firing,
+            # or from a read view that never exposed the field -- three very different facts.
+            per_field.append({"field": field, "verdict": verdict["verdict"],
+                              "view": tag, "baseline": verdict.get("baseline_value")
+                              if verdict.get("baseline_found") else None,
+                              "observed": verdict.get("observed_value")
+                              if verdict.get("observed_found") else None,
+                              "why": verdict.get("reason", "")[:200]})
+            base_ev = ("no baseline object could be re-read, so the baseline control did not run"
+                       if not baseline_ran else
+                       "an object created with NO extra attribute, re-read through the same view "
+                       "(%s), carried %s=%r" % (tag, field, b_fval) if b_found else
+                       "an object created with NO extra attribute, re-read through the same view "
+                       "(%s), did not carry %s at all" % (tag, field))
             if verdict["verdict"] == _ma.CONFIRMED:
                 findings.append(self._attach_poc(
                     _ma.mass_assignment_finding(target=url, method=method, verdict=verdict,
-                                                why=cand.get("why", ""), read_url=read_url,
+                                                why=c.get("why", ""), read_url=read_u,
                                                 control_evidence=ctl_ev, baseline_evidence=base_ev,
-                                                object_key=key_field, object_value=str(marker),
+                                                object_key=key, object_value=kval,
                                                 offered_fields=offered),
-                    url, w))
+                    url, w, method=method, body=payload))
             elif verdict["verdict"] == _ma.LEAD:
                 findings.append(_ma.unverified_lead(target=url, method=method, verdict=verdict,
-                                                    read_url=read_url, control_evidence=ctl_ev,
+                                                    read_url=read_u, control_evidence=ctl_ev,
                                                     baseline_evidence=base_ev))
-        return ToolResult("mass_assign", url, True,
-                          "%d field(s) tried (%s), %d finding(s)" % (len(tried), ", ".join(tried), len(findings)),
-                          findings)
+        return ToolResult("mass_assign", url, True, _json.dumps({
+            "ran": True, "fields_tried": [c["field"] for c in cands],
+            "offered_fields": offered, "views_located": [t for t, _u, _o in located],
+            "control_field": c_field, "control_ran": c_ran, "control_reflected": c_found,
+            "baseline_ran": baseline_ran, "verdicts": tally, "per_field": per_field,
+            # Recorded for EVERY run, not only confirming ones: this engine writes, and an operator
+            # needs the undo list whatever the verdict was.
+            "objects_created": objects_created}), findings)
 
     async def _run_web_probes(self, inp: dict) -> ToolResult:
         url = inp["url"]

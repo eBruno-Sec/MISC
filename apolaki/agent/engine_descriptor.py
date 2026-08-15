@@ -54,6 +54,11 @@ PRECONDITIONS = {
     "stored_xss":              ["has_api"],
     "idor_bola_read":          ["has_object_id"],
     "bfla_privileged_action":  ["has_sensitive_route"],
+    # Q-011 CLOSED: this precondition used to gate an engine that did not exist. It now gates
+    # `tools.ToolRegistry._run_mass_assign`. Deliberately NO entry in EFFECTS below: the engine
+    # creates an object carrying `role: admin` and never logs into it, so it does not establish
+    # `authenticated` for the rest of the engagement. Declaring that would teach the planner to
+    # chase a capability the oracle has not actually obtained, which this module's own rule forbids.
     "mass_assignment":         ["has_api"],
     "excessive_data_exposure": ["has_api"],
     "xxe_file_ssrf":           ["has_xml_input"],

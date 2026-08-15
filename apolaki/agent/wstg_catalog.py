@@ -101,7 +101,14 @@ FULL = {
     "WSTG-INPV-05": "run_sqli / run_auth_sqli", "WSTG-INPV-06": "run_ldap", "WSTG-INPV-07": "run_xxe",
     "WSTG-INPV-08": "run_ssi", "WSTG-INPV-09": "run_xpath", "WSTG-INPV-12": "run_cmdi / run_form_cmdi",
     "WSTG-INPV-17": "run_injection_probes (host header)", "WSTG-INPV-18": "run_injection_probes (SSTI)",
-    "WSTG-INPV-19": "run_ssrf", "WSTG-INPV-20": "mass_assignment (authz)",
+    "WSTG-INPV-19": "run_ssrf",
+    # Q-011. This used to read "mass_assignment (authz)" -- a TECHNIQUE id, not an engine, and the
+    # engine it implied did not exist, so `FULL` claimed full coverage for a capability the product
+    # did not have (Q-012 measured that as the over-report half of the same defect). It now names the
+    # engine that actually runs, in the spelling that actually dispatches: `run_mass_assign`, not the
+    # `run_mass_assignment` this catalog and asvs_model both guessed at.
+    "WSTG-INPV-20": "run_mass_assign (privileged attribute persists on a SEPARATE re-read; "
+                    "invented-attribute + baseline controls both recorded)",
     "WSTG-SESS-01": "run_session_token (predictability/meaningful analyzer)",
     "WSTG-SESS-02": "cookie/header analysis", "WSTG-SESS-05": "run_csrf", "WSTG-SESS-10": "run_jwt (+ key confusion)",
     "WSTG-SESS-03": "run_session_fixation (token-rotation-on-login oracle)",

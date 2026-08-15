@@ -183,13 +183,37 @@ def body_with(base_body, field: str, value):
     return json.dumps(out)
 
 
+#: Value shapes an API's own validation will reject if we ignore them. A registration endpoint that
+#: 400s on `email: "apolaki_email"` yields no object at all, and the engine would report a clean
+#: through a false negative. General field-name conventions, not any target's schema.
+_EMAIL_HINTS = ("email", "mail")
+_PASSWORD_HINTS = ("password", "passwd", "pwd", "secret")
+#: Clears the common password policies out of the box (length + upper + lower + digit + symbol),
+#: same reasoning as `register.adapt_password`.
+_PASSWORD_VALUE = "Apolaki-Test-1!"
+_EMAIL_DOMAIN = "apolaki-test.local"
+
+
+def _string_value(name: str, marker: str) -> str:
+    """A string that satisfies the validation a field of this NAME usually carries. Pure."""
+    low = _norm(name)
+    mk = marker or "apolaki"
+    if any(h in low for h in _PASSWORD_HINTS):
+        return _PASSWORD_VALUE
+    if any(h in low for h in _EMAIL_HINTS):
+        return "%s@%s" % (mk, _EMAIL_DOMAIN)
+    return "%s_%s" % (mk, name)
+
+
 def body_from_params(params, marker: str = "") -> dict:
     """A minimally-valid JSON body from an OpenAPI operation's typed BODY parameters (Q-031). Pure.
 
     `params` is `surface.operations_from_openapi(...)["params"]`. Only `location == "body"` entries
     are used; query/path/header parameters do not belong in a body. Types are honoured so the API's
-    own validation passes: string -> a marker-derived value, integer/number -> 1, boolean -> False,
-    array -> [], object -> {}.
+    own validation passes: integer/number -> 1, boolean -> False, array -> [], object -> {}, string
+    -> a marker-derived value shaped by the field NAME (an `email` field gets something that parses
+    as an e-mail, a `password` field gets something that clears a password policy). A body the API
+    rejects yields no object, and no object means the engine reports clean through a false negative.
 
     Returns {} when the operation declares no body parameters. That is a real answer -- the caller
     must then learn the shape from a sample object rather than invent one.
@@ -211,7 +235,166 @@ def body_from_params(params, marker: str = "") -> dict:
         elif t == "object":
             out[name] = {}
         else:
-            out[name] = "%s_%s" % (marker or "apolaki", name) if marker else "apolaki"
+            out[name] = _string_value(name, marker)
+    return out
+
+
+#: Fields an API commonly keys an object by, so a re-read can be matched back to the object we
+#: wrote. Ordered by how identifying they are. General REST/JSON conventions.
+NATURAL_KEY_FIELDS = ("username", "email", "login", "handle", "user_name", "slug", "book_title",
+                      "title", "name", "code", "label")
+
+
+def object_key(body) -> tuple:
+    """(field, value) that identifies the object this body creates, or ("", ""). Pure.
+
+    Prefers a natural key (`username`, `email`, `title`, ...), falls back to the LONGEST string
+    value, which is the field most likely to carry our marker. Password-ish fields are excluded --
+    they are not returned by any sane read view, and matching on one would mean matching on a
+    credential.
+
+    Returns ("", "") for a body with no usable string field. That is a real answer: without a key we
+    cannot prove a re-read found OUR object, and `locate_object` refuses to guess.
+    """
+    if isinstance(body, str):
+        try:
+            body = json.loads(body or "")
+        except Exception:
+            return "", ""
+    if not isinstance(body, dict):
+        return "", ""
+    usable = {k: v for k, v in body.items()
+              if isinstance(v, str) and v and not any(h in _norm(k) for h in _PASSWORD_HINTS)}
+    if not usable:
+        return "", ""
+    for nat in NATURAL_KEY_FIELDS:
+        for k in usable:
+            if _norm(k) == _norm(nat):
+                return k, usable[k]
+    best = max(usable.items(), key=lambda kv: len(kv[1]))
+    return best[0], best[1]
+
+
+def personalize(base_body, marker: str) -> tuple:
+    """(body, key_field, key_value) -- `base_body` made unique to `marker`. Pure.
+
+    THE RE-READ CANNOT WORK WITHOUT THIS, and getting it wrong is silent. Every attempt sends its own
+    write, so every attempt must produce a DISTINGUISHABLE object. Without a unique key the re-read
+    either locates nothing (every verdict degrades to a lead, and the engine reports clean on a
+    vulnerable target) or locates a PREVIOUS attempt's object -- which reads back the previous
+    attempt's injected value, a false positive carrying a real, replayable-looking artifact.
+
+    Only two classes of field are rewritten, each for a stated reason:
+      * the object's natural key (`object_key`) -- that is what `locate_object` matches on;
+      * any e-mail-ish field -- registration endpoints almost always require it to be unique, so
+        leaving it fixed makes the SECOND attempt fail with "already registered".
+    Everything else is left exactly as the caller supplied it: which values the endpoint's validation
+    accepts is knowledge we do not have and must not overwrite.
+
+    Deterministic in (`base_body`, `marker`), so a body already built by `body_from_params` with the
+    same marker passes through unchanged.
+
+    An empty body, or one with no field that can identify the object, yields an empty key -- a real
+    answer, and the driver must decline rather than write blind into something it cannot re-read.
+    """
+    if isinstance(base_body, str):
+        try:
+            base_body = json.loads(base_body or "")
+        except Exception:
+            return {}, "", ""
+    if not isinstance(base_body, dict) or not base_body:
+        return {}, "", ""
+    body = dict(base_body)
+    key_field, _ = object_key(body)
+    for name in list(body):
+        if not isinstance(body[name], str):
+            continue
+        if name == key_field or any(h in _norm(name) for h in _EMAIL_HINTS):
+            body[name] = _string_value(name, marker)
+    if not key_field:
+        return body, "", ""
+    return body, key_field, str(body[key_field])
+
+
+# -- ranking the re-read views --------------------------------------------------------------------
+
+_ID_PLACEHOLDERS = ("id", "_id", "uuid", "pk", "objectid", "object_id")
+
+
+def _segments(path: str) -> list:
+    return [s for s in str(path or "").split("/") if s]
+
+
+def _shared_prefix(a: str, b: str) -> int:
+    sa, sb = _segments(a), _segments(b)
+    n = 0
+    for x, y in zip(sa, sb):
+        if x.lower() != y.lower():
+            break
+        n += 1
+    return n
+
+
+def _fill_template(path: str, key_field: str, key_value: str, object_id: str):
+    """`/users/v1/{username}` -> `/users/v1/<our username>`, or None when the placeholder names
+    something we cannot supply. Pure.
+
+    Refusing to fill is deliberate: guessing a value for `{book_title}` burns a request on a view
+    that can only ever locate nothing, and a view that locates nothing is indistinguishable from a
+    view that proves the object is gone.
+    """
+    import re
+    out, filled = path, False
+    for m in re.finditer(r"\{([^}]+)\}", str(path or "")):
+        ph = _norm(m.group(1))
+        if key_field and key_value and ph == _norm(key_field):
+            val = str(key_value)
+        elif object_id and (ph in _ID_PLACEHOLDERS or ph.endswith("id")):
+            val = str(object_id)
+        else:
+            return None
+        out = out.replace(m.group(0), val)
+        filled = True
+    return out if (filled or "{" not in str(path or "")) else None
+
+
+def read_views(write_path: str, get_paths, key_field: str = "", key_value: str = "",
+               object_id: str = "", limit: int = 5) -> list:
+    """Ranked candidate re-read PATHS for an object created by a write at `write_path`. Pure.
+
+    `get_paths` are GET operations the mission OBSERVED (from the API's own spec / crawl). Only
+    paths sharing a leading path segment with the write are kept -- a `/books` view can never hold a
+    `/users` object, and probing it is pure cost. Ranked: most path segments shared with the write
+    first (the closest relative), then a filled template (which identifies exactly our object) ahead
+    of a collection listing, then the longer path first.
+
+    That last tie-break is what reaches VAmPI's `/users/v1/_debug` alongside `/users/v1` -- both
+    share two segments, and BOTH are tried, because which of them exposes the field is decided later
+    against the baseline object, never against a result.
+
+    An empty `get_paths` is a real input and yields [] -- the driver then falls back to the REST
+    convention (`<write path>/<id>`), which it constructs itself.
+    """
+    if not str(write_path or "") or limit is None or int(limit) <= 0:
+        return []
+    scored = []
+    for p in (get_paths or []):
+        p = str(p or "")
+        if not p.startswith("/"):
+            continue
+        share = _shared_prefix(write_path, p)
+        if share < 1:
+            continue
+        filled = _fill_template(p, key_field, key_value, object_id)
+        if filled is None:
+            continue
+        scored.append((-share, 0 if "{" in p else 1, -len(_segments(p)), filled))
+    out = []
+    for _, _, _, path in sorted(scored):
+        if path not in out:
+            out.append(path)
+        if len(out) >= int(limit):
+            break
     return out
 
 
@@ -330,7 +513,7 @@ CONFIRMED, LEAD, CLEAN, UNTESTED = "confirmed", "lead", "clean", "untested"
 
 
 def evaluate(*, field: str, sent_value, baseline: dict, after: dict, control: dict,
-             reread_ran: bool) -> dict:
+             reread_ran: bool, write_accepted: bool) -> dict:
     """The mass-assignment verdict for ONE injected field. Pure, and the only place the halves meet.
 
     `baseline`   -- {"ran": bool, "found": bool, "value": any}: the field's state on an object of the
@@ -340,16 +523,22 @@ def evaluate(*, field: str, sent_value, baseline: dict, after: dict, control: di
     `control`    -- {"ran": bool, "field": str, "found": bool}: the ignored-field probe. `found` is
                     whether the invented attribute came back at all.
     `reread_ran` -- whether the separate re-read actually located our object.
+    `write_accepted` -- whether the write carrying the extra attribute got a 2xx. REQUIRED, with no
+                    default: a rejected write and an unverified write are opposite results (one is a
+                    correctly-validating API, the other is an untested one) and a default would
+                    silently pick one of them for every caller that forgot.
 
-    CONFIRMED requires all five:
-      (a) the re-read located our object, AND
-      (b) the ignored-field control RAN and the invented attribute did NOT come back, AND
-      (c) the baseline RAN, AND
-      (d) the baseline did not already hold the injected value, AND
-      (e) the re-read shows the field holding the injected value.
+    CONFIRMED requires all six:
+      (a) the write carrying the extra attribute was ACCEPTED, AND
+      (b) the re-read located our object, AND
+      (c) the ignored-field control RAN and the invented attribute did NOT come back, AND
+      (d) the baseline RAN, AND
+      (e) the baseline did not already hold the injected value, AND
+      (f) the re-read shows the field holding the injected value.
 
     Everything weaker degrades explicitly:
-      * no re-read / no control run / no baseline run -> LEAD   (untested, never silently clean)
+      * the write was rejected                        -> CLEAN  (the API validates unknown fields)
+      * no re-read / no control run / no baseline run  -> LEAD   (untested, never silently clean)
       * the invented attribute came back               -> CLEAN  (the endpoint echoes anything)
       * the baseline already held the value            -> CLEAN  (the server's own default)
       * the field is exposed and does not hold it      -> CLEAN  (accepted and ignored)
@@ -363,6 +552,12 @@ def evaluate(*, field: str, sent_value, baseline: dict, after: dict, control: di
            "observed_found": bool(after.get("found")), "observed_value": after.get("value"),
            "control_field": str(control.get("field") or ""),
            "control_reflected": bool(control.get("found")), "reason": ""}
+
+    if not write_accepted:
+        out.update(verdict=CLEAN, reason=(
+            "the endpoint REJECTED the write carrying the extra attribute %r, so the attribute is "
+            "not bound -- the API validates the properties it accepts" % out["field"]))
+        return out
 
     if not reread_ran:
         out.update(verdict=LEAD, reason=(
