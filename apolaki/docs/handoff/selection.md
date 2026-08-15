@@ -5,7 +5,17 @@ consumer?** The ticket offers two levers (raise `MAX_STEPS`; change what fills t
 requires the measurement before the choice.
 
 Status legend: `[MEASURED]` a number I took - `[in progress]` running, no number yet -
-`[READ]` derived from source, not from a run.
+`[READ]` derived from source, not from a run - `[DERIVED]` computed from measured parts, with the
+assumption named.
+
+**STATE, for whoever inherits this.** Sections 0-6 are complete and every number in them is taken.
+The change in section 7 is committed (`805a78e`) on a green suite (2377/0). Its whole-product
+before/after is **`[in progress]`**: the "before" is sealed at `b97260c`
+(18/18 precision, 18/1415 recall, seal `3ee7609d`), and the "after" run `apolaki-sel-wp1` was still
+executing when this line was written. **Nothing in section 7 has an after-number yet.** If the run
+never lands, the correct read of this lane is sections 0-6 - the account - plus a code change whose
+suite is green and whose mission effect is unverified. The revert condition is written into
+`805a78e`: if precision moves off 100.0%, revert rather than defend.
 
 ---
 
