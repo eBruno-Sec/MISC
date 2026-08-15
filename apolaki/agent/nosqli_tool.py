@@ -152,7 +152,8 @@ def analyze_boolean(baseline: str, operator_body: str, control_body: str,
 
 def _base(surface: str, param: str, oracle: str, sev: str, desc: str, evidence: str, steps: list) -> dict:
     return {
-        "title": f"NoSQL injection ({oracle}) in '{param}'", "severity": sev, "target": surface,
+        "title": f"NoSQL injection ({oracle}) in '{param}'", "param": param,  # Q-046
+        "severity": sev, "target": surface,
         "description": desc,
         "impact": ("Read or modify the NoSQL store: bypass authentication, dump/alter documents outside "
                    "the caller's scope, and — depending on the driver — reach $where/JS execution."),

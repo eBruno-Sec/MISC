@@ -165,7 +165,8 @@ def oob_payloads(value: str, collab_url: str) -> list:
 # ── finding builders ─────────────────────────────────────────────
 def _base(url: str, param: str, oracle: str, sev: str, desc: str, evidence: str, steps: list) -> dict:
     return {
-        "title": f"OS command injection ({oracle}) in '{param}'", "severity": sev, "target": url,
+        "title": f"OS command injection ({oracle}) in '{param}'", "param": param,  # Q-046
+        "severity": sev, "target": url,
         "description": desc,
         "impact": "Execute arbitrary OS commands on the server: full host compromise, data theft, lateral movement.",
         "reproduction_steps": steps, "evidence": evidence, "cwe": "CWE-78",

@@ -94,10 +94,21 @@ def finding_fp(f: dict) -> str:
     # same path (e.g. dom_link vs dom_data vs reflected XSS on /catalog, all CWE-79) are NOT merged into
     # one fingerprint — the coarse cwe|host/path key silently deduped separate confirmed findings.
     fam = str(f.get("family") or f.get("vuln_class") or "").strip().lower()
-    param = ""
-    m = str(f.get("title") or "").rsplit(" in '", 1)
-    if len(m) == 2 and m[1].endswith("'"):
-        param = m[1][:-1].lower()
+    # BIND THE VALUE, do not recover it from prose (Q-046). The producer knows the parameter it
+    # tested; reading it back out of the rendered title made the key depend on sentence wording, and
+    # a wording that did not match yielded "" -- INDISTINGUISHABLE from "this finding has no
+    # parameter". That is not a cosmetic difference: five ldap_injection findings on five different
+    # cases all took param="" (their title is `LDAP injection in form field 'x'` -- the word between
+    # `in` and the quote defeats the split) and collapsed into ONE finding, which is how the published
+    # baseline came to report 22 true positives instead of 26.
+    #
+    # The title parse stays as a FALLBACK, and only that, because ~1052 findings are already stored
+    # without the field and their fingerprints must not move.
+    param = str(f.get("param") or "").strip().lower()
+    if not param:
+        m = str(f.get("title") or "").rsplit(" in '", 1)
+        if len(m) == 2 and m[1].endswith("'"):
+            param = m[1][:-1].lower()
     return f"{cls}|{fam}|{param}|{host}{path}"
 
 

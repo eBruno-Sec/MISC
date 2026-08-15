@@ -339,6 +339,41 @@ defend.
 
 ---
 
+## Q-046 — the four true positives were lost to a `rsplit`. 2026-08-14
+
+The cause of the understated baseline, fixed at the root. `finding_fp` recovered the tested parameter
+by parsing the rendered title:
+
+```python
+m = title.rsplit(" in '", 1)          # every builder renders "... in '<param>'"
+```
+
+Every injection builder matches that shape **except** `ldap_tool.finding`, which renders
+`LDAP injection in form field 'uid'` — a word between `in` and the quote. The split matched nothing,
+`param` fell to `""`, and **`""` is indistinguishable from "this finding has no parameter."** Five
+`ldap_injection` findings on five different benchmark cases therefore shared one key and were counted
+once. That is the whole distance between a published 22 and a measured 26.
+
+**Every one of the five builders already had `param` as a local variable and threw it away after
+formatting it into a sentence.** The value was never missing; it was rendered and discarded. So the
+fix is the standing rule rather than a better regex — **bind the value at the point it is known** —
+and the parse survives only as a fallback, because ~1052 findings are already stored without the
+field and their fingerprints must not move.
+
+**The control that decided it was safe to ship** asserts the parsed key and the bound key are
+byte-identical for a title the parse *can* read. If that had failed, every historical diff would have
+silently broken.
+
+Four mutants, all killed: ignore the bound field (4 tests fail), let the title win over it (1), stop
+emitting it in `ldap_tool` (2), and drop the empty-value fallback (2) — that last one is the
+`x or DEFAULT` trap this codebase has now been bitten by three times, so it gets its own control.
+
+**Worth naming: this is the same defect as Q-042 and as the `_POWERED` names above** — a value
+recovered from prose instead of carried as data. Three independent instances in one week says the
+pattern is the finding, not the three bugs.
+
+---
+
 ## The unre-derivable baseline: counts reconciled, seal still dead. 2026-08-14
 
 `ebd96f45` has been carried as "cannot be re-derived; every comparison against it is suspect." The

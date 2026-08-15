@@ -208,7 +208,8 @@ def analyze_time(control_elapsed: float, sleep_elapsed: float, seconds: int, mar
 # ── finding builders ─────────────────────────────────────────────
 def _base(url: str, param: str, oracle: str, sev: str, desc: str, evidence: str, steps: list) -> dict:
     return {
-        "title": f"SQL injection ({oracle}) in '{param}'", "severity": sev, "target": url,
+        "title": f"SQL injection ({oracle}) in '{param}'", "param": param,  # Q-046: bind, don't reparse
+        "severity": sev, "target": url,
         "description": desc,
         "impact": ("Read or modify the database: dump credentials/PII, bypass authentication, and — depending on "
                    "privileges — write files or execute commands on the DB host."),

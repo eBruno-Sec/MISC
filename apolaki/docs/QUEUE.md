@@ -27,10 +27,12 @@ the whole-product rerun and outranks everything below)
     27 claimed, 96.3% precision, 1.84% recall**, seal `fab8a46e` recorded before the key was opened.
     All five `ldapi` cases are TRUE positives — the old count hid four real detections, so the
     published baseline *understated* the product. `BASELINE` now carries 26/1/27, all three together.
-  - **Q-046 · `finding_fp` derives `param` by parsing prose** (`rsplit(" in '", 1)`), so any title
-    whose wording does not match silently yields `param = ""` and a whole family collides. Today the
-    path in the key masks it; same-path findings of one family would still merge. Bind the value at
-    the point the parameter is known, do not recover it from a sentence.
+  - **Q-046 · CLOSED.** `finding_fp` derived `param` by parsing prose (`rsplit(" in '", 1)`), so any
+    title whose wording did not match yielded `param = ""` — indistinguishable from "no parameter".
+    `ldap_tool` renders `in <where> '<param>'`, which the split cannot read, so five findings became
+    one. All five injection builders already had `param` as a local and discarded it; they now emit
+    it, and the key prefers the field with the title parse kept as a fallback so the ~1052 stored
+    findings keep their fingerprints. 9 controls, 4 mutants killed.
 - **The `00494` two-call-site patch** — written up, not applied; closes the proved-undecidable residual
   by adding an after-probe sample rather than guessing from two.
 - ~~**The `_POWERED` regex yields garbage product names**~~ — **CLOSED** (see LEDGERS). The gate now

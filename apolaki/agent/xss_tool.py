@@ -190,7 +190,7 @@ def reflection_finding(url: str, param: str, context: str, where: str = "query",
     proven = context in EXECUTABLE_ON_REFLECTION and bool(evidence)
     label = "confirmed" if proven else "candidate"
     return {
-        "title": f"Reflected XSS ({context}) in '{param}'",
+        "title": f"Reflected XSS ({context}) in '{param}'", "param": param,  # Q-046
         "severity": "high", "target": set_param(url, param, BREAKOUTS[context]) if where == "query" else url,
         "description": (f"User input in the {where} parameter '{param}' reflects into a {context} context with the "
                         f"structural characters unescaped (breakout '{BREAKOUTS[context]}' survived literally). "

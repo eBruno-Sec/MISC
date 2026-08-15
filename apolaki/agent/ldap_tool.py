@@ -84,6 +84,10 @@ def evaluate_boolean(true_body: str, false_body: str, true_payload: str, false_p
 def finding(url: str, param: str, where: str, oracle: str) -> dict:
     return {
         "title": "LDAP injection in %s '%s'" % (where, param),
+        # Q-046: carry the parameter as DATA. This builder is the one that proved why -- `where`
+        # sits between `in` and the quote, so a reader recovering the name from this title gets
+        # nothing, and five distinct findings deduped into one.
+        "param": param,
         "severity": "high", "family": "ldap_injection", "confidence": "confirmed", "target": url,
         "cwe": "CWE-90", "cvss_vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:L/A:N", "cvss_score": 8.2,
         "evidence": "The %s '%s' is concatenated into an LDAP search filter. %s" % (where, param, oracle),
