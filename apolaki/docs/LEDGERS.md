@@ -339,6 +339,58 @@ defend.
 
 ---
 
+## wp2 — the oracle fix was NECESSARY AND NOT SUFFICIENT, and the score went DOWN. 2026-08-15
+
+The Q-047 re-measure: fixed traversal oracle **plus** `run_web_probes` back in `_SWEEP_HTTP_ENGINES`,
+run from a scratch snapshot so the repo stayed reverted. Sealed `82f55903` and committed before the key
+was opened; both halves of the fix verified present in the snapshot that ran (`r_repeat = await
+send(twin.exists)`, `graded()`).
+
+| | baseline `ebd96f45` | wp1 (unfixed oracle) | **wp2 (fixed)** |
+|---|---:|---:|---:|
+| true positives | 26 | 30 | **28** |
+| false positives | 1 | 1 | **1** |
+| precision | 96.3% | 96.8% | **96.6%** |
+| recall | 1.84% | 2.12% | **1.98%** |
+| elapsed | 5329 s | 2103 s | 2103 s |
+
+**Read that honestly: against wp1 the fix LOST two true positives and did not remove the false
+positive.** The exact claim delta is the useful part:
+
+```
+wp1 only (removed by the fix): BenchmarkTest00023, BenchmarkTest00187, BenchmarkTest00236
+wp2 only (newly claimed)     : BenchmarkTest00042
+```
+
+All four are `weakrand` cases claimed by the **traversal** engine. The fix killed `00187` — the FP it
+was built to kill, and the two it killed alongside it (`00023`, `00236`) were TRUE only by the accident
+that those cases are vulnerable to *something*. Then a **new** weakrand FP appeared at `00042`. The
+specific instance died; **the class did not.** `pathtraver` itself is unchanged at 5 TP across both
+runs, which is the tell: every traversal claim outside `pathtraver-00` is the defect, and the ones that
+score TP are luck.
+
+**An unexplained residual, stated as unexplained.** Driving the REAL `run_web_probes` engine against
+`weakrand-00/BenchmarkTest00042` with the current code returns **0 findings**, and the differential on
+that URL with the repeat returns `None` (the repeat sees the steady-state page). So the wp2 claim
+**cannot be reproduced standalone**, and the difference is something in mission context I have not
+isolated — crawl-established session state, field discovery, or ordering. I am not going to invent a
+mechanism to close the gap. Reproduced: the oracle behaves correctly in isolation. Not reproduced:
+why the mission still claimed it.
+
+**Decision, unchanged and not dependent on that gap:** `run_web_probes` stays OUT of
+`_SWEEP_HTTP_ENGINES`. The pre-registered condition asked for precision at 100.0%; this is 96.6% with
+a live FP whose mechanism is not understood. Q-047 stays OPEN. The oracle fix keeps its value — it is
+strictly more honest, it is validated on 00187 and on two real traversal cases, and it costs one
+request per twin — but it did not earn the sweep entry back.
+
+**The wider lesson, which is the same one as yesterday:** wp1's `+4 TP` looked like the best result the
+project had produced and was mostly an artifact of loose scoring; wp2's `-2 TP` looks like a
+regression and is mostly the removal of that artifact. **Neither number means what its sign suggests.**
+Class-matched scoring is not a refinement here, it is the only version of this measurement that is
+about capability at all.
+
+---
+
 ## Q-015 / Q-016 — the report contradicted itself, and a crash read as "no controls". 2026-08-14
 
 Two small ones, same family as everything else this week: a second copy of a rule, and a failure that

@@ -47,9 +47,14 @@ session limit that **resets 22:40 PT**.
   repeat; without the repeat the verdict is a lead that says why. Validated live: 00187 → **no
   finding**, `pathtraver-00/00040` and `00045` → still **confirmed**. (The other three wp1 traversal
   cases used the **header** carrier, so they are untested here — validated on two, not five.)
-  **REMAINING for this ticket:** a full mission re-measure before `run_web_probes` returns to
-  `_SWEEP_HTTP_ENGINES`, and the two `xfail(strict=True)` tests in `test_sweep_class_coverage.py`
-  flip. The pre-registered condition was about a measurement, and none has been taken since the fix.
+  **RE-MEASURED (wp2, seal `82f55903`) — and the ticket STAYS OPEN.** 28 TP / 1 FP / 29 claimed,
+  96.6% precision. Against wp1 the fix **lost 2 TPs and did not remove the FP**: it killed `00187`
+  and its two lucky twins (`00023`, `00236` — weakrand cases that scored TP by accident), and a NEW
+  weakrand FP appeared at `00042`. `pathtraver` is unchanged at 5 TP in both runs. The instance died,
+  the class did not. **`run_web_probes` stays out of the sweep; the two strict xfails stay.**
+  Unexplained and recorded as such: the real engine against `weakrand-00/BenchmarkTest00042` returns
+  **0 findings** standalone, so the mission's claim cannot be reproduced outside a mission. Next step
+  is that gap, not another oracle guess.
 - **`sqli` 21 → 11.** The whole-product runs keep losing half the sqli detections. Older than the
   wp1 change, survived it, still unexplained, and it is the single largest known recall loss.
 
