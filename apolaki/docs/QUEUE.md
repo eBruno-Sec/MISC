@@ -1,5 +1,26 @@
 # QUEUE — the one canonical, dependency-ordered work queue
 
+## LANE OWNERSHIP — cycle 5, assigned 2026-08-15. Two lanes RESUMED, not respawned.
+
+Cycles 3 and 4 were each wiped by a single session limit. **Resuming beats respawning**: an agent
+carries its own 200k-token context, so the asvs lane keeps the source-derived producer map it spent
+its whole session building and the massassign lane keeps its oracle design. A cold spawn would pay
+for both again.
+
+| owner | files it may WRITE | ticket |
+|---|---|---|
+| **Builder · asvsproducers** (resumed) | `agent/asvs_model.py` · `agent/tests/test_asvs_model.py` · `docs/handoff/asvsproducers.md` | **Q-048** — repairs + the ratchet, on the map it already measured |
+| **Builder · massassign** (resumed) | `agent/mass_assign_tool.py` · `agent/tools.py` · `agent/engine_descriptor.py` · `agent/wstg_catalog.py` · `agent/mutation_gate.py` · `agent/tests/test_mass_assign_tool.py` · `docs/handoff/massassign.md` | **Q-011 LIVE VALIDATION** — the driver exists; it is proven only against fixtures |
+| **Breaker · validated** | `docs/handoff/validated.md` · `agent/tests/test_validated_on.py` (new) | **`validated_on` is minted by hand, counted as capability, guarded vacuously** — measure it |
+| **Coordinator (main thread)** | `docs/QUEUE.md` · `docs/STATUS.md` · `docs/LEDGERS.md` · `docs/benchmarks/` · `agent/report.py` · `agent/web_security.py` · `agent/agent.py` · `agent/main.py` · `agent/db.py` · `agent/liveness.py` · `scripts/` | ledgers, sequencing, recovery |
+
+The `validated` lane is deliberately diagnosis-only: it audits a promise that two engines shipped this
+week are currently unable to keep honestly (`run_ws_hijack` validated against a local paired server,
+`run_mass_assign` against fixtures), so whatever rule it proposes must be one they can satisfy
+TRUTHFULLY rather than one that retroactively blesses them.
+
+---
+
 ## LANE OWNERSHIP — cycle 4, assigned 2026-08-15. Declared BEFORE spawning.
 
 Cycle 3's three lanes were all killed by one session limit; each had committed a slice first and all
