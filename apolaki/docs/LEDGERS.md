@@ -339,6 +339,48 @@ defend.
 
 ---
 
+## Q-049 FALSIFIED — the nine cases are a BUDGET problem, and the allocator was already optimal. 2026-08-15
+
+I raised Q-049 off the breaker lane's diagnosis, implemented proportional allocation, and it was
+**wrong twice over**. Recording it because a disproved hypothesis of my own is worth more than the
+ticket was.
+
+**1. The lane had already measured my idea and left the test that catches it.** Its docstring:
+*"MEASURED against a size-proportional `_spread_by_shape` mutant, which drops the smallest class from
+100% to 14.8% and fails here."* Finishing the small classes is worth macro-averaged reachable recall
+**34.1% vs 17.8%**. My change broke both of its invariants — complete coverage of a class that fits,
+and monotonicity (a larger class never drawing fewer slots than a smaller one). I had read the ticket
+and not the test.
+
+**2. There was no slack to reallocate anyway.** A round-robin truncated at N *is* the classic
+water-filling optimum: every shape gets `min(size, level)` for the largest level that fits. It is
+already the most even feasible split, so "reallocate it better" has no meaning — any gain for the
+dominant class comes straight out of a class that then stops being finished.
+
+**MEASURED over the real spread (2524 candidates, 11 shapes, sizes 456…27):**
+
+```
+cap  400 -> dominant class 38 slots      (shipped)
+cap  600 -> 58
+cap  605 -> 59      <- first cap that probes ALL NINE lost cases
+cap  700 -> 70
+```
+
+**So the lever is `SWEEP_TARGET_CAP`, not the allocator.** The nine cases need the sweep to keep
+**~24% of the candidate surface instead of 15.8%**. That converges with everything else measured this
+week: coverage is the binding constraint, and here the constraint is the size of the budget rather
+than its distribution.
+
+**What I got wrong, precisely:** I treated "even round-robin" as obviously unfair because 456 and 27
+drew the same, and never asked what the alternative costs. The number that mattered — 34.1% vs 17.8%
+— was already written down in the handoff I had read. **A ticket I raise is a hypothesis, and mine got
+the same scrutiny it would have got from anyone else only because a dead lane's test outlived it.**
+
+Change reverted. The measurement is kept as `tests/test_sweep_budget_is_the_lever.py`, which pins the
+605 boundary so the conclusion cannot outlive its evidence.
+
+---
+
 ## ★ THE sqli 21 -> 11 LOSS, ANSWERED: an EVEN round-robin over URL shapes. 2026-08-15
 
 The largest known recall loss in the project, and the answer is selection again — a third independent

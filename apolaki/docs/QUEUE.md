@@ -56,11 +56,17 @@ pushed as `b1d56eb`.
 
 **TOP OF THE QUEUE — Q-049 first, it is worth nine cases:**
 
-- **Q-049 · the sweep's shape round-robin is EVEN, not proportional.** A shape with 4 candidates gets
-  the same budget as one with 456. `de4c3aa` introduced it to stop discovery order starving whole
-  classes — a real problem — and traded one starvation for another without measuring the trade.
-  **DoD: proportional (or evidence-weighted) allocation, the 9 named cases probed, and a sealed
-  whole-product re-measure.** Selection is the binding constraint on recall; this is the direct lever.
+- **Q-049 · FALSIFIED as written, and re-aimed. The lever is `SWEEP_TARGET_CAP`, not the allocator.**
+  I proposed proportional allocation; implemented, it broke both invariants the breaker lane had
+  already measured (complete coverage of a class that fits — worth 34.1% vs 17.8% macro reachable
+  recall — and monotonicity). And there was no slack anyway: a truncated round-robin **is** the
+  water-filling optimum `min(size, level)`. MEASURED: the dominant class draws 38 slots at cap 400,
+  and **cap 605 is the first that probes all nine** lost cases (~24% of the surface vs 15.8%).
+  Reverted; the measurement is pinned in `tests/test_sweep_budget_is_the_lever.py`.
+  **REMAINING: raise `SWEEP_TARGET_CAP` and measure it.** Cost is real and must be priced, not
+  assumed — the sweep is 92% of dispatches and 78% of tool-seconds, so ~605 targets is roughly +50%
+  on a 2103 s mission. DoD: a sealed whole-product run at the higher cap, scored, with a
+  pre-registered revert condition on precision.
 - **Q-048 · every objective's `violated_by` families must have a real producer reachable from one of
   its own engines.** MEASURED instances: SESS-02 can never fail (`cookie_flags` has no producer;
   `transport_posture` emits `security_misconfig` instead), and CONF-01 names `run_fingerprint`, which
