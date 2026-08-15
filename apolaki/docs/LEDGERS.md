@@ -261,6 +261,49 @@ Apolaki as a product.
 
 ---
 
+## Q-013 / Q-014 CLOSED — the gate did not read the field it was gating. 2026-08-14
+
+`3addb1c` · `42e1544` · `a1cdb8d` · report rendering. Suite **2374 passed, 11 skipped, 1 xfailed**.
+No benchmark number moved — this is a proof-integrity fix, not a detection change.
+
+**The first fix was correct and insufficient, and that gap is the finding.** Pass one routed
+`db.update_finding` through `db._gate`, closing the raw `UPDATE findings SET data=?` that bypassed the
+documented "single write chokepoint" and picking up `agent._triage` and `capture_finding_poc` for
+free. Then the lane asked whether the three invariants it had just enforced actually protect the
+proof, and read them: SCHEMA #6 normalizes `reproduction_steps`, SCOPE #8 refuses out-of-scope
+targets, TRUTH #7 keeps a lead out of the confirmed table. **Not one of them reads `evidence`** — the
+field `validate_confirmed` judges. Measured *after* the fix: PUT a gate-demoted row back with
+fabricated prose, and `is_confirmed: True`, with no engine having issued a single request.
+
+Generalising: **a chokepoint is only as strong as the fields its invariants inspect.** Three invariants
+all passing is not coverage; it is three specific questions being asked, and every field nobody asks
+about is still writable. Same family as the island pattern — registration is not invocation, and here,
+gated is not inspected.
+
+Two more things worth keeping:
+
+- **Whitelist, not blacklist.** PUT is annotation-only against an explicit allowed set. A blacklist
+  leaves every *future* proof field editable, which is precisely how this survived pass one. And a
+  PUT-only fix would have been defeatable by DELETE+POST, so both routes were closed.
+- **The design answer for Q-014**: operator confirmation is an **attestation on its own axis** —
+  who, when, why — never a value of `confidence`. Letting an operator's own text satisfy
+  `validate_confirmed` was rejected because that contract is a **substring match over prose**: it
+  would award `confirmed` for vocabulary and teach people which words to type. The report now renders
+  the attestation in its own column, naming the operator, the date, and *what machine proof is still
+  missing*. Additive — an unattested lead renders byte-for-byte as before.
+
+**What this costs, stated plainly:** manual findings now land under Unconfirmed Leads, confirmed
+counts drop, and `risk_score` no longer takes severity from them. That is the intended direction.
+
+**Two mutants survived the first outcome control, and both diagnoses are reusable.** M9/M10 survived
+because the two mechanisms they mutated are *redundant* — killing either alone changes no outcome, so
+an outcome assertion cannot discriminate them. M4 survived because the test lead carried no `impact`,
+so the impact gap alone blocked promotion: **the test asserted the right outcome for the wrong
+reason**, which is the exact shape of a test that will pass after the fix is deleted. Both repaired;
+13 mutants, all killed.
+
+---
+
 ## ★ WHAT BOUNDS RECALL, ANSWERED: SELECTION. 2026-08-14
 
 After four of my hypotheses died, the harness that was built to discriminate them answered on its

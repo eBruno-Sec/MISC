@@ -8,14 +8,15 @@ block in the same commit.** A queue whose state cannot be trusted is the same de
 defect we keep finding in the code, and it is the one artifact every lane reads before choosing work.
 
 **CLOSED, with the commit** — ignore any `ready`/`proposed` marker further down:
-`Q-000` 5af0af8 · `Q-00A` 65970da · `Q-001` fc91bb0 · `Q-013` *(in flight, see below)* ·
-**`Q-014` a1cdb8d** · `Q-019` fc91bb0 · `Q-022` 837b1f0 · **`Q-023` Codex lane 7 / 2ae0007** ·
+`Q-000` 5af0af8 · `Q-00A` 65970da · `Q-001` fc91bb0 · **`Q-013` 3addb1c + 42e1544 (two passes — the
+first fixed the write path, the second found the invariants never read `evidence` at all)** ·
+**`Q-014` a1cdb8d + report rendering** · `Q-019` fc91bb0 · `Q-022` 837b1f0 · **`Q-023` Codex lane 7 / 2ae0007** ·
 `Q-031` 8eb42e8 · **`Q-040` cbcba79 (the real fix; the first was incomplete)** · `Q-041`/`Q-042` 9f8707a ·
 `Q-043` c02208d · `Q-044` aa3a139 · **`Q-021B` 1f342c9** ·
 `B-001`/`B-002`/`B-003` Codex lane 1 · `B-010` Juliet Codex lane 2 · **`B-020` a7aa700**
 
-**IN FLIGHT**: `Q-013` `PUT /findings` bypass (gate lane) · **selection / step-cap** (selection lane —
-no ticket number yet; it is the successor to the whole-product rerun and outranks everything below)
+**IN FLIGHT**: **selection / step-cap** (selection lane — no ticket number yet; it is the successor to
+the whole-product rerun and outranks everything below)
 
 **NEW AND UNASSIGNED — raised by the rerun, currently nobody's:**
 - **The published whole-product baseline cannot be re-derived.** The store returns 29 findings /
@@ -31,9 +32,6 @@ no ticket number yet; it is the successor to the whole-product rerun and outrank
 
 | ticket | what | why it matters |
 |---|---|---|
-| **Q-023** | ZAP has never executed in any mission — 0 calls across 150 missions, 25,619 tool calls | a whole integrated scanner, wired and never invoked. Three flags do not explain the July-26 four |
-| **Q-013** | `PUT /findings` bypasses all three `findings_gate` invariants | a write path around the proof gate |
-| **Q-014** | operator lead-confirmation is silently re-demoted; gate-routed leads cannot be confirmed at all | the human override does not work |
 | **Q-021B–F** | Technology Intelligence chain: persist TechnologyFacts → identity/ranges → feeds → orchestration → honest UI | detected tech still drives no testing |
 | **Q-032/033/034** | credential→session→persona, multi-persona differentials, report chronology | the architecture programme; `session_headers` is still one global raw dict at 50 sites |
 | **Q-002/003/004** | WebSockets/CSWSH · `postMessage` source · API4 resource consumption | genuine zero-engine classes |
@@ -43,7 +41,9 @@ no ticket number yet; it is the successor to the whole-product rerun and outrank
 | **Q-030/035/036** | canonical cycle design · the model A/B experiment · fold the 15 architecture defects in | Q-030 is designed, not built |
 | **B-011+** | Juliet C/C++ (**UNSUPPORTED — no C/C++ analysis**), SARD subsets, remaining language ecosystems | matrix programme |
 
-Roughly **30 open**, of which Q-023 and Q-013/Q-014 are the highest-value unstarted work.
+Roughly **28 open**. Q-023, Q-013 and Q-014 are all closed; the highest-value unstarted work is now
+**Q-021B–F** (detected technology still drives no testing) and the **baseline provenance** item above,
+which blocks trusting any comparison against `ebd96f45`.
 
 
 **Only the Coordinator (QUEUE agent) changes state in this file.** Everyone else proposes; the
@@ -799,7 +799,17 @@ wiring, orchestration or reporting-integrity. None is a new engine. Q-019 should
   asserting behaviour for a name that can never appear in a real ledger.
 - **Dependencies**: Q-020 (the table), Q-011 (so ATHZ-04/WSTG-INPV-20 become true rather than deleted).
 
-### Q-013 · `PUT /findings` bypasses all three `findings_gate` invariants · **HIGH** · `proposed`
+### Q-013 · `PUT /findings` bypasses all three `findings_gate` invariants · **HIGH** · `CLOSED` 3addb1c + 42e1544
+**Closed in two passes, and pass one was not enough.** `3addb1c` routed `db.update_finding` through
+`db._gate`, which is the right chokepoint and covers `agent._triage` and `capture_finding_poc` too.
+Then the gate lane asked whether the three invariants actually protect the proof, and measured that
+**none of them reads `evidence`** — the field `validate_confirmed` judges. Post-`3addb1c`, a PUT that
+put a gate-demoted row back with fabricated prose still returned `is_confirmed: True` with no engine
+having issued a single request. `42e1544` made PUT annotation-only against a **whitelist** — a
+blacklist leaves every future proof field editable, which is exactly how this survived pass one — and
+closed the DELETE+POST route a PUT-only fix would have left open.
+
+
 - **Root cause**: `db.add_finding` is documented as "the single write chokepoint" and enforces
   schema/scope/truth. `db.update_finding` (`db.py:222`) issues a raw
   `UPDATE findings SET data=?` and calls none of it. `PUT /findings/{sid}/{fid}` (`main.py:3118`)
@@ -826,7 +836,16 @@ wiring, orchestration or reporting-integrity. None is a new engine. Q-019 should
   succeed unchanged.
 - **Files**: `agent/db.py`, `agent/main.py` (owned elsewhere this cycle — sequence it).
 
-### Q-014 · Operator lead-confirmation is silently re-demoted, and gate-routed leads cannot be confirmed at all · **HIGH** · `proposed`
+### Q-014 · Operator lead-confirmation is silently re-demoted, and gate-routed leads cannot be confirmed at all · **HIGH** · `CLOSED` a1cdb8d + report rendering
+**The design answer, which is the durable part:** operator confirmation is an **attestation on its own
+axis** — who, when, why — and never a value of `confidence`. The tempting fix was to let an operator's
+own text satisfy `validate_confirmed`; the lane rejected it because that contract is a **substring
+match over prose**, so it would award `confirmed` for vocabulary and teach people which words to type.
+A lead is released to confirmed only when the lead's own engine-produced evidence satisfies the
+oracle. What this costs, plainly: manual findings now land under Unconfirmed Leads, confirmed counts
+drop, and `risk_score` no longer takes severity from them.
+
+
 Two defects in the same handler. The second is not in the Q-009 list; I found it while proving the first.
 - **(a) The confirmation is discarded.** MEASURED, replaying the exact dict `main.py:confirm_lead`
   builds from a realistic IDOR lead:

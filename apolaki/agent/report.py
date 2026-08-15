@@ -117,10 +117,27 @@ def _leads_md(leads: list) -> str:
     lines = ["", "## Unconfirmed Leads", "",
              "_Signals worth manual verification — NOT confirmed vulnerabilities. "
              "Confirm before reporting to a program._", "",
-             "| Severity | Confidence | Lead | Target |", "|---|---|---|---|"]
+             "| Severity | Confidence | Lead | Target | Operator attestation |",
+             "|---|---|---|---|---|"]
     for l in sorted(leads, key=lambda x: SEV_ORDER.get((x.get("severity") or "info").lower(), 5)):
+        # An operator attestation is a DISTINCT PROVENANCE, not a confirmation. `confidence` stays the
+        # oracle's verdict; this column carries who/when plus whether machine proof was satisfied.
+        # Rendering an attestation as `confirmed` is the defect 707b3b9 fixed one layer earlier — a
+        # surface disagreeing with the gate — and the whole point of Q-014 is that the operator's
+        # decision must be DURABLE AND VISIBLE without being laundered into the oracle's verdict.
+        # Additive: a lead with no attestation renders exactly as it did before.
+        at = l.get("operator_attestation") or {}
+        if not at:
+            att = "—"
+        elif at.get("machine_proof"):
+            att = "Attested by %s (%s); machine proof satisfied" % (
+                at.get("operator", ""), str(at.get("attested_at", ""))[:10])
+        else:
+            att = "Attested by %s (%s) — NO machine proof; missing: %s" % (
+                at.get("operator", ""), str(at.get("attested_at", ""))[:10],
+                ", ".join(at.get("proof_gap") or []))
         lines.append(f"| {(l.get('severity') or 'info').capitalize()} | {l.get('confidence','candidate')} "
-                     f"| {l.get('title','')} | `{l.get('target','')}` |")
+                     f"| {l.get('title','')} | `{l.get('target','')}` | {att} |")
     return "\n".join(lines) + "\n"
 
 

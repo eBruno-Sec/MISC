@@ -71,3 +71,38 @@ def test_every_family_gets_the_honest_treatment_not_just_sqli():
     for fam in ("sqli", "idor", "xss", "ssrf", "vulnerable_component", "open_redirect", ""):
         txt = report.proof_and_retest(_bare(fam))["negative_control"]
         assert "NO NEGATIVE CONTROL WAS RECORDED" in txt, fam
+
+
+# ── operator attestation is a distinct provenance, never a confirmation (Q-014) ──
+def _attested_lead(machine_proof=False):
+    return {"title": "Possible IDOR", "severity": "high", "target": "https://t/o/2",
+            "confidence": "lead",
+            "operator_attestation": {"operator": "erwin", "attested_at": "2026-08-14T10:00:00Z",
+                                     "rationale": "reproduced by hand",
+                                     "machine_proof": machine_proof,
+                                     "proof_gap": [] if machine_proof else ["ownership_evidence"]}}
+
+
+def test_an_attested_lead_is_visible_but_still_a_lead():
+    """Q-014's whole point: the operator's decision must be DURABLE AND VISIBLE without being
+    laundered into the oracle's verdict. Both halves are asserted here because either alone is a
+    defect — invisible means the operator was ignored, promoted means `confirmed` stops meaning
+    deterministic proof."""
+    md = report.generate_report("P", [], {"in_scope": ["t"]}, leads=[_attested_lead()])
+    assert "Attested by erwin" in md and "NO machine proof" in md
+    assert "ownership_evidence" in md, "the reader must see WHAT is still missing"
+    assert "Unconfirmed Leads" in md, "it stays a lead"
+    assert report._confirmed(_attested_lead()) is False, "attestation must not make it confirmed"
+
+
+def test_an_attested_lead_with_machine_proof_says_so_distinctly():
+    md = report.generate_report("P", [], {"in_scope": ["t"]}, leads=[_attested_lead(machine_proof=True)])
+    assert "machine proof satisfied" in md and "NO machine proof" not in md
+
+
+def test_an_unattested_lead_renders_exactly_as_before():
+    """The negative control for the column: additive means additive."""
+    plain = {"title": "Reflected value", "severity": "low", "target": "https://t/a?q=1",
+             "confidence": "candidate"}
+    md = report.generate_report("P", [], {"in_scope": ["t"]}, leads=[plain])
+    assert "Reflected value" in md and "Attested by" not in md
