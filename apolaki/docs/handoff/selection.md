@@ -496,6 +496,32 @@ Python v0.1, the GinAndJuice blind recall and Juliet are structurally incapable 
 commit.** The only number that can move is the whole-product mission figure, which is the number
 being measured.
 
+### Lever 3 - `SWEEP_TARGET_CAP` - priced from measured parts [DERIVED, not measured]
+
+The ticket asked for cost per marginal finding before any number is proposed. Three of the four
+terms are now measured; the fourth is not, and the honest thing is to name it.
+
+| term | value | status |
+|---|---|---|
+| cost of one additional target | **1.70 s** (eight HTTP engines; the browser tier does NOT grow with this cap) | MEASURED |
+| cases reached per target | 373 / 400 = **0.93** | MEASURED |
+| vulnerable share of probed cases | 220 / 373 = **59%** | MEASURED |
+| class-correct rate x detection on the *unprobed* 85.5% | assumed equal to the probed sample | **NOT MEASURED** |
+
+Taking `SWEEP_TARGET_CAP` 400 -> 1200 costs **+800 x 1.70 s = +1360 s (+72% elapsed)** and reaches
+about +740 cases, ~440 of them vulnerable. At the measured 23% class-correct rate and 35.3%
+detection that is **~+36 claims for +1360 s = ~38 s per marginal finding**, against the current
+run's average of 1889 / 18 = **105 s per finding**. Marginal is ~2.8x cheaper than average, which is
+what a hard truncation at 14.5% of candidates predicts.
+
+**The unmeasured term is the whole risk.** `_spread_by_shape` round-robins across structural shapes
+before truncating, so the first 400 are a representative sample rather than the first directory -
+which is the reason to expect the rate to hold. It is still an assumption, and one full run at
+`BBH_SWEEP_TARGETS=1200` settles it. **I am not proposing a new default from a derivation.** The
+recommendation is: fix the class misallocation first (this lane's change, no extra targets, no
+longer crawl), then measure the cap with the misallocation already fixed - otherwise the cap
+experiment prices a surface that is still being tested by the wrong engines.
+
 ### Suite, with the change applied [MEASURED]
 
 ```
