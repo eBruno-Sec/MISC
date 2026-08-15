@@ -254,9 +254,140 @@ without spending a run on it. If P3 holds, adding or removing engines does not c
 all - only `SWEEP_TARGET_CAP` does - and the ticket's "40% of the budget for 3% of the coverage"
 shape is really "100% of the budget for 0% of the marginal coverage, bought as depth".
 
-## 3. Numbers
+## 3. THE BASELINE, SEALED [MEASURED]
 
-Baseline run in progress. Nothing measured yet.
+Own harness, own container, frozen snapshot of the agent tree, `/out` key-free, key never present.
+
+```
+=== WHOLE-PRODUCT RERUN, SEALED ===
+elapsed                 : 1889s
+findings total          : 20      leads 4
+by family               : sqli 11, ldap_injection 5, dom_data_manipulation 1,
+                          xpath_injection 1, sensitive_exposure 1, weak_random 1
+distinct cases claimed  : 18
+plan steps              : 309 / cap 220        (cap recovered by source read; see fa98906)
+tool calls              : 3659
+cases PROBED            : 373     probed but not claimed 355
+SEAL sha256             : 3ee7609d766836d40ef44547ad00b485a83cf26fe14b85b2be7278ce7f7fbfdd
+```
+
+**The seal is byte-identical to the breaker's runs A and B** (`docs/handoff/breaker.md` 3-two-c,
+committed `7fc3115` three days ago, before any key was read). This is a THIRD independent run of the
+same pipeline producing the same 18 claims, the same 309 plan steps, the same 3659 tool calls and
+the same 373 probed cases - now with sixteen wrapped methods, three census hooks and per-dispatch
+timing attached. **The instrument does not change the measurement**, which is the precondition for
+everything below.
+
+### Where the budget goes, by phase
+
+```
+phase        calls    %calls    tool_s   %time   cases probed
+sweep         3350     91.6%    1360.5   75.1%       373
+planner        309      8.4%     451.2   24.9%        25
+attributed 1812s of 1889s elapsed; 77s outside any tool dispatch (crawl, projection, report)
+```
+
+### Where the budget goes, by consumer
+
+```
+tool                    calls    tool_s   %time   cases  unique   claims
+run_xss                    55     742.3   41.0%      50       0        0
+run_sqli                  400     259.0   14.3%     373       0       11
+run_dom_trace              42     166.0    9.2%      28       0        1*
+run_ldap                  412     160.1    8.8%     373       0        5
+run_dom_audit              18     151.2    8.3%       5       0        0
+run_xpath                 412     144.1    8.0%     373       0        1
+run_waf_bypass            400      34.0    1.9%       0       0        0
+run_sqli_structural       400      28.6    1.6%     373       0        0
+run_ssi                   412      22.8    1.3%     373       0        0
+run_injection_probes      400      20.9    1.2%     373       0        0
+run_css_injection         400      11.3    0.6%     373       0        0
+run_web_probes              0       0.0    0.0%       0       0        0
+```
+`*` the one `dom_data_manipulation` claim; attribution by family, not by dispatch record.
+
+## 4. THE EIGHT PREDICTIONS, SCORED
+
+| # | prediction | result | number |
+|---|---|---|---|
+| P1 | planner < 15% of dispatches AND < 20% of tool-seconds | **HALF FALSIFIED** | 8.4% of dispatches (held), **24.9% of tool-seconds (wrong)** |
+| P2 | sweep > 80% of dispatches | **HELD** | 91.6% |
+| P3 | `unique` ~ 0 for all eight HTTP sweep engines | **HELD, exactly 0** | every engine, 0 |
+| P4 | 400 kept of well over 1000 candidates | **HELD** | **400 of 2762 - the cap keeps 14.5%** |
+| P5 | `run_web_probes` ~ 25 dispatches | **FALSIFIED, and worse than predicted** | **0 dispatches** |
+| P6 | owning engine absent for pathtraver/securecookie/weakrand | pending the key | - |
+| P7 | browser engines ~1.6% of dispatches, > 25% of tool-seconds | **HALF FALSIFIED** | 2.7% of dispatches (I said 1.6%), **50.1% of tool-seconds** |
+| P8 | `planner_would_schedule_more` small; 0 kills lever 1 | **HELD** | **2** |
+
+**The two that were wrong are the two worth having.**
+
+**P1's time half.** I expected the planner to be cheap in time as well as in count. It is not: 309
+dispatches cost 451 s, **1.46 s per step**, against the sweep's 0.41 s per dispatch. The planner is
+3.6x more expensive per dispatch than the sweep, because in `active` mode it schedules the browser
+engines (`run_xss` x25, `run_dom_audit` x6) and almost nothing else that costs anything.
+
+**P5.** I predicted 25 and measured **zero**. The cause is `planner.py:175` -
+`_ALLOWED["active"] = {PASSIVE, ACTIVE}` - and `fresh()` drops any step whose tool is not
+`_allowed(tool, mode)`. `run_web_probes` is INTRUSIVE. **In the default `active` mode the planner
+cannot schedule ANY intrusive tool at all**, so the traversal / IDOR / cookie-flag / PRNG engine is
+not under-used, it is **completely dead**. The same gate silences `run_cmdi`, `run_nosqli`,
+`run_ssrf`, `run_bfla`, `run_content_discovery` and `run_ffuf` in the planner.
+
+This also explains why the sweep is the whole story: `_inject_sweep_surface` dispatches through
+`_run_tool` directly, which applies the intrusive HITL gate (pre-authorised on an autonomous run)
+rather than the planner's mode filter. **So `_SWEEP_HTTP_ENGINES` is not "one of two paths" to
+intrusive injection coverage in an active-mode mission. It is the ONLY path.** A class absent from
+that tuple is a class the mission never tests.
+
+## 5. THE TICKET'S TWO LEVERS, ANSWERED
+
+### Lever 1 - `MAX_STEPS`: DEAD, and cheaply
+
+`planner_would_schedule_more = 2`. Batch sizes were `[14, 6, 30, 41, 218]`; the cap is checked at
+the top of the `while`, so the 218-step batch started at step 91 and ran to 309 unimpeded. Asking
+the real planner for one more batch at the final world-state returns **2 steps**.
+
+So the honest reading of "309 steps against a cap of 220" is **not** "cut off 40% past its budget
+with work remaining". It is "one batch overshot the cap by 89, and the planner was 2 steps from its
+fixpoint anyway". Raising `MAX_STEPS` to any value buys **2 dispatches, roughly 3 seconds, and 0
+additional cases** - the planner's reach is bounded by `CAP_ENDPOINTS = 25`, not by `MAX_STEPS`.
+
+**Recommendation: do not raise `MAX_STEPS`.** It is not the coverage lever. (`exit_reason =
+step_cap_exhausted` is still technically true and is what sent this ticket here; it is a true fact
+that pointed at the wrong constant, which is exactly why the marginal-value measurement was
+required before the change.)
+
+### Lever 2 - what fills the steps: two findings, and the ticket's shape is confirmed
+
+**(a) The ticket predicted "a tool that burns 40% of the budget for 3% of the coverage is the
+finding". It exists, and the numbers are almost exactly those.**
+
+`run_xss` is **55 of 3659 dispatches (1.5%)** and **742 s of 1812 attributed tool-seconds
+(41.0%)**. It reached 50 cases, **0 of them uniquely**, and produced **0 of the 18 claims**. Add
+`run_dom_trace` and `run_dom_audit` and the browser trio is **115 dispatches (3.1%) for 1059 s
+(58.5%)** and **1 claim**.
+
+At **13.5 s per `run_xss` call against 0.41 s for an average sweep dispatch, one browser target
+costs 33 HTTP targets.** That is the real budget question, and it is a genuine trade rather than a
+free win: browser confirmation is how reflected and DOM XSS become proof instead of leads, and it
+is validated on Juice Shop and GinAndJuice. This lane measures it and does **not** cut it - trading
+proof for corpus coverage on the strength of one benchmark is precisely the benchmark-fitting this
+project forbids. It is recorded as a priced decision for an owner, not taken unilaterally.
+
+**(b) Engines do not buy coverage at all. `unique = 0` for every single engine.**
+
+All eight HTTP engines ride ONE target list, so their marginal contribution to *cases probed* is
+exactly zero; what they buy is *classes tested per case*. Coverage is bought by exactly one number,
+`SWEEP_TARGET_CAP`, and it is measured keeping **400 of 2762 candidates (14.5%)** - which is the
+85.5%-never-probed figure, arriving from a completely independent direction and matching to within
+a tenth of a point.
+
+That reframes the ticket's brief. The budget is not mostly wasted on the wrong engines; the cheap
+engines are genuinely cheap (`run_css_injection` 0.03 s/target, `run_injection_probes` 0.05,
+`run_ssi` 0.06, `run_sqli_structural` 0.08 - all four together are 4.7% of tool time). The waste is
+concentrated in the browser tier, and the coverage bound is a single constant.
+
+**And the hole is that one of the cheap engines is missing from the list entirely.**
 
 ### Operational note for whoever runs this next
 
