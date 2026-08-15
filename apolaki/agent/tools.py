@@ -124,6 +124,9 @@ TOOL_PERMISSIONS = {
     "run_cache_poison": PermissionLevel.INTRUSIVE,
     "run_cache_deception": PermissionLevel.ACTIVE,
     "run_client_checks": PermissionLevel.PASSIVE,
+    # ACTIVE, not PASSIVE: it opens a TCP connection and replays the session cookie. Read-only
+    # (one Upgrade, one inbound frame, never an application frame), so it is not INTRUSIVE.
+    "run_ws_hijack": PermissionLevel.ACTIVE,
     "run_css_injection": PermissionLevel.ACTIVE,
     "run_waf_bypass": PermissionLevel.ACTIVE,
     "run_sqli_structural": PermissionLevel.INTRUSIVE,
@@ -500,6 +503,26 @@ CLAUDE_TOOLS = [
                      "exposure, field-suggestion leaks, and request batching (brute-force amplification)."),
      "input_schema": {"type": "object", "properties": {
          "url": {"type": "string", "description": "A base URL or a suspected GraphQL endpoint"}}, "required": ["url"]}},
+    # Q-002. ADVERTISED HERE AND DELIBERATELY NOT ADDED TO THE ALWAYS-ON DETERMINISTIC SWEEP. The
+    # engine was implemented, permission-registered and reachable from NOTHING -- `run_ws_hijack` was
+    # the exact `run_external_surface` island the reachability gate exists to catch, and the lane's
+    # handoff had already ticked "wiring" off. Advertising it makes it genuinely callable; putting a
+    # brand-new confirming engine into every mission's always-on path is the move that produced a
+    # measured false positive this week (Q-047), so that step waits for a measurement.
+    {"name": "run_ws_hijack",
+     "description": ("ACTIVE: Test a WebSocket endpoint for Cross-Site WebSocket Hijacking (CWE-1385/346). "
+                     "Discovers ws:// and wss:// endpoints from page/JS content, then performs the RFC 6455 "
+                     "Upgrade handshake carrying the session cookie plus an ATTACKER Origin. Confirms only "
+                     "when the server both completes the handshake with a Sec-WebSocket-Accept derived from "
+                     "our own key AND pushes a frame carrying the same authenticated marker the HTTP session "
+                     "already proved. Runs the cookie-stripped handshake as a negative control and records "
+                     "it; a 101 alone is a lead, never a finding. Read-only: one handshake plus one inbound "
+                     "frame, no application frames are sent."),
+     "input_schema": {"type": "object", "properties": {
+         "url": {"type": "string", "description": "A page URL whose WebSocket endpoints should be tested"},
+         "ws_urls": {"type": "array", "items": {"type": "string"},
+                     "description": "Optional explicit ws:// or wss:// endpoints to test instead of discovery"}},
+         "required": ["url"]}},
     {"name": "run_jwt",
      "description": ("ACTIVE: Analyze and attack a JWT (Bearer token). Decodes header/payload, then runs offline "
                      "attacks: alg:none forge, HMAC weak-secret crack, forges an admin token if the secret cracks, and "
@@ -1089,6 +1112,10 @@ class ToolRegistry:
         # Quarantined rather than discarded: they must never be probed by the general sweep, and the
         # session-lifecycle engine cannot test CWE-613 without knowing where they are. See `_add_urls`.
         self.session_kill_urls: list = []
+        # WebSocket endpoints the CSWSH engine has already handshaked this mission. The engine is
+        # reached from the always-on sweep, which visits many URLs that advertise the SAME socket,
+        # so without this a single-socket app would be re-probed once per swept page.
+        self._ws_tested: set = set()
         # LIVE canonical asset/intelligence graph — grown as observations arrive (see _graph_add_url),
         # so the planner reads a current world model instead of a graph rebuilt only at finalize.
         import asset_graph as _asset_graph
@@ -7783,6 +7810,178 @@ class ToolRegistry:
             if "<" in body and cc.crossdomain_wildcard(body, fn):
                 findings.append(self._attach_poc(cc.crossdomain_finding(pol_url, fn), pol_url, None))
         return ToolResult("client_checks", url, True, "%d client/config finding(s)" % len(findings), findings)
+
+    # Bounded per mission: a target advertising many sockets must not turn the page sweep into a
+    # connection storm. Two handshakes per endpoint (the probe and its negative control).
+    _WS_MAX_ENDPOINTS = 3
+
+    async def _ws_handshake(self, ws_url: str, cookie: str, origin: str) -> dict:
+        """ONE WebSocket handshake. Returns {accepted, frames, status, error}.
+
+        Read-only and non-destructive by construction: it sends the Upgrade, reads the response head
+        and whatever the server pushes unprompted, and closes. It never sends an application frame,
+        so it cannot change state on the other side.
+
+        `accepted` is the RFC 6455 verdict from `ws_tool.handshake_accepted` -- status 101 AND
+        `Upgrade: websocket` AND an accept derived from the key THIS call generated -- not a status
+        check. An error is RECORDED via `_swallow` by the caller and returned, never swallowed into
+        a clean negative: a connection that failed and a server that refused look identical
+        otherwise, and that is the shape of an invisible false negative.
+        """
+        import ws_tool as _cswsh
+        host, port, path = _cswsh.split_ws_url(ws_url)
+        if not host:
+            return {"accepted": False, "frames": [], "status": 0, "error": "unparseable ws url"}
+        if not self.budget.charge(2):
+            return {"accepted": False, "frames": [], "status": 0, "error": "mission request budget exhausted"}
+        key = _cswsh.new_key()
+        writer = None
+        try:
+            await _browser_engine.target_rate_policy.wait_async(ws_url)
+            ssl_ctx = None
+            if ws_url.lower().startswith("wss://"):
+                import ssl as _ssl
+                ssl_ctx = _ssl.create_default_context()
+                ssl_ctx.check_hostname = False
+                ssl_ctx.verify_mode = _ssl.CERT_NONE      # labs and staging use self-signed certs
+            reader, writer = await asyncio.wait_for(
+                asyncio.open_connection(host, port, ssl=ssl_ctx), timeout=8)
+            writer.write(_cswsh.build_handshake(host, path, key, origin=origin, cookie=cookie,
+                                                port=port, extra_headers={"User-Agent": _UA}))
+            await writer.drain()
+            buf = b""
+            while b"\r\n\r\n" not in buf and len(buf) < 16384:
+                chunk = await asyncio.wait_for(reader.read(4096), timeout=8)
+                if not chunk:
+                    break
+                buf += chunk
+            sep = buf.find(b"\r\n\r\n")
+            if sep < 0:
+                return {"accepted": False, "frames": [], "status": 0,
+                        "error": "no complete response head"}
+            parsed = _cswsh.parse_handshake(buf[:sep])
+            accepted = _cswsh.handshake_accepted(parsed, key)
+            # Frame bytes can already be riding in the same TCP segment as the head; keep them.
+            frame_bytes = buf[sep + 4:]
+            if accepted:
+                # Read what the server PUSHES on its own. A short timeout is the whole budget: a
+                # socket that says nothing unprompted has no authenticated data to leak, and we
+                # never send a frame to coax one out.
+                try:
+                    for _ in range(3):
+                        chunk = await asyncio.wait_for(reader.read(8192), timeout=4)
+                        if not chunk:
+                            break
+                        frame_bytes += chunk
+                        if len(frame_bytes) >= 64:
+                            break
+                except asyncio.TimeoutError:
+                    pass                       # silence is a real answer here, not a failure
+            return {"accepted": accepted, "frames": _cswsh.decode_frames(frame_bytes),
+                    "status": parsed.get("status", 0), "error": ""}
+        except Exception as e:
+            return {"accepted": False, "frames": [], "status": 0,
+                    "error": "%s: %s" % (type(e).__name__, str(e)[:120])}
+        finally:
+            if writer is not None:
+                try:
+                    writer.close()
+                except Exception as _e:
+                    self._swallow(_e, "ws_hijack.close", ws_url)
+
+    async def _run_ws_hijack(self, inp: dict) -> ToolResult:
+        """ACTIVE: Cross-Site WebSocket Hijacking (CWE-1385 / CWE-346, WSTG-CLNT-10).
+
+        Sends an HTTP/1.1 Upgrade carrying the persona's session cookie plus a FOREIGN `Origin`, and
+        confirms only when BOTH halves hold: the server completes a real RFC 6455 upgrade (accept
+        derived from the key we sent), AND the first frame it pushes carries an identity marker the
+        HTTP session already proved which the cookie-stripped control does NOT receive.
+
+        The negative control is not optional and not a sentence: every finding carries the recorded
+        result of the byte-identical cookie-less handshake in `negative_controls`.
+
+        Half (a) alone is emitted as a LEAD, never a finding -- most WebSocket servers complete the
+        upgrade and then authorise at the application layer, and Juice Shop's socket.io does exactly
+        that. See ws_tool's module docstring and docs/handoff/realtime.md.
+        """
+        import ws_tool as _cswsh
+        url = inp.get("url") or inp.get("base_url") or ""
+        if url and not self.scope.validate(url)[0]:
+            return ToolResult("ws_hijack", url, False, "", [], "SCOPE BLOCK")
+
+        # Candidates, most trustworthy first: an explicit list (the sweep passes what it already
+        # parsed), then endpoints this page advertises, then the framework defaults -- and the
+        # defaults ONLY on request, so the always-on path never blind-probes paths the app never
+        # mentioned.
+        cands = [u for u in (inp.get("ws_urls") or []) if isinstance(u, str) and u.strip()]
+        content = inp.get("content") or ""
+        if not cands and url:
+            if not content:
+                page = await self._http(url, "GET", capture=False)
+                content = page.get("body", "") or ""
+            cands = _cswsh.discover_ws_urls(content, url)
+            if not cands and inp.get("try_defaults"):
+                cands = _cswsh.default_ws_urls(url)
+        if not cands:
+            return ToolResult("ws_hijack", url, True, "no WebSocket endpoint advertised", [])
+
+        # The ambient credential. An EMPTY cookie is a real input, not a missing one: it means the
+        # session is a Bearer token (Juice Shop) or there is no session, and `evaluate` caps the
+        # verdict at a lead because a browser does not attach Authorization cross-origin.
+        cookie = next((v for k, v in (self.session_headers or {}).items()
+                       if k.lower() == "cookie"), "")
+        markers = _cswsh.identity_markers(
+            [self._known_account()]
+            + [(m or {}).get("identity") or ""
+               for m in (getattr(self.state, "identities", {}) or {}).values()])
+
+        findings, probed = [], []
+        for ws_url in cands[:self._WS_MAX_ENDPOINTS]:
+            http_origin = _cswsh.http_origin_of(ws_url)
+            # Scope is defined over http(s) hosts, so the socket is validated by the origin a
+            # browser would report for it -- a ws:// URL pointing off-scope is dropped here.
+            if not http_origin or not self.scope.validate(http_origin)[0]:
+                continue
+            if ws_url in self._ws_tested:
+                continue
+            self._ws_tested.add(ws_url)
+            probed.append(ws_url)
+
+            authed = await self._ws_handshake(ws_url, cookie, _cswsh.EVIL_ORIGIN)
+            if authed.get("error"):
+                self._swallow(RuntimeError(authed["error"]), "ws_hijack.authed", ws_url)
+            if not authed.get("accepted"):
+                continue                          # nothing upgraded: there is no socket to hijack
+
+            # THE NEGATIVE CONTROL. Byte-identical request, Cookie header removed. It runs before
+            # any verdict is formed, so no finding can exist without it.
+            control = await self._ws_handshake(ws_url, "", _cswsh.EVIL_ORIGIN)
+            if control.get("error"):
+                self._swallow(RuntimeError(control["error"]), "ws_hijack.control", ws_url)
+            control_ev = (
+                "was refused -- no verified RFC 6455 upgrade (HTTP %s%s)"
+                % (control.get("status") or "no response",
+                   ", " + control["error"] if control.get("error") else "")
+                if not control.get("accepted") else
+                "ALSO upgraded, and the frame it received was: %s"
+                % ((_cswsh.frames_text(control.get("frames")) or "(nothing pushed)")[:200]))
+
+            verdict = _cswsh.evaluate(authed, control, markers, had_cookie=bool(cookie))
+            if verdict["verdict"] == _cswsh.CONFIRMED:
+                findings.append(self._attach_poc(
+                    _cswsh.cswsh_finding(ws_url, verdict, _cswsh.EVIL_ORIGIN, control_ev,
+                                         marker_source="the verified session identity"),
+                    http_origin, None))
+            elif verdict["verdict"] == _cswsh.LEAD:
+                findings.append(self._attach_poc(
+                    _cswsh.upgrade_lead(ws_url, verdict, _cswsh.EVIL_ORIGIN, control_ev),
+                    http_origin, None))
+
+        if not probed:
+            return ToolResult("ws_hijack", url, True, "no in-scope WebSocket endpoint to test", [])
+        return ToolResult("ws_hijack", url, True,
+                          "%d WebSocket endpoint(s) handshaked, %d finding(s)/lead(s)"
+                          % (len(probed), len(findings)), findings)
 
     async def _run_waf_bypass(self, inp: dict) -> ToolResult:
         """ACTIVE: WAF inspection-window bypass (CWE-693) — a signature payload the WAF blocks is smuggled past

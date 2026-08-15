@@ -13,12 +13,28 @@ HONESTY RAILS (non-negotiable):
   * The `violated_by` family sets are grounded in the families Apolaki actually emits — an unmapped
     finding family would let a violated property read "verified", which is the one failure mode we refuse.
   * ASVS is a per-objective property model; it is NOT a chain score.
+  * Every `engine` name MUST resolve to something a real dispatcher can reach (Q-012). `ToolRegistry.execute`
+    dispatches `getattr(self, "_" + tool_name)` and the ledger records the REQUESTED tool name — measured, see
+    docs/handoff/asvs.md — so the model must name `run_authz_matrix`, never the `ToolResult` label
+    `authz_matrix`, and never a MODULE (`dependency_intel`, `bizlogic_graph`) that no dispatcher exposes.
+    A phantom engine name silently pins its objective to "not_tested" even on a perfect run.
+  * A capability Apolaki DOES NOT HAVE reports "not_implemented", never "not_tested". "not_tested" reads as
+    "we did not get to it"; conflating the two lets an absent engine hide behind a skipped one. An objective
+    with no engine carries NO_ENGINE plus an explicit reason key (`blocked_reason` for safety-excluded,
+    `not_implemented_reason` for absent capability). A finding still FAILS a not-implemented objective — a
+    demonstrated violation outranks our inability to go looking for it.
 """
 from __future__ import annotations
 
 STANDARD = "OWASP_ASVS"
 VERSION = "5.0-curated-partial"
-STATUSES = ("verified", "attempted", "failed", "not_tested", "not_applicable", "blocked")
+STATUSES = ("verified", "attempted", "failed", "not_tested", "not_applicable", "blocked",
+            "not_implemented")
+
+# Explicit sentinel for "this objective has no engine". Legal ONLY on an objective that also declares
+# `blocked_reason` (safety-excluded) or `not_implemented_reason` (capability absent) — enforced by
+# tests/test_asvs_model.py so the sentinel can never become a quiet way to park a broken name.
+NO_ENGINE = "n/a"
 
 # Curated ASVS-5 verification objectives. `engine` is the Apolaki tool (or tuple of acceptable tool names)
 # that attempts each; a clean run of it (no violating finding) is real evidence the property held. `violated_by`
@@ -35,7 +51,7 @@ OBJECTIVES = (
     {"chapter": "Authentication", "cid": "AUTHN-02", "level": 1,
      "summary": "Authentication cannot be bypassed by injection or forced browsing.",
      "objective": "Confirm the auth schema is not bypassable.",
-     "engine": ("run_auth_sqli", "authz_matrix"), "violated_by": ("auth_bypass", "broken_auth"),
+     "engine": ("run_auth_sqli", "run_authz_matrix"), "violated_by": ("auth_bypass", "broken_auth"),
      "verifiable": True},
     {"chapter": "Authentication", "cid": "AUTHN-03", "level": 1,
      "summary": "Accounts are not enumerable via response/timing discrepancies.",
@@ -44,16 +60,24 @@ OBJECTIVES = (
     {"chapter": "Authentication", "cid": "AUTHN-04", "level": 1,
      "summary": "Credentials are transported only over an encrypted channel.",
      "objective": "Confirm no cleartext credential transport.",
-     "engine": "header_analysis", "violated_by": ("cleartext_transport",), "verifiable": False},
+     # Q-012: was engine "header_analysis" — a name no dispatcher can reach — AND "verifiable": False, so it
+     # fell through to "not_tested" on a perfect run no matter what. Two independent reasons it could never
+     # be verified, one of them the author's own admission. Apolaki has no engine that observes a CREDENTIAL
+     # crossing a cleartext channel: run_transport_posture grades TLS/cert posture for an origin, which is a
+     # different property, and family "cleartext_transport" has zero producers in the tree. Mapping it there
+     # would manufacture a verified. It is a capability we do not have, and it now says so.
+     "engine": NO_ENGINE, "violated_by": ("cleartext_transport",),
+     "not_implemented_reason": ("no engine observes credential transport; run_transport_posture grades TLS "
+                                "posture for an origin, which does not establish this property")},
     {"chapter": "Authentication", "cid": "AUTHN-05", "level": 2,
      "summary": "Repeated failed authentication is rate-limited / locked out.",
      "objective": "Verify anti-automation on login.",
-     "engine": "n/a", "violated_by": (),
+     "engine": NO_ENGINE, "violated_by": (),
      "blocked_reason": "lockout testing needs repeated failed logins (brute) — excluded by no-brute rule"},
     {"chapter": "Authentication", "cid": "AUTHN-06", "level": 2,
      "summary": "Multi-factor authentication is enforced where required.",
      "objective": "Verify MFA presence/enforcement.",
-     "engine": "n/a", "violated_by": (),
+     "engine": NO_ENGINE, "violated_by": (),
      "blocked_reason": "MFA prompts PAUSE the engine (never bypassed), so it is not auto-verified"},
 
     # ── Session Management ──
@@ -64,7 +88,10 @@ OBJECTIVES = (
     {"chapter": "Session Management", "cid": "SESS-02", "level": 1,
      "summary": "Session cookies carry Secure/HttpOnly/SameSite attributes.",
      "objective": "Verify session-cookie hardening flags.",
-     "engine": ("header_analysis", "run_encoded_cookie"), "violated_by": ("cookie_flags",), "verifiable": True},
+     # Q-012: "header_analysis" resolved to nothing. The engine that actually inspects cookie hardening is
+     # run_transport_posture (transport_posture.py:251 grades HttpOnly/Secure/SameSite).
+     "engine": ("run_transport_posture", "run_encoded_cookie"), "violated_by": ("cookie_flags",),
+     "verifiable": True},
     {"chapter": "Session Management", "cid": "SESS-03", "level": 2,
      "summary": "Session identifier is rotated on authentication (no fixation).",
      "objective": "Confirm token rotates on login.",
@@ -78,7 +105,7 @@ OBJECTIVES = (
     {"chapter": "Authorization", "cid": "ATHZ-00", "level": 1,
      "summary": "Access control is enforced end-to-end (no broken access control).",
      "objective": "Confirm no broken-access-control violation was demonstrated.",
-     "engine": ("run_bfla", "confirm_idor", "authz_matrix"),
+     "engine": ("run_bfla", "confirm_idor", "run_authz_matrix"),
      # This is the UMBRELLA access-control property: ANY child access-control violation must fail it too,
      # otherwise it could read "verified" while a child IDOR/BFLA is "failed" (#11 — a self-contradiction).
      # So its violated_by subsumes every specific access-control family (idor/bola/bfla/priv-esc/mass-assign).
@@ -100,7 +127,14 @@ OBJECTIVES = (
     {"chapter": "Authorization", "cid": "ATHZ-04", "level": 2,
      "summary": "Mass-assignment cannot set privileged attributes.",
      "objective": "Confirm mass-assignment protections.",
-     "engine": "run_mass_assignment", "violated_by": ("mass_assignment",), "verifiable": True},
+     # Q-012 / Q-011: `run_mass_assignment` was a phantom — no _run_mass_assignment method, no
+     # TOOL_PERMISSIONS entry, no CLAUDE_TOOLS spec. The only code that over-posts a privileged attribute is
+     # the LAB SOLVER (juiceshop_solvers.py), which is not a general engine. `violated_by` is deliberately
+     # KEPT: if a mass-assignment finding is ever produced, this objective must read "failed" — a
+     # demonstrated violation outranks our inability to go looking for it.
+     "engine": NO_ENGINE, "violated_by": ("mass_assignment",),
+     "not_implemented_reason": ("no general mass-assignment engine exists (Q-011); only the Juice Shop lab "
+                                "solver over-posts a privileged attribute, which is not a product capability")},
 
     # ── Validation, Sanitization, Encoding ──
     {"chapter": "Validation & Encoding", "cid": "VAL-01", "level": 1,
@@ -128,7 +162,9 @@ OBJECTIVES = (
     {"chapter": "Validation & Encoding", "cid": "VAL-06", "level": 2,
      "summary": "Untrusted data is not deserialized into live objects.",
      "objective": "Confirm no insecure deserialization.",
-     "engine": ("run_deserialization", "run_deser"), "violated_by": ("deserialization",), "verifiable": True},
+     # Q-012: dropped the phantom alias "run_deser" (no method/permission/spec). The real engine
+     # `run_deserialization` was already carrying this objective, so its status is unchanged.
+     "engine": "run_deserialization", "violated_by": ("deserialization",), "verifiable": True},
     {"chapter": "Validation & Encoding", "cid": "VAL-07", "level": 2,
      "summary": "LDAP/XPath/NoSQL queries are parameterized (no injection).",
      "objective": "Confirm no directory/query injection.",
@@ -148,7 +184,10 @@ OBJECTIVES = (
     {"chapter": "Configuration & Dependencies", "cid": "CONF-01", "level": 1,
      "summary": "No components with known vulnerabilities are in use.",
      "objective": "Confirm no known-vulnerable component was fingerprinted.",
-     "engine": ("run_fingerprint", "dependency_intel"), "violated_by": ("vulnerable_component",),
+     # Q-012: "dependency_intel" is a MODULE, not a dispatchable tool. Its SCA verdict reaches a mission
+     # through run_js_review, the sole production caller of dependency_intel.vulnerable_component_finding
+     # (tools.py:5534) — i.e. the only engine that can actually emit the family that FAILS this objective.
+     "engine": ("run_fingerprint", "run_js_review"), "violated_by": ("vulnerable_component",),
      "verifiable": True},
 
     # ── API & Web Service ──
@@ -185,7 +224,12 @@ OBJECTIVES = (
     {"chapter": "Business Logic", "cid": "BUSL-01", "level": 2,
      "summary": "Business rules cannot be bypassed by request forgery or workflow skipping.",
      "objective": "Reason about business-logic integrity.",
-     "engine": "bizlogic_graph", "violated_by": ("business_logic",), "verifiable": True,
+     # Q-012: "bizlogic_graph" is a MODULE (bizlogic.py), reachable only from codeintel.py's source-review
+     # lane and a REST endpoint — never from ToolRegistry. The dispatchable engines that exercise business
+     # logic are run_workflow (executes a declarative logic-abuse pack) and test_numeric_abuse, which is the
+     # engine that actually emits family "business_logic" (tools.py:3062). Still attempt_only: business-logic
+     # integrity is inconclusive by nature, so this can reach "attempted" and never "verified".
+     "engine": ("run_workflow", "test_numeric_abuse"), "violated_by": ("business_logic",), "verifiable": True,
      "attempt_only": True},
     {"chapter": "Business Logic", "cid": "BUSL-02", "level": 2,
      "summary": "Sensitive operations are not exploitable via timing/race conditions.",
@@ -228,9 +272,15 @@ def assess(findings: list = None, attempted_engines=None) -> dict:
     """Assess every curated objective. `attempted_engines` is the set of engine/tool names that actually RAN
     this mission (a clean run of a verifiable objective's engine, with no violating finding, => "verified").
 
-    Status precedence: failed (a violating finding exists) > blocked (safety-excluded) > attempted (ran but
-    inconclusive-by-nature) > verified (ran clean) > not_tested. Returns per-objective rows, a tally, and a
-    per-chapter breakdown — with an explicit disclaimer that this is a curated partial model."""
+    Status precedence: failed (a violating finding exists) > not_implemented (Apolaki has no engine for this
+    property) > blocked (safety-excluded) > attempted (ran but inconclusive-by-nature) > verified (ran clean)
+    > not_tested. Returns per-objective rows, a tally, and a per-chapter breakdown — with an explicit
+    disclaimer that this is a curated partial model.
+
+    `failed` outranks `not_implemented` on purpose: a violation someone else demonstrated (a lab solver, an
+    imported finding, a human) is still a violation, and must never be hidden behind "we have no engine".
+    `not_implemented` outranks everything below it because an absent capability is a property of the PRODUCT,
+    not of this mission — no amount of engines running can change it."""
     findings = findings or []
     ran = set(attempted_engines or ())
     violations = map_findings(findings)
@@ -240,6 +290,8 @@ def assess(findings: list = None, attempted_engines=None) -> dict:
         finding_ids = violations.get(cid, [])
         if finding_ids:
             status = "failed"
+        elif obj.get("not_implemented_reason"):
+            status = "not_implemented"
         elif obj.get("blocked_reason"):
             status = "blocked"
         elif _engine_ran(obj, ran) and obj.get("verifiable"):
@@ -254,6 +306,10 @@ def assess(findings: list = None, attempted_engines=None) -> dict:
         }
         if obj.get("blocked_reason"):
             row["blocked_reason"] = obj["blocked_reason"]
+        if obj.get("not_implemented_reason"):
+            # Carried on the row so a reader is told WHY the property is unassessed, and can tell an absent
+            # capability apart from a skipped one without reading this module.
+            row["not_implemented_reason"] = obj["not_implemented_reason"]
         rows.append(row)
         tally[status] += 1
         ch = chapters.setdefault(obj["chapter"], {s: 0 for s in STATUSES})

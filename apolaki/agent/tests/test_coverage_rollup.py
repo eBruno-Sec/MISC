@@ -12,8 +12,26 @@ def test_rollup_buckets_from_asvs():
     assert p["vulnerable"] >= 1                      # the idor fails its access-control objective(s)
     assert p["confirmed_safe"] >= 1                  # sqli/xss engines ran clean -> those properties verified
     assert p["blocked"] >= 1                         # lockout/MFA are safety-blocked
-    assert p["total"] == p["confirmed_safe"] + p["vulnerable"] + p["inconclusive"] + p["blocked"] + p["not_tested"]
+    # The accounting identity, now including `not_implemented` (Q-012). It is a SIXTH bucket rather
+    # than part of `not_tested` on purpose: a property Apolaki has no engine for is a different claim
+    # to a reader than one it merely did not reach. The identity is what keeps the split honest -- a
+    # status that fell out of every bucket would silently shrink the reported model.
+    assert p["total"] == (p["confirmed_safe"] + p["vulnerable"] + p["inconclusive"]
+                          + p["blocked"] + p["not_tested"] + p["not_implemented"])
     assert 0 <= p["tested_pct"] <= 100
+
+
+def test_not_implemented_is_never_folded_into_not_tested():
+    """The distinction Q-012 exists to make, asserted at the rollup layer too. `not_implemented`
+    stays in the `total` and in the `tested_pct` denominator -- a property we cannot test is not
+    tested, and hiding it would inflate the coverage percentage."""
+    import asvs_model
+    absent = [o for o in asvs_model.OBJECTIVES if o.get("not_implemented_reason")]
+    assert absent, "precondition: the model declares at least one absent capability"
+
+    p = report.coverage_rollup([], tool_ledger={})["properties"]
+    assert p["not_implemented"] == len(absent), (p["not_implemented"], len(absent))
+    assert p["not_implemented"] >= 1 and "not_implemented" in p
 
 
 def test_rollup_carries_wstg_and_never_claims_full():

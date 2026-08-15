@@ -31,6 +31,13 @@ APP_DIR = os.path.dirname(os.path.abspath(__file__))
 # Each mutant WEAKENS an FP guard. The exact node id is load-bearing: a collection error, broken fixture,
 # or unrelated failing test must not be credited with killing the mutant.
 MUTANTS = [
+    # Q-002. Added when ws_tool.py landed, so the confirmed-producer ceiling stays 46 by EARNING it
+    # rather than by raising it. This is the guard that separates CSWSH from "a WebSocket exists":
+    # drop it and a socket pushing PUBLIC data confirms as a hijack, which is precisely the class of
+    # error that made the traversal engine confirm on reflective endpoints.
+    ("ws_tool.py", "evaluate: drop the cookie-stripped control — public pushed data would confirm as CSWSH",
+     r'if c_hit:', 'if False:',
+     "tests/test_ws_tool.py::test_a_public_socket_is_clean_because_the_control_got_the_same_marker"),
     ("bie.py", "judge: drop the anonymous control — public data would confirm as BOLA",
      r'if _s\(anon\) == 200 and _b\(anon\) == base_b:', 'if False:',
      "tests/test_bie.py::test_rejects_public_resource"),

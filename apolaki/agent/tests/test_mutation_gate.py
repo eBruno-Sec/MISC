@@ -18,6 +18,21 @@ AGENT_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 _KNOWN_UNMUTATED_CONFIRMED_PRODUCERS = 46
 
 
+def _a_mutant_for(module):
+    """The first registered mutant targeting `module`, by NAME rather than by index.
+
+    These tests used `MUTANTS[0]` while also hardcoding `bie.py` as the file to check, so the list's
+    ORDER was load-bearing without saying so. Adding a mutant at the front (ws_tool.py, Q-002) made
+    `_apply` silently no-op against bie.py and two unrelated tests failed. Selecting by module means
+    the registry can be extended in any order -- and a test that pins an index is a test that fails
+    for a reason unrelated to what it is about.
+    """
+    for m in mg.MUTANTS:
+        if m[0] == module:
+            return m
+    raise AssertionError("no mutant registered for %s" % module)
+
+
 def _literal(node, value):
     return isinstance(node, ast.Constant) and node.value == value
 
@@ -123,7 +138,7 @@ def test_the_gate_restores_every_file_it_touches():
     """A mutation run that leaves a mutated file behind would poison the repo."""
     path = os.path.join(mg.APP_DIR, "bie.py")
     before = open(path, encoding="utf8").read()
-    mg.run([mg.MUTANTS[0]])
+    mg.run([_a_mutant_for("bie.py")])
     assert open(path, encoding="utf8").read() == before
     assert not os.path.exists(path + ".mutbak")
 
@@ -138,8 +153,8 @@ def test_a_crashed_run_is_recovered_before_the_next_one_applies_anything():
     what the running scanner uses until someone rebuilds."""
     path = os.path.join(mg.APP_DIR, "bie.py")
     original = open(path, encoding="utf8").read()
-    module, desc, pattern, repl, tests = mg.MUTANTS[0]
-    assert module == "bie.py", "this test pins MUTANTS[0]; update it if the order changed"
+    module, desc, pattern, repl, tests = _a_mutant_for("bie.py")
+    assert module == "bie.py"
 
     # Simulate the crash: apply the mutant, then do NOT restore.
     assert mg._apply(path, pattern, repl)
@@ -161,7 +176,7 @@ def test_a_recovery_is_reported_not_silent():
     """Recovering is not the same as nothing having gone wrong — the run must say so."""
     path = os.path.join(mg.APP_DIR, "bie.py")
     original = open(path, encoding="utf8").read()
-    module, desc, pattern, repl, tests = mg.MUTANTS[0]
+    module, desc, pattern, repl, tests = _a_mutant_for("bie.py")
     assert mg._apply(path, pattern, repl)
     try:
         res = mg.run([])                        # no mutants: exercises only the recovery step

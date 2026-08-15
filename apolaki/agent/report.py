@@ -302,6 +302,13 @@ def coverage_rollup(findings: list, tool_ledger: dict, candidate_validation: dic
             "inconclusive": t.get("attempted", 0),
             "blocked": t.get("blocked", 0),
             "not_tested": t.get("not_tested", 0) + t.get("not_applicable", 0),
+            # Q-012: `not_implemented` gets its OWN bucket and is deliberately NOT folded into
+            # `not_tested`. "Not tested" reads as "we did not get to it"; a capability the product
+            # does not have is a different statement to a reader deciding what this report covers,
+            # and collapsing the two lets an absent engine hide behind a skipped one. That
+            # distinction is the entire point of the status, so the rollup must not undo it one
+            # layer up -- the same "second copy of the rule" defect as Q-015.
+            "not_implemented": t.get("not_implemented", 0),
             "total": total,
             "tested_pct": round(100.0 * (t.get("verified", 0) + t.get("failed", 0) + t.get("attempted", 0))
                                 / total, 1) if total else 0.0,

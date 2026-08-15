@@ -1,11 +1,10 @@
-"""The sweep budget is rationed PER SHAPE, not per candidate -- and that is the whole of the
-21 -> 11 sqli recall loss.
+"""The sweep budget is rationed PER SHAPE, and that is the whole of the 21 -> 11 sqli recall loss.
 
 DIAGNOSIS (docs/handoff/sqli.md, BREAKER lane). Between the sealed baseline `ebd96f45` and both
 reruns since (seals `e6674d6d`, `82f55903`) the `sqli` family went 21 findings -> 11. Ten cases were
 dropped, the same ten in both reruns:
 
-    00335 00337 00339 00341 00342 00428 00429 00433 00438   (nine true positives)
+    00335 00337 00339 00341 00342 00428 00429 00433 00438   (nine true positives, CWE-89)
     00494                                                    (the baseline's one false positive)
 
 MEASURED from the rerun's own `coverage` block: nine of the ten received ZERO tool dispatches. The
@@ -14,32 +13,29 @@ list that did not contain their URLs. The tenth, 00494, was touched only by `run
 
 THE MECHANISM. `target_shape()` collapses every digit run to `#`, so an application whose whole
 surface is one URL template over N category directories collapses to N shapes. `_spread_by_shape()`
-then round-robins the `SWEEP_TARGET_CAP` budget across those shapes, which spends it EVENLY BY SHAPE
-rather than proportionally by shape size. On the OWASP Benchmark that is 11 shapes holding 27 to 456
-candidates each, and every one of them received ~37 slots: the 27-candidate class was covered 100%,
-the 456-candidate class 8.1%. All 11 surviving sqli claims sit at shape-group indices 1..28 and all
-nine lost cases at 38..58 -- a pure ordinal cut, with zero exceptions in either direction.
+then round-robins the `SWEEP_TARGET_CAP` budget across those shapes. On the OWASP Benchmark that is
+11 shapes holding 27 to 456 candidates each, and every one drew ~37 slots: the 27-candidate class
+was covered 100%, the 456-candidate class 8.1%. All 11 surviving sqli claims sit at shape-group
+indices 1..28 and all nine lost cases at 38..58 -- a pure ordinal cut, no exceptions either side.
 
-WHY THE ROUND-ROBIN IS STILL RIGHT. It is not a bug to be reverted. It replaced a truncation in
-discovery order that spent the entire budget inside the first directory the crawl walked, which is
-strictly worse. What is wrong is the RATION: a class holding 18% of the candidates and a class
-holding 1% draw the same slot count, so the fix is a proportional (or at least size-aware) split,
-not the removal of the spread.
+THE EVEN RATION IS CORRECT AND MUST NOT BE MADE PROPORTIONAL. This file originally carried a strict
+xfail demanding that budget share track candidate share. That demand was MEASURED and WITHDRAWN:
+vulnerability density is ~51% in every class, so at a fixed budget no partition reaches more than
+~230 vulnerable cases, and a proportional split scores 226 against the even split's 228. Under the
+macro-averaging this project mandates it is far worse -- 17.8% reachable recall against 34.1%,
+roughly half -- because the even ration is what buys the small classes complete coverage. See
+docs/handoff/sqli.md section 4 for the numbers. The recall loss is the PRICE of a policy that is
+right on the metric, and the only lever that moves both macro and micro is `SWEEP_TARGET_CAP`
+itself (400 -> 650 is +13.8 macro, +10.7 micro, and costs no class anything).
 
-These tests drive the REAL `agent.sweep_targets` on SYNTHETIC urls. They assert a property of the
-selection function -- no OWASP Benchmark path, case id or category name appears in any assertion, so
-nothing here can degrade into a benchmark-specific signature.
+So the tests below lock the mechanism and the small-class guarantee, and deliberately do NOT
+assert proportionality. They drive the REAL `agent.sweep_targets` on SYNTHETIC urls: no OWASP
+Benchmark path, case id or category name appears in any assertion, so nothing here can degrade
+into a benchmark-specific signature.
 """
 from __future__ import annotations
 
-import pytest
-
 import agent as agent_mod
-
-#: Why the proportionality test does not hold today. One string so the two halves cannot drift.
-_RATION = ("_spread_by_shape rations the sweep budget evenly across shapes, so a class holding "
-           "18% of the candidate surface draws the same slots as one holding 1%. This is the "
-           "measured cause of the sqli 21 -> 11 recall loss (docs/handoff/sqli.md).")
 
 #: A surface shaped like a generated test-suite: many sibling directories, ONE url template, class
 #: sizes deliberately lopsided. Sizes mirror the real spread (smallest 27, largest 456) without
@@ -47,6 +43,8 @@ _RATION = ("_spread_by_shape rations the sweep budget evenly across shapes, so a
 _CLASS_SIZES = {"alpha": 456, "bravo": 455, "charlie": 448, "delta": 241, "echo": 232,
                 "foxtrot": 225, "golf": 214, "hotel": 112, "india": 60, "juliet": 54,
                 "kilo": 27}
+
+_CAP = 400
 
 
 def _surface():
@@ -82,14 +80,14 @@ def test_the_surface_really_does_collapse_to_one_shape_per_class():
 def test_the_selection_is_deterministic():
     """The platform's standing property, and the reason the same ten cases were lost on BOTH
     reruns rather than a random ten each time."""
-    assert _select(_surface(), 400) == _select(_surface(), 400)
+    assert _select(_surface(), _CAP) == _select(_surface(), _CAP)
 
 
 def test_a_budget_cut_truncates_each_class_as_a_PREFIX_of_its_own_order():
     """The shape of the loss. Within a class nothing is sampled or skipped -- the cut is an ordinal
     boundary, so case N is tested and case N+1 is not for no reason but their position. This is what
-    makes the lost set stable across reruns and invisible to any per-case reasoning."""
-    selected = set(_select(_surface(), 400))
+    made the lost set identical across reruns and invisible to any per-case reasoning."""
+    selected = set(_select(_surface(), _CAP))
     members = [u for u in _surface() if u.startswith("https://t/app/alpha-00/")]
     taken = [i for i, u in enumerate(members) if u in selected]
     assert taken, "the largest class received no slots at all"
@@ -99,26 +97,18 @@ def test_a_budget_cut_truncates_each_class_as_a_PREFIX_of_its_own_order():
 
 def test_no_class_is_starved_to_zero_and_the_whole_budget_is_spent():
     """Policy-agnostic floor. Whatever the ration is, a truncated sweep must reach every class that
-    has candidates and must not leave budget unspent -- both true of the even round-robin and of any
-    size-aware replacement, so this keeps its meaning across the fix rather than freezing today's
-    numbers in place."""
-    selected = _select(_surface(), 400)
-    assert len(selected) == 400, "budget under-spent: %d of 400" % len(selected)
+    has candidates and must not leave budget unspent."""
+    selected = _select(_surface(), _CAP)
+    assert len(selected) == _CAP, "budget under-spent: %d of %d" % (len(selected), _CAP)
     got = _by_class(selected)
     missing = sorted(c for c in _CLASS_SIZES if not got.get(c))
     assert not missing, "class(es) received no slots at all: %s" % missing
 
 
 def test_a_larger_class_never_receives_fewer_slots_than_a_smaller_one():
-    """Monotonicity, the weakest form of size-awareness. The even round-robin satisfies it only by
-    accident -- a class smaller than the per-shape quota simply exhausts -- so this does NOT stand in
-    for the proportionality invariant below. It is here to catch a ration that actively inverts.
-
-    NOTE for whoever fixes this: the defect is that today's ration gives the 456-candidate class and
-    the 60-candidate class the SAME ~37 slots. That measurement lives in docs/handoff/sqli.md and is
-    deliberately NOT asserted anywhere in this file, because a test that pins the disparity would
-    fail on the day it is repaired."""
-    got = _by_class(_select(_surface(), 400))
+    """Monotonicity. The even round-robin satisfies it only because a class smaller than the
+    per-shape quota simply exhausts, so this is a floor and not a size-awareness claim."""
+    got = _by_class(_select(_surface(), _CAP))
     order = sorted(_CLASS_SIZES, key=_CLASS_SIZES.get)
     for smaller, larger in zip(order, order[1:]):
         assert got.get(larger, 0) >= got.get(smaller, 0), (
@@ -127,37 +117,39 @@ def test_a_larger_class_never_receives_fewer_slots_than_a_smaller_one():
                smaller, _CLASS_SIZES[smaller], got.get(smaller, 0)))
 
 
+def test_every_class_smaller_than_its_quota_is_covered_COMPLETELY():
+    """THE invariant a proportional ration would destroy, and the reason the even one is kept.
+
+    A class that fits inside its share of the budget must be tested exhaustively. This is what makes
+    the macro-averaged reachable recall 34.1% instead of 17.8%: the small classes are finished, and
+    finishing them costs the large classes only slots they could never have converted into complete
+    coverage anyway. MEASURED against a size-proportional `_spread_by_shape` mutant, which drops the
+    smallest class from 100% to 14.8% and fails here -- so this test detects the change it forbids.
+
+    It does NOT forbid every future improvement: a scheme that finishes the small classes first and
+    then distributes the remainder by size still passes. It forbids only the naive proportional
+    split, which measurement says is a regression (docs/handoff/sqli.md section 4)."""
+    got = _by_class(_select(_surface(), _CAP))
+    quota = _CAP / len(_CLASS_SIZES)
+    checked = 0
+    for cls, size in _CLASS_SIZES.items():
+        if size <= quota:
+            checked += 1
+            assert got.get(cls, 0) == size, (
+                "class %s holds %d candidate(s), under the %.0f-slot quota, but only %d were "
+                "selected -- a class that fits in its share must be finished"
+                % (cls, size, quota, got.get(cls, 0)))
+    assert checked, "no class was under quota; this test asserted nothing"
+
+
 def test_raising_the_cap_is_the_only_lever_that_moves_a_starved_class():
-    """Why 'raise MAX_STEPS' bought nothing. The bound on a large class is SWEEP_TARGET_CAP divided
-    by the shape count, so its coverage responds to the cap and to nothing else."""
+    """Why 'raise MAX_STEPS' bought nothing, and why SWEEP_TARGET_CAP is the recommendation. The
+    bound on a large class is the cap divided by the shape count, so its coverage responds to the
+    cap and to nothing else."""
     surface = _surface()
     large = max(_CLASS_SIZES, key=_CLASS_SIZES.get)
-    at400 = _by_class(_select(surface, 400)).get(large, 0)
-    at800 = _by_class(_select(surface, 800)).get(large, 0)
-    assert at800 > at400, (
+    at_cap = _by_class(_select(surface, _CAP)).get(large, 0)
+    at_double = _by_class(_select(surface, _CAP * 2)).get(large, 0)
+    assert at_double > at_cap, (
         "doubling the sweep cap did not increase the starved class's coverage (%d -> %d)"
-        % (at400, at800))
-
-
-@pytest.mark.xfail(strict=True, reason=_RATION)
-def test_budget_share_tracks_candidate_share():
-    """THE invariant this lane says is missing. A class holding X% of the parameterized surface
-    should receive a budget share of roughly X%, so that truncating a scan degrades every class
-    proportionally instead of testing the rarest class exhaustively and the commonest hardly at all.
-
-    Tolerance is deliberately loose (a factor of two either way): the claim is that the ration is
-    size-AWARE, not that it is exact. Strict xfail so that the day a size-aware split lands, the
-    unexpected pass fails the suite and forces this file and docs/handoff/sqli.md to be updated
-    together rather than silently diverging."""
-    surface = _surface()
-    total = len(surface)
-    limit = 400
-    got = _by_class(_select(surface, limit))
-    offenders = []
-    for cls, size in _CLASS_SIZES.items():
-        want = limit * size / total
-        have = got.get(cls, 0)
-        if have < want / 2 or have > want * 2:
-            offenders.append("%s: %d slot(s) for %d candidate(s), proportional share %.1f"
-                             % (cls, have, size, want))
-    assert not offenders, "%d class(es) off proportional share: %s" % (len(offenders), offenders)
+        % (at_cap, at_double))
