@@ -339,6 +339,49 @@ defend.
 
 ---
 
+## ★ fp42 CLOSED — the traversal oracle was reading a random number. 2026-08-15
+
+The wp2 false positive I recorded as "unexplained" is explained, and my inability to reproduce it was
+itself the clue. **Three facts that only combine inside a mission:**
+
+**(a) `ToolRegistry._http` builds a NEW httpx client per request.** No cookie is carried, so EVERY
+request to `weakrand-00/BenchmarkTest00042` is a first request, each returning a fresh
+`SecureRandom.nextInt()`. **Under the engine's transport the page is fresh-random per request; under a
+hand-driven shared client it is deterministic.** That is exactly why my standalone repro saw nothing —
+I was testing a different page behaviour than the engine sees, and concluded "cannot be reproduced"
+when I should have concluded "my harness differs from the transport".
+
+**(b) The determinism control asked the wrong question.** It ran
+`unexplained_divergence(absent_a, absent_b)`, which yields a snippet only when a diff chunk holds ≥3
+alphanumerics. `SequenceMatcher` chops two random 9–10 digit integers into 1–2 character chunks, so
+**MEASURED over 5000 draws from a pool of 300 real responses: a page whose 300/300 responses were
+DISTINCT was certified deterministic 3.38% of the time and confirmed traversal 2.98%.** Masking the
+integer dropped confirmations to **0/5000** — the integer was the entire cause.
+
+**(c) Q-047's repeat control is a control for STATE, not for RANDOMNESS.** A per-request artifact makes
+the repeat diverge from the absent pair exactly as the original did, so `holds` was satisfied and the
+reason even gained the words *"it REPRODUCED"*. **A control that was correct for the defect it was
+built for, silently wrong for its mirror image.**
+
+**Fixed on both halves**, because an oracle with two measured false positives has earned defence in
+depth: the determinism control now demands **equality** of the redacted bodies (its docstring already
+said the absent pair must "agree once the echo is redacted" — the code was asking something weaker
+than the sentence describing it), and the repeat must **reproduce** the original `exists` rather than
+merely still differ from the absents. A file system serves the same bytes twice; a random page does
+not.
+
+**Verified three ways:** the recorded-response test fails 2/7 against the shipped oracle and passes
+after; every existing traversal oracle test still passes, so this is not a fix by amputation; and
+**live against the lab, 40 trials driving the real engine at the page the mission actually scanned:
+0 confirmed traversal findings, against the lane's measured 4/40 before.**
+
+**The generalisable lesson is (a), not the oracle.** When a defect reproduces in production and not on
+the bench, suspect the transport before concluding the report was wrong. I had the negative result —
+"engine returns 0 findings standalone" — and read it as evidence about the oracle when it was evidence
+about my client.
+
+---
+
 ## ★ Q-049 CLOSED — the budget was the lever, and it recovered the nine. 2026-08-15
 
 `SWEEP_TARGET_CAP` 400 -> 700. One variable; `run_web_probes` stayed out of the sweep and the Q-047

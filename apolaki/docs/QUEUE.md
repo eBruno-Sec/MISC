@@ -10,7 +10,8 @@ bottleneck, so exactly ONE lane holds it.
 |---|---|---|
 | **Builder · massassign** | `agent/mass_assign_tool.py` (new) · `agent/tools.py` · `agent/engine_descriptor.py` · `agent/wstg_catalog.py` · `agent/tests/test_mass_assign_tool.py` (new) · `docs/handoff/massassign.md` | **Q-011** — `mass_assignment` is declared in three catalogs and implemented nowhere |
 | **Builder · asvsproducers** | `agent/asvs_model.py` · `agent/tests/test_asvs_model.py` · `docs/handoff/asvsproducers.md` | **Q-048** — an objective whose `violated_by` family has no producer can never FAIL |
-| **Breaker · fp42** | `docs/handoff/fp42.md` · `agent/tests/test_traversal_state_fp.py` (new) | the `00042` traversal FP: reproduces in a mission, not standalone |
+| ~~**Breaker · fp42**~~ | **CLOSED** — root cause was the TRANSPORT (`_http` builds a new client per request, so a stateful page is fresh-random every time), a determinism control asking for "no nameable divergence" instead of equality (3.38% false-pass, MEASURED), and Q-047's repeat being a control for state rather than randomness. Fixed both halves; **live 0/40 against a measured 4/40** | |
+| ~~**Builder · massassign**~~ | **oracle landed + DRIVER wired by the Coordinator** after the lane died mid-implementation. `_run_mass_assign` does baseline read -> injected write -> SEPARATE re-read -> invented-control write; INTRUSIVE because it writes; advertised in `CLAUDE_TOOLS`; mutant added so the ceiling stays 46 | **Q-011 still needs LIVE VALIDATION against a real app** |
 | **Coordinator (main thread)** | `docs/QUEUE.md` · `docs/STATUS.md` · `docs/LEDGERS.md` · `docs/benchmarks/` · `agent/report.py` · `agent/main.py` · `agent/db.py` · `agent/web_security.py` · `agent/agent.py` · `scripts/` | score wp3 against its pre-registered conditions, ledgers, sequencing |
 
 Note `agent/web_security.py` is Coordinator-held this cycle: the fp42 lane will likely want the
