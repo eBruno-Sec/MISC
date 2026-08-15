@@ -94,6 +94,45 @@ pushed as `b1d56eb`.
   reachability gate after the handoff had already claimed the wiring was done.
 - **Q-017 CLOSED**, **Q-045/Q-046 CLOSED**, **Q-015/Q-016 CLOSED**, **Q-013/Q-014 CLOSED**.
 
+### Q-050 · **32 of 92 engines have NEVER EXECUTED in 151 missions** · **HIGH** · `proposed`
+
+Raised by Erwin: "are all tools being used harmoniously?" MEASURED rather than answered — 29,109 tool
+calls across 151 stored missions, 67 distinct tools ever executed, 92 engines defined.
+
+**The browser driver and dev tools ARE properly used** and that half of the question is settled:
+`run_xss` 1344 calls, `run_dom_audit` 892, `run_dom_trace` 797, plus the CDP/Playwright BIE work. The
+browser tier is 3.1% of dispatches for **58.5% of tool-seconds**, which is a cost decision already
+priced and deliberately kept (browser confirmation is how XSS becomes proof rather than a lead).
+
+**The other half is not fine. 32 engines have never run once**, and there are TWO distinct causes:
+
+**(a) INTRUSIVE engines are unreachable in the default `active` mode.** `planner._ALLOWED["active"] =
+{PASSIVE, ACTIVE}` excludes INTRUSIVE entirely, so the ONLY path to an intrusive engine is membership
+of `_SWEEP_HTTP_ENGINES` — a tuple of eight. Everything intrusive outside that tuple cannot be
+scheduled at all. **`run_cmdi` is INTRUSIVE and not in the tuple, so command injection — a core OWASP
+class with a full engine and its own oracle — has executed ZERO times in 151 missions.** Same for
+`run_zap`, `run_nosqlmap`, and others.
+
+**(b) ACTIVE engines that ARE reachable and simply never get selected**: `run_jwt`, `run_saml`,
+`run_enumerate_ids`, `run_default_creds`, `run_metadata`, `run_jsonp`, `run_session_lifecycle`,
+`run_workflow`, `run_external_surface`, and the content-discovery trio
+(`run_dirsearch`/`run_ferox`/`run_gobuster`). These are a selection/precondition problem, NOT a
+permission one, and must not be lumped in with (a).
+
+14 more are network/ICS engines needing a non-web target (`run_nmap`, `run_ssh_audit`,
+`run_smb_enum`, `run_modbus_audit`...). Defensible that they have not fired on web missions — but it
+also means they are unvalidated in practice, which is the `validated_on` lane's problem.
+
+**DoD**: (a) and (b) separated with a fix for each; a liveness-style ratchet that FAILS when an engine
+goes a full mission-suite without executing; and `run_cmdi` executing in a real active mission. **Do
+NOT fix this by adding everything to the sweep tuple** — wp1 measured what happens when an unproven
+engine joins the always-on path.
+
+**This is the honest answer to "it better be working the way I wanted": two thirds of the arsenal is
+wired and firing, and one third has never been asked to do anything.**
+
+---
+
 **TOP OF THE QUEUE — Q-049 first, it is worth nine cases:**
 
 - **Q-049 · FALSIFIED as written, and re-aimed. The lever is `SWEEP_TARGET_CAP`, not the allocator.**
