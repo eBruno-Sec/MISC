@@ -94,6 +94,30 @@ pushed as `b1d56eb`.
   reachability gate after the handoff had already claimed the wiring was done.
 - **Q-017 CLOSED**, **Q-045/Q-046 CLOSED**, **Q-015/Q-016 CLOSED**, **Q-013/Q-014 CLOSED**.
 
+### Q-053 · Four findings-plumbing gaps the Q-048 lane refused to paper over · **MEDIUM** · `proposed`
+
+Handed over as tickets rather than quiet re-points, with patches already written in
+`docs/handoff/asvsproducers.md`. Each is a real product gap, not a mapping preference.
+
+- **GAP-1 · `takeover` is DETECTED and can never be REPORTED.** Subdomain-takeover candidates carry no
+  `family`, so they never become findings. COMM-04's `violated_by` is therefore unreachable by
+  construction — the objective was honest and the plumbing was not.
+- **GAP-2 · dalfox findings carry no `family` AT ALL.** They are invisible to `map_findings` entirely,
+  not merely to VAL-03. An integrated scanner whose output cannot be classified is a scanner whose
+  output does not exist downstream.
+- **GAP-3 · a confirmed AUTH BYPASS is labelled `sqli`.** `sqli_tool._base` stamps `family: "sqli"` on
+  every finding it builds, including the auth-bypass oracle. The finding is real and its family is a
+  lie, which is why AUTHN-02 cannot be mapped without making every SQLi fail it.
+- **GAP-4 · `transport_posture` shares `security_misconfig`** across cookie, header and methods
+  findings, so no objective can key on any one of them without catching the other two.
+
+**Common root**: `family` is assigned per-MODULE rather than per-FINDING, so one engine that proves
+three different properties emits one label — and an objective keyed to that label either over-fails or
+cannot be keyed at all. **Do not fix by adding families to the ASVS map**; fix where the finding is
+built, which is the same "bind the value at the point it is known" rule as Q-046 and Q-051.
+
+---
+
 ### Q-052 · The permission model is enforced in the PLANNER and not in the DISPATCHER, so `active` and `full` are the same mission · **HIGH** · `proposed`
 
 Found while trying to fix Q-050, and **it corrects Q-050's stated mechanism, which was mine and was

@@ -339,6 +339,59 @@ defend.
 
 ---
 
+## ★ Q-048 CLOSED — six objectives could never FAIL, and four failed on SPELLING. 2026-08-15
+
+A family-producer map built from source with `ast` (per function, which `family` values it can emit,
+closed over the call graph) found **6 ASVS objectives that read `verified` in every possible run**:
+
+| cid | declared `violated_by` | what its engines actually emit |
+|---|---|---|
+| AUTHN-01 | `default_creds` | `default_credentials` |
+| AUTHN-03 | `username_enum` | `username_enumeration` |
+| SESS-01 | `weak_session`, `predictable_token` | `weak_session_token` |
+| SESS-02 | `cookie_flags` | `security_misconfig` / `base64_param` |
+| AUTHN-02 | `auth_bypass`, `broken_auth` | `sqli` / `idor`, `excessive_data_exposure` |
+| COMM-04 | `takeover` | nothing at all |
+
+**Four of the six are NEAR-MISS NAMES, and that is worse than a phantom engine.** A phantom fails
+loudly the moment anyone looks for the executor. `default_creds` vs `default_credentials` fails
+silently and in the flattering direction: the right engine runs, finds the real vulnerability, emits
+its family — and the objective still reads `verified` because two strings differ by five characters.
+**A new shape for the collection: string identity across a module boundary, with no compiler,
+no test, and a default that reads as success.**
+
+**THE TALLY DID NOT MOVE — 27/33 (81.8%) before and after, byte-identical — and the lane said plainly
+that this is a coincidence, not a success.** COMM-04 left `verified` for `not_implemented` (worse, and
+correctly worse); ATHZ-04 moved the other way for unrelated reasons. The real change is invisible in
+the headline: **6 of the 27 "verified" previously could not fail; now 26 can be contradicted by a
+family a real engine emits.** A coverage number that cannot move while the thing it measures improves
+is itself worth knowing about.
+
+**The generalisation, which is the durable part:** *Q-012 fixed the declaration and left the fact
+untouched — it proved every engine could **RUN** and never asked whether it could **FAIL**. SESS-02 was
+touched by that very repair and came out still unfailable.* **Reachability is not capability.** That is
+the sixth instance of a guard checking a declaration, and the first where the previous fix for the
+same defect walked straight past it.
+
+**My brief was wrong three times and the lane was right each time**, including a claim I repeated in
+the resume message after the ticket had already been corrected once: **ATHZ-04 does not name
+`run_mass_assignment`** — it carried `NO_ENGINE`, and Q-011 shipped the engine under a *different*
+name, `run_mass_assign`. Third instance of a Coordinator citation being a claim rather than evidence.
+**The lane also caught its OWN error** (it initially reported VAL-08 unfailable; its analyser missed
+literals passed positionally into `_base(..., family, ...)`), and disclosed that one of its three
+analyser defects *over*-attributed families, which weakens the ratchet — with a negative control
+proving no repair depended on it.
+
+**Two re-points were REFUSED for spurious-FAIL risk**, which is the discipline working in the
+unglamorous direction: mapping SESS-02 to `security_misconfig` would make a missing header fail a
+cookie objective, and mapping AUTHN-02 to `sqli` would make every SQL injection fail "authentication
+cannot be bypassed". Consequence stated rather than hidden: **SESS-02's summary is narrowed to CWE-614
+rather than overclaiming.**
+
+Four residual gaps are filed as tickets rather than quietly re-pointed — see Q-053.
+
+---
+
 ## ★ THE ARSENAL IS REAL; THE BOOKKEEPING AROUND IT IS NOT. 2026-08-15
 
 Erwin asked whether every tool is actually being used, and whether Apolaki works the way he wanted
