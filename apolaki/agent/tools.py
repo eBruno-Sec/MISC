@@ -102,6 +102,9 @@ TOOL_PERMISSIONS = {
     "run_ffuf": PermissionLevel.INTRUSIVE,
     "run_content_discovery": PermissionLevel.INTRUSIVE,
     "run_web_probes": PermissionLevel.INTRUSIVE,
+    # Q-011. INTRUSIVE, not ACTIVE: it WRITES. Every other level is read-only or read-mostly, and a
+    # mass-assignment probe necessarily persists an attribute on a real object.
+    "run_mass_assign": PermissionLevel.INTRUSIVE,
     "run_injection_probes": PermissionLevel.INTRUSIVE,
     "run_bfla": PermissionLevel.INTRUSIVE,
     "run_race": PermissionLevel.INTRUSIVE,
@@ -509,6 +512,23 @@ CLAUDE_TOOLS = [
     # handoff had already ticked "wiring" off. Advertising it makes it genuinely callable; putting a
     # brand-new confirming engine into every mission's always-on path is the move that produced a
     # measured false positive this week (Q-047), so that step waits for a measurement.
+    {"name": "run_mass_assign",
+     "description": ("INTRUSIVE (writes): test a JSON write endpoint for mass assignment (CWE-915). "
+                     "Adds ONE privileged attribute the endpoint did not offer (role, isAdmin, "
+                     "verified, balance...), then RE-READS the object in a separate request and "
+                     "confirms only if the field now holds the injected value. Runs two negative "
+                     "controls and records both: an invented attribute that cannot pre-exist (if it "
+                     "comes back, the endpoint echoes anything and proves nothing), and a baseline "
+                     "read (a field that already held the value is not a finding). 200 OK is never "
+                     "the oracle. Without a successful re-read it emits a lead, never a finding."),
+     "input_schema": {"type": "object", "properties": {
+         "url": {"type": "string", "description": "The write endpoint"},
+         "method": {"type": "string", "description": "POST (default), PUT or PATCH"},
+         "body": {"type": "string", "description": "Base JSON body the endpoint accepts"},
+         "read_url": {"type": "string", "description": "Where to re-read the object; defaults to url"},
+         "key_field": {"type": "string", "description": "Field identifying our object in the re-read"},
+         "limit": {"type": "integer", "description": "How many privileged fields to try (default 4)"}},
+         "required": ["url"]}},
     {"name": "run_ws_hijack",
      "description": ("ACTIVE: Test a WebSocket endpoint for Cross-Site WebSocket Hijacking (CWE-1385/346). "
                      "Discovers ws:// and wss:// endpoints from page/JS content, then performs the RFC 6455 "
@@ -5766,6 +5786,114 @@ class ToolRegistry:
         self._add_urls([h["url"] for h in hits if 200 <= (h["status"] or 0) < 400])
         return ToolResult("content_discovery", base_url, True,
                           f"{len(hits)} paths probed, {len(findings)} validated hits", findings)
+
+    async def _run_mass_assign(self, inp: dict) -> ToolResult:
+        """ACTIVE: test a JSON write endpoint for mass assignment (CWE-915), one attribute at a time.
+
+        The oracle lives in `mass_assign_tool` and is pure; this is the transport that feeds it. Per
+        candidate field, FOUR requests: baseline read, the injected write, a SEPARATE re-read, and an
+        invented-control write. `200 OK` is never the oracle -- APIs routinely accept and ignore
+        unknown attributes -- so a run that cannot re-read its own object emits a LEAD and says which
+        half is missing.
+
+        Q-011 exists because `mass_assignment` was declared in three catalogs (engine_descriptor,
+        asvs_model ATHZ-04, wstg_catalog WSTG-INPV-20) and implemented nowhere: the only code that
+        ever over-posted a privileged attribute was the Juice Shop lab SOLVER, whose behaviour was
+        then backfilled onto the technique. So this method is the whole point of the ticket, and it
+        is dispatched rather than merely defined -- `tests/test_engine_reachability.py` enforces that.
+        """
+        import json as _json
+        import mass_assign_tool as _ma
+
+        url = inp["url"]
+        if not self.scope.validate(url)[0]:
+            return ToolResult("mass_assign", url, False, "", [], "SCOPE BLOCK")
+        method = str(inp.get("method") or "POST").upper()
+        if method not in ("POST", "PUT", "PATCH"):
+            return ToolResult("mass_assign", url, False, "", [], "unsupported write method %s" % method)
+        read_url = inp.get("read_url") or url
+        key_field = str(inp.get("key_field") or "")
+        base_body = inp.get("body")
+        if isinstance(base_body, str):
+            try:
+                base_body = _json.loads(base_body)
+            except Exception as exc:
+                self._swallow(exc, "mass_assign.body", url)
+                base_body = {}
+        base_body = base_body if isinstance(base_body, dict) else {}
+        hdrs = {"Content-Type": "application/json"}
+        findings, tried = [], []
+
+        async def _json_of(u):
+            r = await self._http(u, "GET", hdrs, capture=False)
+            if r.get("error"):
+                return None
+            try:
+                return _json.loads(r.get("body") or "")
+            except Exception:
+                return None
+
+        # The baseline is read through the SAME view the re-read uses. Reading it any other way would
+        # compare two different projections of the object and call the difference a vulnerability.
+        base_payload = await _json_of(read_url)
+        offered = sorted(base_body.keys())
+        for cand in _ma.privileged_candidates(offered_fields=offered, limit=int(inp.get("limit") or 4)):
+            field, value = cand["field"], cand["value"]
+            tried.append(field)
+            marker = _ma.new_marker()
+            body = _ma.body_with({**base_body, **_ma.body_from_params({}, marker=marker)}, field, value)
+            w = await self._http(url, method, hdrs, body, capture=True)
+            if w.get("error"):
+                self._swallow(RuntimeError(w["error"]), "mass_assign.write", url)
+                continue
+
+            after_payload = await _json_of(read_url)
+            obj = _ma.locate_object(after_payload, key_field, marker) if key_field else None
+            if obj is None:
+                obj = _ma.locate_object(after_payload, "marker", marker)
+            reread_ran = obj is not None
+            a_found, a_val = _ma.read_field(obj, field) if reread_ran else (False, None)
+
+            # The invented control: if an attribute that CANNOT pre-exist comes back, the endpoint
+            # round-trips arbitrary input and nothing it persists is evidence of privilege binding.
+            nonce = _ma.new_nonce()
+            c_field = _ma.control_field(nonce)
+            c_marker = _ma.new_marker()
+            c_body = _ma.body_with({**base_body, **_ma.body_from_params({}, marker=c_marker)},
+                                   c_field, nonce)
+            c = await self._http(url, method, hdrs, c_body, capture=False)
+            c_ran = not c.get("error")
+            c_obj = _ma.locate_object(await _json_of(read_url), key_field or "marker", c_marker) if c_ran else None
+            c_found = bool(_ma.read_field(c_obj, c_field)[0]) if c_obj is not None else False
+
+            b_obj = _ma.locate_object(base_payload, key_field, "") if key_field else None
+            b_found, b_val = _ma.read_field(b_obj, field) if b_obj is not None else (False, None)
+            verdict = _ma.evaluate(field=field, sent_value=value,
+                                   baseline={"ran": base_payload is not None,
+                                             "found": b_found, "value": b_val},
+                                   after={"found": a_found, "value": a_val},
+                                   control={"ran": c_ran, "field": c_field, "found": c_found},
+                                   reread_ran=reread_ran)
+            ctl_ev = ("control attribute %r %s on the re-read" %
+                      (c_field, "CAME BACK" if c_found else "did not come back")) if c_ran \
+                else "the control write did not run"
+            base_ev = ("baseline read %s" % ("found %r" % (b_val,) if b_found else "did not carry the field")) \
+                if base_payload is not None else "no baseline was read"
+            if verdict["verdict"] == _ma.CONFIRMED:
+                findings.append(self._attach_poc(
+                    _ma.mass_assignment_finding(target=url, method=method, verdict=verdict,
+                                                why=cand.get("why", ""), read_url=read_url,
+                                                control_evidence=ctl_ev, baseline_evidence=base_ev,
+                                                object_key=key_field, object_value=str(marker),
+                                                offered_fields=offered),
+                    url, w))
+            elif verdict["verdict"] == _ma.LEAD:
+                findings.append(_ma.unverified_lead(target=url, method=method, verdict=verdict,
+                                                    read_url=read_url, control_evidence=ctl_ev,
+                                                    baseline_evidence=base_ev))
+        return ToolResult("mass_assign", url, True,
+                          "%d field(s) tried (%s), %d finding(s)" % (len(tried), ", ".join(tried), len(findings)),
+                          findings)
 
     async def _run_web_probes(self, inp: dict) -> ToolResult:
         url = inp["url"]

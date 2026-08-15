@@ -441,6 +441,17 @@ def redact_payload_echo(body: str, payloads) -> str:
     return " ".join(text.split())
 
 
+def _redacted(text: str, payloads) -> str:
+    """The comparable form of a response: its body with every echoed payload removed.
+
+    Exists so the two CONTROLS can ask for equality while `unexplained_divergence` keeps its
+    `min_chars` floor for the job that floor is for — naming EVIDENCE a human will read. One function
+    was serving both purposes, and the threshold that stops a 1-character diff being quoted as proof
+    is the same threshold that let a nondeterministic page pass as deterministic (fp42).
+    """
+    return redact_payload_echo(text or "", payloads)
+
+
 def unexplained_divergence(text_a: str, text_b: str, payloads, *, min_chars: int = 3):
     """The first difference between two responses that the echoed payloads CANNOT account for.
 
@@ -561,7 +572,16 @@ def analyze_traversal_differential(exists_resp, absent_a_resp, absent_b_resp, tw
                 "reason": signature, "payload": twin.exists, "twin": twin.label}
 
     # (1) determinism control — the negative control that keeps a noisy page from confirming.
-    if a_st != b_st or unexplained_divergence(a_text, b_text, payloads):
+    #
+    # STRICT EQUALITY, not "no nameable divergence" (fp42). This asked
+    # `unexplained_divergence(a_text, b_text)`, which returns a snippet only when some diff chunk holds
+    # >= 3 alphanumerics. SequenceMatcher chops two random 9-10 digit integers into 1-2 character
+    # chunks, so MEASURED over 5000 draws from a pool of 300 real responses, a page whose 300/300
+    # responses were DISTINCT was certified deterministic 3.38% of the time and confirmed traversal
+    # 2.98% of the time. Masking the random integer dropped that to 0/5000 — the integer was the whole
+    # cause. The docstring already said the absent pair must "agree once the echo is redacted"; that is
+    # equality, and the code was asking a weaker question than the sentence describing it.
+    if a_st != b_st or _redacted(a_text, payloads) != _redacted(b_text, payloads):
         return None
 
     # (3) the ORDER control. Judged before any verdict is built, so every path below inherits it.
@@ -577,10 +597,19 @@ def analyze_traversal_differential(exists_resp, absent_a_resp, absent_b_resp, tw
                                   "request this cannot be told apart from a first-request artifact "
                                   "(session establishment, cache miss), so it is reported as a lead")
             return verdict
-        if not holds:
+        # The repeat must REPRODUCE the original exists, not merely still differ from the absent pair
+        # (fp42). Q-047's repeat was aimed at a FIRST-REQUEST artifact: the first response differs, the
+        # repeat does not, the divergence dies. It cannot catch the complementary EVERY-REQUEST
+        # artifact, because a per-request random value makes the repeat diverge from the absents
+        # exactly as the original did — `holds` is satisfied and the reason even gains the words "it
+        # REPRODUCED". Requiring the repeat to be IDENTICAL to the first `exists` after echo redaction
+        # closes both: a file system serves the same bytes twice, a random page does not. Same rule as
+        # Q-040 — the reference must REPRODUCE, not merely resemble.
+        if not holds or _redacted(r_text, payloads) != _redacted(e_text, payloads):
             return None
         verdict["reason"] += " — and it REPRODUCED on a repeat of the same request"
-        verdict["repeat_control"] = "the exists divergence held on a second identical request"
+        verdict["repeat_control"] = ("the exists response was byte-identical on a repeat, after echo "
+                                     "redaction, and still diverged from both absent twins")
         return verdict
 
     # (2) the present/absent divergence. A status code cannot be echoed, so it counts on its own.

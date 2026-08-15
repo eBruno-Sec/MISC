@@ -31,6 +31,14 @@ APP_DIR = os.path.dirname(os.path.abspath(__file__))
 # Each mutant WEAKENS an FP guard. The exact node id is load-bearing: a collection error, broken fixture,
 # or unrelated failing test must not be credited with killing the mutant.
 MUTANTS = [
+    # Q-011. Added when mass_assign_tool.py landed, keeping the ceiling at 46 by earning it. This is
+    # the guard that separates "the server BOUND my privileged attribute" from "the server echoes any
+    # attribute it is handed": an invented control field coming back on the re-read means persistence
+    # proves nothing. Drop it and every echoing endpoint confirms as mass assignment.
+    ("mass_assign_tool.py", "evaluate: drop the echo control — an endpoint that round-trips any "
+                            "attribute would confirm as mass assignment",
+     r'if control\.get\("found"\):', 'if False:',
+     "tests/test_mass_assign_tool.py::test_an_endpoint_that_echoes_the_control_attribute_is_clean"),
     # Q-002. Added when ws_tool.py landed, so the confirmed-producer ceiling stays 46 by EARNING it
     # rather than by raising it. This is the guard that separates CSWSH from "a WebSocket exists":
     # drop it and a socket pushing PUBLIC data confirms as a hijack, which is precisely the class of
