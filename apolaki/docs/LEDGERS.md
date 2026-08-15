@@ -339,6 +339,32 @@ defend.
 
 ---
 
+## Q-017 — the log kept the oldest rows, so a truncated tail looked like a dead mission. 2026-08-15
+
+`db.get_logs` was `ORDER BY id LIMIT ?`, which keeps the OLDEST n and discards everything after.
+MEASURED on mission `54155d4b` (1287 rows): `get_logs(limit=500)[-1].ts = 22:31:01` against a true
+last event of `22:35:20`. The mission view and the backup export both ended four minutes early — and
+**a truncated tail is indistinguishable from a mission that stopped**, so the evidence of what went
+wrong is exactly what was dropped.
+
+Fixed as a subselect (`ORDER BY id DESC LIMIT ?` inside, `ORDER BY id` outside): SQLite walks the
+index backwards and stops, so cost tracks `limit` rather than mission length, and every existing
+caller still receives chronological order. Only WHICH rows survive truncation changed.
+
+**The naive fix is a real trap and gets its own control**: `ORDER BY id DESC LIMIT ?` alone passes the
+"keeps the newest" test and hands every consumer its events backwards. Mutants: revert to oldest-first
+→ 2 fail; drop the outer re-sort → 4 fail.
+
+**A mutation that does not apply is not a surviving mutant.** Both mutants first came back "survived";
+the edits had silently not matched. Verifying the mutation landed before believing its result is now
+part of the loop, not a nicety — an unapplied mutant reports the same green as a vacuous test.
+
+The other half of this ticket stays DISPROVED and was not re-litigated: the 4000-row caps in
+`_tool_ledger` and `asvs_coverage` have never truncated, because the largest mission on record is 1287
+rows.
+
+---
+
 ## wp2 — the oracle fix was NECESSARY AND NOT SUFFICIENT, and the score went DOWN. 2026-08-15
 
 The Q-047 re-measure: fixed traversal oracle **plus** `run_web_probes` back in `_SWEEP_HTTP_ENGINES`,

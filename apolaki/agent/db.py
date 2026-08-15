@@ -324,8 +324,23 @@ def add_log(mid: str, etype: str, data: dict) -> None:
 
 
 def get_logs(mid: str, limit: int = 1000) -> list:
-    rows = _query("SELECT etype,data,created_at FROM logs WHERE mission_id=? "
-                  "ORDER BY id LIMIT ?", (mid, limit))
+    """The mission's events, oldest first -- but when the limit bites, the NEWEST `limit` rows.
+
+    Q-017: this was `ORDER BY id LIMIT ?`, which keeps the OLDEST n and silently discards everything
+    after them. MEASURED on mission 54155d4b (1287 rows): `get_logs(limit=500)[-1].ts` was 22:31:01
+    against a true last event of 22:35:20 -- the mission view and the backup export both ended four
+    minutes early, and a truncated tail looks exactly like a mission that stopped. For a log the
+    interesting end is the recent one; a run that died has its cause in the last rows, not the first.
+
+    Two-step rather than a reversed scan in Python: `ORDER BY id DESC LIMIT ?` lets SQLite walk the
+    index backwards and stop, so the cost tracks `limit` rather than the mission's whole history, and
+    the outer flip restores chronological order for every existing caller. Callers see the same shape
+    and the same ordering they always did -- only WHICH rows survive truncation changes.
+    """
+    rows = _query("SELECT etype,data,created_at FROM ("
+                  "  SELECT id,etype,data,created_at FROM logs WHERE mission_id=? "
+                  "  ORDER BY id DESC LIMIT ?"
+                  ") ORDER BY id", (mid, limit))
     return [{"type": r["etype"], **json.loads(r["data"]), "ts": r["created_at"]} for r in rows]
 
 
