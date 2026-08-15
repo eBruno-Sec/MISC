@@ -146,8 +146,10 @@ OBJECTIVES = (
     {"chapter": "Authorization", "cid": "ATHZ-03", "level": 1,
      "summary": "Directory traversal cannot reach files outside the intended scope.",
      "objective": "Confirm path traversal is blocked.",
-     "engine": ("run_web_probes", "run_content_discovery"), "violated_by": ("path_traversal",),
-     "verifiable": True},
+     # Q-048: dropped run_content_discovery. It emits family "exposure" (a COMM-03 family) and never
+     # "path_traversal" -- it discovers content, it does not test traversal -- so a mission that ran it
+     # without run_web_probes stamped this objective verified with nothing able to contradict it.
+     "engine": "run_web_probes", "violated_by": ("path_traversal",), "verifiable": True},
     {"chapter": "Authorization", "cid": "ATHZ-04", "level": 2,
      "summary": "Mass-assignment cannot set privileged attributes.",
      "objective": "Confirm mass-assignment protections.",
@@ -172,7 +174,10 @@ OBJECTIVES = (
     {"chapter": "Validation & Encoding", "cid": "VAL-03", "level": 1,
      "summary": "Output is contextually encoded (no reflected/stored/DOM XSS or client-side template injection).",
      "objective": "Confirm no XSS/CSTI sink.",
-     "engine": ("run_xss", "run_form_xss", "run_dalfox", "run_dom_audit"),
+     # Q-048: dropped run_dalfox. _run_dalfox appends RAW dalfox JSON lines as findings, which carry no
+     # "family" key at all, so nothing it reports can fail this (or any) objective. That is a real gap in
+     # the dalfox integration, not just a model error -- patch handed off in docs/handoff/asvsproducers.md.
+     "engine": ("run_xss", "run_form_xss", "run_dom_audit"),
      "violated_by": ("xss", "dom_xss", "stored_xss", "reflected_xss", "csti",
                      "dom_data_manipulation", "dom_link_manipulation"), "verifiable": True},
     {"chapter": "Validation & Encoding", "cid": "VAL-04", "level": 2,
@@ -202,12 +207,17 @@ OBJECTIVES = (
     {"chapter": "Validation & Encoding", "cid": "VAL-08", "level": 2,
      "summary": "Objects are not corruptible via prototype pollution.",
      "objective": "Confirm no prototype-pollution sink.",
-     "engine": ("run_dom_audit", "run_injection_probes"), "violated_by": ("prototype_pollution",),
+     # Q-048: run_injection_probes emits cors/crlf/host_header/open_redirect/ssti and never
+     # prototype_pollution -- dropped. run_dom_audit CONFIRMS it in a real browser (dom_tool), and
+     # run_js_review flags it statically (dependency_intel); both really do emit the family.
+     "engine": ("run_dom_audit", "run_js_review"), "violated_by": ("prototype_pollution",),
      "verifiable": True},
     {"chapter": "Validation & Encoding", "cid": "VAL-09", "level": 2,
      "summary": "Responses are not injectable via CRLF / response-header splitting.",
      "objective": "Confirm no CRLF/header-injection sink.",
-     "engine": ("run_injection_probes", "run_web_probes"), "violated_by": ("crlf",), "verifiable": True},
+     # Q-048: dropped run_web_probes -- it emits seven families, none of them "crlf". Only
+     # run_injection_probes (via web_security) can produce a CRLF finding.
+     "engine": "run_injection_probes", "violated_by": ("crlf",), "verifiable": True},
 
     # ── Configuration & Dependencies ──
     {"chapter": "Configuration & Dependencies", "cid": "CONF-01", "level": 1,
@@ -216,8 +226,11 @@ OBJECTIVES = (
      # Q-012: "dependency_intel" is a MODULE, not a dispatchable tool. Its SCA verdict reaches a mission
      # through run_js_review, the sole production caller of dependency_intel.vulnerable_component_finding
      # (tools.py:5534) — i.e. the only engine that can actually emit the family that FAILS this objective.
-     "engine": ("run_fingerprint", "run_js_review"), "violated_by": ("vulnerable_component",),
-     "verifiable": True},
+     # Q-048: dropped run_fingerprint. It emits family "fingerprint" ONLY, so a mission that fingerprinted
+     # the stack but never ran the JS review stamped "no known-vulnerable components" with nothing able to
+     # contradict it. run_js_review is the sole engine that can emit vulnerable_component, and Q-012 had
+     # already added it -- so the objective could fail; only this sibling was the false-verify path.
+     "engine": "run_js_review", "violated_by": ("vulnerable_component",), "verifiable": True},
 
     # ── API & Web Service ──
     {"chapter": "API & Web Service", "cid": "API-01", "level": 1,
@@ -266,7 +279,11 @@ OBJECTIVES = (
      # logic are run_workflow (executes a declarative logic-abuse pack) and test_numeric_abuse, which is the
      # engine that actually emits family "business_logic" (tools.py:3062). Still attempt_only: business-logic
      # integrity is inconclusive by nature, so this can reach "attempted" and never "verified".
-     "engine": ("run_workflow", "test_numeric_abuse"), "violated_by": ("business_logic",), "verifiable": True,
+     # Q-048: dropped run_workflow. It returns ToolResult(..., []) by design -- its own docstring says
+     # confirmed findings come from the confirm_* steps INSIDE the pack, so the engine itself emits no
+     # family and could never contradict this objective. test_numeric_abuse really does emit
+     # "business_logic" (tools.py:3062).
+     "engine": "test_numeric_abuse", "violated_by": ("business_logic",), "verifiable": True,
      "attempt_only": True},
     {"chapter": "Business Logic", "cid": "BUSL-02", "level": 2,
      "summary": "Sensitive operations are not exploitable via timing/race conditions.",
