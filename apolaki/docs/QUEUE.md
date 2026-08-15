@@ -1,5 +1,25 @@
 # QUEUE — the one canonical, dependency-ordered work queue
 
+## LANE OWNERSHIP — cycle 3, assigned 2026-08-15. Declared BEFORE spawning.
+
+Disjoint write sets, docs included. Cross-lane needs go to `docs/handoff/<lane>.md`, never here.
+
+| owner | files it may WRITE | ticket |
+|---|---|---|
+| **Breaker · sqli** | `docs/handoff/sqli.md` · `agent/tests/test_sqli_selection_regression.py` (new) | **the `sqli` 21 -> 11 regression** — diagnose, do not fix |
+| **Builder · asvs** | `agent/asvs_model.py` · `agent/tests/test_asvs_model.py` · `docs/handoff/asvs.md` | **Q-012** — six engine names resolve to nothing; 3 objectives unverifiable on a perfect run |
+| **Builder · realtime** | `agent/ws_tool.py` (new) · `agent/tools.py` · `agent/register.py` · `agent/engine_descriptor.py` · `agent/wstg_catalog.py` · `agent/tests/test_ws_tool.py` (new) · `docs/handoff/realtime.md` | **Q-002** — WebSocket CSWSH, a genuine zero-engine class |
+| **Coordinator (main thread)** | `docs/QUEUE.md` · `docs/STATUS.md` · `docs/LEDGERS.md` · `docs/benchmarks/` · `agent/report.py` · `agent/main.py` · `agent/db.py` · `agent/web_security.py` · `scripts/` | score wp2, Q-047 close-or-hold, Q-017, sequencing |
+
+Known-conflict hand-offs, issued in advance:
+- **Q-012's likely fix is in `tools.py`** (the ledger records `authz_matrix` while dispatch is
+  `run_authz_matrix`), which the realtime lane owns. The asvs lane writes that patch into
+  `docs/handoff/asvs.md`; the Coordinator applies it after the realtime lane lands.
+- **Q-011 (`mass_assignment` phantom) is NOT assigned this cycle.** It needs `tools.py` +
+  `engine_descriptor.py`, both held by the realtime lane. It is queued behind it, not forgotten.
+
+---
+
 ## STATE SWEEP — 2026-08-14 (second pass, same day). Authoritative.
 
 **The first sweep went stale in under a day** — five more tickets closed while it sat. Sweeping again
