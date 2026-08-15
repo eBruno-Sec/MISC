@@ -22,17 +22,30 @@ import json
 CLAIMS = "/out/wp_claims.json"
 KEY = "/out/key.csv"
 
-# The standing comparison point. PROVENANCE, because it is not reproducible from the mission it
-# names: docs/LEDGERS.md records mission ebd96f45 as 25 findings / 23 claimed cases / seal
-# a95670f9..., while the agent store today returns 29 findings / 27 claimed cases for that same
-# mission id (measured 2026-08-14, breaker lane) and no subset of it reproduces the recorded seal.
-# The ledger figure is what every published delta has been measured against, so it stays the
-# baseline -- but anything derived from it inherits this caveat and must say so.
-BASELINE = {"tp": 22, "fp": 1, "claimed": 23, "elapsed": 5329,
-            "precision": 22 / 23, "recall": 22 / 1415,
-            "source": "docs/LEDGERS.md, mission ebd96f45, sealed 2026-08-11",
-            "caveat": ("not reproducible from the mission store: ebd96f45 now returns 29 findings / "
-                       "27 claimed cases and no subset reproduces seal a95670f9"),
+# The standing comparison point. RE-DERIVED 2026-08-14 and now reproducible: the claim set lives in
+# docs/benchmarks/baseline_ebd96f45_claims.json, sealed and committed BEFORE this key was opened
+# (seal fab8a46e...), extracted from the mission's own 29 stored rows with the same case_ids() the
+# reruns use. Re-run `whole_product_score.py` against that file and these numbers come back.
+#
+# IT REPLACES A FIGURE THAT WAS WRONG IN OUR OWN FAVOUR'S OPPOSITE DIRECTION. The published baseline
+# was 22 TP / 23 claimed / 95.7%, from a count that collapsed five ldap_injection findings into one
+# via a finding_fp param collision (QUEUE Q-046). Those five are five distinct cases and the key says
+# all five are TRUE positives, so the baseline was UNDERSTATED: it is 26 TP / 27 claimed / 96.3%.
+#
+# The old seal a95670f9 is abandoned rather than explained -- it reproduces under no serialization
+# tried, and the 08-11 sealing script was never committed. All three of tp/fp/claimed moved together;
+# moving `claimed` alone would have raised apparent precision by arithmetic instead of by evidence.
+#
+# Consequence for every published delta: deltas measured against 22/23 UNDERSTATE the regression.
+# The 08-13 rerun's 18 claims is -9 against this baseline, not -3, and the "class coverage broadened,
+# ldapi 1 -> 5" line is zero -- the baseline already had all five.
+BASELINE = {"tp": 26, "fp": 1, "claimed": 27, "elapsed": 5329,
+            "precision": 26 / 27, "recall": 26 / 1415,
+            "source": ("docs/benchmarks/baseline_ebd96f45_claims.json, seal fab8a46e..., "
+                       "sealed 2026-08-14 before the key was opened"),
+            "caveat": ("counts are re-derivable from the mission store; the ORIGINAL 08-11 seal "
+                       "a95670f9 is not, and is abandoned. This run predates the effort/coverage "
+                       "harness, so its step count and exit reason stay unrecoverable"),
             "steps": None, "exit_reason": None, "cases_probed": None}
 
 d = json.load(open(CLAIMS))

@@ -181,6 +181,12 @@ by (key category, is_vulnerable): {('sqli', True): 20, ('cmdi', True): 1,
                                    ('ldapi', True): 1, ('cmdi', False): 1}
 ```
 
+> **SUPERSEDED 2026-08-14 — see "The unre-derivable baseline" below.** These two rows undercount by
+> four: five `ldapi` findings were collapsed into one by a `finding_fp` param collision, and the key
+> says all five are true positives. Re-scored from the same stored rows against a seal recorded
+> before the key: **26/27 = 96.3% precision, 26/1415 = 1.84% recall.** Left standing as written,
+> because a published number is corrected in the open, not edited out of the record.
+
 | metric | value | how to read it |
 |---|---:|---|
 | **Precision** | **22/23 = 95.7%** | when the product speaks, it is almost always right |
@@ -368,15 +374,33 @@ count for the baseline is **27, not 23**, the "class coverage broadened, `ldapi 
 is **zero** — the baseline already had all five — and the whole-product regression is **-9, not -3**.
 Worse than published, and published anyway.
 
-**`BASELINE` in `scripts/whole_product_score.py` is NOT being edited to 27 on this.** Moving
-`claimed` alone leaves `tp`/`fp` describing a different case set, which would *raise* apparent
-precision by arithmetic rather than by evidence — a worse error than the one being fixed. The
-baseline needs re-scoring end to end from the 29 stored rows, sealed before the key is opened, or it
-stays as it is with the caveat. **Ticketed, not quietly patched.**
+**Q-045 DONE — the baseline is re-derivable now.** Rather than move `claimed` alone (which would
+raise apparent precision by arithmetic instead of by evidence), the run was re-scored end to end.
+Claim set extracted from the 29 stored rows with the same `case_ids()` the reruns use, written to
+`docs/benchmarks/baseline_ebd96f45_claims.json`, **committed with its seal in `59d6eb0` before the
+answer key was opened**, then scored in a `--network none` container:
 
-The recorded seal `a95670f9…` still does not reproduce under ten serializations or any field subset
-to size 4, and the 08-11 sealing script was never committed. **The counts are re-derivable; the seal
-is not, and no amount of arguing changes that.**
+```
+seal recorded  : fab8a46e13633f6a418a05742b4a49a588acd8e5fb34aa00ceb03f0dedeb9051
+seal recomputed: fab8a46e13633f6a418a05742b4a49a588acd8e5fb34aa00ceb03f0dedeb9051
+distinct cases claimed : 27
+TRUE POSITIVES : 26      FALSE POSITIVES : 1      unknown : 0
+PRECISION : 26/27 = 96.3%   (published 95.7%)
+RECALL    : 26/1415 = 1.84% (published 1.55%)
+by (category, verdict): {('sqli','TP'): 20, ('ldapi','TP'): 5, ('cmdi','TP'): 1, ('cmdi','FP'): 1}
+```
+
+**The error ran against us, not for us.** All five `ldapi` cases are TRUE positives in the key, so
+the collapsed count did not hide a false positive — it hid **four real detections**. The published
+baseline understated the product: **26 TP / 27 claimed / 96.3%**, not 22 / 23 / 95.7%. The one FP is
+`00494`, the long-known cmdi false positive, which is exactly where it was expected.
+
+Every published delta measured against 22/23 therefore **understates the regression**: the 08-13
+rerun's 18 claims is **−9**, and `ldapi 1 -> 5` is **zero broadening**. `BASELINE` in
+`scripts/whole_product_score.py` now carries 26/1/27 — all three moved together, or none would have.
+
+The 08-11 seal `a95670f9…` reproduces under no serialization tried and its sealing script was never
+committed. **Abandoned, not explained.** The counts are re-derivable; that seal never will be.
 
 ---
 
@@ -683,6 +707,13 @@ claims moved. Result at `689b3c9`.
 | elapsed | 5329 s | **1893 s** | **−64%** |
 
 Like-for-like is the loose pair, because the standing baseline is a loose number: **1.55% → 1.34%.**
+
+> **BOTH CLAIMS IN THIS TABLE ARE WRONG, corrected 2026-08-14.** The baseline column is undercounted:
+> re-scored, `ebd96f45` is **26 TP / 27 claimed / 96.3% / 1.84%**. So the true delta is
+> **1.84% → 1.34%**, a loss of **−9 cases, not −3** — the regression is three times what was
+> published. And the "class coverage broadened, ldapi 1 → 5" line immediately below is **zero**: the
+> baseline already had all five, and they were only ever counted as one. The paragraph is left intact
+> because it is the reasoning that has to be visible for the correction to teach anything.
 
 **Class coverage genuinely broadened — and it still lost.** ldapi **1 → 5**, xpathi **0 → 1**, exactly
 what the body-parameter work predicted, since those sinks take body input only. **The entire loss is

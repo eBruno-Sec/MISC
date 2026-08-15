@@ -44,7 +44,11 @@ gate at `scripts/tier3_gate.sh` (LF-normalized and pinned via `.gitattributes`).
 | Python v0.1 — DAST only | 24.5% | 14-cat macro, full suite | 0.0% |
 | ~~Python v0.1 — harness~~ | ~~34.8%~~ | superseded: 54 cases, ~4 per category | — |
 | **Whole-product — RERUN 2026-08-13, sealed** | **precision 100.0%** · **recall 1.34%** | 19 TP / 0 FP / 1415 vulnerable | **0 FP** |
-| ~~Whole-product — baseline `ebd96f45`~~ | ~~precision 95.7% · recall 1.55%~~ | 22 TP / 1 FP / 1415 | superseded |
+| **Whole-product — baseline `ebd96f45`, RE-SCORED 2026-08-14** | **precision 96.3% · recall 1.84%** | 26 TP / 1 FP / 1415, seal `fab8a46e` | re-derivable |
+
+**RECALL WENT DOWN — and by MORE than this said.** Re-scoring the baseline (2026-08-14) puts it at
+26 TP, not 22, so the rerun's loss is **−9 findings, not −3**. Everything below still holds; the
+regression it describes is three times larger. Original line kept for the record:
 
 **RECALL WENT DOWN. −3 findings. A week of work did not raise it.** Precision reached a clean 100%
 and the run is 2.8× faster (5329 s → 1893 s), but the product finds *fewer* benchmark cases. Class

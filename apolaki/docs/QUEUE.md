@@ -23,10 +23,10 @@ the whole-product rerun and outranks everything below)
   the same 29 stored rows with five `ldap_injection` findings collapsed by a `finding_fp` param
   collision. Honest claim count is **27**, the `ldapi 1 -> 5` "class broadening" is **zero**, and the
   regression is **−9, not −3**. Two things remain open and are the actual tickets:
-  - **Q-045 · re-score the baseline end to end** from the 29 stored rows, sealed before the key.
-    `BASELINE` in `scripts/whole_product_score.py` must NOT have `claimed` moved to 27 on its own —
-    that would leave `tp`/`fp` describing a different case set and raise apparent precision by
-    arithmetic. All three move together or none do.
+  - **Q-045 · CLOSED** `59d6eb0` (seal) + the scoring commit. Re-scored end to end: **26 TP / 1 FP /
+    27 claimed, 96.3% precision, 1.84% recall**, seal `fab8a46e` recorded before the key was opened.
+    All five `ldapi` cases are TRUE positives — the old count hid four real detections, so the
+    published baseline *understated* the product. `BASELINE` now carries 26/1/27, all three together.
   - **Q-046 · `finding_fp` derives `param` by parsing prose** (`rsplit(" in '", 1)`), so any title
     whose wording does not match silently yields `param = ""` and a whole family collides. Today the
     path in the key masks it; same-path findings of one family would still merge. Bind the value at

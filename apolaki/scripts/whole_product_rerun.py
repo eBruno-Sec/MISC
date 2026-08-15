@@ -1,7 +1,10 @@
 """Whole-product rerun: owaspbench-q019 shape, current code, SEALED before any key is touched.
 
 Drives BBHAgent.run() -- the same full pipeline the API mission uses -- not just _execute_plan, so
-this is comparable to mission ebd96f45 (95.7% precision / 1.6% recall, 22 TP / 1 FP / 1415 vulnerable).
+this is comparable to mission ebd96f45 -- re-scored 2026-08-14 to 96.3% precision / 1.84% recall,
+26 TP / 1 FP / 1415 vulnerable, seal fab8a46e over docs/benchmarks/baseline_ebd96f45_claims.json.
+(It was published as 22 TP / 23 claimed / 95.7%; that count collapsed five ldapi findings into one,
+and the key says all five are true positives. Deltas against the old figure understate the loss.)
 
 Writes /out/wp_claims.json and prints the SEAL (sha256 over the sorted distinct case ids). The key is
 NOT read here and must not be read until the seal is recorded.
