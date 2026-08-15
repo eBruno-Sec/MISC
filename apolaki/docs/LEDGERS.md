@@ -261,6 +261,156 @@ Apolaki as a product.
 
 ---
 
+## ★ CORRECTION — `step_cap_exhausted` was a TRUE label pointing at the WRONG CONSTANT. 2026-08-14
+
+I published "THE ANSWER: `exit_reason = step_cap_exhausted`, 309 steps against a cap of 220." The
+label was accurate and my reading of it was not. Third instrumented run, seal `3ee7609d…`,
+**byte-identical to the breaker's runs A and B** with 16 wrapped methods attached — so the instrument
+does not perturb what it measures:
+
+```
+planner_would_schedule_more = 2
+batches = [14, 6, 30, 41, 218]
+```
+
+The cap is tested at the TOP of the `while`, so the 218-step batch began at step 91 and ran to 309
+unimpeded. The planner was **2 steps from fixpoint**. Raising `MAX_STEPS` buys 2 dispatches, ~3
+seconds, and **0 cases**. The planner's reach is bounded by `CAP_ENDPOINTS = 25`.
+
+**The lesson is about reading instruments, not about this constant.** An exit reason names the
+condition that *held when the loop stopped*, which is not the same as the constraint that *decided
+what the run could reach*. A true label answered a question I had not actually asked, and I quoted it
+as a cause. Anything reported as an "exit reason", "limit hit" or "timeout" gets the same follow-up
+now: **would relaxing it change the outcome?** — a counterfactual, which is cheap to measure and is
+the only thing that makes it a lever.
+
+**Where the work actually goes** (percentages of one run):
+
+| phase | calls | tool seconds | cases reached |
+|---|---|---|---|
+| sweep | 3350 (91.6%) | 1360.5 (75.1%) | 373 |
+| planner | 309 (8.4%) | 451.2 (24.9%) | 25 |
+
+Coverage is set by one constant: `SWEEP_TARGET_CAP` keeps **400 of 2762 candidates (14.5%)**. The
+85.5%-never-probed figure therefore arrives a second time, from a different direction, which is the
+corroboration the first measurement did not have.
+
+**`unique = 0` for EVERY engine.** They all ride one target list, so an added engine buys
+classes-per-case and **never** coverage. That single fact reorders the backlog: engine work cannot
+move recall on this suite while the target list is the binding constraint.
+
+**The headline recall number is a denominator artifact.** Of 220 vulnerable cases probed, only **51
+(23%)** ever received the engine that owns their class:
+
+```
+detection on PROBED                : 18/220 =  8.2%
+detection on CLASS-CORRECTLY PROBED: 18/51  = 35.3%
+```
+
+So the "202-case detection shortfall" is really **33** genuine oracle misses, **56** structurally
+invisible to any DAST tool (crypto/hash/trustbound), and **113** whose owning engine exists and never
+ran — 56 of those owned by an engine that ran **zero** times.
+
+**The prediction that was wrong in the worse direction.** P5 predicted `run_web_probes` at ~25
+dispatches; it is **zero**. `planner._ALLOWED["active"]` excludes INTRUSIVE and `fresh()` drops those
+steps, so in the default mode the planner **cannot schedule** `run_web_probes`, `run_cmdi`,
+`run_nosqli`, `run_ssrf` or `run_bfla` at all. The sweep dispatches through `_run_tool` instead, which
+makes `_SWEEP_HTTP_ENGINES` **the only path to intrusive injection coverage in an active mission** —
+an architectural fact nothing in the code says out loud.
+
+**The cost that was priced and deliberately NOT cut.** `run_xss` is 1.5% of dispatches and **41.0% of
+tool-seconds**, reaches 50 cases, **0 uniquely**, and produced **0 of 18 claims**; the browser trio is
+3.1% of dispatches for 58.5% of tool time and 1 claim. One browser target costs 33 HTTP targets. The
+lane refused to cut it: browser confirmation is how XSS becomes proof instead of a lead, and trading
+that for corpus coverage on one benchmark is exactly the benchmark-fitting this project forbids.
+Priced, recorded, left to an owner. **A cost is not a defect.**
+
+**Still open, and stated as open:** `apolaki-sel-wp1` (the change — `run_web_probes` added to the
+sweep) is mid-run with 6 `path_traversal` findings, a class this mission has never produced. It is
+**not sealed, not scored, not repeated**, so there is **no after-number** and none may be quoted.
+`805a78e` carries the revert condition in advance: if precision moves off 100.0%, revert rather than
+defend.
+
+---
+
+## The unre-derivable baseline: counts reconciled, seal still dead. 2026-08-14
+
+`ebd96f45` has been carried as "cannot be re-derived; every comparison against it is suspect." The
+counts now reconcile. **Independently measured against the store, not taken from the lane's report:**
+
+```
+rows                     : 29
+confidence               : {'confirmed': 29}          <- zero leads
+severity                 : {'high': 27, 'medium': 2}
+family                   : sqli 21, ldap_injection 5, dom_data 1, sensitive 1, component 1
+distinct finding_fp      : 29   (current code, path in the key)
+```
+
+`27 high + 2 medium` is **character for character** the ledger's own raw parenthetical for that
+mission. It is the same data. The ledgered **25** is those 29 with the five `ldap_injection`
+findings collapsed into one, which also explains why the ledgered by-family line reads `ldap 1` while
+`sqli 21` is untouched: `finding_fp` derives `param` by `rsplit(" in '", 1)`, the sqli titles are
+`... in 'header:BenchmarkTest00018'` so each keeps a distinct param, and the LDAP titles are
+`LDAP injection in form field 'BenchmarkTest00630'` — no `" in '"`, so all five get `param = ""` and
+differ only by path.
+
+**One correction to the mechanism as first written, from `git log -L` on `finding_fp`.** The
+reconstruction assumed a path-less key. The committed key has included the path since **8714e6a,
+2026-08-04** — a week *before* this mission — so the collapse cannot be attributed to the code of
+record. The mission also ran on uncommitted Q-019 WIP, which is precisely the state the standing rule
+forbids relying on, so *which* counter produced the 25 is **not recoverable**. It does not change the
+reconciliation: the 29 stored rows are the run's real output either way. It does change what may be
+claimed — this is an explanation that fits, **not a proven cause**.
+
+**Consequences, including the unflattering one.** The five LDAP findings are five distinct claims
+about five distinct cases; merging them was a fingerprint collision, not a dedup. So the honest claim
+count for the baseline is **27, not 23**, the "class coverage broadened, `ldapi 1 -> 5`" line I wrote
+is **zero** — the baseline already had all five — and the whole-product regression is **-9, not -3**.
+Worse than published, and published anyway.
+
+**`BASELINE` in `scripts/whole_product_score.py` is NOT being edited to 27 on this.** Moving
+`claimed` alone leaves `tp`/`fp` describing a different case set, which would *raise* apparent
+precision by arithmetic rather than by evidence — a worse error than the one being fixed. The
+baseline needs re-scoring end to end from the 29 stored rows, sealed before the key is opened, or it
+stays as it is with the caveat. **Ticketed, not quietly patched.**
+
+The recorded seal `a95670f9…` still does not reproduce under ten serializations or any field subset
+to size 4, and the 08-11 sealing script was never committed. **The counts are re-derivable; the seal
+is not, and no amount of arguing changes that.**
+
+---
+
+## `_POWERED` garbage names — the gate was on the wrong side of the report. 2026-08-14
+
+Carried in QUEUE as a known-unticketed defect since Q-021B: the report and `live_hosts[i]["tech"]`
+printed `'a MultiJuicer Kubernetes cluste'`, `'nothing on.'` and (live, against Mutillidae) `'and
+that the database username'` as the target's technology stack. Q-021B built the admission rule and
+correctly gated **persistence** with it, so none of that was stored — but a reader was still shown it.
+
+**Where the filter goes is the entire decision.** Filtering at extraction cleans the display and
+**blinds the ledger**: `tech_facts` reads `detect()` and records every refusal with its reason, which
+is the one artifact separating *dropped on a rule* from *never detected*. So `detect()` keeps
+everything, and only `public_view` — the projection whose whole job is "what we are willing to show a
+human as a product name" — drops rejected names.
+
+**The prior test asserted the opposite, and its reason did not survive checking.** It said narrowing
+this "would change `fingerprint()`'s output for every existing caller." Enumerated: there is exactly
+**one** consumer, `tools._run_fingerprint`, and it already keeps the evidence-carrying records for the
+fact path and uses the projection only for display. That was a scope limit for a lane that owned
+neither the callers nor the report, not a finding that the behaviour was right. Test replaced, with
+the reversal and its reason written into the docstring rather than deleted.
+
+**A control of mine failed and the failure was the useful part.** I asserted `built with Express`
+survives; it is refused `prose_not_a_known_product`, because `_KNOWN_PRODUCTS` is *derived* from the
+detection tables and the cookie table spells it `Express/Node.js`. So the filter charges a real price:
+**a legitimate powered-by naming a product no table lists is not displayed.** Stated here rather than
+discovered later. It is not silent — the fact path still carries it with a named reason.
+
+`_POWERED` itself is unchanged. The fix is an admission rule on a shape, not a cleverer regex over
+English prose.
+
+---
+
 ## Q-013 / Q-014 CLOSED — the gate did not read the field it was gating. 2026-08-14
 
 `3addb1c` · `42e1544` · `a1cdb8d` · report rendering. Suite **2374 passed, 11 skipped, 1 xfailed**.

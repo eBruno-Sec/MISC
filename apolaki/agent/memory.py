@@ -121,13 +121,17 @@ def snapshot(recon: dict = None, urls: list = None, findings: list = None) -> di
         if host:
             hosts.add(host)
         for t in (h.get("tech") or []):
-            # Q-021B: the DISPLAY list is ungated by design (narrowing `_POWERED` would change
-            # `fingerprint()` for every caller), so the identity gate is applied HERE, at the point
-            # of persistence. Six of thirteen live `tech` rows were sentence fragments the
-            # powered-by regex captured -- `'a MultiJuicer Kubernetes cluste'`, `'in safety mode.'`
-            # -- and a live run against Mutillidae produced `'and that the database username'`.
-            # Those are the strings a future feed lookup would send off as product names.
+            # Q-021B: the identity gate is applied HERE, at the point of persistence. Six of
+            # thirteen live `tech` rows were sentence fragments the powered-by regex captured --
+            # `'a MultiJuicer Kubernetes cluste'`, `'in safety mode.'` -- and a live run against
+            # Mutillidae produced `'and that the database username'`. Those are the strings a future
+            # feed lookup would send off as product names.
             # No `source` is passed: a bare display string has none, so only the SHAPE rules apply.
+            #
+            # `fp.public_view` now applies the same gate, so fresh `tech` rows arrive clean and this
+            # is a second line of defence rather than the only one. Keep it: `recon` snapshots
+            # written before that change still hold the fragments, and this is the boundary that
+            # decides what a LATER run warm-starts from.
             if t and not _fp.name_rejection(t):
                 tech.add(str(t))
     import dns_recon

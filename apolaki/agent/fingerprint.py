@@ -167,10 +167,23 @@ def detect(headers: dict, set_cookie: str, body: str) -> list:
 
 
 def public_view(records: list) -> list:
-    """`detect()` records projected onto the four keys `fingerprint()` has always returned. Exposed
-    so a caller that needs BOTH the display list and the evidence-carrying records can run the
-    detection once, without a second copy of the key tuple drifting out of step with this one."""
-    return [{k: t.get(k, "") for k in _PUBLIC_KEYS} for t in (records or [])]
+    """`detect()` records projected onto the four keys `fingerprint()` has always returned, MINUS
+    anything `name_rejection` refuses to call a product identity. Exposed so a caller that needs BOTH
+    the display list and the evidence-carrying records can run the detection once, without a second
+    copy of the key tuple drifting out of step with this one.
+
+    The filter is here and NOT in `_from_body`/`detect()` on purpose, and the distinction is the whole
+    point. Q-021B gated PERSISTENCE, so `'a MultiJuicer Kubernetes cluste'` and `'nothing on.'` stopped
+    being stored -- but `fingerprint()` still handed them to the report and to `live_hosts[i]["tech"]`,
+    where a reader sees a sentence fragment presented as the target's technology stack. Filtering at
+    extraction would fix the display and BLIND THE LEDGER: `tech_facts` reads `detect()` and records
+    every refusal with its reason, which is the one artifact proving a detection was dropped on a rule
+    rather than lost. So `detect()` keeps everything, the ledger keeps naming its refusals, and only
+    the display projection -- the layer whose entire job is "what we are willing to show a human as a
+    product name" -- drops them.
+    """
+    return [{k: t.get(k, "") for k in _PUBLIC_KEYS} for t in (records or [])
+            if not name_rejection(t.get("name", ""), t.get("source", ""))]
 
 
 def fingerprint(headers: dict, set_cookie: str, body: str) -> list:

@@ -30,11 +30,20 @@ def test_fingerprint_return_shape_is_unchanged():
     assert all(set(t) == {"name", "version", "source", "category"} for t in techs)
 
 
-def test_prose_still_reaches_the_display_path_unchanged():
-    """`_POWERED` is deliberately NOT narrowed - narrowing it would change `fingerprint()`'s output
-    for every existing caller. The gate lives on the persistence path instead."""
-    assert [t["name"] for t in fp.fingerprint({}, "", PROSE)] == \
-        ["a MultiJuicer Kubernetes cluste", "nothing on."]
+def test_prose_no_longer_reaches_the_display_path():
+    """REVERSED DELIBERATELY. This test previously asserted the opposite, and the reason it gave was
+    "narrowing `_POWERED` would change `fingerprint()`'s output for every existing caller" - a scope
+    limit for a lane that owned neither the callers nor the report, not a finding that the behaviour
+    was correct. QUEUE.md carried the leak as a known-unticketed defect the whole time.
+
+    Enumerated since: there is exactly ONE consumer, `tools._run_fingerprint`, and it already keeps
+    the evidence-carrying `detect()` records for the fact path while using the projection purely for
+    display and `live_hosts[i]["tech"]`. So the filter costs that caller nothing it wanted, and the
+    thing it removes is a sentence fragment printed to a human as the target's technology stack.
+
+    `_POWERED` itself is still NOT narrowed - the fix is an admission rule on a shape, not a cleverer
+    regex over English prose."""
+    assert [t["name"] for t in fp.fingerprint({}, "", PROSE)] == []
 
 
 # ── the identity gate ──────────────────────────────────────────────────────────────────────────
@@ -224,3 +233,66 @@ def test_record_facts_leaves_the_display_list_alone():
     recon = {"live_hosts": [{"url": "http://box/", "tech": ["nginx"]}]}
     fp.record_facts(recon, "http://box/", HDRS, "", "", now=1.0)
     assert recon["live_hosts"] == [{"url": "http://box/", "tech": ["nginx"]}]
+
+
+# ── the display list may not print a sentence fragment as a product name ──
+# Q-021B gated PERSISTENCE. `fingerprint()` kept handing the same fragments to the report and to
+# live_hosts[i]["tech"], so a reader saw `nothing on.` listed as the target's technology stack.
+_PROSE_BODY = (
+    "<html><body>"
+    "<p>This shop is running on a MultiJuicer Kubernetes cluster and is fully isolated.</p>"
+    "<p>We are powered by nothing on. Really.</p>"
+    "<p>The API is built with Express and that the database username is hidden.</p>"
+    "</body></html>"
+)
+
+
+def _names(techs):
+    return [t["name"] for t in techs]
+
+
+def test_the_display_list_drops_prose_fragments():
+    shown = _names(fp.fingerprint({}, "", _PROSE_BODY))
+    for junk in ("a MultiJuicer Kubernetes cluste", "nothing on.", "and that the database username"):
+        assert junk not in shown, "%r reached the display list" % junk
+    # And nothing prose-shaped slipped through under another spelling.
+    for n in shown:
+        assert not fp.name_rejection(n), (n, fp.name_rejection(n))
+
+
+def test_a_real_powered_by_product_still_survives():
+    """The negative control for the filter: the rule is shape-plus-known-product, never a blanket
+    refusal of the powered-by detector.
+
+    MEASURED while writing this, and the first draft of the control was wrong: `built with Express`
+    is refused `prose_not_a_known_product`, because `_KNOWN_PRODUCTS` is DERIVED from the detection
+    tables and the cookie table spells it `Express/Node.js`. That is the rule behaving as designed -
+    a free-text source may only name a product some table already knows - and it is the cost this
+    filter charges: a legitimate powered-by naming a product no table lists is not displayed. It is
+    not silent, because `detect()` still carries it and `tech_facts` still records the refusal with
+    its reason."""
+    shown = _names(fp.fingerprint({}, "", "<p>powered by WordPress</p>"))
+    assert "WordPress" in shown
+    assert fp.name_rejection("Express", "powered-by text") == "prose_not_a_known_product"
+
+
+def test_header_and_signature_detections_are_untouched():
+    """The filter must not cost the paths that were never broken."""
+    shown = _names(fp.fingerprint({"Server": "nginx/1.18.0"}, "", '<div id="__NEXT_DATA__">'))
+    assert "nginx" in shown and "Next.js" in shown
+
+
+def test_detect_still_sees_what_the_display_hides_so_the_ledger_can_name_it():
+    """THE control that decides where the filter belongs.
+
+    Filtering at extraction would have cleaned the display and silently emptied the refusal ledger --
+    the one artifact that distinguishes `dropped on a rule` from `never detected`. Assert both halves:
+    the raw detection still carries the fragment, and tech_facts still reports refusing it BY NAME.
+    """
+    raw = _names(fp.detect({}, "", _PROSE_BODY))
+    assert any("MultiJuicer" in n for n in raw), "detect() must keep the fragment for the ledger"
+
+    _facts, rejected = fp.tech_facts({}, "", _PROSE_BODY)
+    assert rejected, "a refusal that cannot say why is the invisible drop this design forbids"
+    reasons = {r.get("reason") for r in rejected}
+    assert reasons and all(r for r in reasons), reasons

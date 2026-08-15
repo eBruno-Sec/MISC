@@ -19,14 +19,24 @@ first fixed the write path, the second found the invariants never read `evidence
 the whole-product rerun and outranks everything below)
 
 **NEW AND UNASSIGNED — raised by the rerun, currently nobody's:**
-- **The published whole-product baseline cannot be re-derived.** The store returns 29 findings /
-  27 cases / `ldapi 5` for `ebd96f45` against the ledgered 22/23 / `ldapi 1`; no dedup explains it and
-  no subset reproduces the seal. On the store's numbers the loss is **−8, not −3**, and the "class
-  coverage broadened" claim is unproven. **Every comparison against that mission is suspect.**
+- **Baseline `ebd96f45` — counts RECONCILED, seal still dead** (see LEDGERS). The ledgered 25/23 is
+  the same 29 stored rows with five `ldap_injection` findings collapsed by a `finding_fp` param
+  collision. Honest claim count is **27**, the `ldapi 1 -> 5` "class broadening" is **zero**, and the
+  regression is **−9, not −3**. Two things remain open and are the actual tickets:
+  - **Q-045 · re-score the baseline end to end** from the 29 stored rows, sealed before the key.
+    `BASELINE` in `scripts/whole_product_score.py` must NOT have `claimed` moved to 27 on its own —
+    that would leave `tp`/`fp` describing a different case set and raise apparent precision by
+    arithmetic. All three move together or none do.
+  - **Q-046 · `finding_fp` derives `param` by parsing prose** (`rsplit(" in '", 1)`), so any title
+    whose wording does not match silently yields `param = ""` and a whole family collides. Today the
+    path in the key masks it; same-path findings of one family would still merge. Bind the value at
+    the point the parameter is known, do not recover it from a sentence.
 - **The `00494` two-call-site patch** — written up, not applied; closes the proved-undecidable residual
   by adding an after-probe sample rather than guessing from two.
-- **The `_POWERED` regex yields garbage product names** (`'a MultiJuicer Kubernetes cluste'`,
-  `'nothing on.'`) — found in passing during Q-021B, never ticketed.
+- ~~**The `_POWERED` regex yields garbage product names**~~ — **CLOSED** (see LEDGERS). The gate now
+  also runs on the display projection, so the report and `live_hosts[i]["tech"]` stop printing
+  sentence fragments as the target's technology stack. `detect()` is deliberately left unfiltered so
+  the refusal ledger can still name what it dropped.
 
 **OPEN, ranked by value — this is the real backlog:**
 
