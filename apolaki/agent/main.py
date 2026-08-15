@@ -3348,17 +3348,114 @@ async def get_findings(session_id: str):
     return {"findings": db.get_findings(session_id)}
 
 
+# ── Q-013 second pass: an HTTP body may not AUTHOR proof ─────────
+# The three findings_gate invariants are about a finding's CONFIDENCE, its SCOPE and its SHAPE. None of
+# them looks at `evidence`, which is the field `proof_schema.validate_confirmed` actually judges. So
+# after the storage gate was closed (3addb1c) this still worked, measured:
+#
+#   POST a weak access-control finding -> the proof gate demotes it to a lead
+#   PUT it back with fabricated prose containing "owner ... 403 denied ... impact"
+#   -> get_findings_gated now reports CONFIRMED, with no engine having issued a single request.
+#
+# That is the same laundering Q-014 decided an operator may not do on the leads path, still wide open
+# on the findings path — and a PUT-only fix is defeatable by DELETE + POST, since the UI's manual-
+# finding form posts `confidence:"confirmed"` with operator-typed evidence. So the rule is stated once,
+# for every route: AN HTTP WRITE ROUTE MAY NOT MINT AN ORACLE `confirmed`. `confirmed` means an Apolaki
+# oracle observed the proof; an HTTP body is a claim, and a claim is an attestation.
+
+#: The ONLY keys an HTTP body may change on a stored finding. A WHITELIST, deliberately: a blacklist
+#: means every field proof_schema learns to read next is silently editable, which is exactly how this
+#: hole survived the first pass. Everything absent from here is proof-bearing or identity.
+_EDITABLE_FINDING_KEYS = frozenset({
+    "title", "severity", "analyst_notes", "notes", "tags", "owasp", "remediation",
+    "references", "status", "poc_url",
+})
+
+
+def _attestation(operator: str, rationale: str, notes: str = "", subject: str = "",
+                 exchange_ids=None, machine_proof: bool = False, proof_gap=None) -> dict:
+    """One shape for an operator attestation, used by the leads path and the manual-finding path.
+    Who / when / why, plus the ORACLE's separate verdict on whether machine proof exists."""
+    return {"operator": operator, "rationale": rationale, "notes": notes or "",
+            "attested_at": db._now(), "lead_id": subject, "exchange_ids": list(exchange_ids or []),
+            "machine_proof": bool(machine_proof), "proof_gap": list(proof_gap or [])}
+
+
+def _require_attestation(body: dict):
+    """(operator, rationale) or a 400 the operator can read. Shared by every route that accepts an
+    operator's claim, so the refusal wording is identical wherever they meet it."""
+    operator = str((body or {}).get("operator") or "").strip()
+    rationale = str((body or {}).get("rationale") or "").strip()
+    missing = [n for n, v in (("operator", operator), ("rationale", rationale)) if not v]
+    if missing:
+        raise HTTPException(400, "this write records an operator claim and requires %s. An attestation "
+                                 "with no attester or no stated grounds is an unsigned claim and "
+                                 "Apolaki will not record one. Nothing was changed."
+                                 % " and ".join(missing))
+    return operator, rationale
+
+
 @app.post("/findings/{session_id}")
 async def add_finding(session_id: str, finding: dict):
+    """Record an OPERATOR-AUTHORED finding — an attestation, not an oracle confirmation.
+
+    Every field of a manually-added finding is typed by a human, so no oracle ever observed anything
+    here. It is therefore stored as an operator-attested LEAD carrying who / when / why, and
+    `confidence` is set by this endpoint rather than read from the body. This is the same rule
+    `confirm_lead` applies, and it has to be the same rule: leaving POST able to mint `confirmed` from
+    typed prose would let DELETE + POST reproduce the PUT bypass exactly.
+
+    WHAT THIS CHANGES: a manual finding now appears under Unconfirmed Leads with an attestation block
+    instead of under confirmed findings. That is the honest placement — it is a human's claim, and the
+    report can now say whose and on what grounds, which `confirmed` never carried."""
     _require_mission(session_id)
-    fid = db.add_finding(session_id, finding)
-    return {"id": fid}
+    operator, rationale = _require_attestation(finding)
+    f = {k: v for k, v in (finding or {}).items() if k not in ("operator", "rationale")}
+    f.pop("confirmed", None)
+    f["confidence"] = "lead"                              # never taken from the body
+    f["authored_by"] = "operator"
+    f["operator_attestation"] = _attestation(
+        operator, rationale, notes=str(f.get("analyst_notes") or ""),
+        machine_proof=False, proof_gap=["operator-authored: no oracle observation exists"])
+    fid = db.add_finding(session_id, f)                   # lead confidence -> routed to leads (#7)
+    return {"id": fid, "promoted": False, "provenance": "operator-attested", "machine_proof": False,
+            "note": ("Recorded as an operator-attested lead by %s. Apolaki labels a finding "
+                     "`confirmed` only when one of its oracles observed the proof, so a manually "
+                     "entered finding is attested — it carries your name and your grounds, which a "
+                     "bare `confirmed` never did." % operator)}
 
 
 @app.put("/findings/{session_id}/{fid}")
 async def update_finding(session_id: str, fid: str, finding: dict):
+    """Edit the ANNOTATION on a stored finding. Proof-bearing fields are immutable through HTTP.
+
+    Q-013, second pass. This route let a body rewrite `evidence` — the field the proof gate judges —
+    and so could flip a gate-demoted row to `confirmed`. It now merges only `_EDITABLE_FINDING_KEYS`
+    over the stored row and REFUSES, naming the fields, any body that tries to change anything else.
+    Re-sending a field with the value already stored is fine, so the ordinary read-modify-write round
+    trip an API client does still works; only an actual attempt to author proof is refused.
+
+    The storage invariants still run underneath (db.update_finding), so this is a second, narrower
+    gate at the trust boundary rather than a replacement: the DB layer decides what may BE in storage
+    for any producer, this decides what an untrusted HTTP body may AUTHOR."""
     _require_mission(session_id)
-    if not db.update_finding(session_id, fid, finding):   # scoped to (mission, id) — no cross-mission write
+    stored = db.get_finding(session_id, fid)              # scoped to (mission, id) — tenant isolation
+    if stored is None:
+        raise HTTPException(404, "finding not found in this mission")
+    attempted = sorted(k for k, v in (finding or {}).items()
+                       if k not in _EDITABLE_FINDING_KEYS and v != stored.get(k))
+    if attempted:
+        raise HTTPException(400, "PUT /findings may only edit %s. Refused: %s — these carry the "
+                                 "finding's PROOF, and `confirmed` means an Apolaki oracle observed "
+                                 "it, not that a request body asserted it. To record a human judgement "
+                                 "use POST /leads/{sid}/{lid}/confirm, which stores who and why. "
+                                 "Nothing was changed."
+                                 % (", ".join(sorted(_EDITABLE_FINDING_KEYS)), ", ".join(attempted)))
+    merged = dict(stored)
+    for k in _EDITABLE_FINDING_KEYS:
+        if k in (finding or {}):
+            merged[k] = finding[k]
+    if not db.update_finding(session_id, fid, merged):
         raise HTTPException(404, "finding not found in this mission")
     return {"ok": True}
 
@@ -3438,12 +3535,7 @@ async def confirm_lead(session_id: str, lid: str, req: LeadConfirmRequest = None
         raise HTTPException(404, "lead not found")
 
     req = req or LeadConfirmRequest()
-    operator, rationale = (req.operator or "").strip(), (req.rationale or "").strip()
-    missing = [n for n, v in (("operator", operator), ("rationale", rationale)) if not v]
-    if missing:
-        raise HTTPException(400, "operator confirmation requires %s. An attestation with no attester or "
-                                 "no stated grounds is an unsigned claim and Apolaki will not record "
-                                 "one. Nothing was changed." % " and ".join(missing))
+    operator, rationale = _require_attestation({"operator": req.operator, "rationale": req.rationale})
     # A cited exchange makes the attestation checkable: it must be traffic APOLAKI recorded in THIS
     # mission, not a reference to something nobody can look at.
     cited = [str(x) for x in (req.exchange_ids or [])]
@@ -3469,9 +3561,10 @@ async def confirm_lead(session_id: str, lid: str, req: LeadConfirmRequest = None
     except Exception:                      # proof gate unavailable -> never release on a guess
         machine_proof, gaps = False, ["proof_gate_unavailable"]
 
-    attestation = {"operator": operator, "rationale": rationale, "notes": (req.notes or "").strip(),
-                   "attested_at": db._now(), "lead_id": _lead_key(lead), "exchange_ids": cited,
-                   "machine_proof": bool(machine_proof), "proof_gap": [] if machine_proof else list(gaps)}
+    attestation = _attestation(operator, rationale, notes=(req.notes or "").strip(),
+                               subject=_lead_key(lead), exchange_ids=cited,
+                               machine_proof=machine_proof,
+                               proof_gap=[] if machine_proof else gaps)
 
     if not machine_proof:
         # The attestation is recorded ON the lead, which stays a lead. Not a demotion of the human:

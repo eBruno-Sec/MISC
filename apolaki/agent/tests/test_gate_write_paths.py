@@ -241,3 +241,131 @@ def test_every_finding_write_route_is_gated():
                 assert gate_violations(mid) == [], (
                     "%s %s let a gate violation reach storage: %s"
                     % (method, path, gate_violations(mid)))
+
+
+# ── absence-of-bypass, second pass: no HTTP body can AUTHOR proof ──
+#: Evidence prose an ENGINE would emit for a confirmed IDOR — it satisfies every signal group
+#: `proof_schema.validate_confirmed` checks. Sent as a request body it must never produce a
+#: confirmation, because `confirmed` names WHO observed the proof, not which words appear in a string.
+_FABRICATED = {
+    "title": "IDOR", "confidence": "confirmed", "confirmed": True, "family": "idor",
+    "cwe": "CWE-639", "target": "http://app:3000/api/orders/2", "url": "http://app:3000/api/orders/2",
+    "impact": "Any user can read any other user's order.",
+    "evidence": ("GET /api/orders/2 as user A -> 200 with user B's owner record (identical body to "
+                 "B's own read); the same request anon -> 403 denied. Cross-user object read."),
+    "reproduction_steps": ["GET /api/orders/2"],
+}
+
+
+def test_no_http_write_route_can_mint_an_oracle_confirmation():
+    """The property, stated where it cannot be sidestepped: starting from a mission with NO engine
+    findings, driving EVERY discovered /findings write route with a fully-fabricated proof payload
+    must leave zero rows that `get_findings_gated` reports as confirmed.
+
+    Field-level rules are an implementation detail and each of them is individually defeatable — a
+    PUT-only fix falls to DELETE + POST, a blacklist falls to the next field proof_schema learns to
+    read. This asserts the outcome for every route at once, which is the shape that catches the
+    bypass coming back through a path nobody remembered to gate.
+
+    FAIL-BEFORE-FIX (measured): PUT with this payload moved a gate-demoted row from `lead` to
+    `confirmed` — `is_confirmed` True with no engine having issued a request — and POST minted one
+    outright from the same body.
+    """
+    import pytest
+    pytest.importorskip("fastapi")
+    from fastapi.testclient import TestClient
+    import main as mainmod
+    import proof_schema as ps
+
+    dbmod.DB_PATH = os.path.join(tempfile.mkdtemp(), "t.db")
+    dbmod._conn = None
+    with TestClient(mainmod.app) as c:
+        mid = "mintcheck"
+        dbmod.create_mission(mid, "P", "active", "o", SCOPE, {})
+        routes = _finding_write_routes(mainmod.app)
+
+        def confirmed_rows():
+            return [f for f in dbmod.get_findings_gated(mid) if ps.is_confirmed(f)]
+
+        # (1) every discovered write route, driven with the fabricated proof, in both the
+        #     "no such finding yet" and "a finding exists to overwrite" states.
+        seed = dbmod.add_finding(mid, {"title": "IDOR", "confidence": "confirmed", "family": "idor",
+                                       "cwe": "CWE-639", "target": "http://app:3000/api/orders/2",
+                                       "evidence": "the id parameter is sequential, looks guessable",
+                                       "reproduction_steps": ["GET /api/orders/2"]})
+        assert not confirmed_rows(), "the seed finding should be demoted by the proof gate"
+        for method, path in sorted(routes):
+            url = path.replace("{session_id}", mid).replace("{fid}", seed)
+            c.request(method, url, json=_FABRICATED)
+            assert not confirmed_rows(), (
+                "%s %s minted an oracle confirmation from a request body: %s"
+                % (method, path, [f.get("title") for f in confirmed_rows()]))
+
+        # (2) the DELETE + POST route around a PUT-only fix
+        c.delete("/findings/%s/%s" % (mid, seed))
+        c.post("/findings/%s" % mid, json=dict(_FABRICATED, operator="e.bruno", rationale="I saw it"))
+        assert not confirmed_rows(), "DELETE + POST minted an oracle confirmation"
+
+        # (3) and the operator's claim is not discarded either — it is recorded as an attestation
+        leads = (dbmod.get_mission(mid).get("context") or {}).get("leads") or []
+        att = [l for l in leads if l.get("operator_attestation")]
+        assert att and att[0]["operator_attestation"]["operator"] == "e.bruno"
+        assert att[0]["operator_attestation"]["machine_proof"] is False
+
+
+def test_put_refuses_a_proof_bearing_edit_with_a_reason_and_still_allows_annotation():
+    """The two halves of the PUT rule, asserted separately because they are REDUNDANT and the
+    outcome-level control above therefore cannot tell them apart: with either half alone a fabricated
+    payload still fails to mint, so a mutant that removes one survives that test. Measured — mutants
+    M9 (refusal removed) and M10 (whitelist merge removed) both survived
+    `test_no_http_write_route_can_mint_an_oracle_confirmation` and are killed here.
+
+    Half one: an attempt to author proof is REFUSED, visibly, naming the fields, and changes nothing.
+    Half two: an annotation edit still lands — the route is narrowed, not disabled."""
+    import pytest
+    pytest.importorskip("fastapi")
+    from fastapi.testclient import TestClient
+    import main as mainmod
+
+    dbmod.DB_PATH = os.path.join(tempfile.mkdtemp(), "t.db")
+    dbmod._conn = None
+    with TestClient(mainmod.app) as c:
+        mid = "putrule"
+        dbmod.create_mission(mid, "P", "active", "o", SCOPE, {})
+        fid = dbmod.add_finding(mid, {"title": "IDOR", "confidence": "confirmed", "family": "idor",
+                                      "cwe": "CWE-639", "target": "http://app:3000/api/orders/2",
+                                      "evidence": "the id parameter is sequential, looks guessable",
+                                      "reproduction_steps": ["GET /api/orders/2"]})
+        # half one — refused, with the offending field named, and nothing written
+        r = c.put("/findings/%s/%s" % (mid, fid), json={"evidence": _FABRICATED["evidence"]})
+        assert r.status_code == 400, r.text
+        assert "evidence" in r.json()["detail"] and "Nothing was changed" in r.json()["detail"]
+        assert dbmod.get_finding(mid, fid)["evidence"].startswith("the id parameter")
+
+        # half two — an annotation edit still lands, and a full read-modify-write round trip that
+        # changes ONLY an annotation is accepted even though it resends every proof field unchanged
+        assert c.put("/findings/%s/%s" % (mid, fid), json={"title": "IDOR (triaged)"}).status_code == 200
+        assert dbmod.get_finding(mid, fid)["title"] == "IDOR (triaged)"
+        rmw = dict(dbmod.get_finding(mid, fid))
+        rmw["analyst_notes"] = "reviewed"
+        assert c.put("/findings/%s/%s" % (mid, fid), json=rmw).status_code == 200
+        assert dbmod.get_finding(mid, fid)["analyst_notes"] == "reviewed"
+
+
+def test_editable_key_whitelist_contains_nothing_the_proof_gate_reads():
+    """A drift guard on the whitelist itself. `_EDITABLE_FINDING_KEYS` is what an HTTP body may
+    change; if a key the proof gate READS ever lands in it, the route can author proof again. The
+    forbidden set is derived from proof_schema rather than retyped, so a new proof field is covered
+    the day it is added."""
+    import main as mainmod
+    import proof_schema as ps
+
+    proof_read = set(ps.CONTROL_KEYS) | {ps.ORACLE_KEY, "oracle", "counter_example"}
+    proof_read |= {k for k, _v in ps._SOURCE_MARKERS}                 # proof_kind's markers
+    proof_read |= {"confidence", "confirmed", "evidence", "impact",   # validate_confirmed's inputs
+                   "reproduction_steps", "family", "cwe",
+                   "target", "url",                                   # scope + what is claimed
+                   "operator_attestation", "authored_by", "id"}
+    overlap = mainmod._EDITABLE_FINDING_KEYS & proof_read
+    assert not overlap, ("these keys carry proof and must not be editable through an HTTP body: %s"
+                         % sorted(overlap))

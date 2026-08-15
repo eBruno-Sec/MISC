@@ -1490,7 +1490,7 @@ function renderFindings(){
         <div class="kv"><span>Target <code>${esc(f.target||f.url||"")}</code></span><span>CVSS ${esc(String(f.cvss_score??"N/A"))}</span><span>CWE ${esc(f.cwe||"N/A")}</span>${f.owasp?`<span>OWASP ${esc(f.owasp)}</span>`:""}</div>
         <div>${esc(f.description||f.evidence||"")}</div>${steps?`<details><summary>Steps to reproduce</summary><ol>${steps}</ol></details>`:""}
         ${f.analyst_notes?`<div class="muted" style="margin-top:.5rem;font-style:italic">Triage: ${esc(f.analyst_notes)}</div>`:""}</div>`;
-    }).join("") : (_findFilter==="confirmed"?emptyState("No confirmed findings yet","Confirm a lead below, or ＋ Add a manual finding. Anything you confirm lands here and in the report."):"");
+    }).join("") : (_findFilter==="confirmed"?emptyState("No confirmed findings yet","<b>Confirmed</b> means an Apolaki oracle observed the proof. What you confirm or add by hand is recorded as YOUR attestation — with your name and grounds — and appears under Unconfirmed Leads until machine proof exists."):"");
   // unconfirmed leads — the operator confirms (or dismisses) these
   let lHtml="";
   if(showL && leads.length){
@@ -1557,8 +1557,9 @@ function showAddFinding(){
   if(!sessionId){alert("Start or load a mission first.");return;}
   const f=document.createElement("div"); f.id="addFindForm"; f.className="card"; f.style.cssText="--c:var(--accent)";
   f.innerHTML=`<h4>＋ Add a manual finding</h4>
+    <div class="muted" style="margin:-.2rem 0 .6rem">Recorded as <b>your attestation</b> (your name + grounds), not as an oracle confirmation. It lands under Unconfirmed Leads.</div>
     <div class="add-grid">
-      <input id="afTitle" placeholder="Title — what you proved">
+      <input id="afTitle" placeholder="Title — what you observed">
       <select id="afSev"><option value="critical">critical</option><option value="high">high</option><option value="medium" selected>medium</option><option value="low">low</option><option value="info">info</option></select>
       <input id="afUrl" placeholder="Target URL">
       <input id="afCwe" placeholder="CWE (optional, e.g. CWE-89)">
@@ -1570,15 +1571,30 @@ function showAddFinding(){
   document.getElementById("findingsList").prepend(f);
   document.getElementById("afTitle").focus();
 }
+// Q-013 second pass. This used to post confidence:"confirmed", confirmed:true with operator-typed
+// evidence — the same laundering the leads path refuses, and the DELETE+POST way around a PUT-only
+// fix. A manually added finding is an ATTESTATION: it carries who and why, and the server sets the
+// confidence. `confirmed` stays reserved for what an Apolaki oracle observed.
 async function submitAddFinding(){
   const g=id=>(document.getElementById(id)?.value||"").trim();
   const title=g("afTitle"); if(!title){alert("Title is required.");return;}
+  const operator=(prompt("A manually added finding is recorded as your attestation. Who is adding it? (your name/handle)")||"").trim();
+  if(!operator)return;
+  const rationale=(prompt("On what grounds? Stored with your name and shown in the report.")||"").trim();
+  if(!rationale)return;
   const finding={title,severity:g("afSev"),url:g("afUrl"),target:g("afUrl"),cwe:g("afCwe"),
-    confidence:"confirmed",confirmed:true,evidence:g("afEvidence"),description:g("afEvidence"),
+    evidence:g("afEvidence"),description:g("afEvidence"),
     reproduction_steps:g("afSteps").split("\n").map(s=>s.trim()).filter(Boolean),
-    analyst_notes:"Manually added by the operator.",tags:["manual","operator-confirmed"]};
-  try{await fetch(`${API}/findings/${sessionId}`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(finding)});}catch(e){}
+    analyst_notes:"Manually added by the operator.",tags:["manual","operator-attested"],
+    operator,rationale};
+  let r={};
+  try{
+    const res=await fetch(`${API}/findings/${sessionId}`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(finding)});
+    r=await res.json();
+    if(!res.ok){alert(r.detail||"Refused.");return;}
+  }catch(e){alert("Could not reach the server; nothing was saved.");return;}
   document.getElementById("addFindForm")?.remove();
+  if(r.note)alert(r.note);                 // says where it landed and why — never a silent reclassification
   await refreshFindingsAndLeads();
 }
 

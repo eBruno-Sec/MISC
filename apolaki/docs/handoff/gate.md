@@ -83,7 +83,78 @@ violating row present, unexpected writer), not on `ImportError`/`AttributeError`
 use already existed. `test_update_finding_keeps_tenant_isolation_and_legitimate_merges` passed before
 and after, by design: it is the "existing callers keep working" control.
 
-STATUS: **DONE**, committed `3addb1c`.
+STATUS: **DONE**, committed `3addb1c`. But see the next section — it was necessary and **not
+sufficient**, and the second pass is what actually answers "should this endpoint exist in its present
+form".
+
+## Q-013 second pass — the three invariants do not cover `evidence`
+
+Asked again after Q-014 landed: with the storage gate closed, does `PUT /findings` still have a
+justification? Measured, on the post-`3addb1c` tree:
+
+```
+POST a weak access-control finding -> gated confidence: lead   is_confirmed: False
+PUT it back with fabricated prose ("...owner record... anon -> 403 denied...", + impact)
+PUT status -> 200
+                                   -> gated confidence: confirmed  is_confirmed: True
+```
+
+Nothing in that PUT violates SCHEMA, SCOPE or TRUTH: `reproduction_steps` is a list, the target is in
+scope, `confidence` is `"confirmed"`. The three invariants are about a finding's **confidence, scope
+and shape**; none of them looks at `evidence`, which is the field `validate_confirmed` actually judges.
+So an HTTP body could still author the proof and flip a gate-demoted row to confirmed with no engine
+having issued a single request.
+
+That is the same laundering Q-014 rejected on the leads path, still open on the findings path — which
+makes the two tickets one defect in a stronger sense than the brief claimed.
+
+**And a PUT-only fix is not a fix.** The UI's "Add a manual finding" form posts
+`confidence:"confirmed", confirmed:true` with operator-typed evidence, so `DELETE` + `POST`
+reproduces the bypass exactly. Any control written only against PUT would have passed.
+
+### Decision: the endpoint stays, but not in its present form
+
+The rule is stated once and applies to every route: **an HTTP write route may not mint an oracle
+`confirmed`.** `confirmed` names *who observed* the proof, not which words appear in a string.
+
+* **`PUT /findings/{sid}/{fid}` becomes annotation-only.** A whitelist — `_EDITABLE_FINDING_KEYS` —
+  is merged over the stored row; a body that tries to change anything else is refused 400, naming the
+  fields and pointing at the attestation path. A **whitelist, not a blacklist**, deliberately: a
+  blacklist means every field `proof_schema` learns to read next is silently editable, which is
+  precisely how this hole survived the first pass. Only an *actual change* is refused, so the ordinary
+  read-modify-write round trip (resending proof fields unchanged) still works.
+* **`POST /findings/{sid}` records an operator-authored ATTESTATION.** Every field is typed by a
+  human, so no oracle observed anything; it requires `operator` + `rationale`, stamps
+  `operator_attestation`, and `confidence` is set by the endpoint, never read from the body. It lands
+  as an attested lead.
+
+Deleting the routes was considered and rejected: `PUT` has a real annotation use, deleting a public
+endpoint breaks unknown external clients, and a 400 that explains itself teaches the right model where
+a 404 teaches nothing.
+
+### The control (`test_no_http_write_route_can_mint_an_oracle_confirmation`)
+
+Starting from a mission with **no engine findings**, drive **every discovered** `/findings` write route
+with a fully-fabricated proof payload and assert zero rows come back confirmed from
+`get_findings_gated` — then repeat via `DELETE` + `POST`. It asserts the outcome for every route at
+once rather than any field-level rule, because each field-level rule is individually defeatable.
+A drift guard (`test_editable_key_whitelist_contains_nothing_the_proof_gate_reads`) derives the
+proof-read key set from `proof_schema` rather than retyping it, so a new proof field is covered the day
+it is added.
+
+### A gap this found in my own controls
+
+Mutants **M9** (remove the PUT refusal) and **M10** (remove the whitelist merge) both **SURVIVED** the
+outcome-level control. The two mechanisms are redundant — with either one alone the fabricated payload
+still fails to mint — so the control cannot tell them apart, and a single-mechanism regression would
+have gone unnoticed. Fixed by adding
+`test_put_refuses_a_proof_bearing_edit_with_a_reason_and_still_allows_annotation`, which asserts each
+half separately (visible refusal naming the field and changing nothing; annotation edit still lands).
+M9 and M10 are now killed, and **M13** — both mechanisms removed at once, i.e. the literal pre-fix
+pass-through — is killed by the outcome control, which is the case that control exists for.
+
+Second-pass mutants: M9, M10, M11 (POST takes `confidence` from the body), M12 (`evidence` added back
+to the whitelist), M13 — **all KILLED**.
 
 ---
 
@@ -301,9 +372,10 @@ the honest provenance line.
 |------|--------|
 | brief's stated baseline | 2351 passed, 11 skipped, 1 xfailed, 0 failed |
 | after Q-013 (slice 1) | 2 failed — **both** `tests/test_sweep_class_coverage.py`, which the selection lane committed RED on purpose in `2f76886` while this run was in flight. Not this lane's. |
-| after Q-014 (slice 2) | **2371 passed, 11 skipped, 1 xfailed, 0 failed** |
+| after Q-014 (slice 2) | 2371 passed, 11 skipped, 1 xfailed, 0 failed |
+| after Q-013 second pass (slice 3) | **2374 passed, 11 skipped, 1 xfailed, 0 failed** |
 
-2351 -> 2371 is +20: **15 from this lane** (6 in `test_gate_write_paths.py`, 9 in
+2351 -> 2374 is +23: **18 from this lane** (9 in `test_gate_write_paths.py`, 9 in
 `test_operator_attestation.py`) and 5 from the selection lane's commits (`cf22521`, `f9b56c5`,
 `602e693`, `508885c`), which landed on `main` during this work. The single xfail (`00494`, the
 proved-undecidable `(A,A,A,B)` signature) is untouched; 11 skipped is unchanged.
@@ -314,7 +386,23 @@ module (`benchmark.py`, `blind_benchmark.py`, `owasp_bench.py`) references `add_
 `update_finding`; the scoring harnesses write through `db.add_finding`, whose behaviour is byte-for-byte
 unchanged, and read through `db.get_findings`.
 
-## What changes for existing callers
+## What changes for existing callers — stated plainly, including what BREAKS
+
+**This is the one real behaviour change in the lane.** A manually added finding no longer appears
+under confirmed findings. It appears under Unconfirmed Leads carrying an operator attestation.
+
+That is deliberate and it follows directly from the design answer: `confirmed` means an Apolaki oracle
+observed the proof, and a hand-typed finding never had one. The operator loses nothing real — the
+claim is durable, and it now carries *who* and *on what grounds*, which a bare `confirmed` never did —
+but anyone whose workflow counted manual findings in the confirmed total will see that total drop.
+Affected surfaces: the confirmed/unconfirmed counters, `risk_score` (which reads confirmed findings
+only, so a manual finding no longer contributes severity weight), and the report's Findings vs
+Unconfirmed-Leads split. No test asserted the old behaviour; the only caller was the UI form, updated
+here. If that trade is not wanted, the alternative is to keep manual findings in the confirmed table
+under a separate `authored_by: operator` label and teach every consumer to read it — strictly more
+work at every surface, for a word that would still mean two different things.
+
+
 
 * `db.update_finding` gained two `False`-returning refusals it did not have. The three callers in the
   tree — `main.capture_finding_poc`, `main.update_finding` (the route), `agent._triage` — all pass
@@ -343,7 +431,8 @@ Recorded from `git log`; a row with no hash has not been committed.
 | slice | what | hash |
 |-------|------|------|
 | 1 | Q-013 gate on the update write path + bypass controls | `3addb1c` |
-| 2 | Q-014 lead identity + operator attestation | (see below) |
+| 2 | Q-014 lead identity + operator attestation | `a1cdb8d` |
+| 3 | Q-013 second pass: an HTTP body may not author proof | (this commit) |
 
 Slices 2 and 3 of the original plan landed as ONE commit rather than two. They are not separable: the
 attestation endpoint is unreachable for a gate-routed lead without the identity fix, and the identity
