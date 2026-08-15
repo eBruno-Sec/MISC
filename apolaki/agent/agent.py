@@ -179,14 +179,49 @@ def _is_generic_objective(objective: str) -> bool:
 # clock for 20% of the engines. A single cap for both is why it had to be 20: twenty endpoints against a
 # 2756-URL surface, all twenty inside one directory. Budget the two tiers separately and the same wall
 # clock buys an order of magnitude more coverage. Both are env-tunable; neither is unbounded.
+#
+# RE-MEASURED over a FULL mission, 2026-08-14 (selection lane) — per-dispatch wall clock, not a
+# single-URL sample, and the 2026-08-10 figures were optimistic:
+#   eight HTTP engines   680.8 s over 400 targets = **1.70 s per URL** between them
+#     run_sqli 0.65  run_ldap 0.39  run_xpath 0.35  run_waf_bypass 0.09
+#     run_sqli_structural 0.07  run_ssi 0.06  run_injection_probes 0.05  run_css_injection 0.03
+#   two browser engines  run_xss **13.5 s** per call, run_dom_trace 3.95 s
+# So ONE browser target costs ~33 HTTP targets, and the browser trio (run_xss, run_dom_trace,
+# run_dom_audit) is 3.1% of the mission's dispatches for 58.5% of its tool-seconds. That ratio is
+# the reason the two tiers have separate budgets, and it is now a measurement rather than a sample.
 SWEEP_TARGET_CAP = max(1, int(os.getenv("BBH_SWEEP_TARGETS", "400") or 400))
 # targets that additionally get the browser-backed confirmers, taken off the FRONT of the shape-spread
 # order so they are representatives of the whole site rather than the first N of one directory.
 SWEEP_BROWSER_CAP = max(0, int(os.getenv("BBH_SWEEP_BROWSER_TARGETS", "30") or 30))
 # the split itself. HTTP-only engines are cheap enough to run on every selected target; the two that
 # drive a real browser are not, and pretending otherwise is what capped coverage at twenty endpoints.
+#
+# `run_web_probes` JOINED THIS TIER 2026-08-14 (selection lane). `_inject_sweep_surface` promises
+# that "a discovered query input is ALWAYS tested even if the graph-authoritative planner did not
+# select it". MEASURED on a full whole-product mission, that promise covered SQLi, XPath, LDAP and
+# SSI and covered NOTHING for path traversal, IDOR, cookie flags or PRNG disclosure -- the four
+# classes `run_web_probes` owns, and the engine `owasp_bench.ENGINES` names as the owner of
+# `pathtraver`, `securecookie` and `weakrand`.
+#
+# It was not merely under-scheduled. **It ran ZERO times in the whole mission**, and the reason is a
+# second gate, not this tuple: `planner._ALLOWED["active"] = {PASSIVE, ACTIVE}`, and `fresh()` drops
+# any step whose tool is not `_allowed(tool, mode)`. `run_web_probes` is INTRUSIVE, so in the
+# DEFAULT `active` mode the planner cannot schedule it at all -- nor `run_cmdi`, `run_nosqli`,
+# `run_ssrf`, `run_bfla`, `run_content_discovery` or `run_ffuf`. The sweep dispatches through
+# `_run_tool`, which applies the intrusive HITL gate (pre-authorised on an autonomous run) instead
+# of the planner's mode filter, so THIS TUPLE IS THE ONLY PATH to intrusive injection coverage in an
+# active-mode mission. A class absent from it is a class the mission never tests.
+#
+# MEASURED consequence on the OWASP Benchmark: of 220 vulnerable cases the mission actually probed,
+# 56 (weakrand 18, pathtraver 16, securecookie 22) had `run_web_probes` as their owning engine and
+# never received it, and were then booked as a DETECTION shortfall.
+#
+# It belongs in THIS tier and not the browser tier: HTTP-only (no CDP, no page render), and
+# INTRUSIVE exactly like `run_sqli` and `run_injection_probes` already here, so the sweep's
+# permission surface is unchanged.
 _SWEEP_HTTP_ENGINES = ("run_sqli", "run_sqli_structural", "run_xpath", "run_ldap", "run_ssi",
-                       "run_css_injection", "run_waf_bypass", "run_injection_probes")
+                       "run_css_injection", "run_waf_bypass", "run_injection_probes",
+                       "run_web_probes")
 _SWEEP_BROWSER_ENGINES = ("run_xss", "run_dom_trace")
 
 _SHAPE_DIGITS = re.compile(r"\d+")
