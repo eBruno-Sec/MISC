@@ -113,10 +113,19 @@ def step_cap():
 
     Returns None when the literal cannot be found, which is itself worth recording: an exit reason
     derived from a stale constant would be worse than no exit reason at all.
+
+    READS THE ORIGINAL, NOT THE WRAPPER (2026-08-14). `install_phases` replaces
+    `BBHAgent._execute_plan` with a pass-through wrapper, and `inspect.getsource` on the wrapper
+    finds no `MAX_STEPS` -- so calling this AFTER instrumentation silently returned None and the
+    baseline artifact recorded `step_cap: None, exit_reason: unknown`. The instrument had broken the
+    one field the run was instrumented to explain. `_ORIGINALS` keeps the pre-wrap callables so the
+    source read is of the real method whenever this is called; `main` additionally reads the cap
+    BEFORE installing anything and fails loudly if it cannot.
     """
     try:
         import inspect
-        src = inspect.getsource(agent_mod.BBHAgent._execute_plan)
+        fn = _ORIGINALS.get("_execute_plan") or agent_mod.BBHAgent._execute_plan
+        src = inspect.getsource(fn)
         m = re.search(r"MAX_STEPS\s*=\s*(\d+)", src)
         return int(m.group(1)) if m else None
     except Exception:
@@ -166,6 +175,8 @@ PHASE_METHODS = [
 ]
 
 _PHASE_STACK = ["boot"]
+# pre-wrap callables, kept so anything that reads a method's SOURCE still sees the real one
+_ORIGINALS: dict = {}
 
 
 def _phase():
@@ -187,6 +198,7 @@ def install_phases(cls):
     wrapped = []
     for name, label in PHASE_METHODS:
         orig = getattr(cls, name)
+        _ORIGINALS.setdefault(name, orig)
         if inspect.isasyncgenfunction(orig):
             def mk(orig=orig, label=label):
                 async def gen(self, *a, **kw):
@@ -297,6 +309,13 @@ async def main():
     known_tools = check_probe_tools()
     print("probe-tool self-check OK (%d registered tools, %d payload-bearing tracked)"
           % (known_tools, len(PROBE_TOOLS)), flush=True)
+    # READ THE CAP FIRST. Instrumentation must never be able to destroy the field the run exists to
+    # explain -- it did exactly that once, and a None cap turns exit_reason into "unknown".
+    cap_preflight = step_cap()
+    if cap_preflight is None:
+        raise SystemExit("MAX_STEPS literal not found in BBHAgent._execute_plan before "
+                         "instrumentation -- refusing to run, the exit reason would be unfalsifiable")
+    print("step cap read BEFORE instrumentation: %d" % cap_preflight, flush=True)
     wrapped_phases = install_phases(agent_mod.BBHAgent)
     planner_batches = []
     planner_state = install_planner_census(planner_batches)
@@ -390,7 +409,7 @@ async def main():
 
     # ── EFFORT + EXIT REASON ──────────────────────────────────────────────
     steps = getattr(ag, "_plan_steps", None)
-    cap = step_cap()
+    cap = step_cap() or cap_preflight
     degraded = getattr(ag, "_degraded", None)
     if degraded:
         exit_reason = "degraded"
