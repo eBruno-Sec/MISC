@@ -4,11 +4,20 @@ Status header (a killed agent leaves an accurate document):
 
 | sub-question | status |
 | --- | --- |
-| 1. WHICH cases were lost | MEASURED - answered below |
-| 2. WHY | in progress |
-| 3. WHEN (commit) | in progress |
+| 1. WHICH cases were lost | MEASURED - 9 TP + 1 FP, named below |
+| 2. WHY | MEASURED - never probed; the sweep's shape round-robin cut them |
+| 3. WHEN | MEASURED - commit `de4c3aa`, 2026-08-11 02:57:09 -0700 |
+| regression test | MEASURED - 6 passed / 1 strict xfail, mutation-checked |
+| full agent suite with the new file | in progress |
 
 Scope: DIAGNOSIS only. This lane fixes nothing.
+
+**One-line answer.** `de4c3aa` replaced the sweep's discovery-order truncation
+with an EVEN round-robin across URL shapes. The OWASP Benchmark's whole surface
+collapses to 11 shapes, so the 400-target budget was split 11 ways regardless of
+class size: the sqli class holds 456 of 2524 query-bearing candidates and drew
+31 slots. The nine lost true positives sit at sqli-class indices 38-58, just
+past a cut at index 30. They were never probed by anything.
 
 ---
 
@@ -264,4 +273,190 @@ by the same ordinal cut that dropped the nine true positives. The 96.3% ->
 higher precision reading must NOT be credited to an oracle improvement: the
 FP was never re-tested.
 
-## 3. WHEN - in progress
+## 3. WHEN - MEASURED. Commit `de4c3aa`, 2026-08-11 02:57:09 -0700
+
+`git log -S` over the four symbols that make up the mechanism returns ONE
+commit for each, and it is the same commit:
+
+```
+$ git log --oneline -S "_spread_by_shape"    -- agent/agent.py
+$ git log --oneline -S "SWEEP_TARGET_CAP"    -- agent/agent.py
+$ git log --oneline -S "def target_shape"    -- agent/agent.py
+$ git log --oneline -S "limit=SWEEP_TARGET_CAP" -- agent/agent.py
+de4c3aa Apolaki: land the browser sensor, hostless guards, and the squad's written evidence (#123)
+```
+
+The selection diff inside it:
+
+```
+-def sweep_targets(urls, forms, in_scope, limit: int = 20) -> list:
+-    return targets[:limit]
++SWEEP_TARGET_CAP  = max(1, int(os.getenv("BBH_SWEEP_TARGETS", "400") or 400))
++SWEEP_BROWSER_CAP = max(0, int(os.getenv("BBH_SWEEP_BROWSER_TARGETS", "30") or 30))
++def target_shape(url: str) -> str:
++def _spread_by_shape(targets: list) -> list:
++def sweep_targets(urls, forms, in_scope, limit: int = SWEEP_TARGET_CAP) -> list:
++    return _spread_by_shape(targets)[:limit]
++       targets = sweep_targets(..., limit=SWEEP_TARGET_CAP)
+```
+
+So one commit did three things at once: raised the effective cap 20 -> 400,
+introduced shape collapsing, and introduced the even round-robin.
+
+**The commit message does not mention any of it.** `de4c3aa` is described as
+"the browser sensor, hostless guards, and the squad's written evidence", and
+its body explains `browser_engine`, `cdp`, `liveness_run` and two docs. The
+sweep-selection rewrite arrived inside "everything left green-but-uncommitted
+after four agents were killed by session limits". That is why a 47%-of-surface
+recall change has gone eleven days without an owner: nothing in the log says
+it happened.
+
+### The baseline ran before it - chronology and behaviour agree
+
+| fact | value | source |
+| --- | --- | --- |
+| mission `ebd96f45` created | 2026-08-11T00:19:55Z | `missions.json` record |
+| mission elapsed | 5329 s (~89 min), so it ended ~01:48Z | sealed claim file |
+| `de4c3aa` authored + committed | 2026-08-11T09:57:09Z | `git log --date=iso` |
+
+The baseline finished about **8 hours before** the mechanism was committed.
+
+Chronology alone is not proof, because the WIP could have sat in the tree
+before it was committed. The behavioural argument is the one that closes it.
+Under `_spread_by_shape`, reaching the deepest baseline case (00438, sqli-group
+index 58) requires the sqli shape to draw at least 59 slots, and MEASURED:
+
+```
+=== NEW selection: cap needed for the sqli shape to reach idx 58
+   cap   400 -> sqli slots   37 ; baseline-20 recovered 11/20
+   cap   500 -> sqli slots   47 ; baseline-20 recovered 16/20
+   cap   600 -> sqli slots   58 ; baseline-20 recovered 19/20
+   cap   650 -> sqli slots   64 ; baseline-20 recovered 20/20 ALL
+```
+
+The baseline's 20 sqli cases are unreachable under shape-spread at any cap
+below ~650. `SWEEP_TARGET_CAP` is 400, `BBH_SWEEP_TARGETS` is set nowhere in
+the repo and is absent from both rerun containers' env, and both reruns record
+`sweep_selection: [{"candidates": 2762, "kept": 400, "limit": 400}]`. So the
+baseline cannot have run this code path. Its sweep reached deep into one class
+the way an unspread, discovery-order truncation does.
+
+Note the cap-11-of-20 row: at cap 400 the reconstruction recovers exactly the
+11 cases the reruns claim. The model predicts the observed number.
+
+### What `de4c3aa` got RIGHT, and must not be reverted
+
+The pre-change code was `return targets[:limit]` with `limit` defaulting to 20
+and the call site passing nothing - 20 targets on a 2762-URL surface, all
+inside whichever directory the crawl walked first. Illustrating that on the
+same candidate list:
+
+```
+=== OLD truncation (targets[:limit], discovery order)
+   cap    20 -> shape mix {'cmdi-#': 20}
+   cap   400 -> shape mix {'cmdi-#': 232, 'securecookie-#': 60, 'ldapi-#': 54, 'pathtraver-#': 54}
+```
+
+(Discovery order here is index-page order, which is NOT the live crawl order,
+so this row is an ILLUSTRATION of the failure mode - one class monopolises the
+budget - not a reproduction of the 08-11 run.)
+
+That is strictly worse as a policy: it makes recall a lottery on crawl order.
+`de4c3aa` is a real improvement that carried a real regression. The whole-run
+numbers show both halves at once: findings 29 -> 31/33, distinct cases 27 ->
+29/31, six families claimed instead of five - and sqli 21 -> 11.
+
+**The defect is the RATION, not the spread.** Even round-robin over shapes
+means budget share is 1/11 regardless of whether a class holds 27 candidates
+or 456. The fix is a size-aware split, not a revert.
+
+---
+
+## Suggested patch (for the owning lane - this lane writes no code outside its two files)
+
+`agent/agent.py` is not mine to edit. The change is in `_spread_by_shape`
+(agent/agent.py:275): weight each shape's turn by its share of the candidate
+set, so truncation degrades every class proportionally.
+
+```python
+def _spread_by_shape(targets: list) -> list:
+    groups: dict = {}
+    for t in targets:
+        groups.setdefault(target_shape(t), []).append(t)
+    out, order = [], list(groups)
+    # PROPORTIONAL, NOT EVEN. An even round-robin gives a 456-candidate class and a
+    # 27-candidate class the same slots, so the rarest class is tested exhaustively and the
+    # commonest at 8%. MEASURED: that cost nine true positives on the OWASP Benchmark sqli
+    # class (docs/handoff/sqli.md, baseline ebd96f45 vs seals e6674d6d / 82f55903).
+    sizes = {k: len(groups[k]) for k in order}
+    total = sum(sizes.values()) or 1
+    credit = {k: 0.0 for k in order}
+    while len(out) < len(targets):
+        for k in order:
+            g = groups[k]
+            if not g:
+                continue
+            credit[k] += sizes[k] / total * len(order)
+            while credit[k] >= 1.0 and g:
+                credit[k] -= 1.0
+                out.append(g.pop(0))
+    return out
+```
+
+Properties, MEASURED on the synthetic 11-class surface in the regression test:
+deterministic, order-stable within a shape, spends the full budget, reaches
+every class, and makes budget share track candidate share within a factor of
+two for all 11 classes.
+
+CAUTION, and this lane will not pretend otherwise: this is UNVERIFIED as a
+recall fix. It has been run only against `sweep_targets`, never in a mission.
+Proportionality moves slots from the small classes to the big ones, so
+`xpathi` (27 candidates, currently 100% covered, 1 claimed finding today) and
+`ldapi` (54 candidates, 5 claimed findings today) will LOSE coverage. Whether
+the trade nets positive is a measurement nobody has taken. Raising
+`SWEEP_TARGET_CAP` from 400 to 650 is the alternative lever and would recover
+all 20 baseline sqli cases without taking anything from any class, at the cost
+of ~62% more sweep dispatches (the sweep was 1603 s of a 2103 s run).
+
+Do not adopt either from this document. Pre-register the prediction, then run
+the mission.
+
+---
+
+## Hypotheses killed
+
+| hypothesis | verdict | evidence |
+| --- | --- | --- |
+| The oracle got stricter and declined these cases | **DISPROVED** | the nine cases got zero dispatches from all 17 tools; the oracle never saw a response |
+| A different engine claimed them under another family | **DISPROVED** | they are absent from every `cases_by_tool` list, and absent from both reruns' full 29/31-case claim sets, not merely from `sqli` |
+| `run_sqli` errored on them | **DISPROVED** | `run_sqli` made 400 calls / 373 cases; `cases_by_tool['run_sqli']` is byte-identical to `cases_probed`, and `claimed_not_probed` is empty |
+| The loss is directory-scoped (survivors in `sqli-00`, lost elsewhere) | **DISPROVED** | all nine lost sqli cases are in `sqli-00`, same directory and same URL template as all 11 survivors |
+| Shape collapse merged several `sqli-NN` directories into a few slots | **DISPROVED as stated, CONFIRMED in substance** | there is only ONE sqli directory, so nothing merged across directories. What collapsed is 456 URLs of one class into ONE round-robin slot-holder rationed like a 27-URL class |
+| The step cap (`MAX_STEPS`) | **not the cause** (pre-existing finding, re-confirmed) | the sweep dispatches through `_inject_sweep_surface`, whose bound is `SWEEP_TARGET_CAP`; the reruns record `kept 400 of 2762 candidates` |
+| The 08-11 code is unrecoverable WIP, so the cause may not be in git | **DISPROVED** | the mechanism is fully present in git as `de4c3aa`, and cap-400 shape-spread reproduces the observed 11 exactly while being arithmetically incapable of producing the baseline's 20 |
+| Precision improved because the oracle stopped false-positiving on 00494 | **DISPROVED** | 00494 sits one slot past the same ordinal cut; it was never injection-probed. The FP was dropped by the budget, not by an oracle |
+
+## Regression test
+
+`agent/tests/test_sqli_selection_regression.py` - 7 tests, synthetic URLs
+only, no benchmark path/case-id/category name in any assertion.
+
+MEASURED on current code: `6 passed, 1 xfail`.
+
+The xfail is `test_budget_share_tracks_candidate_share`, `strict=True`: the
+invariant this diagnosis says is missing.
+
+NEGATIVE CONTROL (the test must be able to detect the fix it names). A
+throwaway copy of `agent/` with `_spread_by_shape` replaced by the
+size-proportional interleave above:
+
+```
+=== REAL CODE       ......x    6 passed, 1 xfailed
+=== PROPORTIONAL MUTANT ......F  XPASS(strict) on test_budget_share_tracks_candidate_share
+```
+
+Only the xfail flips; the six policy-agnostic tests pass in both worlds. So
+the invariant is live, and the file does NOT freeze the defect in place - no
+test asserts the 37-of-456 disparity, deliberately, because such a test would
+fail on the day it is repaired. The disparity is recorded here instead.
+
