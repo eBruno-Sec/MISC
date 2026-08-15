@@ -523,8 +523,20 @@ def test_the_evidence_names_the_separate_reread_and_both_controls():
 
 
 def test_the_cvss_score_matches_its_own_vector():
-    """Nothing in the report pipeline recomputes a v3.1 score -- `report.check_report_honesty` is
-    cited by two modules and does not exist -- so the arithmetic is pinned here.
+    """The engine's own arithmetic, pinned at the producer.
+
+    CORRECTED 2026-08-15, and the correction is the lesson. This docstring used to assert that
+    "nothing in the report pipeline recomputes a v3.1 score", inferred from the fact that the
+    function two modules CITE -- `report.check_report_honesty` -- does not exist. The name is indeed
+    stale; the conclusion drawn from it was false. MEASURED: `report.report_integrity_check`
+    (report.py:1903) runs LIVE in the report path (report.py:2800) and rejects a score disagreeing
+    with its vector by more than 0.5 (report.py:1963-1967).
+
+    A missing NAME is not a missing GUARD. I grepped for the citation and stopped, instead of
+    grepping for what the pipeline actually does with `cvss_vector` -- which was two lines away in a
+    file I had already read. This test still earns its place: it pins the value AT THE PRODUCER, so a
+    wrong constant is caught here rather than at render time on a real engagement.
+
     ISS = 1-(1-0.56)(1-0.56) = 0.8064; Impact = 6.42*0.8064 = 5.1771;
     Exploitability = 8.22*0.85(AV:N)*0.77(AC:L)*0.62(PR:L)*0.85(UI:N) = 2.8353; roundup(8.0124) = 8.1
     """
