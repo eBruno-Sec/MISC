@@ -432,7 +432,7 @@ Recorded from `git log`; a row with no hash has not been committed.
 |-------|------|------|
 | 1 | Q-013 gate on the update write path + bypass controls | `3addb1c` |
 | 2 | Q-014 lead identity + operator attestation | `a1cdb8d` |
-| 3 | Q-013 second pass: an HTTP body may not author proof | (this commit) |
+| 3 | Q-013 second pass: an HTTP body may not author proof | `42e1544` |
 
 Slices 2 and 3 of the original plan landed as ONE commit rather than two. They are not separable: the
 attestation endpoint is unreachable for a gate-routed lead without the identity fix, and the identity
