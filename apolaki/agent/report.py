@@ -373,7 +373,7 @@ def generate_report(program: str, findings: list, scope: dict,
     findings = sanitize_finding_urls(findings)   # collapse any duplicated-host URL from prior-scan memory
     findings = _with_capec(findings)
     delta_block = "\n".join(_delta_lines(delta, findings))
-    ledger_block = "\n".join(_ledger_md(tool_ledger))
+    ledger_block = "\n".join(_ledger_md(tool_ledger) + _arsenal_md(tool_ledger))
     status_banner = _status_note(status)          # only failed/stopped/interrupted
     exec_note = _exec_note(execution)             # strategy + AI usage (always for det/low-AI)
     banner = "\n\n".join(b for b in (status_banner, exec_note) if b)
@@ -1601,6 +1601,86 @@ def _zap_badge(status: str) -> str:
     return {"executed": "Run", "executed_passive": "Pass", "executed_safe_active": "Safe",
             "executed_thorough_active": "Deep", "not_configured": "Off", "user_disabled": "Off",
             "unavailable": "N/A", "failed": "Fail", "not_invoked": "Skip"}.get(status or "not_configured", "Off")
+
+
+def arsenal_gap(ledger: dict) -> dict:
+    """Which engines this mission did NOT dispatch, and why — from the registry, not a hand list.
+
+    Q-050/Q-051. The tool ledger has always recorded what RAN. Nothing recorded what did not, so
+    discovering that 32 of 92 engines had never executed in 151 missions took a SQL query over the
+    whole store. A pentester's report says what was not tested; that is the difference between a
+    result and an advertisement, and it is the number a reader needs to size the finding list.
+
+    Returns {"dispatched", "silent", "not_dispatched", "blocked_by_mode", "error"}:
+      dispatched     engines the ledger says ran
+      silent         ran and produced nothing -- a real result, not a gap
+      not_dispatched defined, permission-registered, never called this mission
+      blocked_by_mode the subset that COULD NOT have run at this permission tier, which is a
+                     different statement from "was not selected" and must not be merged with it
+
+    The registry is imported lazily and a failure is RECORDED rather than swallowed: an empty gap
+    list produced by a broken import would read as "every engine ran", which is exactly the silent
+    failure this function exists to expose.
+    """
+    out = {"dispatched": [], "silent": [], "not_dispatched": [], "blocked_by_mode": [], "error": ""}
+    rows = (ledger or {}).get("tools") or []
+    ran = {str(t.get("tool") or "") for t in rows if t.get("tool")}
+    out["dispatched"] = sorted(x for x in ran if x)
+    out["silent"] = sorted(str(t.get("tool")) for t in rows
+                           if t.get("tool") and int(t.get("calls") or 0) > 0
+                           and not int(t.get("findings") or 0))
+    try:
+        import tools as _t
+        registered = {n for n in _t.TOOL_PERMISSIONS}
+        mode = str((ledger or {}).get("strategy") or (ledger or {}).get("mode") or "").lower()
+        allowed = None
+        if mode:
+            try:
+                import planner as _p
+                allowed = _p._ALLOWED.get(mode)
+            except Exception:
+                allowed = None
+        missing = sorted(n for n in registered if n not in ran and n.replace("run_", "") not in ran)
+        out["not_dispatched"] = missing
+        if allowed is not None:
+            out["blocked_by_mode"] = sorted(
+                n for n in missing if _t.TOOL_PERMISSIONS.get(n) not in allowed)
+    except Exception as exc:                       # noqa: BLE001 - recorded, never silent
+        out["error"] = "%s: %s" % (type(exc).__name__, str(exc)[:160])
+    return out
+
+
+def _arsenal_md(ledger: dict) -> list:
+    """The arsenal-gap section. Prints nothing when there is no ledger to reason from — an absent
+    ledger is not evidence that nothing was skipped, and saying "0 engines skipped" from no data is
+    the failure mode this whole section is against."""
+    if not ledger:
+        return []
+    gap = arsenal_gap(ledger)
+    if gap["error"]:
+        return ["## Arsenal coverage", "",
+                "**NOT ESTABLISHED** — the engine registry could not be read, so this report cannot "
+                "say which engines were skipped: `%s`" % gap["error"], ""]
+    lines = ["## Arsenal coverage", "",
+             "_What the platform did NOT run, so the finding list can be read with its bounds "
+             "visible. Engines that ran and found nothing are a RESULT; engines never dispatched "
+             "are a gap._", "",
+             "- **Dispatched:** %d engine(s)" % len(gap["dispatched"]),
+             "- **Ran and found nothing:** %d — %s" % (
+                 len(gap["silent"]), ", ".join("`%s`" % s for s in gap["silent"][:12]) or "none"),
+             "- **Never dispatched this mission:** %d" % len(gap["not_dispatched"])]
+    if gap["blocked_by_mode"]:
+        lines += ["- **Of those, unable to run at this permission tier:** %d — %s" % (
+            len(gap["blocked_by_mode"]),
+            ", ".join("`%s`" % s for s in gap["blocked_by_mode"][:12]))]
+        lines += ["", "  A tier-blocked engine was never a candidate, which is a different statement "
+                      "from one that was available and not selected. Raising the mode is what would "
+                      "change it."]
+    if gap["not_dispatched"]:
+        rest = [n for n in gap["not_dispatched"] if n not in set(gap["blocked_by_mode"])]
+        if rest:
+            lines += ["", "  Available but not selected: %s" % ", ".join("`%s`" % s for s in rest[:16])]
+    return lines + [""]
 
 
 def _ledger_md(ledger: dict) -> list:
