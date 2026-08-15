@@ -94,6 +94,47 @@ pushed as `b1d56eb`.
   reachability gate after the handoff had already claimed the wiring was done.
 - **Q-017 CLOSED**, **Q-045/Q-046 CLOSED**, **Q-015/Q-016 CLOSED**, **Q-013/Q-014 CLOSED**.
 
+### Q-051 · The report cannot say WHICH ENGINE found a finding, and the technique coverage matrix is dead code · **HIGH** · `proposed`
+
+Erwin's idea, and it is the right one: if the report attributed every check to the tool that performed
+it, an unused tool would be **visible in the artifact** instead of requiring a database audit. Q-050
+took a SQL query over 151 missions to find that 32 engines never ran. That should have been readable
+off a report.
+
+**MEASURED, two gaps:**
+
+**(a) No finding carries its producing engine.** 400 stored findings sampled: **zero** have any key
+naming a tool, engine, or source. The mission-level `tool_ledger` block exists and `asvs_model.assess`
+already consumes it via `_engines_from_ledger`, so the mission knows WHICH engines ran — but nothing
+connects an individual finding to the engine that produced it.
+
+This is the **Q-046 defect again**: the producer is known at the moment of creation (`ToolResult` is
+constructed with the tool's own name) and thrown away, exactly as `param` was rendered into a title
+and discarded. Bind it at the `ToolResult` boundary, where the name is already in hand.
+
+What it buys, beyond attribution: **an "engines that produced nothing" section falls out for free**,
+and so does "engines never dispatched". A reader sees `run_cmdi: not dispatched` in the report rather
+than us finding it by hand two years later.
+
+**(b) Technique coverage is computed NOWHERE.** 88 techniques are defined in `techniques.py`. Both
+`techniques.coverage_matrix` and `techniques.techniques_for_lab` are in the **qualified-dead-code
+list** — the machinery that would answer "which techniques ran" exists and is never called. WSTG,
+which is wired, stands at **full 60 / partial 25 / none 24 / excluded 5 of 109 (55.0% full)**, so the
+honest coverage picture is available for WSTG and absent for techniques.
+
+**On "all techniques must be used":** not every technique applies to every target, and forcing them all
+to fire would manufacture noise. The right invariant is the one Q-012 already established for ASVS —
+every technique must either **RUN**, or be recorded as **not applicable with a reason**. Silence is the
+defect, not non-execution. A technique that never ran and never explained itself is indistinguishable
+from one the product cannot perform.
+
+**DoD**: `engine` bound on every finding at the `ToolResult` boundary; the report prints per-finding
+attribution plus a not-dispatched/produced-nothing section; `coverage_matrix` wired and printed; every
+technique either runs or carries a reason. **Do not fix (b) by deleting the dead functions** — they
+are the answer, not the problem.
+
+---
+
 ### Q-050 · **32 of 92 engines have NEVER EXECUTED in 151 missions** · **HIGH** · `proposed`
 
 Raised by Erwin: "are all tools being used harmoniously?" MEASURED rather than answered — 29,109 tool
