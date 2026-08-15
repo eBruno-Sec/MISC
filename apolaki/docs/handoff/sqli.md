@@ -372,11 +372,100 @@ or 456. The fix is a size-aware split, not a revert.
 
 ---
 
-## Suggested patch (for the owning lane - this lane writes no code outside its two files)
+## 4. The patch I proposed, MEASURED, and WITHDRAWN
 
-`agent/agent.py` is not mine to edit. The change is in `_spread_by_shape`
-(agent/agent.py:275): weight each shape's turn by its share of the candidate
-set, so truncation degrades every class proportionally.
+I wrote the proportional-ration patch below and then priced it. **It is not a
+fix. Do not ship it.** Recording it because a disproved proposal is a result,
+and because it would have looked obviously right to the next person too.
+
+First, what is actually out there to be reached (answer key, read for
+diagnosis only - no detection rule is derived from it):
+
+```
+=== vulnerable cases available per shape
+   cmdi            232 candidates,  115 vulnerable
+   securecookie     60 candidates,   33 vulnerable
+   ldapi            54 candidates,   23 vulnerable
+   pathtraver      241 candidates,  117 vulnerable
+   sqli            456 candidates,  241 vulnerable
+   trustbound      112 candidates,   74 vulnerable
+   crypto          225 candidates,  120 vulnerable
+   hash            214 candidates,  119 vulnerable
+   weakrand        448 candidates,  189 vulnerable
+   xpathi           27 candidates,   13 vulnerable
+   xss             455 candidates,  246 vulnerable
+   TOTAL          2524 candidates, 1290 vulnerable
+```
+
+Vulnerability density is ~51% in EVERY class. That is the fact that kills the
+patch: at a fixed budget, any partition of 400 targets reaches ~200-230
+vulnerable cases no matter how it is split. Rationing does not create reach.
+
+```
+=== cap 400, even ration (today) vs proportional
+   even  (today) vuln reached 228 of 1290 (17.7%)
+   proportional  vuln reached 226 of 1290 (17.5%)
+```
+
+Proportionality is **2 cases WORSE**. And under the macro-averaging this
+project mandates for every benchmark number, it is far worse than that:
+
+```
+=== MACRO-AVERAGED reachable recall, cap 400
+   even  (today)  MACRO  34.1%   micro  17.7%
+       per-class {cmdi 17.4, crypto 14.2, hash 20.2, ldapi 69.6, pathtraver 17.1,
+                  securecookie 72.7, sqli 9.5, trustbound 32.4, weakrand 11.6,
+                  xpathi 100.0, xss 10.2}
+   proportional   MACRO  17.8%   micro  17.5%
+       per-class {cmdi 17.4, crypto 13.3, hash 17.6, ldapi 17.4, pathtraver 17.9,
+                  securecookie 18.2, sqli 17.4, trustbound 16.2, weakrand 18.5,
+                  xpathi 23.1, xss 18.7}
+```
+
+**The patch would have roughly HALVED the macro-averaged reachable recall,
+34.1% -> 17.8%, to gain nothing on micro.** The even round-robin is not an
+oversight that happens to hurt sqli; it is the ration that maximises macro
+coverage, which is exactly what an equal-weight-per-category scorer rewards.
+It buys `xpathi` 100% and `securecookie` 72.7% with slots that would otherwise
+disappear into sqli's 456-case tail.
+
+So the sqli 21 -> 11 loss is the PRICE of a policy that is right on the metric
+the project scores itself with. That is a trade-off, not a defect, and I was
+wrong in section 3 to call the ration "the defect". Section 3's diagnosis of
+the MECHANISM stands unchanged; its recommendation does not.
+
+### The only lever that moves both numbers is the cap
+
+```
+=== even ration (today), varying SWEEP_TARGET_CAP
+    cap   MACRO   micro   sqli class reach
+     400   34.1%   17.7%    23 of 241     <-- today
+     500   40.8%   22.1%    28 of 241
+     650   47.9%   28.4%    38 of 241     <-- recovers all 20 baseline sqli cases
+     800   53.2%   34.2%    50 of 241
+    1000   61.2%   42.7%    64 of 241
+    1500   75.2%   60.1%    94 of 241
+    2524  100.0%  100.0%   241 of 241
+```
+
+Cap 400 -> 650 is +13.8 points macro and +10.7 micro, costs no class anything,
+and is the change that recovers the nine lost cases. Its price is dispatch
+time: the sweep was 1603 s of the 2103 s run, and 650/400 implies roughly
++62%, so ~2600 s of sweep and a ~3100 s mission. UNVERIFIED - that is
+proportional arithmetic on the measured per-URL costs at `agent/agent.py:185`,
+not a timed run.
+
+REACHABILITY IS NOT DETECTION. Every number in this section counts vulnerable
+cases HANDED TO the engines. The engines still have to confirm them, and the
+baseline's own record shows they do not confirm all of what they reach - it
+claimed 20 of the sqli cases it swept, not all of them. Treat these as
+ceilings, and pre-register a prediction before running the mission.
+
+### The withdrawn patch, for the record
+
+`agent/agent.py` is not mine to edit, and I am NOT asking anyone to apply this.
+It weights each shape's turn by its share of the candidate set. It is correct
+code for a policy that measurement says is worse than the one in place.
 
 ```python
 def _spread_by_shape(targets: list) -> list:
@@ -403,23 +492,14 @@ def _spread_by_shape(targets: list) -> list:
     return out
 ```
 
-Properties, MEASURED on the synthetic 11-class surface in the regression test:
-deterministic, order-stable within a shape, spends the full budget, reaches
-every class, and makes budget share track candidate share within a factor of
-two for all 11 classes.
+Properties, MEASURED: deterministic, order-stable within a shape, spends the
+full budget, reaches every class, and makes budget share track candidate share
+within a factor of two for all 11 classes. It does everything it claims. It is
+still the wrong policy, for the reason measured above.
 
-CAUTION, and this lane will not pretend otherwise: this is UNVERIFIED as a
-recall fix. It has been run only against `sweep_targets`, never in a mission.
-Proportionality moves slots from the small classes to the big ones, so
-`xpathi` (27 candidates, currently 100% covered, 1 claimed finding today) and
-`ldapi` (54 candidates, 5 claimed findings today) will LOSE coverage. Whether
-the trade nets positive is a measurement nobody has taken. Raising
-`SWEEP_TARGET_CAP` from 400 to 650 is the alternative lever and would recover
-all 20 baseline sqli cases without taking anything from any class, at the cost
-of ~62% more sweep dispatches (the sweep was 1603 s of a 2103 s run).
-
-Do not adopt either from this document. Pre-register the prediction, then run
-the mission.
+Its one legitimate use is as the NEGATIVE CONTROL for the regression test -
+it is the mutant that flips the strict xfail, proving that test can detect the
+change it names.
 
 ---
 
