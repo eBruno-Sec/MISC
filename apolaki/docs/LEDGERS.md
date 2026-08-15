@@ -339,6 +339,49 @@ defend.
 
 ---
 
+## ★ Q-049 CLOSED — the budget was the lever, and it recovered the nine. 2026-08-15
+
+`SWEEP_TARGET_CAP` 400 -> 700. One variable; `run_web_probes` stayed out of the sweep and the Q-047
+oracle fix was in. Sealed `951dc0a0` and committed **before** the key was opened, against conditions
+registered in advance (`docs/benchmarks/wp3_precondition.md`).
+
+| | baseline `ebd96f45` | wp2 (cap 400) | **wp3 (cap 700)** |
+|---|---:|---:|---:|
+| cases probed | — | 373 | **645** |
+| `sqli` findings | 21 | 11 | **20** |
+| true positives | 26 | 28 | **26** |
+| false positives | 1 | 1 | **1** |
+| precision | 96.3% | 96.6% | **96.3%** |
+| recall | 1.84% | 1.98% | **1.84%** |
+| elapsed | 5329 s | 2103 s | **2576 s** |
+
+**All three pre-registered conditions met.** Precision did not fall below 96.3%; **8 of the 9** named
+cases came back (`00335 00337 00339 00341 00342 00428 00429 00433`); and the single FP is `00494`, the
+long-known baseline false positive, **not a new one** — it returns precisely because probing sqli
+deeply again reaches it again.
+
+**What this is:** the baseline's exact score, **in 48% of the time**, with the nine starved cases
+genuinely probed rather than reached by luck. The prediction that they were budget-starved was correct
+and is now measured end to end.
+
+**What this is NOT: a headline improvement, and the comparison that flatters it is the wrong one.**
+Against wp2 the true-positive count went **down**, 28 -> 26. wp2's extra TPs were traversal-family
+claims on `cmdi-00` and `weakrand-00` endpoints — an engine firing outside its class and scoring TP
+because those cases happen to be vulnerable to something else. wp3's 26 are class-correct. **A
+smaller number of honest findings replaced a larger number of lucky ones**, which is the third time
+this week a count has moved in the opposite direction to the capability behind it.
+
+**My cost prediction was WRONG, in the good direction**, and it was written down to be falsifiable:
+predicted +57% elapsed from a linear per-URL model, measured **+22%**. Per-URL cost is sublinear in
+target count. That matters before the next budget change is priced, because **`00438` — the ninth
+case, the highest index — is still unprobed**, and the naive model would have said it costs far more
+than it evidently does.
+
+Still open and named: `00438`, and the unexplained wp2 FP mechanism at `00042` (its traversal claim is
+absent here only because the engine that made it is out of the sweep, which is not the same as fixed).
+
+---
+
 ## Q-049 FALSIFIED — the nine cases are a BUDGET problem, and the allocator was already optimal. 2026-08-15
 
 I raised Q-049 off the breaker lane's diagnosis, implemented proportional allocation, and it was

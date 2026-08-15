@@ -189,7 +189,27 @@ def _is_generic_objective(objective: str) -> bool:
 # So ONE browser target costs ~33 HTTP targets, and the browser trio (run_xss, run_dom_trace,
 # run_dom_audit) is 3.1% of the mission's dispatches for 58.5% of its tool-seconds. That ratio is
 # the reason the two tiers have separate budgets, and it is now a measurement rather than a sample.
-SWEEP_TARGET_CAP = max(1, int(os.getenv("BBH_SWEEP_TARGETS", "400") or 400))
+# RAISED 400 -> 700 on 2026-08-15, and the number is a MEASUREMENT, not a preference (Q-049).
+#
+# 400 kept 14.5% of a 2762-URL surface. Because a truncated round-robin is the water-filling optimum
+# `min(size, level)`, every shape drew the same ~38, and the sqli class -- 456 of 2524 query-bearing
+# candidates -- had nine true positives sitting at class indices 38-58, just past the cut. They were
+# never probed by anything, and that WAS the entire `sqli 21 -> 11` regression. Reallocating cannot
+# reach them (proportional splits break complete coverage of the small classes, worth 34.1% vs 17.8%
+# macro reachable recall), so the budget itself was the lever. 605 is the modelled boundary; 700 is
+# the first round number above it with margin.
+#
+# MEASURED end to end, sealed before the key (docs/benchmarks/wp3_raised_cap_claims.json, seal
+# 951dc0a0), against conditions registered in advance (docs/benchmarks/wp3_precondition.md):
+#   cases probed 373 -> 645 | sqli findings 11 -> 20 | 8 of the 9 named cases recovered
+#   26 TP / 1 FP / 27 claimed, precision 96.3%, recall 1.84% -- the baseline's exact score
+#   elapsed 2576 s vs the baseline's 5329 s, so the same result in 48% of the time
+# The single FP is 00494, the long-known baseline false positive, not a new one.
+#
+# The cost prediction was WRONG in the good direction: +22% elapsed, not the +57% predicted from a
+# linear per-URL model. Per-URL cost is evidently sublinear in target count, which is worth
+# understanding before the next budget change is priced -- 00438, the ninth case, is still unprobed.
+SWEEP_TARGET_CAP = max(1, int(os.getenv("BBH_SWEEP_TARGETS", "700") or 700))
 # targets that additionally get the browser-backed confirmers, taken off the FRONT of the shape-spread
 # order so they are representatives of the whole site rather than the first N of one directory.
 SWEEP_BROWSER_CAP = max(0, int(os.getenv("BBH_SWEEP_BROWSER_TARGETS", "30") or 30))

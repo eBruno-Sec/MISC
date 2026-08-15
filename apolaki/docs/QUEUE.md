@@ -81,10 +81,14 @@ pushed as `b1d56eb`.
   water-filling optimum `min(size, level)`. MEASURED: the dominant class draws 38 slots at cap 400,
   and **cap 605 is the first that probes all nine** lost cases (~24% of the surface vs 15.8%).
   Reverted; the measurement is pinned in `tests/test_sweep_budget_is_the_lever.py`.
-  **REMAINING: raise `SWEEP_TARGET_CAP` and measure it.** Cost is real and must be priced, not
-  assumed — the sweep is 92% of dispatches and 78% of tool-seconds, so ~605 targets is roughly +50%
-  on a 2103 s mission. DoD: a sealed whole-product run at the higher cap, scored, with a
-  pre-registered revert condition on precision.
+  **CLOSED.** `SWEEP_TARGET_CAP` is now **700**, earned by measurement: wp3 (seal `951dc0a0`, sealed
+  before the key, conditions pre-registered) probed **645 cases instead of 373**, took `sqli` from 11
+  back to **20**, recovered **8 of the 9** named cases, and scored **26 TP / 1 FP / 27, precision
+  96.3%, in 2576 s against the baseline's 5329 s** — the same score in 48% of the time. The one FP is
+  `00494`, the known baseline FP, not a new one. Cost prediction was wrong in the good direction:
+  +22%, not the +57% a linear model predicted.
+  **Left open, named:** `00438` (the ninth case, highest index) is still unprobed, and per-URL cost is
+  sublinear in target count — understand that before pricing the next budget change.
 - **Q-048 · every objective's `violated_by` families must have a real producer reachable from one of
   its own engines.** MEASURED instances: SESS-02 can never fail (`cookie_flags` has no producer;
   `transport_posture` emits `security_misconfig` instead), and CONF-01 names `run_fingerprint`, which
