@@ -79,6 +79,14 @@ nothing false reached history, but the next one may not self-catch. Write-as-you
 progress`, never a number, and a commit hash is copied from `git log` or omitted. The Coordinator
 greps every handoff for hash-shaped strings and status claims before committing it.
 
+**8c · Disjoint WRITE sets do not give a disjoint READ of the tree.** Paid for twice in one day. A
+lane reported *"the tree is shifting under me from concurrent lanes"*, and a Coordinator full-suite
+run produced three failures that were a **torn read** — the suite executing against a working tree
+another lane was mid-commit in. Ownership stops two agents editing one file; it does nothing about a
+third agent reading all of them at once. **Any full-suite run during a cycle goes against an isolated
+snapshot of HEAD plus that agent's own changes**, never the shared tree. A red suite that is really a
+torn read costs an hour and, worse, gets attributed to the wrong lane.
+
 **9 · Expect death; budget for recovery.** Staggering helps and does not save you — three staggered
 agents still died to one limit. Every cycle the Coordinator must read what landed, repair what
 half-landed, and commit what was left green but uncommitted.

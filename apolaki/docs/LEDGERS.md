@@ -339,6 +339,51 @@ defend.
 
 ---
 
+## ★ THE ARSENAL IS REAL; THE BOOKKEEPING AROUND IT IS NOT. 2026-08-15
+
+Erwin asked whether every tool is actually being used, and whether Apolaki works the way he wanted
+after all the investment. Both halves were MEASURED rather than answered, and they land on the same
+conclusion from opposite directions.
+
+**Q-050 — a third of the arsenal has never been asked to do anything.** 29,109 tool calls across 151
+stored missions; 67 distinct tools ever executed; **32 of 92 engines have never run once.** The
+browser driver and devtools are NOT the problem and that half is settled: `run_xss` 1344 calls,
+`run_dom_audit` 892, `run_dom_trace` 797, plus the CDP/Playwright BIE work — 3.1% of dispatches for
+58.5% of tool-seconds, a cost already priced and deliberately kept. Two distinct causes underneath,
+which must not be merged:
+- **Structural.** `planner._ALLOWED["active"] = {PASSIVE, ACTIVE}` excludes INTRUSIVE, so the only
+  route to an intrusive engine is the eight-entry `_SWEEP_HTTP_ENGINES` tuple. **`run_cmdi` — a
+  complete command-injection engine with its own oracle — has executed ZERO times.**
+- **Selection.** `run_jwt`, `run_saml`, `run_enumerate_ids`, `run_default_creds` and others are
+  reachable and simply never chosen.
+
+**The validated_on lane — a third of what CLAIMS to be proven is proven by nothing.** Six strict
+xfails, each carrying its measurement: **34 of 48 `validated_on` claims are named by no test asserting
+anything**; there is **no lab vocabulary**, so a fabricated claim is not rejected (the lane's own
+title: a fabricated claim scores 90/100 high); the guards **fail only on REMOVAL**, i.e. they check
+the field is non-empty — the guard-that-checks-a-declaration pattern, now found six times; and two
+subsystems disagree on the same number, `/packs` summing `proven` as `len(validated_on) > 0 = 48`
+while techniques reports otherwise, because the Q-012 fix was never propagated.
+
+**Read together: the engines are real and tested, and the ledger of which ones are proven is not.**
+That is a better problem than the reverse — capability that exists but is not tracked, rather than
+tracking that describes capability which does not exist — and neither half is fixed by asserting
+harder. Both are now tickets with numbers instead of impressions.
+
+**The report no longer hides it.** `arsenal_gap()` derives from the registry and prints what did NOT
+run, split three ways (ran-and-found-nothing is a RESULT; never-dispatched is a gap; tier-blocked was
+never a candidate). Q-050 took a SQL query over the whole store to find; the next one will be legible
+on the artifact.
+
+**A concurrency lesson, paid for twice today.** A lane reported *"the tree is shifting under me from
+concurrent lanes"*, and earlier my own full-suite run produced three failures that were a **torn
+read** — the suite was executing against a working tree another lane was mid-commit in. Disjoint WRITE
+sets do not give a disjoint READ of the tree. Any lane running the full suite must do it against an
+isolated snapshot of HEAD plus its own changes, which is what that lane had correctly started doing
+when it was killed.
+
+---
+
 ## ★ fp42 CLOSED — the traversal oracle was reading a random number. 2026-08-15
 
 The wp2 false positive I recorded as "unexplained" is explained, and my inability to reproduce it was
