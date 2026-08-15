@@ -220,8 +220,25 @@ SWEEP_BROWSER_CAP = max(0, int(os.getenv("BBH_SWEEP_BROWSER_TARGETS", "30") or 3
 # INTRUSIVE exactly like `run_sqli` and `run_injection_probes` already here, so the sweep's
 # permission surface is unchanged.
 _SWEEP_HTTP_ENGINES = ("run_sqli", "run_sqli_structural", "run_xpath", "run_ldap", "run_ssi",
-                       "run_css_injection", "run_waf_bypass", "run_injection_probes",
-                       "run_web_probes")
+                       "run_css_injection", "run_waf_bypass", "run_injection_probes")
+# `run_web_probes` was ADDED here on 2026-08-14 and REMOVED the same day, by a revert condition
+# registered BEFORE the measurement rather than argued after it. Both halves are recorded because the
+# coverage argument below is still correct and still unaddressed -- this tuple covers no traversal,
+# IDOR, cookie-flag or PRNG class -- while the engine that would cover them is not yet sound enough
+# to be trusted with a confirmed verdict.
+#
+# MEASURED, whole-product mission, seal e6674d6d (docs/benchmarks/wp1_web_probes_sweep_claims.json):
+# 30 TP / 1 FP / 31 claimed, 96.8% precision in 2103 s against the baseline's 96.3% in 5329 s. It
+# looked like the first recall gain this suite has ever produced. Then the claims were read by class:
+# of 12 confirmed `path_traversal` findings, only FIVE are on cases whose actual class is traversal.
+# The rest landed on `cmdi-00` and `weakrand-00` endpoints and scored TP only because those cases
+# happen to be vulnerable to something else -- and the single FP, `weakrand-00/BenchmarkTest00187`,
+# is the same behaviour on a case that is vulnerable to nothing. Same engine, same carrier, same
+# "POST body field" pattern: the verdict tracks the endpoint being reflective, not traversable.
+#
+# So the score was right and the reason was wrong, which is why the condition was written down in
+# advance. See Q-047. Restoring this entry needs a traversal oracle that fails on 00187, not a better
+# number.
 _SWEEP_BROWSER_ENGINES = ("run_xss", "run_dom_trace")
 
 _SHAPE_DIGITS = re.compile(r"\d+")

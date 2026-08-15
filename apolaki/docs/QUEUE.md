@@ -15,8 +15,20 @@ first fixed the write path, the second found the invariants never read `evidence
 `Q-043` c02208d · `Q-044` aa3a139 · **`Q-021B` 1f342c9** ·
 `B-001`/`B-002`/`B-003` Codex lane 1 · `B-010` Juliet Codex lane 2 · **`B-020` a7aa700**
 
-**IN FLIGHT**: **selection / step-cap** (selection lane — no ticket number yet; it is the successor to
-the whole-product rerun and outranks everything below)
+**IN FLIGHT**: nothing. The selection lane closed its question (`step_cap_exhausted` was a true label
+on the wrong constant; the bound is `CAP_ENDPOINTS`/`SWEEP_TARGET_CAP`) and was then killed by a
+session limit that **resets 22:40 PT**.
+
+**TOP OF THE QUEUE — both raised by the wp1 measurement, both unassigned:**
+- **Q-047 · `run_web_probes` confirms traversal on endpoints that merely reflect.** MEASURED: of 12
+  confirmed `path_traversal` findings, 5 are on traversal cases; the rest are on `cmdi-00` and
+  `weakrand-00`, and `weakrand-00/BenchmarkTest00187` is an outright FP. These render as **proven**,
+  not leads, so `UNPROVEN_TRAVERSAL_CONFIDENCE` is not catching them. **DoD: an oracle that fails on
+  00187 and still passes the five real traversal cases.** Until then `run_web_probes` stays out of
+  `_SWEEP_HTTP_ENGINES` and four classes stay uncovered by the sweep — the coverage gap is real and
+  is blocked on this, not abandoned.
+- **`sqli` 21 → 11.** The whole-product runs keep losing half the sqli detections. Older than the
+  wp1 change, survived it, still unexplained, and it is the single largest known recall loss.
 
 **NEW AND UNASSIGNED — raised by the rerun, currently nobody's:**
 - **Baseline `ebd96f45` — counts RECONCILED, seal still dead** (see LEDGERS). The ledgered 25/23 is

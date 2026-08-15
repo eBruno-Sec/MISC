@@ -339,6 +339,69 @@ defend.
 
 ---
 
+## ★ THE BEST NUMBER THIS SUITE HAS PRODUCED, AND IT WAS REVERTED. 2026-08-14
+
+`run_web_probes` joined `_SWEEP_HTTP_ENGINES` (`805a78e`), because the sweep's promise that "a
+discovered query input is ALWAYS tested" covered SQLi/XPath/LDAP/SSI and covered **nothing** for
+traversal, IDOR, cookie flags or PRNG — and the engine that owns those classes had run **zero times
+in the entire mission**, blocked by `planner._ALLOWED["active"]` excluding INTRUSIVE.
+
+Sealed as `e6674d6d` (`docs/benchmarks/wp1_web_probes_sweep_claims.json`, committed before the key was
+opened), then scored:
+
+| | baseline `ebd96f45` | wp1 | delta |
+|---|---:|---:|---|
+| **true positives** | 26 | **30** | **+4** |
+| false positives | 1 | 1 | 0 |
+| **precision** | 96.3% | **96.8%** | **+0.5 pt** |
+| **recall** | 1.84% | **2.12%** | **+0.28 pt** |
+| elapsed | 5329 s | **2103 s** | **−61%** |
+
+Better on every axis, in 40% of the time, with four whole classes appearing for the first time
+(`pathtraver`, `securecookie`, `weakrand`, `xpathi`). **It was reverted anyway.**
+
+**Why: the score was right and the reason was wrong.** Reading the claims BY CLASS instead of by
+count — of 12 confirmed `path_traversal` findings, only **five** are on cases whose actual class is
+traversal. The others landed on `cmdi-00` and `weakrand-00` endpoints and scored TP only because
+those cases happen to be vulnerable to something else. The lone FP,
+`weakrand-00/BenchmarkTest00187`, is the same engine, the same carrier, the same "POST body field"
+pattern, on a case vulnerable to nothing. **The verdict tracks whether the endpoint is reflective,
+not whether it is traversable** — and on this corpus that correlates well enough to look like skill.
+
+`tools._traversal_finding`'s own docstring already names this failure: *"reflection means the
+parameter reaches the response and NOTHING more"*, and *"titling both 'path traversal' is how 22
+echoes became confirmed findings."* The distinction exists in the code and did not hold here, because
+these findings rendered as **proven**, not as leads.
+
+**The revert condition was registered in `805a78e` BEFORE the run, and honouring it is the point.**
+Every ingredient of a good post-hoc defence was present: a real coverage gap, a genuine architectural
+finding, the best headline number the project has ever measured, and a false positive that is only
+one case. That is exactly the situation pre-registration exists for. Reverted, `run_web_probes`
+removed from the tuple, both halves recorded in the code comment so the next reader gets the
+measurement and the reason together.
+
+**What is NOT retracted:** the coverage gap is real and still open — the sweep tests no traversal,
+IDOR, cookie-flag or PRNG class, and `_SWEEP_HTTP_ENGINES` remains the only path to intrusive
+injection coverage in an active mission. **Q-047** is the blocker: restoring the entry needs a
+traversal oracle that **fails on 00187**, not a better number.
+
+**And the number that must not get lost in the good news:** `sqli` fell **21 → 11** in this run. That
+regression is older than this change, survived it, and is still unexplained.
+
+**The revert broke two tests, and that is the second half of the lesson.** The lane had shipped
+`test_sweep_class_coverage.py` asserting the guarantee as a fact about dispatches. Removing the engine
+made both fail. Deleting them would have made the gap invisible — the exact failure that file was
+written to prevent — so they are marked **`xfail(strict=True)`** with the ticket and the FP in the
+reason. Strict is what makes it a tracker rather than a silencer: **verified by putting the engine
+back, where both report `XPASS(strict)` and fail the suite.** The day Q-047 lands, the suite forces
+this file to be updated deliberately rather than letting a stale expectation pass unnoticed.
+
+A third test in that file (`..._still_bounds_the_traversal_engine`) now passes **vacuously** — an
+empty dispatch set is trivially under the cap. It is documented as vacuous in its own docstring
+rather than dressed up as coverage.
+
+---
+
 ## Q-046 — the four true positives were lost to a `rsplit`. 2026-08-14
 
 The cause of the understated baseline, fixed at the root. `finding_fp` recovered the tested parameter

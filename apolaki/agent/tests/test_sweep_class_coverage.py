@@ -12,12 +12,31 @@ guaranteed a traversal test, on a surface where the two numbers should be the sa
 These tests drive the REAL `_inject_sweep_surface` with a recording `_run_tool`, so they assert what
 was DISPATCHED. Asserting `"run_web_probes" in _SWEEP_HTTP_ENGINES` instead would be a guard that
 checks a declaration: it would pass on a tuple that no code path iterates.
+
+STATE, 2026-08-14: the guarantee was implemented, MEASURED on a whole-product mission, and then
+REVERTED -- not because the coverage argument was wrong, but because the engine providing it confirms
+`path_traversal` on endpoints that merely reflect. Of 12 confirmed traversal findings, 5 were on
+traversal cases; the rest were on `cmdi-00`/`weakrand-00`, and `weakrand-00/BenchmarkTest00187` is a
+case vulnerable to nothing (seal e6674d6d, Q-047).
+
+The two tests below therefore assert something TRUE THAT DOES NOT HOLD YET, and they are marked
+`xfail(strict=True)` rather than deleted, weakened or inverted. Strict matters: the day Q-047 lands
+and the guarantee starts holding, an unexpected pass fails the suite and forces this file to be
+updated deliberately. A deleted test would have left the gap invisible, which is the failure mode
+this file was written to prevent.
 """
 from __future__ import annotations
 
 import asyncio
 
+import pytest
+
 import agent as agent_mod
+
+#: Why the two guarantee tests do not hold today. One string, so the reason cannot drift between them.
+_Q047 = ("Q-047: run_web_probes is out of _SWEEP_HTTP_ENGINES until its traversal oracle stops "
+         "confirming on reflective-but-not-traversable endpoints (FP: weakrand-00/BenchmarkTest00187, "
+         "seal e6674d6d). The coverage gap this asserts is REAL and blocked, not abandoned.")
 import scope as scope_mod
 
 
@@ -83,6 +102,7 @@ def test_the_sweep_actually_dispatches_on_the_parameterized_surface():
         len(swept), len(_URLS))
 
 
+@pytest.mark.xfail(strict=True, reason=_Q047)
 def test_every_swept_target_is_also_tested_for_traversal_and_idor():
     """THE invariant. A discovered `?file=` parameter receiving seven engines that cannot read a
     file, and not the one that can, is a selection defect however good the seven are."""
@@ -95,6 +115,7 @@ def test_every_swept_target_is_also_tested_for_traversal_and_idor():
         "cookie-flags): %s" % (len(missing), len(injected), missing[:3]))
 
 
+@pytest.mark.xfail(strict=True, reason=_Q047)
 def test_the_traversal_engine_is_not_restricted_to_the_browser_budget():
     """`SWEEP_BROWSER_CAP` deliberately restricts the two ~19 s browser confirmers to the front of
     the shape-spread order. run_web_probes is HTTP-only and must not inherit that bound -- if it
@@ -110,7 +131,13 @@ def test_the_traversal_engine_is_not_restricted_to_the_browser_budget():
 
 def test_the_sweep_budget_still_bounds_the_traversal_engine():
     """The other direction: a guarantee that ignores the budget is an unbounded sweep. Whatever
-    `SWEEP_TARGET_CAP` is, run_web_probes must respect it like every other HTTP engine."""
+    `SWEEP_TARGET_CAP` is, run_web_probes must respect it like every other HTTP engine.
+
+    CURRENTLY VACUOUS, and saying so is the point: with run_web_probes out of the sweep (Q-047) the
+    dispatch set is empty, so `0 <= cap` passes without testing anything. It is left unmarked because
+    it PASSES -- a strict xfail here would itself fail -- and an undocumented vacuous test is exactly
+    the "guard that checks a declaration" this file exists to argue against. It regains its meaning
+    the moment the two xfails above do."""
     cap = agent_mod.SWEEP_TARGET_CAP
     urls = ["https://t/app/s%04d/p%04d.html?p%04d=x" % (i, i, i) for i in range(cap + 25)]
     calls = _sweep(urls)
