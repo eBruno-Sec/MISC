@@ -56,8 +56,18 @@ OBJECTIVES = (
     {"chapter": "Authentication", "cid": "AUTHN-02", "level": 1,
      "summary": "Authentication cannot be bypassed by injection or forced browsing.",
      "objective": "Confirm the auth schema is not bypassable.",
-     "engine": ("run_auth_sqli", "run_authz_matrix"), "violated_by": ("auth_bypass", "broken_auth"),
-     "verifiable": True},
+     # Q-048: both named engines were dead for this objective. run_authz_matrix emits idor /
+     # excessive_data_exposure, which are AUTHORIZATION failures, not authentication bypass. run_auth_sqli
+     # is the sharper problem: it genuinely CONFIRMS full authentication bypass
+     # (sqli_tool.auth_bypass_finding, "sign in as any user without credentials") but shapes it through
+     # sqli_tool._base, which stamps family "sqli" on every SQLi finding alike. So a confirmed auth bypass
+     # is indistinguishable, BY FAMILY, from an ordinary SQLi in a search box, and it fails VAL-01 instead
+     # of this objective. Adding "sqli" here was rejected: every SQLi from run_sqli / run_path_sqli /
+     # run_graphql would then FAIL "authentication cannot be bypassed" -- a false FAIL, which is a defect
+     # too. The fix belongs in sqli_tool (give the auth-bypass builder its own family); patch handed off.
+     # run_saml is the one dispatchable engine that emits "broken_auth" directly. "auth_bypass" is KEPT
+     # with no producer today on purpose: it is the family that handed-off patch would introduce.
+     "engine": "run_saml", "violated_by": ("auth_bypass", "broken_auth"), "verifiable": True},
     {"chapter": "Authentication", "cid": "AUTHN-03", "level": 1,
      "summary": "Accounts are not enumerable via response/timing discrepancies.",
      "objective": "Confirm login/registration does not leak account existence.",
@@ -153,14 +163,16 @@ OBJECTIVES = (
     {"chapter": "Authorization", "cid": "ATHZ-04", "level": 2,
      "summary": "Mass-assignment cannot set privileged attributes.",
      "objective": "Confirm mass-assignment protections.",
-     # Q-012 / Q-011: `run_mass_assignment` was a phantom — no _run_mass_assignment method, no
-     # TOOL_PERMISSIONS entry, no CLAUDE_TOOLS spec. The only code that over-posts a privileged attribute is
-     # the LAB SOLVER (juiceshop_solvers.py), which is not a general engine. `violated_by` is deliberately
-     # KEPT: if a mass-assignment finding is ever produced, this objective must read "failed" — a
-     # demonstrated violation outranks our inability to go looking for it.
-     "engine": NO_ENGINE, "violated_by": ("mass_assignment",),
-     "not_implemented_reason": ("no general mass-assignment engine exists (Q-011); only the Juice Shop lab "
-                                "solver over-posts a privileged attribute, which is not a product capability")},
+     # Q-012 / Q-011 recorded this as not_implemented because `run_mass_assignment` was a phantom. Q-011
+     # has since SHIPPED the engine under the name `run_mass_assign` (tools.py:5790, TOOL_PERMISSIONS:107,
+     # CLAUDE_TOOLS:515), and it emits family "mass_assignment" via mass_assign_tool (sole producer,
+     # reachable from this one engine -> no spurious FAIL). So the capability now exists and the objective
+     # is verifiable; leaving it not_implemented would understate the product exactly as the old entry
+     # overstated the others.
+     # NOTE, honestly: this asserts STRUCTURAL producibility only -- the engine can emit the family that
+     # fails this objective. It has NOT yet been validated against a live vulnerable app, so this is not a
+     # claim of proven detection capability; that belongs in `validated_on`, not here.
+     "engine": "run_mass_assign", "violated_by": ("mass_assignment",), "verifiable": True},
 
     # ── Validation, Sanitization, Encoding ──
     {"chapter": "Validation & Encoding", "cid": "VAL-01", "level": 1,
@@ -268,7 +280,17 @@ OBJECTIVES = (
     {"chapter": "Communication & Config", "cid": "COMM-04", "level": 2,
      "summary": "Subdomains do not dangle to takeover-able providers.",
      "objective": "Confirm no subdomain takeover.",
-     "engine": "check_takeover", "violated_by": ("takeover",), "verifiable": True},
+     # Q-048: declared NOT IMPLEMENTED, and this is a capability gap rather than a naming error.
+     # _check_takeover (tools.py:5669) DOES detect dangling CNAMEs, but dns_recon.match_takeover returns
+     # candidate dicts carrying subdomain/service/cname/severity/reason and NO "family" key at all. They
+     # are appended to self.recon["takeover_candidates"], whose only consumer is guidance.py:629 -- they
+     # never become findings. Family "takeover" therefore has zero producers, and no takeover violation
+     # can exist as a finding by construction, so a clean run could not have been contradicted.
+     # `violated_by` is KEPT: the moment those candidates are promoted to findings this must read failed.
+     "engine": NO_ENGINE, "violated_by": ("takeover",),
+     "not_implemented_reason": ("check_takeover yields recon CANDIDATES, not findings (dns_recon."
+                                "match_takeover returns no family), so a takeover can never be recorded "
+                                "as a violation")},
 
     # ── Business Logic (inconclusive by nature -> "attempted", never auto-"verified") ──
     {"chapter": "Business Logic", "cid": "BUSL-01", "level": 2,

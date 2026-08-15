@@ -5,11 +5,265 @@ Q-012 adds the guard that matters: every `engine` name in OBJECTIVES must resolv
 dispatcher can reach, computed from the dispatch tables rather than from a hand-written allowlist (an
 allowlist would be the same declaration-vs-fact defect one layer up), plus the rule that a capability the
 product does not have reports "not_implemented" and never hides inside "not_tested".
+
+Q-048 closes the same defect one level DOWN. Q-012 proved the engine can RUN; it did not prove the engine
+can FAIL. `assess()` records "verified" when an objective's engine ran and no finding in its `violated_by`
+set exists — an inference that is sound ONLY if that engine can actually EMIT one of those families. Six
+objectives could not: they read "verified" in every possible run, asserting a property nothing tested.
+The producer map below is computed from SOURCE with `ast` for the same reason the reachability scan is —
+a hand-written "engine X emits family Y" table would be the declaration-vs-fact defect all over again.
 """
+import ast
+import functools
+import os
 import re
 
 import asvs_model as A
 import tools
+
+AGENT_ROOT = os.path.dirname(os.path.abspath(A.__file__))
+_SKIP_DIRS = {"tests", "__pycache__", "data", "rules"}
+
+
+# ── Q-048: which finding families can each engine actually emit? (derived from source) ────────────────
+#
+# Recognises the four shapes the tree really uses to set a family, all of which are load-bearing:
+#   {"family": "xss"} literal · f(family="xss") keyword · d["family"] = "xss" · and a literal passed
+#   POSITIONALLY into a callee parameter named `family` (dom_tool builds every DOM finding through
+#   `_base(url, title, sev, desc, ev, family, cwe, ...)`, so reading dict literals alone reports ZERO
+#   families for run_dom_audit — an engine that confirms four classes).
+# Values may be a literal, a NAME bound to one, a ternary (transport_posture.py:397 picks its family with
+# `"transport_posture" if kind in ("tls","cert") else "security_misconfig"`), or an `or` chain.
+# Edges follow `import x as y` (including imports written INSIDE a function, which is how tools.py imports
+# nearly every helper), `from x import f`, and `self._method(...)`, then close transitively.
+
+def _const_strs(node, consts, local):
+    """Every string this expression can evaluate to, or None if it is dynamic."""
+    if isinstance(node, ast.Constant) and isinstance(node.value, str):
+        return {node.value}
+    if isinstance(node, ast.Name):
+        for src in (local, consts):
+            if node.id in src:
+                return {src[node.id]}
+        return None
+    if isinstance(node, ast.IfExp):
+        got = (_const_strs(node.body, consts, local) or set()) | \
+              (_const_strs(node.orelse, consts, local) or set())
+        return got or None
+    if isinstance(node, ast.BoolOp) and isinstance(node.op, ast.Or):
+        got = set()
+        for v in node.values:
+            got |= (_const_strs(v, consts, local) or set())
+        return got or None
+    return None
+
+
+def _str_assigns(node):
+    out = {}
+    for n in ast.walk(node):
+        if isinstance(n, ast.Assign) and isinstance(n.value, ast.Constant) \
+                and isinstance(n.value.value, str):
+            for t in n.targets:
+                if isinstance(t, ast.Name):
+                    out.setdefault(t.id, n.value.value)
+    return out
+
+
+def _record_import(n, aliases, froms):
+    if isinstance(n, ast.Import):
+        for a in n.names:
+            aliases[a.asname or a.name.split(".")[0]] = a.name
+    elif isinstance(n, ast.ImportFrom):
+        for a in n.names:
+            if n.level and not n.module:
+                aliases[a.asname or a.name] = a.name
+            else:
+                froms[a.asname or a.name] = (n.module or "", a.name)
+
+
+def _imports_under(node):
+    """Imports bound ANYWHERE under `node` — used for ONE function at a time."""
+    aliases, froms = {}, {}
+    for n in ast.walk(node):
+        _record_import(n, aliases, froms)
+    return aliases, froms
+
+
+def _module_level_imports(tree):
+    """Imports bound at MODULE scope only.
+
+    Scoping matters and getting it wrong over-attributes badly: tools.py binds `import saml_tool as st`
+    INSIDE _run_saml (tools.py:2347). Collecting aliases from the whole module tree leaked that binding
+    into every other method, so any unrelated method with a local `st` variable calling `st.foo()`
+    resolved to saml_tool and inherited its families — which is how _browser_navigate came to look like a
+    producer of `broken_auth`. A map that over-attributes makes the ratchet weaker, not noisier: a dead
+    engine looks live and the false-verify path it guards stays open.
+    """
+    aliases, froms = {}, {}
+
+    def walk(body):
+        for n in body:
+            if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+                continue                       # function-local imports are per-function, not module-wide
+            _record_import(n, aliases, froms)
+            for attr in ("body", "orelse", "finalbody"):
+                inner = getattr(n, attr, None)
+                if isinstance(inner, list):
+                    walk(inner)                # module-level try:/if: import guards are common
+            for h in getattr(n, "handlers", []) or []:
+                walk(h.body)
+    walk(tree.body)
+    return aliases, froms
+
+
+class _Mod:
+    def __init__(self, name, tree):
+        self.name, self.tree = name, tree
+        self.aliases, self.froms = _module_level_imports(tree)
+        self.consts = _str_assigns(ast.Module(body=[b for b in tree.body
+                                                    if isinstance(b, ast.Assign)], type_ignores=[]))
+        self.funcs = {}
+        for n in tree.body:
+            if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                self.funcs[n.name] = n
+            elif isinstance(n, ast.ClassDef):
+                for m in n.body:
+                    if isinstance(m, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                        self.funcs["%s.%s" % (n.name, m.name)] = m
+
+
+def _load_modules():
+    mods = {}
+    for dirpath, dirnames, filenames in os.walk(AGENT_ROOT):
+        dirnames[:] = [d for d in dirnames if d not in _SKIP_DIRS]
+        for fn in sorted(filenames):
+            if not fn.endswith(".py"):
+                continue
+            path = os.path.join(dirpath, fn)
+            try:
+                with open(path, "r", encoding="utf-8") as fh:
+                    tree = ast.parse(fh.read(), filename=path)
+            except (SyntaxError, UnicodeDecodeError, OSError):
+                continue
+            name = os.path.relpath(path, AGENT_ROOT)[:-3].replace(os.sep, ".")
+            mods[name] = _Mod(name, tree)
+    return mods
+
+
+def _resolve(f, fnode, mi, qual, mods):
+    """A call's func expression -> (module, qualname), or (module, '*') when it is not a known def."""
+    aliases, froms = dict(mi.aliases), dict(mi.froms)
+    if not isinstance(fnode, ast.Module):
+        a2, f2 = _imports_under(fnode)
+        aliases.update(a2)
+        froms.update(f2)
+    cls = qual.split(".")[0] if "." in qual else None
+    if isinstance(f, ast.Attribute) and isinstance(f.value, ast.Name):
+        if f.value.id == "self" and cls:
+            tgt = "%s.%s" % (cls, f.attr)
+            return (mi.name, tgt) if tgt in mi.funcs else None
+        m = aliases.get(f.value.id) or (froms.get(f.value.id) or (None,))[0]
+        if m in mods:
+            return (m, f.attr if f.attr in mods[m].funcs else "*")
+    elif isinstance(f, ast.Name):
+        if f.id in froms and froms[f.id][0] in mods:
+            m, orig = froms[f.id]
+            return (m, orig if orig in mods[m].funcs else "*")
+        if f.id in mi.funcs:
+            return (mi.name, f.id)
+    return None
+
+
+def _returned_strs(fnode):
+    return {n.value.value for n in ast.walk(fnode)
+            if isinstance(n, ast.Return) and isinstance(n.value, ast.Constant)
+            and isinstance(n.value.value, str) and n.value.value}
+
+
+def _families_here(fnode, mi, qual, mods):
+    """Families this node emits itself: dict/keyword/subscript literals, plus literals it hands to a
+    callee parameter named `family`."""
+    fams = set()
+    local = _str_assigns(fnode) if not isinstance(fnode, ast.Module) else {}
+    bound = {t.id: n.value for n in ast.walk(fnode) if isinstance(n, ast.Assign)
+             and isinstance(n.value, ast.Call) for t in n.targets if isinstance(t, ast.Name)}
+    for n in ast.walk(fnode):
+        if isinstance(n, ast.Dict):
+            for k, v in zip(n.keys, n.values):
+                if isinstance(k, ast.Constant) and k.value == "family":
+                    fams |= (_const_strs(v, mi.consts, local) or set())
+        elif isinstance(n, ast.Assign):
+            for t in n.targets:
+                if isinstance(t, ast.Subscript) and isinstance(t.slice, ast.Constant) \
+                        and t.slice.value == "family":
+                    fams |= (_const_strs(n.value, mi.consts, local) or set())
+        elif isinstance(n, ast.Call):
+            for kw in n.keywords:
+                if kw.arg == "family":
+                    fams |= (_const_strs(kw.value, mi.consts, local) or set())
+            if isinstance(n.func, ast.Attribute) and n.func.attr == "setdefault" and len(n.args) == 2 \
+                    and isinstance(n.args[0], ast.Constant) and n.args[0].value == "family":
+                fams |= (_const_strs(n.args[1], mi.consts, local) or set())
+            # literal handed to a callee's `family` parameter
+            tgt = _resolve(n.func, fnode, mi, qual, mods)
+            tnode = mods[tgt[0]].funcs.get(tgt[1]) if tgt and tgt[0] in mods else None
+            if tnode is None:
+                continue
+            names = [p.arg for p in (list(tnode.args.posonlyargs) + list(tnode.args.args))]
+            arg = None
+            if "family" in names and names.index("family") < len(n.args):
+                arg = n.args[names.index("family")]
+            for kw in n.keywords:
+                if kw.arg == "family":
+                    arg = kw.value
+            if arg is None:
+                continue
+            got = _const_strs(arg, mi.consts, local)
+            if got:
+                fams |= got
+            elif isinstance(arg, ast.Name) and arg.id in bound:
+                # `fam = gadget_family(...)` -> `gadget_finding(url, prop, nav, fam)`
+                g = _resolve(bound[arg.id].func, fnode, mi, qual, mods)
+                gnode = mods[g[0]].funcs.get(g[1]) if g and g[0] in mods else None
+                if gnode is not None:
+                    fams |= _returned_strs(gnode)
+    return fams
+
+
+@functools.lru_cache(maxsize=1)
+def _family_producers():
+    """engine tool name -> every finding family a call to it can end up emitting."""
+    mods = _load_modules()
+    direct, graph = {}, {}
+    for mname, mi in mods.items():
+        modlvl = ast.Module(body=[b for b in mi.tree.body if not isinstance(
+            b, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef))], type_ignores=[])
+        for qual, fnode in list(mi.funcs.items()) + [("<module>", modlvl)]:
+            key = (mname, qual)
+            direct[key] = _families_here(fnode, mi, qual, mods)
+            graph[key] = {t for t in (_resolve(n.func, fnode, mi, qual, mods)
+                                      for n in ast.walk(fnode) if isinstance(n, ast.Call)) if t}
+        star = (mname, "*")
+        direct[star] = set().union(*[direct[(mname, q)] for q in list(mi.funcs) + ["<module>"]]) \
+            if mi.funcs or True else set()
+        graph[star] = set().union(*[graph[(mname, q)] for q in list(mi.funcs) + ["<module>"]]) \
+            if mi.funcs or True else set()
+    fams = {k: set(v) for k, v in direct.items()}
+    for _ in range(60):
+        changed = False
+        for k, tgts in graph.items():
+            for t in tgts:
+                add = fams.get(t)
+                if add and not add <= fams[k]:
+                    fams[k] |= add
+                    changed = True
+        if not changed:
+            break
+    out = {}
+    for qual in mods["tools"].funcs:
+        if qual.startswith("ToolRegistry._"):
+            out[qual[len("ToolRegistry._"):]] = fams[("tools", qual)]
+    return out
 
 
 def _dispatch_reachable():
@@ -172,7 +426,11 @@ def test_absent_capability_reports_not_implemented_with_a_reason():
     """A capability the product does not have must be distinguishable from one it merely skipped."""
     r = A.assess([], attempted_engines=_dispatch_reachable())
     ni = [o for o in r["objectives"] if o["status"] == "not_implemented"]
-    assert {o["cid"] for o in ni} == {"AUTHN-04", "ATHZ-04"}
+    # Q-048 swapped the membership of this set, in both directions, and the count is a coincidence:
+    #   ATHZ-04 LEFT  — Q-011 shipped `run_mass_assign`, so the capability now exists.
+    #   COMM-04 JOINED — check_takeover yields recon candidates that carry no family and never become
+    #                    findings, so a takeover cannot be recorded as a violation.
+    assert {o["cid"] for o in ni} == {"AUTHN-04", "COMM-04"}
     for o in ni:
         assert o.get("not_implemented_reason"), "%s is not_implemented with no stated reason" % o["cid"]
         assert o["engine"] == A.NO_ENGINE
@@ -186,18 +444,26 @@ def test_not_implemented_survives_every_engine_claiming_to_have_run():
     however dishonest or over-broad, can flip a not-implemented objective to verified."""
     liar = _dispatch_reachable() | {n for o in A.OBJECTIVES for n in A._engine_names(o)} | {A.NO_ENGINE}
     r = A.assess([], attempted_engines=liar)
-    for cid in ("AUTHN-04", "ATHZ-04"):
+    for cid in ("AUTHN-04", "COMM-04"):          # Q-048: ATHZ-04 gained a real engine, COMM-04 lost one
         o = next(x for x in r["objectives"] if x["cid"] == cid)
         assert o["status"] == "not_implemented", "%s flipped to %s" % (cid, o["status"])
 
 
 def test_a_finding_still_fails_a_not_implemented_objective():
-    """Negative control on the precedence order. Apolaki has no mass-assignment engine, but the Juice Shop
-    lab solver can still demonstrate one. A violation someone else proved must never be hidden behind
-    "we have no engine" — failed outranks not_implemented."""
+    """Negative control on the precedence order: a violation someone else proved must never be hidden
+    behind "we have no engine" — failed outranks not_implemented.
+
+    Q-048: ATHZ-04 is no longer the not_implemented example (Q-011 shipped `run_mass_assign`), so the
+    precedence half of this test now rides on COMM-04, which IS not_implemented — nothing in the product
+    can record a subdomain takeover as a finding, but an imported/human-supplied one must still fail it.
+    The mass_assignment case is kept because it still proves the umbrella rule below."""
     r = A.assess([{"id": "M1", "family": "mass_assignment"}], attempted_engines=set())
     athz4 = next(o for o in r["objectives"] if o["cid"] == "ATHZ-04")
     assert athz4["status"] == "failed" and athz4["finding_ids"] == ["M1"]
+    # the actual not_implemented -> failed precedence, on an objective that really is not_implemented
+    t = A.assess([{"id": "T1", "family": "takeover"}], attempted_engines=set())
+    comm4 = next(o for o in t["objectives"] if o["cid"] == "COMM-04")
+    assert comm4["status"] == "failed" and comm4["finding_ids"] == ["T1"]
     # ...and the umbrella access-control objective fails with it
     athz0 = next(o for o in r["objectives"] if o["cid"] == "ATHZ-00")
     assert athz0["status"] == "failed"
@@ -208,18 +474,21 @@ def test_authz_matrix_objectives_verify_from_the_REAL_ledger_name():
 
     `_run_authz_matrix` returns ToolResult("authz_matrix", ...), but BOTH tool_call emitters
     (agent.py:551 and agent.py:634) log the REQUESTED name, so a real ledger carries
-    "run_authz_matrix" and never the bare label. The model matched the label, so ATHZ-00/AUTHN-02 read
+    "run_authz_matrix" and never the bare label. The model matched the label, so ATHZ-00 read
     not_tested on a mission where the authz matrix genuinely ran. Measured in docs/handoff/asvs.md.
+
+    Q-048 dropped AUTHN-02 from this test, and NOT to make it pass: run_authz_matrix emits `idor` and
+    `excessive_data_exposure`, which are AUTHORIZATION failures, so it could never fail "authentication
+    cannot be bypassed" and had no business verifying it. The property under test here is the ledger
+    NAMING boundary, and ATHZ-00 exercises both halves of it exactly as before.
     """
     r = A.assess([], attempted_engines={"run_authz_matrix"})
-    for cid in ("ATHZ-00", "AUTHN-02"):
-        o = next(x for x in r["objectives"] if x["cid"] == cid)
-        assert o["status"] == "verified", "%s did not verify from the real ledger name" % cid
+    o = next(x for x in r["objectives"] if x["cid"] == "ATHZ-00")
+    assert o["status"] == "verified", "ATHZ-00 did not verify from the real ledger name"
     # the bare ToolResult LABEL is not a ledger key and must verify nothing
     stale = A.assess([], attempted_engines={"authz_matrix"})
-    for cid in ("ATHZ-00", "AUTHN-02"):
-        o = next(x for x in stale["objectives"] if x["cid"] == cid)
-        assert o["status"] == "not_tested", "%s verified from a name no ledger records" % cid
+    o = next(x for x in stale["objectives"] if x["cid"] == "ATHZ-00")
+    assert o["status"] == "not_tested", "ATHZ-00 verified from a name no ledger records"
 
 
 def test_report_never_claims_full_asvs_coverage():
@@ -229,3 +498,84 @@ def test_report_never_claims_full_asvs_coverage():
     assert "not" in r["disclaimer"].lower() and "full asvs" in r["disclaimer"].lower()
     # even with every engine "run", verified can never reach 100% because some objectives are blocked
     assert r["verified_pct"] < 100.0
+
+
+# ── Q-048: an objective must be capable of FAILING ────────────────────────────────────────────────
+
+def test_the_producer_map_is_not_vacuous():
+    """Guard the guard. If this map came back empty, or attributed every family to every engine, the
+    ratchet below would pass for free — the exact failure shape this ticket exists to stop.
+
+    The last three assertions pin the two analyser defects that made the map UNDER-report while I was
+    building it, because under-reporting invents never-fail objectives that are actually fine:
+      * a family chosen by a TERNARY (transport_posture.py:397) read as 0 families,
+      * a family passed POSITIONALLY into a callee's `family` parameter (dom_tool `_base`) read as 0
+        families for run_dom_audit — which briefly made me report VAL-08 as unfailable. It is not.
+    """
+    prod = _family_producers()
+    assert len(prod) > 50, "producer map is empty/tiny — every producibility assertion would be vacuous"
+    everything = set().union(*prod.values())
+    assert len(everything) > 50
+    # discriminating, not a firehose: the SQLi engine emits sqli and does NOT emit unrelated classes
+    assert "sqli" in prod["run_sqli"]
+    assert not ({"xxe", "oauth", "race"} & prod["run_sqli"])
+    # ...and no single engine is credited with the whole vocabulary
+    assert max(len(v) for v in prod.values()) < len(everything) / 2
+    assert "security_misconfig" in prod["run_transport_posture"]        # ternary family
+    assert "prototype_pollution" in prod["run_dom_audit"]               # positional `family` argument
+    assert {"csti", "xss"} <= prod["run_dom_audit"]
+
+
+def test_every_engine_can_fail_the_objective_it_verifies():
+    """THE Q-048 ratchet, and the reason it is stated PER ENGINE rather than per objective.
+
+    `_engine_ran` is `any(...)`: a single named engine running is enough to stamp an objective
+    "verified". So an engine that cannot emit ANY family in that objective's `violated_by` is a
+    false-verify path in its own right, even when a sibling engine in the same tuple is fine — a
+    mission that happened to run only the dead one would report a property nothing tested.
+
+    Adding an objective whose violating family no producer can emit fails here immediately.
+    """
+    prod = _family_producers()
+    dead = []
+    for o in A.OBJECTIVES:
+        names = A._engine_names(o)
+        if names == (A.NO_ENGINE,):
+            continue                      # covered by the NO_ENGINE/reason guard above
+        violated = set(o["violated_by"])
+        for n in names:
+            if not (prod.get(n, set()) & violated):
+                dead.append("%s/%s (engine emits %s; objective fails on %s)"
+                            % (o["cid"], n, sorted(prod.get(n, set())) or "nothing", sorted(violated)))
+    assert dead == [], (
+        "these engines can never emit a family that FAILS the objective they are trusted to verify, so a "
+        "clean run of them is not evidence of anything:\n  " + "\n  ".join(dead))
+
+
+def test_no_objective_is_structurally_incapable_of_failing():
+    """The headline property, stated as an outcome. Every objective that can reach "verified" must have
+    at least one engine able to produce a finding that contradicts it. Six could not when Q-048 opened
+    (AUTHN-01/02/03, SESS-01, SESS-02, COMM-04) — all six read "verified" on a perfect run."""
+    prod = _family_producers()
+    unfailable = sorted(o["cid"] for o in A.OBJECTIVES
+                        if A._engine_names(o) != (A.NO_ENGINE,)
+                        and not any(prod.get(n, set()) & set(o["violated_by"])
+                                    for n in A._engine_names(o)))
+    assert unfailable == [], (
+        "these objectives can reach 'verified' but nothing in the product could ever contradict "
+        "them: %s" % unfailable)
+
+
+def test_a_not_implemented_objective_still_names_a_family_someone_could_emit():
+    """NO_ENGINE objectives are exempt from the ratchet (nothing runs, so nothing false-verifies), but a
+    `violated_by` naming a family with NO producer anywhere is dead weight that can never fire either.
+    Recorded rather than asserted-away: AUTHN-04's `cleartext_transport` is deliberately such a family,
+    and the honest reading is that the objective is unassessable, which is what it already says."""
+    prod = _family_producers()
+    anywhere = set().union(*prod.values())
+    for o in A.OBJECTIVES:
+        if A._engine_names(o) != (A.NO_ENGINE,) or not o["violated_by"]:
+            continue
+        if not (set(o["violated_by"]) & anywhere):
+            assert o.get("not_implemented_reason"), (
+                "%s can neither be verified nor failed and gives no reason" % o["cid"])
