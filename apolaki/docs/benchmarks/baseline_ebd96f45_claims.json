@@ -1,0 +1,31 @@
+{
+  "_what": "Re-derived claim set for mission ebd96f45, the standing whole-product baseline.",
+  "_why": "The 2026-08-11 baseline was published as 25 findings / 23 claimed cases with seal a95670f9, and could not be re-derived: the store holds 29 findings and the sealing script was never committed. This file replaces an unverifiable constant with a re-derivable one. The counts here come from the SAME stored rows the mission wrote; nothing was re-run and nothing was re-detected.",
+  "_how": "sqlite3 /app/data/bbh.db, mission_id like 'ebd96f45%' -> 29 rows, all confidence=confirmed, 27 high + 2 medium. Case ids extracted with the SAME regex and the SAME field list scripts/whole_product_rerun.py:case_ids uses (BenchmarkTest\\d{5} over title/target/evidence/description/request/poc/impact), so this claim set is derived identically to every rerun it will be compared against.",
+  "_seal_discipline": "This file, including seal_sha256, was committed BEFORE the answer key was opened. The seal is sha256 over '\\n'.join(sorted distinct case ids) -- byte-identical to the function whole_product_rerun.py uses, so artifacts stay comparable.",
+  "_supersedes": "The recorded 08-11 seal a95670f9 does NOT reproduce, under ten serializations and every field subset to size 4, over both the 29-row and 25-row bases. The 08-11 sealing script was never committed, so its serialization is unrecoverable. That seal is abandoned, not explained.",
+  "_known_bound": "The ledgered 25 findings / 23 cases is these same 29 rows with five ldap_injection findings collapsed into one by a finding_fp param collision (QUEUE Q-046). Five distinct cases at five distinct paths are five claims, so 27 is the honest count. The collapse mechanism FITS the numbers exactly but is not a proven cause: the committed fingerprint has included the path since 8714e6a (2026-08-04), before this mission, and the mission ran on uncommitted Q-019 WIP.",
+
+  "mission_id": "ebd96f45",
+  "mission_label": "owaspbench-q019",
+  "sealed_on": "2026-08-14",
+  "findings_total": 29,
+  "leads_total": 0,
+  "by_family": {"sqli": 21, "ldap_injection": 5, "dom_data_manipulation": 1, "sensitive_exposure": 1, "vulnerable_component": 1},
+  "by_severity": {"high": 27, "medium": 2},
+  "distinct_cases_claimed": 27,
+  "seal_sha256": "fab8a46e13633f6a418a05742b4a49a588acd8e5fb34aa00ceb03f0dedeb9051",
+  "elapsed_s": 5329,
+  "effort": null,
+  "coverage": null,
+  "_effort_note": "NULL and left null. This run predates the effort/coverage harness, so its step count, exit reason and cases_probed are UNRECOVERABLE. Any 'it converged' or 'it ran out of budget' claim about this mission is unfalsifiable and must not be made.",
+  "claims": [
+    "BenchmarkTest00018", "BenchmarkTest00033", "BenchmarkTest00192", "BenchmarkTest00193",
+    "BenchmarkTest00194", "BenchmarkTest00195", "BenchmarkTest00196", "BenchmarkTest00198",
+    "BenchmarkTest00199", "BenchmarkTest00203", "BenchmarkTest00204", "BenchmarkTest00335",
+    "BenchmarkTest00337", "BenchmarkTest00339", "BenchmarkTest00341", "BenchmarkTest00342",
+    "BenchmarkTest00407", "BenchmarkTest00428", "BenchmarkTest00429", "BenchmarkTest00433",
+    "BenchmarkTest00438", "BenchmarkTest00494", "BenchmarkTest00630", "BenchmarkTest00695",
+    "BenchmarkTest01242", "BenchmarkTest01490", "BenchmarkTest01568"
+  ]
+}
