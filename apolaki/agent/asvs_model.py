@@ -47,7 +47,12 @@ OBJECTIVES = (
     {"chapter": "Authentication", "cid": "AUTHN-01", "level": 1,
      "summary": "Application does not ship or accept vendor/well-known default credentials.",
      "objective": "Confirm no default admin login is accepted.",
-     "engine": "run_default_creds", "violated_by": ("default_creds",), "verifiable": True},
+     # Q-048: `violated_by` was ("default_creds",) — a string NOTHING in the tree emits. The engine that
+     # carries this objective produces family "default_credentials" (default_creds_tool.py:59), so a REAL
+     # confirmed default-credential login did not fail this objective and it read "verified" anyway. Sole
+     # producer of the family is default_creds_tool, reachable only from run_default_creds, so re-pointing
+     # cannot fail this objective spuriously.
+     "engine": "run_default_creds", "violated_by": ("default_credentials",), "verifiable": True},
     {"chapter": "Authentication", "cid": "AUTHN-02", "level": 1,
      "summary": "Authentication cannot be bypassed by injection or forced browsing.",
      "objective": "Confirm the auth schema is not bypassable.",
@@ -56,7 +61,9 @@ OBJECTIVES = (
     {"chapter": "Authentication", "cid": "AUTHN-03", "level": 1,
      "summary": "Accounts are not enumerable via response/timing discrepancies.",
      "objective": "Confirm login/registration does not leak account existence.",
-     "engine": "run_username_enum", "violated_by": ("username_enum",), "verifiable": True},
+     # Q-048: was ("username_enum",), which nothing emits; the engine produces "username_enumeration"
+     # (username_enum_tool). Sole producer, reachable only from run_username_enum — no spurious-FAIL risk.
+     "engine": "run_username_enum", "violated_by": ("username_enumeration",), "verifiable": True},
     {"chapter": "Authentication", "cid": "AUTHN-04", "level": 1,
      "summary": "Credentials are transported only over an encrypted channel.",
      "objective": "Confirm no cleartext credential transport.",
@@ -84,7 +91,10 @@ OBJECTIVES = (
     {"chapter": "Session Management", "cid": "SESS-01", "level": 1,
      "summary": "Session identifiers are unpredictable and high-entropy.",
      "objective": "Verify session-token randomness/meaningfulness.",
-     "engine": "run_session_token", "violated_by": ("weak_session", "predictable_token"), "verifiable": True},
+     # Q-048: was ("weak_session", "predictable_token") — two plausible-looking strings, neither of which
+     # any producer emits. session_token_tool.finding emits "weak_session_token" and is reachable only
+     # from run_session_token. Same property (a predictable/low-entropy session identifier), one producer.
+     "engine": "run_session_token", "violated_by": ("weak_session_token",), "verifiable": True},
     {"chapter": "Session Management", "cid": "SESS-02", "level": 1,
      "summary": "Session cookies carry Secure/HttpOnly/SameSite attributes.",
      "objective": "Verify session-cookie hardening flags.",
@@ -168,8 +178,13 @@ OBJECTIVES = (
     {"chapter": "Validation & Encoding", "cid": "VAL-07", "level": 2,
      "summary": "LDAP/XPath/NoSQL queries are parameterized (no injection).",
      "objective": "Confirm no directory/query injection.",
+     # Q-048: "ldap" has no producer — ldap_tool emits "ldap_injection" — so run_ldap was a dead engine on
+     # an objective it was trusted to verify. Added the real family (sole producer ldap_tool, reachable
+     # only from run_ldap). "xpath"/"nosql_injection" are likewise producer-less aliases kept beside their
+     # live siblings "xpath_injection"/"nosqli"; harmless here because a live family covers each engine.
      "engine": ("run_ldap", "run_xpath", "run_form_nosqli"),
-     "violated_by": ("ldap", "xpath", "xpath_injection", "nosqli", "nosql_injection"), "verifiable": True},
+     "violated_by": ("ldap", "ldap_injection", "xpath", "xpath_injection", "nosqli", "nosql_injection"),
+     "verifiable": True},
     {"chapter": "Validation & Encoding", "cid": "VAL-08", "level": 2,
      "summary": "Objects are not corruptible via prototype pollution.",
      "objective": "Confirm no prototype-pollution sink.",
