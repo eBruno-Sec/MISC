@@ -96,12 +96,26 @@ OBJECTIVES = (
      # from run_session_token. Same property (a predictable/low-entropy session identifier), one producer.
      "engine": "run_session_token", "violated_by": ("weak_session_token",), "verifiable": True},
     {"chapter": "Session Management", "cid": "SESS-02", "level": 1,
-     "summary": "Session cookies carry Secure/HttpOnly/SameSite attributes.",
+     # Q-048 NARROWED from "Secure/HttpOnly/SameSite" to what is actually FAILABLE. See below: the only
+     # cookie weakness that becomes a distinguishable finding is the missing Secure attribute (CWE-614).
+     "summary": "Session cookies carry the Secure attribute (CWE-614).",
      "objective": "Verify session-cookie hardening flags.",
-     # Q-012: "header_analysis" resolved to nothing. The engine that actually inspects cookie hardening is
-     # run_transport_posture (transport_posture.py:251 grades HttpOnly/Secure/SameSite).
-     "engine": ("run_transport_posture", "run_encoded_cookie"), "violated_by": ("cookie_flags",),
-     "verifiable": True},
+     # Q-012 re-pointed the engine here and was still wrong, because it fixed the RUN and not the FAIL:
+     # family "cookie_flags" has NO producer anywhere in the tree, so SESS-02 read "verified" on every
+     # possible run. Both engines it named were dead for it -- run_transport_posture emits
+     # "security_misconfig"/"transport_posture", run_encoded_cookie emits "base64_param" (a different
+     # property entirely: base64-encoded parameters).
+     #
+     # The real producer, which the Q-012 pass missed: cookie_flags.py emits family "insecure_cookie"
+     # (CWE-614, judged from the RAW Set-Cookie header on session-ish cookies) and is called from
+     # _run_web_probes (tools.py:5781). Sole producer, reachable from that one engine -> no spurious FAIL.
+     #
+     # DELIBERATELY NOT re-pointed to "security_misconfig", which transport_posture DOES emit for its
+     # cookie checks: that family is chosen by `"transport_posture" if kind in ("tls","cert") else
+     # "security_misconfig"` (transport_posture.py:397) and `kind` is also "header" and "methods". A
+     # missing security header or a permitted TRACE would then FAIL "session cookies carry Secure" -- a
+     # false FAIL, which is as much a defect as a false verified.
+     "engine": "run_web_probes", "violated_by": ("insecure_cookie",), "verifiable": True},
     {"chapter": "Session Management", "cid": "SESS-03", "level": 2,
      "summary": "Session identifier is rotated on authentication (no fixation).",
      "objective": "Confirm token rotates on login.",
@@ -221,9 +235,17 @@ OBJECTIVES = (
      "objective": "Confirm SSRF is not exploitable.",
      "engine": "run_ssrf", "violated_by": ("ssrf",), "verifiable": True},
     {"chapter": "Communication & Config", "cid": "COMM-02", "level": 1,
-     "summary": "CORS policy does not trust arbitrary/reflected origins with credentials.",
-     "objective": "Confirm CORS is not overly permissive.",
-     "engine": ("run_injection_probes", "run_client_checks"), "violated_by": ("cors",), "verifiable": True},
+     # Q-048 BROADENED to match the engines: the objective said "CORS" while one of its two engines tests
+     # the crossdomain.xml policy, which is the same property (do we grant arbitrary origins access?)
+     # through a different mechanism.
+     "summary": "Cross-origin trust policy (CORS and crossdomain.xml) does not trust arbitrary origins.",
+     "objective": "Confirm cross-origin policy is not overly permissive.",
+     # run_client_checks emits "permissive_crossdomain" (CWE-942, client_checks_tool.py:81) and
+     # "reverse_tabnabbing" -- never "cors" -- so it was a dead engine that could stamp this objective
+     # verified on its own. Sole producer of permissive_crossdomain, reachable only from run_client_checks,
+     # so adding it cannot fail this objective spuriously.
+     "engine": ("run_injection_probes", "run_client_checks"),
+     "violated_by": ("cors", "permissive_crossdomain"), "verifiable": True},
     {"chapter": "Communication & Config", "cid": "COMM-03", "level": 1,
      "summary": "No sensitive files, backups, or VCS metadata are web-exposed.",
      "objective": "Confirm no sensitive exposure.",
