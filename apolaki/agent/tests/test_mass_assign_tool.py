@@ -574,3 +574,99 @@ def test_an_empty_nonce_still_yields_a_name_no_application_defines():
 
 def test_markers_are_unique():
     assert MA.new_marker() != MA.new_marker()
+
+
+# ══ THE `validated_on` LEDGER, made executable ═════════════════════════════════════════════════
+#
+# The VALIDATED lane measured that `validated_on` is a hand-typed literal: 34 of 48 claims are named
+# by no test assertion at all, there is no lab vocabulary so a fabricated id is not rejected, and
+# every existing per-lab guard is a MEMBERSHIP test -- `assert "conpot" in validated_on` -- which
+# fails when a claim is DELETED and cannot fail when a false one is ADDED.
+#
+# This block is the missing direction for ONE technique. It carries the recorded reply behind each
+# lab this engine actually ran against, replays it through the real oracle, and asserts that the
+# technique record may not claim a lab that has no recorded reply here. Adding `dvwa` to
+# `mass_assignment.validated_on` without recording a reply fails this file.
+#
+# Lab ids are the vocabulary the agent can resolve (bench_all.LAB_URLS | benchmark.MANIFESTS |
+# labs.LABS), not prose. "Admin Registration" -- the Juice Shop CHALLENGE name that the old solver
+# backfill used -- is not a lab id and could never be checked against a target.
+
+#: lab id -> the exchange that was actually observed, live, on 2026-08-15.
+#: Every field here was copied from a real run of ToolRegistry.execute("run_mass_assign", ...);
+#: see docs/handoff/massassign.md section 6 for the full transcripts.
+RECORDED_EVIDENCE = {
+    "vampi": {
+        "write": "POST /users/v1/register",
+        "reread": "GET /users/v1/_debug",           # ranked from VAmPI's OWN OpenAPI spec
+        "field": "admin", "injected": True,
+        "baseline": False,                          # a user created WITHOUT the injection
+        "key_field": "username", "key_value": "apolaki_ma_aabbcc",
+        "body": VAMPI_DEBUG,
+    },
+    "juiceshop": {
+        "write": "POST /api/Users",
+        "reread": "GET /api/Users/24",              # the REST convention <write>/<id>
+        "field": "role", "injected": "admin",
+        "baseline": "customer",
+        "key_field": "id", "key_value": 24,
+        "body": JUICE_USER,
+    },
+}
+
+
+def test_the_recorded_evidence_replays_to_a_confirmation_on_every_lab_claimed():
+    """Each recorded reply, through the REAL oracle, must still reach `confirmed`.
+
+    This is what makes the claim a measurement rather than a string: if the oracle is later changed
+    so it would no longer confirm what was actually observed on these labs, this fails."""
+    assert RECORDED_EVIDENCE, "an empty ledger would make every assertion below vacuous"
+    for lab, ev in sorted(RECORDED_EVIDENCE.items()):
+        obj = MA.locate_object(ev["body"], ev["key_field"], ev["key_value"])
+        assert obj is not None, "%s: the recorded reply no longer locates the object we wrote" % lab
+        found, val = MA.read_field(obj, ev["field"])
+        v = MA.evaluate(field=ev["field"], sent_value=ev["injected"],
+                        baseline={"ran": True, "found": True, "value": ev["baseline"]},
+                        after={"found": found, "value": val},
+                        control=_ctl(), reread_ran=True, write_accepted=True)
+        assert v["verdict"] == MA.CONFIRMED, "%s: %s" % (lab, v["reason"])
+        assert MA.same_value(ev["injected"], v["observed_value"])
+        assert not MA.same_value(ev["injected"], ev["baseline"]), (
+            "%s: a baseline equal to the injected value is not evidence of anything" % lab)
+
+
+def test_every_lab_in_the_recorded_evidence_resolves_to_a_real_target():
+    """A capability claim must name something that exists. `vampi` and `juiceshop` are ids the agent's
+    own registries can resolve to a target definition; a lab name somebody typed is not."""
+    import bench_all as BA
+    import benchmark as B
+    import labs as L
+    known = set(BA.LAB_URLS) | set(B.MANIFESTS) | set(L.LABS)
+    assert known, "empty lab registries would make this pass for free"
+    unknown = sorted(set(RECORDED_EVIDENCE) - known)
+    assert unknown == [], "recorded evidence names targets no lab registry knows: %s" % unknown
+
+
+def test_mass_assignment_may_not_claim_a_lab_it_has_no_recorded_reply_for():
+    """THE MISSING DIRECTION. Every existing per-lab guard asserts `lab in validated_on`, which fails
+    only on REMOVAL. This one fails on ADDITION: the technique record's claim must be a subset of the
+    labs replayed above, so a lab id typed into `validated_on` without a recorded reply is rejected.
+
+    It passes vacuously while the claim is empty, which is why the two assertions above -- non-empty
+    recorded evidence that actually replays to a confirmation -- are the load-bearing half.
+    """
+    import techniques as T
+    claimed = set(T.TECHNIQUES["mass_assignment"].get("validated_on") or [])
+    unbacked = sorted(claimed - set(RECORDED_EVIDENCE))
+    assert unbacked == [], (
+        "mass_assignment claims %s with no recorded reply in RECORDED_EVIDENCE. Either run the "
+        "engine against that lab and record the exchange, or drop the claim." % unbacked)
+
+
+def test_the_addition_guard_actually_rejects_a_fabricated_claim():
+    """NEGATIVE CONTROL for the test above -- without this, a guard that can never fail would look
+    identical to one that passes. Mirrors `test_validated_on.FABRICATED`."""
+    claimed = {"vampi", "fabricated_lab_9000"}
+    unbacked = sorted(claimed - set(RECORDED_EVIDENCE))
+    assert unbacked == ["fabricated_lab_9000"], (
+        "the subset check must reject an invented lab id, or it defends nothing")

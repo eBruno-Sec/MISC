@@ -311,14 +311,68 @@ Same engine, same six candidate fields, an authenticated bearer session, six obj
 
 ### `validated_on` - the honest ledger
 
-| lab | endpoint | result | view discovery path |
-|---|---|---|---|
-| VAmPI `apolaki-vampi-1` | `POST /users/v1/register` | **confirmed** `admin` | ranked from the live OpenAPI spec |
-| VAmPI `apolaki-vampi-1` | `POST /books/v1` | clean, no findings | ranked from the live OpenAPI spec |
-| Juice Shop `apolaki-juice-shop-bench-1` | `POST /api/Users` | **confirmed** `role`; `isActive` held clean by the baseline control | REST convention `<write>/<id>` |
+MEASURED at HEAD, before writing anything into it:
 
-Not validated against: crAPI (not running), any target where the re-read requires a session the
-engine must mint itself (see section 9).
+```
+mass_assignment  validated_on    []
+                 backfill_claim  ['juiceshop']
+                 maps_to         {'juiceshop': ['Admin Registration']}
+                 technique_status catalogued
+```
+
+So the field is currently EMPTY and honest - a previous lane already split the Juice Shop solver's
+claim out into `backfill_claim`, which is the right shape. "Admin Registration" is a Juice Shop
+CHALLENGE name, not a lab id, and could never have been checked against a target.
+
+What this lane actually ran, in the lab vocabulary the agent can resolve
+(`bench_all.LAB_URLS | benchmark.MANIFESTS | labs.LABS`):
+
+| lab id | container | endpoint | result | view discovery path |
+|---|---|---|---|---|
+| `vampi` | `apolaki-vampi-1` | `POST /users/v1/register` | **confirmed** `admin` | ranked from the live OpenAPI spec |
+| `vampi` | `apolaki-vampi-1` | `POST /books/v1` | clean - 0 findings, 0 leads | ranked from the live OpenAPI spec |
+| `juiceshop` | `apolaki-juice-shop-bench-1` | `POST /api/Users` | **confirmed** `role`; `isActive` held clean by the baseline control | REST convention `<write>/<id>` |
+
+**Two labs, three endpoints, two confirmed fields.** Both lab ids resolve against the agent's own lab
+registries - asserted, not assumed, by
+`test_every_lab_in_the_recorded_evidence_resolves_to_a_real_target`.
+
+Not validated against: crAPI (not running), DVWA/bWAPP/Mutillidae/WebGoat (no JSON write API of this
+shape), GinAndJuice (not attempted), and any target whose re-read needs a session the engine must
+mint itself (section 9). None of those belong in `validated_on`.
+
+### The claim is executable, and it fails on ADDITION
+
+The VALIDATED lane measured that `validated_on` is a hand-typed literal with nothing behind it: 34 of
+48 claims named by no test assertion, no lab vocabulary so a fabricated id is accepted, and every
+existing per-lab guard is a MEMBERSHIP test (`assert "conpot" in validated_on`) that fails on
+REMOVAL and *cannot* fail when a false claim is added.
+
+`agent/tests/test_mass_assign_tool.py` now carries the missing direction for this one technique:
+
+- `RECORDED_EVIDENCE` maps each lab id to the reply actually observed on it - the write, the re-read
+  path, the injected field, the baseline value, and the recorded response body.
+- `test_the_recorded_evidence_replays_to_a_confirmation_on_every_lab_claimed` drives those recorded
+  bytes through the real oracle and requires `confirmed`. If the oracle later stops confirming what
+  was genuinely observed, this fails.
+- `test_mass_assignment_may_not_claim_a_lab_it_has_no_recorded_reply_for` asserts
+  `set(validated_on) <= set(RECORDED_EVIDENCE)`. Typing `dvwa` into the claim without recording a
+  reply fails this file. That is the direction no existing guard has.
+- `test_the_addition_guard_actually_rejects_a_fabricated_claim` is that guard's own negative control,
+  because a subset check that can never fail looks identical to one that passes.
+
+Negative control for the replay guard itself, because a replay that would confirm whatever it is
+handed defends nothing. Each recorded reply was re-run with ONLY the privileged field reverted to its
+baseline value:
+
+```
+juiceshop  recorded reply -> confirmed | same reply with 'role' reverted to baseline -> clean
+vampi      recorded reply -> confirmed | same reply with 'admin' reverted to baseline -> clean
+```
+
+MEASURED: the six strict xfails in `tests/test_validated_on.py` still XFAIL with this in place
+(`.....xxxxxx......  18 passed`), so none of them was quietly flipped to XPASS. `mass_assignment`
+carries an empty claim today, so it is not in `_claims()` and cannot shrink that census.
 
 ### Objects this lane created on shared labs
 
@@ -355,7 +409,9 @@ and same_value(...)` weakened to `if False`, Juice Shop's `isActive` confirms as
 
 ---
 
-## 8. FOR THE ASVS LANE (`agent/asvs_model.py` - not mine to edit)
+## 8. PATCHES FOR FILES THIS LANE DOES NOT OWN
+
+### For the ASVS lane (`agent/asvs_model.py`)
 
 **No patch needed - they already did it, concurrently.** MEASURED at `asvs_model.py:163-176`:
 ATHZ-04 now carries `"engine": "run_mass_assign", "violated_by": ("mass_assignment",),
@@ -393,21 +449,36 @@ does appear.
 
 I have NOT touched either file.
 
-### Second patch, for whoever owns `agent/techniques.py`
+### Patch for the VALIDATED lane (`agent/techniques.py` - not mine to edit)
 
-`_JUICESHOP_PROVEN["mass_assignment"] = ["Admin Registration"]` is the solver backfill Q-011 named:
-the technique's `validated_on` was borrowed from `juiceshop_solvers.py:67`, not from an engine. There
-is now real engine evidence, and it is broader than the backfill. Requested:
+**Correction to an earlier draft of this handoff.** I first wrote this as a patch to
+`_JUICESHOP_PROVEN`. I then MEASURED it and was wrong: `_JUICESHOP_PROVEN` no longer feeds
+`validated_on` at all - `techniques.py:1030` routes it into `backfill_claim` and `maps_to`, which is
+already the honest split. `mass_assignment.validated_on` is `[]`. Nothing needs correcting there.
+
+What is now true is that the field has been EARNED for the first time. Requested:
 
 ```python
-# Q-011: this was a SOLVER backfill -- the technique claimed a Juice Shop challenge the lab solver
-# closed, not a capability the product had. `run_mass_assign` now confirms it live on two labs:
-# VAmPI POST /users/v1/register binds `admin` (view ranked from the API's own OpenAPI spec), and
-# Juice Shop POST /api/Users binds `role` (view from the REST convention). See
-# docs/handoff/massassign.md section 6.
-"mass_assignment": ["Admin Registration", "VAmPI /users/v1/register (admin)",
-                    "Juice Shop /api/Users (role)"],
+# Q-011. The FIRST `validated_on` on the web side backed by a replayable artifact rather than by a
+# typed string. `run_mass_assign` confirmed live on both labs on 2026-08-15:
+#   vampi      POST /users/v1/register binds `admin`  (re-read view ranked from the API's OWN spec)
+#   juiceshop  POST /api/Users binds `role`           (re-read view from the REST convention)
+# The recorded replies behind both, and a guard that rejects any lab id added here WITHOUT one, are
+# in agent/tests/test_mass_assign_tool.py::RECORDED_EVIDENCE. See docs/handoff/massassign.md s.6.
+validated_on=["vampi", "juiceshop"],
 ```
+
+Three things to know before applying it:
+
+1. **It is not free.** Two labs means `technique_planner.registry_seed` scores it 60 instead of 20,
+   `is_generalized` becomes true, and `/packs` counts one more "proven". If your lane would rather
+   land the ONE-rule-for-proven fix first and let this technique arrive into a fixed model, that is
+   a better order and this can wait - the evidence is not going stale.
+2. **My tests will hold you to it.** Adding any lab id other than `vampi` or `juiceshop` makes
+   `test_mass_assignment_may_not_claim_a_lab_it_has_no_recorded_reply_for` fail. That is deliberate.
+3. **Do not add it to the liveness ledger on my behalf.** `mass_assignment` is not in
+   `_liveness_verified()` and I did not put it there; it is not on the always-on path, so there is
+   nothing for a liveness run to ratchet yet (section 8, "Not requested").
 
 ### Not requested: the liveness ratchet
 
@@ -459,8 +530,30 @@ did not have. Two traps, both hit:
    taken at 09:21 showed two ASVS failures that had vanished by 09:45.
 
 So the attributable measurement is a full suite over an **isolated snapshot: committed HEAD plus
-only this lane's six agent files**, with the other lanes' uncommitted edits reverted and their
-untracked test files removed. That is the only run whose result belongs to this lane.
+only this lane's own files**, with the other lanes' uncommitted edits reverted and their untracked
+test files removed. That is the only run whose result belongs to this lane.
+
+Results, in order:
+
+| snapshot | scope | result |
+|---|---|---|
+| HEAD@`39b41b9`-era + this lane's 6 agent files | full suite | `PYTEST_EXIT=0`, 0 failed |
+| HEAD@`3b18571` + this lane's test file | full suite | see below |
+
+**Honest status of the second run at the time of the `validated_on` commit: still executing** (the
+host was running three lanes' containers concurrently and it had reached 33%). It was NOT green-at-
+commit, and the commit says so. What WAS verified before committing:
+
+- `tests/test_mass_assign_tool.py` - 64 passed, run directly.
+- `tests/test_validated_on.py` + `tests/test_arsenal_gap.py` - 18 passed, all six strict xfails still
+  XFAILing, none flipped to XPASS. These are the only files that can interact with the change.
+- Both mutants re-applied and re-killed after the edit (`2/2 killed`, `not_applied` empty).
+- **No production module changed in that slice** - the diff is one test file plus this document, so
+  the blast radius is bounded to what was directly run.
+
+That is the reasoning for committing before the full run landed, stated so it can be judged rather
+than assumed. The alternative - holding an unpushed slice through a session limit - is how the
+previous slice was nearly lost.
 
 ## 11. Status
 
@@ -470,4 +563,10 @@ untracked test files removed. That is the only run whose result belongs to this 
 - [x] slice 3: live validation on two labs, one true positive each, one paired negative endpoint,
       one paired negative FIELD on a real app
 - [x] slice 4: second mutant added; both applied and killed
-- [ ] NOT DONE: `asvs_model` ATHZ-04 (section 8) - another lane owns that file this cycle
+- [x] slice 5: `validated_on` made executable - recorded replies per lab, a guard that fails on
+      ADDITION, and its own negative control. Six strict xfails in `test_validated_on.py` verified
+      still XFAILing, none flipped to XPASS.
+- [ ] NOT MINE: `asvs_model` ATHZ-04 - the ASVS lane already did it (section 8); only their stale
+      "not yet validated against a live vulnerable app" caveat remains
+- [ ] NOT MINE: `techniques.py` `validated_on=["vampi", "juiceshop"]` - patch in section 8 for the
+      VALIDATED lane, with the reasons they may want to sequence it after their own fix
