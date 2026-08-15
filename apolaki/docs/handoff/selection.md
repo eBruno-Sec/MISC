@@ -496,6 +496,17 @@ Python v0.1, the GinAndJuice blind recall and Juliet are structurally incapable 
 commit.** The only number that can move is the whole-product mission figure, which is the number
 being measured.
 
+### Suite, with the change applied [MEASURED]
+
+```
+docker run --rm --network none -v <repo>/agent:/app -w /app apolaki-agent \
+  python -m pytest tests/ -p no:cacheprovider -p no:warnings --tb=line -rf
+  EXIT=0    2377 passed, 11 skipped, 1 xfailed, 0 failed   (262.70s)
+```
+
+2371 (the gate lane's baseline) + 5 new `test_sweep_class_coverage.py` tests + 1 from another lane
+in flight. The single xfail pinning the proved-undecidable `00494` residual is untouched.
+
 **Q5 and Q6 are the honest ones.** If the gain is mostly `weakrand`, it is largely a suite-specific
 signal - `docs/handoff/measure.md` records that the Benchmark's weakrand handler ANNOUNCES its own
 generator and that the 86.7% DAST score does not transfer. `securecookie` (raw `Set-Cookie`
