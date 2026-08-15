@@ -478,6 +478,24 @@ Predictions, falsifiable, recorded before `wp1` finishes:
 | Q5 | the gain skews to **weakrand and securecookie**; `pathtraver` UNDER-performs its 65.4% suite figure, because the suite harness passes `lab_mode=True` and the sweep deliberately does not - the mission gets `TRAVERSAL_SAFE_PAYLOADS` only, no `/etc/passwd` reads | per-category claims |
 | Q6 | precision stays **18+/18+ = 100.0%**; any claim on a clean case falsifies it, and the first place to look is a cross-family PRNG or cookie confirmation on a `sqli`/`xss` page - a combination `owasp_bench.py` can never test because it runs each engine only on its own category | `wp_score.py` FP count |
 
+### Which benchmark numbers CAN move, verified rather than asserted [MEASURED]
+
+```
+grep -rn "_SWEEP_HTTP_ENGINES|_SWEEP_BROWSER_ENGINES" agent/ --include=*.py
+  agent/agent.py:222   the definition
+  agent/agent.py:225   the browser tuple
+  agent/agent.py:3498  the ONLY consumer -- the sweep's per-target engine loop
+  agent/tests/test_sweep_class_coverage.py:13   a docstring, not a use
+```
+
+**One consumer.** No benchmark harness reads the tuple: `owasp_bench.py` maps category -> engine via
+its own `ENGINES` dict and calls the engine directly (it does use `agent.sweep_targets`, which this
+change does NOT touch), and `blind_benchmark.py`, `bench_all.py`, `bench_contract.py`,
+`bench_juliet.py` and `benchmark.py` do not import `agent` at all. So **Java v1.2 DAST/hybrid,
+Python v0.1, the GinAndJuice blind recall and Juliet are structurally incapable of moving from this
+commit.** The only number that can move is the whole-product mission figure, which is the number
+being measured.
+
 **Q5 and Q6 are the honest ones.** If the gain is mostly `weakrand`, it is largely a suite-specific
 signal - `docs/handoff/measure.md` records that the Benchmark's weakrand handler ANNOUNCES its own
 generator and that the 86.7% DAST score does not transfer. `securecookie` (raw `Set-Cookie`
