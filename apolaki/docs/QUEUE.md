@@ -20,13 +20,16 @@ on the wrong constant; the bound is `CAP_ENDPOINTS`/`SWEEP_TARGET_CAP`) and was 
 session limit that **resets 22:40 PT**.
 
 **TOP OF THE QUEUE — both raised by the wp1 measurement, both unassigned:**
-- **Q-047 · `run_web_probes` confirms traversal on endpoints that merely reflect.** MEASURED: of 12
-  confirmed `path_traversal` findings, 5 are on traversal cases; the rest are on `cmdi-00` and
-  `weakrand-00`, and `weakrand-00/BenchmarkTest00187` is an outright FP. These render as **proven**,
-  not leads, so `UNPROVEN_TRAVERSAL_CONFIDENCE` is not catching them. **DoD: an oracle that fails on
-  00187 and still passes the five real traversal cases.** Until then `run_web_probes` stays out of
-  `_SWEEP_HTTP_ENGINES` and four classes stay uncovered by the sweep — the coverage gap is real and
-  is blocked on this, not abandoned.
+- **Q-047 · ORACLE FIXED, sweep entry still out.** Root cause was not reflection: the oracle was
+  reading **request order**. On the stateful `weakrand-00/BenchmarkTest00187` the `exists` probe went
+  first and got the session-establishing body while both absent probes got the steady state — every
+  requirement satisfied by a cookie. `exists` is now repeated and a divergence must survive the
+  repeat; without the repeat the verdict is a lead that says why. Validated live: 00187 → **no
+  finding**, `pathtraver-00/00040` and `00045` → still **confirmed**. (The other three wp1 traversal
+  cases used the **header** carrier, so they are untested here — validated on two, not five.)
+  **REMAINING for this ticket:** a full mission re-measure before `run_web_probes` returns to
+  `_SWEEP_HTTP_ENGINES`, and the two `xfail(strict=True)` tests in `test_sweep_class_coverage.py`
+  flip. The pre-registered condition was about a measurement, and none has been taken since the fix.
 - **`sqli` 21 → 11.** The whole-product runs keep losing half the sqli detections. Older than the
   wp1 change, survived it, still unexplained, and it is the single largest known recall loss.
 

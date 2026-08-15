@@ -512,7 +512,7 @@ def analyze_traversal_pair(baseline, probe, payload: str, *, lab_mode: bool = Fa
 
 
 def analyze_traversal_differential(exists_resp, absent_a_resp, absent_b_resp, twin,
-                                   *, baseline=None):
+                                   *, baseline=None, exists_repeat=None):
     """CONFIRM path traversal from a three-request, two-sided experiment.
 
     Requests, all with the same parameter and shape-identical payloads:
@@ -526,7 +526,28 @@ def analyze_traversal_differential(exists_resp, absent_a_resp, absent_b_resp, tw
       2. the EXISTS response diverges from them in a way the echoed payload cannot explain;
     and the shortcut of (0) the response simply containing the file's contents.
 
-    A reflecting endpoint fails (2) by construction: redaction removes the only thing that differed."""
+    A reflecting endpoint fails (2) by construction: redaction removes the only thing that differed.
+
+    (3) THE ORDER CONTROL, added 2026-08-14 after a MEASURED false positive. The two checks above
+    control for echo and for noise; neither controls for the request ORDER. On a stateful endpoint the
+    first request differs from every later one, and whichever payload happens to go first inherits
+    that difference. Reproduced against the live lab on `weakrand-00/BenchmarkTest00187`, a case
+    vulnerable to nothing:
+
+        order [exists, absent_a, absent_b]  -> exists   'has been remembered with cookie: ...'
+                                              absent_a  'Welcome back: ...'
+                                              absent_b  'Welcome back: ...'   => CONFIRMED
+        order [absent_a, exists, absent_b]  => None      (the divergence moved to absent_a)
+        order [absent_a, absent_b, exists]  => None
+
+    The absent pair agreed, the exists response diverged, and the difference was not the echoed
+    payload -- every stated requirement was met by a session cookie. So `exists` is now REPEATED, and
+    a divergence counts only if it survives the repeat: a file system answers the same way twice,
+    while a first-request artifact (session establishment, cache miss, connection warm-up) does not.
+    Same discipline as Q-040 -- the reference must REPRODUCE, not merely resemble.
+
+    Without `exists_repeat` the caller has run no such control, so the strongest verdict available is
+    a LEAD. Silently confirming without it is what this function did on 2026-08-14."""
     e_text = text_from_response(exists_resp)
     a_text = text_from_response(absent_a_resp)
     b_text = text_from_response(absent_b_resp)
@@ -543,19 +564,45 @@ def analyze_traversal_differential(exists_resp, absent_a_resp, absent_b_resp, tw
     if a_st != b_st or unexplained_divergence(a_text, b_text, payloads):
         return None
 
+    # (3) the ORDER control. Judged before any verdict is built, so every path below inherits it.
+    #     `graded()` is the single place that decides confirmed-vs-lead, because two call sites
+    #     deciding it independently is how one of them ends up not deciding it at all.
+    r_text = text_from_response(exists_repeat) if exists_repeat is not None else None
+    r_st = _status_of(exists_repeat) if exists_repeat is not None else None
+
+    def graded(verdict: dict, *, holds: bool) -> dict:
+        if exists_repeat is None:
+            verdict.update(confidence="lead", severity="medium",
+                           reason=verdict["reason"] + " — NOT REPEATED: without a second `exists` "
+                                  "request this cannot be told apart from a first-request artifact "
+                                  "(session establishment, cache miss), so it is reported as a lead")
+            return verdict
+        if not holds:
+            return None
+        verdict["reason"] += " — and it REPRODUCED on a repeat of the same request"
+        verdict["repeat_control"] = "the exists divergence held on a second identical request"
+        return verdict
+
     # (2) the present/absent divergence. A status code cannot be echoed, so it counts on its own.
     if e_st != a_st:
-        return {"severity": "high", "confidence": "confirmed", "oracle": "existence-differential",
-                "reason": f"'{twin.target}' answered {e_st} where an absent file of identical shape "
-                          f"answered {a_st} twice — the path was resolved against the file system "
-                          f"outside the application directory",
-                "payload": twin.exists, "twin": twin.label}
+        return graded({"severity": "high", "confidence": "confirmed",
+                       "oracle": "existence-differential",
+                       "reason": f"'{twin.target}' answered {e_st} where an absent file of identical "
+                                 f"shape answered {a_st} twice — the path was resolved against the "
+                                 f"file system outside the application directory",
+                       "payload": twin.exists, "twin": twin.label},
+                      holds=(r_st == e_st and r_st != a_st))
     evidence = unexplained_divergence(e_text, a_text, payloads)
     if evidence and unexplained_divergence(e_text, b_text, payloads):
-        return {"severity": "high", "confidence": "confirmed", "oracle": "existence-differential",
-                "reason": f"'{twin.target}' produced a response an absent file of identical shape did "
-                          f"not, twice over, and the difference is not the echoed payload: {evidence!r}",
-                "payload": twin.exists, "twin": twin.label, "evidence": evidence}
+        return graded({"severity": "high", "confidence": "confirmed",
+                       "oracle": "existence-differential",
+                       "reason": f"'{twin.target}' produced a response an absent file of identical "
+                                 f"shape did not, twice over, and the difference is not the echoed "
+                                 f"payload: {evidence!r}",
+                       "payload": twin.exists, "twin": twin.label, "evidence": evidence},
+                      holds=bool(r_text is not None
+                                 and unexplained_divergence(r_text, a_text, payloads)
+                                 and unexplained_divergence(r_text, b_text, payloads)))
     return None
 
 

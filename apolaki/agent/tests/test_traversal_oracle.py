@@ -87,10 +87,14 @@ def test_existence_differential_confirms_on_a_real_file_system_oracle():
             payload.replace("/", "&#x2f;"),
             "And file already exists." if exists else "But file doesn't exist yet."))
 
+    # The repeat is the order control (Q-047): a real file system answers the same way twice, so the
+    # repeat looks exactly like the first `exists`. Passing it is not a formality -- without it this
+    # same evidence is only a lead, which is what `test_..._without_the_repeat_is_only_a_lead` pins.
     v = ws.analyze_traversal_differential(
         page(twin.exists, True), page(twin.absent_a, False), page(twin.absent_b, False), twin,
-        baseline=ECHO_BASE)
+        baseline=ECHO_BASE, exists_repeat=page(twin.exists, True))
     assert _confirmed(v), v
+    assert "REPRODUCED" in v["reason"], v
 
 
 def test_identical_responses_never_confirm():
@@ -114,8 +118,60 @@ def test_a_nondeterministic_endpoint_cannot_confirm():
 def test_status_only_divergence_confirms_because_a_parameter_cannot_echo_a_status():
     twin = ws.build_traversal_twins(nonces=["aaaaaaaaaaaaaaaa", "bbbbbbbbbbbbbbbb"])[0]
     v = ws.analyze_traversal_differential(
-        _r("", 200), _r("", 404), _r("", 404), twin, baseline=ECHO_BASE)
+        _r("", 200), _r("", 404), _r("", 404), twin, baseline=ECHO_BASE, exists_repeat=_r("", 200))
     assert _confirmed(v), v
+
+
+# ── Q-047: the ORDER control ──────────────────────────────────────────────────
+# MEASURED against the live lab on weakrand-00/BenchmarkTest00187, a case vulnerable to nothing.
+# Sending `exists` first gave it the session-establishing body while both absent probes got the
+# steady-state one; the absent pair agreed, the divergence was not the echoed payload, and the oracle
+# confirmed. Reordering so an ABSENT payload went first moved the divergence and the finding vanished
+# -- proof the verdict tracked REQUEST ORDER, not the file system.
+_FIRST_REQUEST = "SafeIngrid00187 has been remembered with cookie: rememberMe00187"
+_STEADY_STATE = "Welcome back: SafeIngrid00187"
+
+
+def _stateful_first_request(twin):
+    """The exact shape of the false positive: whoever goes first sees a different page."""
+    return dict(exists_resp=_r(_FIRST_REQUEST), absent_a_resp=_r(_STEADY_STATE),
+                absent_b_resp=_r(_STEADY_STATE), twin=twin)
+
+
+def test_a_stateful_first_request_no_longer_confirms():
+    """THE regression test for Q-047. The repeat sees the steady-state page, so the divergence does
+    not reproduce and there is no finding at all."""
+    twin = ws.build_traversal_twins(nonces=["aaaaaaaaaaaaaaaa", "bbbbbbbbbbbbbbbb"])[0]
+    v = ws.analyze_traversal_differential(exists_repeat=_r(_STEADY_STATE),
+                                          **_stateful_first_request(twin))
+    assert v is None, v
+
+
+def test_that_scenario_DID_confirm_without_the_repeat():
+    """The precondition, asserted rather than asserted-about: with three requests this evidence is
+    indistinguishable from a real file system. If this ever stops holding, the test above is passing
+    for some other reason and stops being a control."""
+    twin = ws.build_traversal_twins(nonces=["aaaaaaaaaaaaaaaa", "bbbbbbbbbbbbbbbb"])[0]
+    v = ws.analyze_traversal_differential(**_stateful_first_request(twin))
+    assert v is not None and v["oracle"] == "existence-differential", v
+
+
+def test_a_divergence_without_the_repeat_is_only_a_lead():
+    """A caller that runs no order control gets the weaker verdict, and the report says WHY rather
+    than dropping the signal: no control was run, so nothing was established."""
+    twin = ws.build_traversal_twins(nonces=["aaaaaaaaaaaaaaaa", "bbbbbbbbbbbbbbbb"])[0]
+    v = ws.analyze_traversal_differential(**_stateful_first_request(twin))
+    assert not _confirmed(v), v
+    assert v["confidence"] == "lead" and "NOT REPEATED" in v["reason"], v
+
+
+def test_a_status_divergence_that_does_not_reproduce_is_rejected_too():
+    """The other confirmation path gets the same control -- one guarded branch and one unguarded one
+    is how the FP survives its own fix."""
+    twin = ws.build_traversal_twins(nonces=["aaaaaaaaaaaaaaaa", "bbbbbbbbbbbbbbbb"])[0]
+    v = ws.analyze_traversal_differential(
+        _r("", 200), _r("", 404), _r("", 404), twin, exists_repeat=_r("", 404))
+    assert v is None, v
 
 
 # ── the twins themselves must be shape-identical, or the differential is unsound ──

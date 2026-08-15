@@ -339,6 +339,59 @@ defend.
 
 ---
 
+## Q-047 — the traversal oracle was reading REQUEST ORDER. 2026-08-14
+
+The false positive that forced the revert below, diagnosed against the live lab rather than argued
+from the code. `weakrand-00/BenchmarkTest00187` is vulnerable to nothing, and the endpoint sets a
+session cookie, so **its first response differs from every later one**:
+
+```
+order [exists, absent_a, absent_b]   exists   'SafeIngrid00187 has been remembered with cookie: ...'
+                                     absent_a 'Welcome back: SafeIngrid00187 ...'
+                                     absent_b 'Welcome back: SafeIngrid00187 ...'   => CONFIRMED
+order [absent_a, exists, absent_b]   => None      (the divergence moved to absent_a)
+order [absent_a, absent_b, exists]   => None
+```
+
+Every stated requirement of the oracle was satisfied **by a cookie**: the absent pair agreed, the
+exists response diverged, and the difference was not the echoed payload. The two negative controls
+are what make it a cause rather than a story — put an absent payload first and the finding moves to
+it, then vanishes.
+
+**Two earlier hypotheses died first, and cheaply.** (1) *The page is nondeterministic* — it does carry
+a fresh random number, so I ran the differential 25 times × 3 twins: **75/75 no finding.** (2) *The
+single-request path is confirming on reflection* — `analyze_traversal_pair` already downgrades
+reflection to a lead and correctly returned nothing. Neither guess survived contact, and the third
+only worked because it was tested by reordering rather than by reasoning.
+
+**The fix is a control, not a heuristic.** `exists` is sent a fourth time, at the END of the triple,
+and a divergence counts only if it survives the repeat: a file system answers the same way twice, a
+first-request artifact does not. Without the repeat the caller has run no order control, so the
+strongest verdict available is a **lead** that says so — the same honesty rule the report uses for
+missing negative controls. Both confirmation branches go through one `graded()` helper, because one
+guarded branch and one unguarded branch is how a fix survives its own regression test.
+
+**Validated end to end against the live lab, exists-first (the ordering that produced the FP):**
+
+| case | key | 3 requests | 4 requests |
+|---|---|---|---|
+| `weakrand-00/BenchmarkTest00187` | **not vulnerable** | confirmed (as a lead here) | **no finding** |
+| `pathtraver-00/BenchmarkTest00040` | vulnerable | lead | **confirmed** |
+| `pathtraver-00/BenchmarkTest00045` | vulnerable | lead | **confirmed** |
+
+**Stated rather than rounded up:** the other three traversal cases from the wp1 run (`00133`, `00262`,
+`00264`) were claimed there through the **request-header** carrier, and this harness drives the POST
+body, so they report no finding in BOTH columns. They are not evidence either way, and the fix is
+validated on two true cases, not five. Confirming the remaining three needs the header carrier.
+
+Cost: one extra request per twin — 4 instead of 3, on an engine that runs at 0.66 s per URL.
+
+**`run_web_probes` is still OUT of `_SWEEP_HTTP_ENGINES`.** The oracle is fixed and the sweep entry
+stays reverted until a full mission re-measures it, because the pre-registered condition was about a
+measurement, and no measurement has been taken since the fix.
+
+---
+
 ## ★ THE BEST NUMBER THIS SUITE HAS PRODUCED, AND IT WAS REVERTED. 2026-08-14
 
 `run_web_probes` joined `_SWEEP_HTTP_ENGINES` (`805a78e`), because the sweep's promise that "a

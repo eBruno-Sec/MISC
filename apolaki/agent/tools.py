@@ -3266,20 +3266,29 @@ class ToolRegistry:
         `send(payload)` performs one request with the payload in the carrier and returns the response.
         Per twin it sends three shape-identical payloads — one file that MUST exist on the far side of
         the escape, two that cannot — and hands them to the two-sided oracle. Three requests, not one,
-        because a single response cannot distinguish a file system from an echo."""
+        because a single response cannot distinguish a file system from an echo.
+
+        FOUR requests since 2026-08-14: `exists` is sent AGAIN at the end, and the oracle confirms
+        only if the divergence survives the repeat. Three requests could not distinguish a file system
+        from a STATEFUL FIRST REQUEST — on `weakrand-00/BenchmarkTest00187` the exists probe went
+        first, received the session-establishing body while both absent probes received the
+        steady-state one, and every stated requirement was satisfied by a cookie (Q-047). The repeat
+        goes last rather than adjacent so it is maximally separated from whatever the first request
+        perturbed."""
         out: list = []
         for twin in ws.build_traversal_twins(max_twins=max_twins):
             try:
                 r_exists = await send(twin.exists)
                 r_absent_a = await send(twin.absent_a)
                 r_absent_b = await send(twin.absent_b)
+                r_repeat = await send(twin.exists)
             except Exception as exc:
                 self._swallow(exc, "web_probes.traversal_differential", target)
                 return out
-            if any((r or {}).get("error") for r in (r_exists, r_absent_a, r_absent_b)):
+            if any((r or {}).get("error") for r in (r_exists, r_absent_a, r_absent_b, r_repeat)):
                 continue
             verdict = ws.analyze_traversal_differential(
-                r_exists, r_absent_a, r_absent_b, twin, baseline=baseline)
+                r_exists, r_absent_a, r_absent_b, twin, baseline=baseline, exists_repeat=r_repeat)
             if verdict:
                 out.append(self._attach_poc(
                     self._traversal_finding(verdict, target, parameter, twin.exists, carrier),
