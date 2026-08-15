@@ -339,6 +339,88 @@ defend.
 
 ---
 
+## ★ THE sqli 21 -> 11 LOSS, ANSWERED: an EVEN round-robin over URL shapes. 2026-08-15
+
+The largest known recall loss in the project, and the answer is selection again — a third independent
+arrival at the same conclusion.
+
+**The 10 lost cases are identical in both reruns** (`baseline - wp1` == `baseline - wp2`):
+`00335 00337 00339 00341 00342 00428 00429 00433 00438` plus `00494`. Nine are true positives.
+**The tenth, `00494`, is the baseline's known FALSE POSITIVE — losing it is a precision gain**, so the
+honest accounting is −9 TP, not −10.
+
+**Mechanism, MEASURED.** Commit `de4c3aa` (2026-08-11) replaced the sweep's discovery-order truncation
+with an **even round-robin across URL shapes**. The OWASP Benchmark's whole surface collapses to **11
+shapes**, so the 400-target budget was split 11 ways **regardless of class size**: the sqli class holds
+**456 of 2524** query-bearing candidates and drew **31 slots**. The nine lost cases sit at sqli-class
+indices **38–58** — just past a cut at 30. **They were never probed by anything.**
+
+**Why this matters more than the nine cases.** An even split across shapes is fair to *shapes* and
+unfair to *evidence*: it hands a shape with 4 candidates the same budget as one with 456. The change
+was made to stop discovery order from starving whole classes, which was a real problem — the fix
+traded one starvation for another and nobody measured the trade. Proportional allocation is the
+obvious candidate, and it is a change to selection, which this project now knows is the binding
+constraint on recall.
+
+Recorded by the breaker lane before a session limit killed it, with the regression test committed.
+
+---
+
+## Q-012 — six ASVS names, and the one I briefed WRONG. 2026-08-15
+
+The model named six engines nothing could reach, so **three objectives could never be verified even by
+a mission that ran every engine that exists** (`AUTHN-04`, `ATHZ-04`, `BUSL-01`).
+
+**My briefing was wrong and the lane disproved it.** I told it the ledger records the bare label
+`authz_matrix` while dispatch uses `run_authz_matrix`, so the fix would be a `tools.py` patch.
+Measured: **the ledger records the REQUESTED tool name.** The model was simply naming the wrong thing;
+no `tools.py` patch was needed. Second time a Coordinator citation of mine has been caught by a lane
+testing it instead of trusting it. **A citation is a claim, not evidence.**
+
+The durable half is the new status. **A capability the product does NOT HAVE now reports
+`not_implemented`, never `not_tested`** — "not tested" reads as *we did not get to it*, and conflating
+the two lets an absent engine hide behind a skipped one. `AUTHN-04` is the clean example: it named
+`header_analysis` (unreachable) **and** carried `verifiable: False`, so it could never be verified for
+two independent reasons, one of them the author's own admission. Apolaki has no engine that observes a
+credential crossing a cleartext channel; `run_transport_posture` grades TLS posture for an origin,
+which is a different property, and mapping it there would have manufactured a `verified`.
+
+`report.coverage_rollup` gives the new status **its own bucket**. Folding it into `not_tested` one
+layer up would have undone the whole point — the Q-015 defect exactly.
+
+**Two new defects the lane found while proving the six, both worth their own ticket:**
+- **SESS-02 can never FAIL.** Its `violated_by` family `cookie_flags` has **no producer anywhere**.
+  Cookie hardening *is* tested, by `transport_posture.py:251`, but that emits `security_misconfig`.
+  So SESS-02 reads `verified` in a perfect run purely because `run_encoded_cookie` ran.
+- **CONF-01 names `run_fingerprint`, which cannot emit its violating family.** `_run_fingerprint`
+  emits `fingerprint`; the only producer of `vulnerable_component` is `_run_js_review`.
+
+Both are the same shape as Q-012 one level down: **a `verified` backed by an engine structurally
+incapable of failing it.** Generalised as **Q-048**: every objective's `violated_by` families must
+have at least one real producer reachable from one of its own engines.
+
+---
+
+## Q-002 — a CSWSH engine, and the island the gate caught. 2026-08-15
+
+`ws_tool.py` (539 lines, 357 lines of tests): RFC 6455 handshake with the victim's cookie and an
+attacker `Origin`, confirming only when the accept is **derived from our own key** AND a pushed frame
+carries an **observed** identity marker the HTTP session already proved AND the **cookie-stripped
+control** does not carry it AND the credential was a cookie (nothing else is attached cross-origin by
+a browser). Everything weaker degrades explicitly: a `101` alone is a lead, and a marker the control
+also receives is CLEAN — the data is public.
+
+**Then the reachability gate earned its keep.** `run_ws_hijack` was implemented and
+permission-registered and reachable from **nothing** — the exact `run_external_surface` island that
+gate exists to catch. The lane's handoff had already ticked *"Wiring: dispatcher, CLAUDE_TOOLS,
+permission, engine_descriptor, wstg_catalog"* as done; only the permission entry existed. **The gate
+was right and the document was wrong** — which is the whole argument for gates that check facts.
+
+Now advertised in `CLAUDE_TOOLS`, and **deliberately not added to the always-on sweep**: putting a
+brand-new confirming engine into every mission is what produced a measured false positive this week.
+
+---
+
 ## Q-017 — the log kept the oldest rows, so a truncated tail looked like a dead mission. 2026-08-15
 
 `db.get_logs` was `ORDER BY id LIMIT ?`, which keeps the OLDEST n and discards everything after.

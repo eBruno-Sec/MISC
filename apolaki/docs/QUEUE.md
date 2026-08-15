@@ -39,7 +39,35 @@ first fixed the write path, the second found the invariants never read `evidence
 on the wrong constant; the bound is `CAP_ENDPOINTS`/`SWEEP_TARGET_CAP`) and was then killed by a
 session limit that **resets 22:40 PT**.
 
-**TOP OF THE QUEUE — both raised by the wp1 measurement, both unassigned:**
+## CYCLE-3 RESULT — 2026-08-15. All three lanes killed by one session limit; all three work landed.
+
+Suite **2463 passed, 11 skipped, 3 xfailed, 0 failed** (was 2401). Recovered on the main thread and
+pushed as `b1d56eb`.
+
+- **`sqli` 21 -> 11: ANSWERED and now the top ticket.** Even round-robin over 11 URL shapes rationed
+  the sqli class 31 of 400 slots for 456 candidates; the 9 lost TPs sit at indices 38-58, past a cut
+  at 30, **never probed**. The 10th lost case is the known FP `00494` — a precision gain.
+  **-> Q-049 below.**
+- **Q-012 CLOSED.** `not_implemented` status added; the phantom names fixed; `coverage_rollup` gives
+  it its own bucket. My briefing's `authz_matrix` premise was **disproved** by the lane.
+- **Q-002 landed as an advertised engine**, not an always-on one. Its island was caught by the
+  reachability gate after the handoff had already claimed the wiring was done.
+- **Q-017 CLOSED**, **Q-045/Q-046 CLOSED**, **Q-015/Q-016 CLOSED**, **Q-013/Q-014 CLOSED**.
+
+**TOP OF THE QUEUE — Q-049 first, it is worth nine cases:**
+
+- **Q-049 · the sweep's shape round-robin is EVEN, not proportional.** A shape with 4 candidates gets
+  the same budget as one with 456. `de4c3aa` introduced it to stop discovery order starving whole
+  classes — a real problem — and traded one starvation for another without measuring the trade.
+  **DoD: proportional (or evidence-weighted) allocation, the 9 named cases probed, and a sealed
+  whole-product re-measure.** Selection is the binding constraint on recall; this is the direct lever.
+- **Q-048 · every objective's `violated_by` families must have a real producer reachable from one of
+  its own engines.** MEASURED instances: SESS-02 can never fail (`cookie_flags` has no producer;
+  `transport_posture` emits `security_misconfig` instead), and CONF-01 names `run_fingerprint`, which
+  cannot emit `vulnerable_component` (only `_run_js_review` does). A `verified` backed by an engine
+  structurally incapable of failing it is Q-012 one level down.
+
+
 - **Q-047 · ORACLE FIXED, sweep entry still out.** Root cause was not reflection: the oracle was
   reading **request order**. On the stateful `weakrand-00/BenchmarkTest00187` the `exists` probe went
   first and got the session-establishing body while both absent probes got the steady state — every
