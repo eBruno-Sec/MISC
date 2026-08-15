@@ -538,11 +538,15 @@ Results, in order:
 | snapshot | scope | result |
 |---|---|---|
 | HEAD@`39b41b9`-era + this lane's 6 agent files | full suite | `PYTEST_EXIT=0`, 0 failed |
-| HEAD@`3b18571` + this lane's test file | full suite | see below |
+| HEAD@`3b18571` + this lane's test file | full suite | **2556 passed, 11 skipped, 9 xfailed, 0 failed** (`PYTEST_EXIT=0`) |
 
-**Honest status of the second run at the time of the `validated_on` commit: still executing** (the
-host was running three lanes' containers concurrently and it had reached 33%). It was NOT green-at-
-commit, and the commit says so. What WAS verified before committing:
+The nine xfails include the VALIDATED lane's six strict ones, still XFAILing - visible as `xxxxxx` in
+the run and confirmed directly against `tests/test_validated_on.py`. None flipped to XPASS.
+
+**The second run landed AFTER the `validated_on` commit** (`60a9eab`), not before. That commit says
+so in its own message, and the reasoning is left standing here rather than tidied away now that the
+answer came back green. At commit time the host was running three lanes' containers and the run had
+reached 33%. What WAS verified before committing:
 
 - `tests/test_mass_assign_tool.py` - 64 passed, run directly.
 - `tests/test_validated_on.py` + `tests/test_arsenal_gap.py` - 18 passed, all six strict xfails still
@@ -553,7 +557,7 @@ commit, and the commit says so. What WAS verified before committing:
 
 That is the reasoning for committing before the full run landed, stated so it can be judged rather
 than assumed. The alternative - holding an unpushed slice through a session limit - is how the
-previous slice was nearly lost.
+previous slice was nearly lost. The bet came off; it is recorded as a bet either way.
 
 ## 11. Status
 
