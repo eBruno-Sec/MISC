@@ -1424,10 +1424,22 @@ def risk_signals(findings: list, leads: list, coverage: dict, attack_surface: di
     exposure = sum(1 for x in (findings + leads)
                    if any(k in ((x.get("family") or "") + " " + " ".join(x.get("tags") or [])).lower()
                           for k in ("exposure", "secret", "disclosure", "backup", "sensitive")))
-    conf_load = min(100, sum(_SEV_WEIGHT.get((f.get("severity") or "info").lower(), 1) for f in findings))
+    # Q-015: the SAME filter `risk_score` carries, from the SAME shared predicate. This computed the
+    # identical quantity over the unfiltered list, so one report said "No Confirmed Risk" in the
+    # headline and "25% confirmed vulnerability load, 1 confirmed finding" in the executive dashboard
+    # -- off a row the proof gate had already demoted. `demote_unproven` is deliberately
+    # non-destructive (it rewrites confidence to "lead" and LEAVES THE ROW IN THE LIST), so any
+    # consumer that does not filter is counting rejected findings.
+    #
+    # Fourth private copy of this predicate, which is why it is `_confirmed` and not a local test:
+    # three copies is how the HTML report came to stamp CONFIRMED on gate-demoted rows. Note the
+    # `exposure` signal above deliberately spans findings + leads -- it is a descriptive signal about
+    # the engagement and says so in its basis; this one claims the word "confirmed" and must earn it.
+    confirmed = [f for f in findings if _confirmed(f)]
+    conf_load = min(100, sum(_SEV_WEIGHT.get((f.get("severity") or "info").lower(), 1) for f in confirmed))
     sig = [
         {"label": "Confirmed vulnerability load", "pct": conf_load,
-         "basis": f"{len(findings)} confirmed finding(s), severity-weighted"},
+         "basis": f"{len(confirmed)} confirmed finding(s), severity-weighted"},
         {"label": "Attack surface", "pct": min(100, round(endpoints * 1.5 + params * 2)),
          "basis": f"{endpoints} endpoint(s), {params} unique parameter(s) mapped"},
         {"label": "Injectable surface", "pct": (round(100 * parameterized / endpoints) if endpoints else 0),

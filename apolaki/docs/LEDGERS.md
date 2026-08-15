@@ -339,6 +339,42 @@ defend.
 
 ---
 
+## Q-015 / Q-016 — the report contradicted itself, and a crash read as "no controls". 2026-08-14
+
+Two small ones, same family as everything else this week: a second copy of a rule, and a failure that
+looked like a result.
+
+**Q-015.** `risk_score` filters gate-demoted rows; `risk_signals` computed the identical quantity 40
+lines later and did not. One report therefore said both:
+
+```
+risk_score(gated)      -> {'score': 0, 'label': 'No Confirmed Risk'}
+risk_signals(gated)[0] -> {'pct': 25, 'basis': '1 confirmed finding(s), severity-weighted'}
+```
+
+`demote_unproven` is deliberately non-destructive — it rewrites confidence to `lead` and **leaves the
+row in the list** — so every consumer that does not filter is counting findings the gate rejected.
+This was the **fourth** private copy of that predicate; it now uses the shared `_confirmed`.
+
+The test asserts **agreement across mixed inputs** rather than a fixed number, because the two are
+the same quantity and the defect was that they could disagree. Mutation (drop the filter): 2 of 4
+fail. And the control that keeps the fix honest — `Leads awaiting verification` and the exposure
+signal still deliberately span leads, because they are descriptive and say so in their basis.
+Narrowing those would have been a different bug.
+
+**Q-016.** `bie._read_controls` was `except Exception: return []`. A `page.evaluate` that threw became
+byte-identical to a page that genuinely renders no controls: `counts.total = 0`, phase 2 emits zero
+probes, and the report prints a confident claim about the application's control surface that was
+produced by a crash. Fourth instance of this shape (`DOM_SCAN_JS`, the traversal import, the service
+sweep). The read now records **why** it failed, and `control_surface.degraded` is set only when the
+read failed **and** nothing was read — precisely the case a reader would otherwise misread.
+
+The test is written against the DISTINCTION, not the exception: a crashed read and an empty page must
+not produce identical facts. The negative control asserts the genuinely-empty page records **nothing**
+— without it, `degraded` would be permanently true and therefore meaningless.
+
+---
+
 ## Q-047 — the traversal oracle was reading REQUEST ORDER. 2026-08-14
 
 The false positive that forced the revert below, diagnosed against the live lab rather than argued

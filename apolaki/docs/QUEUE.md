@@ -63,7 +63,8 @@ session limit that **resets 22:40 PT**.
 | **Q-032/033/034** | credential→session→persona, multi-persona differentials, report chronology | the architecture programme; `session_headers` is still one global raw dict at 50 sites |
 | **Q-002/003/004** | WebSockets/CSWSH · `postMessage` source · API4 resource consumption | genuine zero-engine classes |
 | **Q-011/012** | second phantom capability; six ASVS engine names resolving to nothing | declaration-vs-fact defects |
-| **Q-015/016/017** | `risk_signals` unfiltered twin · `_read_controls` returns `[]` on failure · `get_logs` oldest-first | smaller, all real |
+| ~~Q-015/016~~ | **CLOSED** — `risk_signals` now shares `risk_score`'s filter; `_read_controls` records why it went dark | a report that contradicted itself, and a crash that read as "no controls" |
+| **Q-017** | `get_logs` oldest-first with a LIMIT | small, real; the 4000-row half was DISPROVED |
 | **Q-005/006** | server-side prototype pollution (gated) · request smuggling (detection tiers only) | deliberately constrained |
 | **Q-030/035/036** | canonical cycle design · the model A/B experiment · fold the 15 architecture defects in | Q-030 is designed, not built |
 | **B-011+** | Juliet C/C++ (**UNSUPPORTED — no C/C++ analysis**), SARD subsets, remaining language ecosystems | matrix programme |

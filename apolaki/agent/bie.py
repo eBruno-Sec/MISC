@@ -1484,11 +1484,25 @@ def route_mutate(context, page, target_url: str, param: str, new_value: str, *, 
     return exchange(mutated, captured.get("status"), captured.get("body", ""), persona=persona), method
 
 
-def _read_controls(page) -> list:
-    """Enumerate the rendered control surface of whatever page the persona is currently on. Never raises."""
+def _read_controls(page, errors: list = None) -> list:
+    """Enumerate the rendered control surface of whatever page the persona is currently on.
+
+    Never raises -- an unreadable page must not abort the phase -- but the failure is RECORDED rather
+    than dissolved (Q-016). `except Exception: return []` made a `page.evaluate` that threw
+    byte-identical to a page that genuinely renders no controls: `classify_controls([])` gives
+    `counts.total = 0`, phase 2 emits zero probes and zero findings, and the report prints
+    `control_surface.counts.total: 0` -- a confident statement that the application has no control
+    surface, produced by a crash.
+
+    Fourth instance of this shape in the codebase (DOM_SCAN_JS, the traversal import, the service
+    sweep), which is why the fix is a recorded diagnostic and not a bare `raise`: the caller decides
+    what a degraded read means, and it can only decide if it is told.
+    """
     try:
         return list(page.evaluate(CONTROL_SURFACE_JS) or [])
-    except Exception:
+    except Exception as exc:
+        if errors is not None and len(errors) < 20:
+            errors.append("%s: %s" % (type(exc).__name__, str(exc)[:160]))
         return []
 
 
@@ -1551,7 +1565,8 @@ def run_persona_swap(base: str, *, owner_headers: dict, attacker_headers: dict, 
                 # The control surface must be read while the personas are still ON the application's own
                 # pages — a later navigation to a raw API URL would present an empty DOM and silently
                 # report "no controls". Accumulate across every rendered route.
-                raw_controls, app_page_url = _read_controls(a_page), base
+                ctl_errors = out.setdefault("control_read_errors", [])
+                raw_controls, app_page_url = _read_controls(a_page, ctl_errors), base
                 attempts = out.setdefault("_attempts", [])
                 for path in (seed_paths or [])[:6]:      # let each app render the pages that fetch objects
                     u = path if "://" in str(path) else base + str(path)
@@ -1560,7 +1575,7 @@ def run_persona_swap(base: str, *, owner_headers: dict, attacker_headers: dict, 
                     for pg in (o_page, a_page):
                         out.setdefault("settle", []).append(
                             {"url": u, "reason": _goto_awaiting_object(pg, u, timeout_ms, attempts)})
-                    raw_controls += _read_controls(a_page)
+                    raw_controls += _read_controls(a_page, ctl_errors)
                     app_page_url = u                     # the last APP page that actually drove requests
                 # OBSERVED cross-user hypotheses: the object URLs each persona's OWN browser requested.
                 owner_urls = [w["url"] for w in o_wire[obs_start[0]:] if w.get("url")]
@@ -1644,6 +1659,12 @@ def run_persona_swap(base: str, *, owner_headers: dict, attacker_headers: dict, 
                 # resources are fired; state-changing controls become operator leads, never auto-clicks.
                 classified = classify_controls(dedupe_controls(raw_controls))
                 out["control_surface"] = {k: classified[k] for k in ("counts", "withheld_privileged")}
+                # Q-016: a zero that came from a CRASH is not the same claim as a zero that came from
+                # a page. `degraded` is set only when the read failed AND nothing was read, which is
+                # exactly the case a reader would otherwise mistake for "this app has no controls".
+                if ctl_errors:
+                    out["control_surface"]["read_errors"] = list(ctl_errors)
+                    out["control_surface"]["degraded"] = not raw_controls
                 for ctl in probe_targets(classified, base):
                     u = ctl["probe_url"]
                     if not ok(u):
