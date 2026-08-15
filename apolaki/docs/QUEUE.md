@@ -94,6 +94,57 @@ pushed as `b1d56eb`.
   reachability gate after the handoff had already claimed the wiring was done.
 - **Q-017 CLOSED**, **Q-045/Q-046 CLOSED**, **Q-015/Q-016 CLOSED**, **Q-013/Q-014 CLOSED**.
 
+### Q-052 · The permission model is enforced in the PLANNER and not in the DISPATCHER, so `active` and `full` are the same mission · **HIGH** · `proposed`
+
+Found while trying to fix Q-050, and **it corrects Q-050's stated mechanism, which was mine and was
+wrong.** I wrote that `run_cmdi` is unreachable because `planner._ALLOWED["active"]` excludes
+INTRUSIVE. Measured one layer down, that is not what is happening.
+
+`agent._run_tool` — the single dispatch point for every engine — enforces exactly one rule:
+
+```python
+perm = TOOL_PERMISSIONS.get(tool_name, PermissionLevel.ACTIVE)
+...
+if self.mode == "passive" and perm != PermissionLevel.PASSIVE:
+    blocked
+```
+
+**That is the whole enforcement.** `passive` is real. `active` blocks NOTHING — an INTRUSIVE engine
+dispatched in `active` mode runs. `full` therefore differs from `active` in no way the dispatcher can
+observe, and the three-tier model collapses to two.
+
+**MEASURED, not inferred.** Five of the eight sweep engines are INTRUSIVE — `run_sqli`,
+`run_sqli_structural`, `run_xpath`, `run_ldap`, `run_injection_probes` — and the wp3 mission ran with
+`WP_MODE=active` and dispatched `run_sqli` **700 times**. Intrusive engines demonstrably run in active
+missions today.
+
+**Two consequences, and the first is a consent problem, not a coverage one:**
+1. **An operator who selects `active` expecting non-intrusive testing is getting SQL, XPath and LDAP
+   injection fired at their application.** Whatever the right answer is, the tier's name is currently
+   a promise the dispatcher does not keep.
+2. **`run_cmdi`'s exclusion is ARBITRARY.** It is not blocked by its tier — nothing is, in `active`.
+   It is absent from an 8-entry tuple, and the planner will not schedule it. So the real gate on what
+   runs is tuple membership, and the permission level is decorative outside `passive`.
+
+**Do not fix this by loosening the planner to match the dispatcher.** Two mechanisms disagree; the
+question is which one is right, and that is a product decision about what `active` should MEAN. My
+reading: `active` should exclude engines that modify state or carry exploitation risk, the sweep
+should honour it, and the OWASP-Benchmark-style runs that need injection coverage should declare
+`full`. But that changes what every existing mission does, so it needs measuring, not asserting.
+
+**Also here, and separately real:** the sweep dispatch loop at `agent.py:3542` is
+`except Exception: pass` — a bare swallow across **92% of all dispatches**. Every engine failure in
+the sweep is invisible; a crashed engine and a clean target produce byte-identical output. That is the
+silent-failure defect (`_swallow` exists precisely for this) sitting on the hottest path in the
+product.
+
+**DoD**: one enforcement point, honoured by both planner and sweep; a test that an INTRUSIVE engine
+cannot run in `active` (or an explicit, recorded decision that it may, with the tier renamed to match);
+the bare swallow replaced with `_swallow`; and a re-measure, since making `active` honest will change
+what every benchmark run dispatches.
+
+---
+
 ### Q-051 · The report cannot say WHICH ENGINE found a finding, and the technique coverage matrix is dead code · **HIGH** · `proposed`
 
 Erwin's idea, and it is the right one: if the report attributed every check to the tool that performed
@@ -147,12 +198,17 @@ priced and deliberately kept (browser confirmation is how XSS becomes proof rath
 
 **The other half is not fine. 32 engines have never run once**, and there are TWO distinct causes:
 
-**(a) INTRUSIVE engines are unreachable in the default `active` mode.** `planner._ALLOWED["active"] =
-{PASSIVE, ACTIVE}` excludes INTRUSIVE entirely, so the ONLY path to an intrusive engine is membership
-of `_SWEEP_HTTP_ENGINES` — a tuple of eight. Everything intrusive outside that tuple cannot be
-scheduled at all. **`run_cmdi` is INTRUSIVE and not in the tuple, so command injection — a core OWASP
-class with a full engine and its own oracle — has executed ZERO times in 151 missions.** Same for
-`run_zap`, `run_nosqlmap`, and others.
+**(a) ~~INTRUSIVE engines are unreachable in the default `active` mode.~~ CORRECTED — see Q-052.**
+I wrote that `planner._ALLOWED["active"]` excluding INTRUSIVE is why `run_cmdi` never runs. Measured
+one layer down, that is **not** the mechanism: `agent._run_tool` enforces the tier only for `passive`,
+so an INTRUSIVE engine dispatched in `active` runs fine — five of the eight sweep engines ARE
+INTRUSIVE and `run_sqli` fired 700 times in an `active` mission. The planner honours the tier and the
+dispatcher does not.
+
+So the true statement is narrower and worse: **`run_cmdi` is absent from an 8-entry tuple and the
+planner will not schedule it, and nothing about its permission level is protecting anyone.** Command
+injection — a core OWASP class with a full engine and its own oracle — has executed ZERO times in 151
+missions for that reason. Same for `run_zap` and `run_nosqlmap`.
 
 **(b) ACTIVE engines that ARE reachable and simply never get selected**: `run_jwt`, `run_saml`,
 `run_enumerate_ids`, `run_default_creds`, `run_metadata`, `run_jsonp`, `run_session_lifecycle`,
