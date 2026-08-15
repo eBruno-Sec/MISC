@@ -389,6 +389,73 @@ concentrated in the browser tier, and the coverage bound is a single constant.
 
 **And the hole is that one of the cheap engines is missing from the list entirely.**
 
+## 6. SCORED, AND THE HEADLINE NUMBER IS WRONG [MEASURED]
+
+Key copied from the lab container AFTER the seal above was committed (`b97260c`), into a
+`--network none` scorer. The scorer recomputes the sha256 and refuses to score if the claims moved;
+it matched.
+
+```
+PRECISION : 18/18 = 100.0%        RECALL : 18/1415 = 1.27%       ELAPSED 1889s
+MISSED-AFTER-PROBING : 202        NEVER PROBED : 1195   -> 85.5% never tested
+```
+
+Precision, recall, probed count and the 85.5% split all reproduce the breaker's run A exactly.
+
+### P6, scored: HELD, and it carries the lane
+
+```
+category       owning engine          vuln  probed  by owner  claimed
+sqli           run_sqli                272      22        22       11
+xss            run_xss                 246      23         2        0
+weakrand       run_web_probes          218      18         0        0
+pathtraver     run_web_probes          133      16         0        0
+crypto         (unmapped)              130      16         0        0
+hash           (unmapped)              129      19         0        0
+cmdi           run_form_cmdi           126      36         0        1
+trustbound     (unmapped)               83      21         0        0
+securecookie   run_web_probes           36      22         0        0
+ldapi          run_ldap                 27      14        14        5
+xpathi         run_xpath                15      13        13        1
+TOTAL                                 1415     220        51       18
+```
+
+**Of 220 vulnerable cases that received a payload, only 51 - 23% - ever received the engine that
+owns their class.**
+
+```
+detection on PROBED                : 18/220 = 8.2%
+detection on CLASS-CORRECTLY PROBED: 18/51  = 35.3%
+```
+
+**The 8.2% detection rate that sent this ticket here is an artifact of the denominator.** It counts
+a `pathtraver` case as "tested" when what it received was `run_sqli`, `run_ldap`, `run_xpath`,
+`run_ssi`, `run_css_injection`, `run_waf_bypass`, `run_sqli_structural` and
+`run_injection_probes` - eight engines, not one of which can observe a file read. When the
+denominator is cases whose own engine actually ran, the oracles confirm **35.3%**.
+
+### The 202 "detection shortfall" decomposes, and most of it is not detection
+
+| bucket | n | what it is |
+|---|---:|---|
+| class-correctly probed, still missed | **33** | a genuine DETECTION shortfall - the real oracle gap |
+| probed, no DAST engine exists for the class | **56** | crypto 16, hash 19, trustbound 21 - structurally invisible to any black-box tool, correctly scored 0 |
+| probed, an owning engine EXISTS and never ran on them | **113** | a SELECTION shortfall wearing a detection shortfall's clothes |
+
+The 113 break down exactly:
+
+* **56 -> `run_web_probes`** (weakrand 18, pathtraver 16, securecookie 22). The engine had **ZERO
+  dispatches in the entire mission**. This is the block this lane's change addresses.
+* **36 -> `run_form_cmdi`**. Same defect, named follow-up.
+* **21 -> `run_xss`** (2 of 23 got it). Not a missing engine - the `SWEEP_BROWSER_CAP = 30` budget,
+  which is the priced trade in 5(a).
+
+**So the ticket's framing needs one correction.** "We do not fail to confirm what we test. We never
+test most of it" is right about the 1195 never probed. But of the 202 it says we *did* test and
+failed to confirm, **only 33 were ever tested for the thing they are**. The recall shortfall is
+selection at both ends: 1195 cases never reached, and 113 of the 220 reached but handed to the
+wrong engines.
+
 ### Operational note for whoever runs this next
 
 Do NOT `docker run -v <repo>/agent:/app -v <somefile>:/app/x.py`. Docker creates the second mount
