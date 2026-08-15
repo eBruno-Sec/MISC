@@ -627,11 +627,18 @@ def evaluate(*, field: str, sent_value, baseline: dict, after: dict, control: di
 # endpoint is really PR:N, and scoring the harder case is the conservative direction), no user
 # interaction, scope unchanged. C:H/I:H because binding `role`/`isAdmin` grants the privileges the
 # application gates on it and lets the attacker write as that role. A:N -- this engine never proves
-# an availability effect. Vector and score are kept adjacent and pinned by a test that recomputes
-# the v3.1 base score from the vector, because nothing in the report pipeline does: `ws_tool` and
-# `session_lifecycle_tool` both cite a `report.check_report_honesty` that does not exist in the tree
-# (MEASURED -- `grep -rn check_report_honesty agent/` matches only those two comments and this one),
-# so the arithmetic is defended here or nowhere.
+# an availability effect. Vector and score are kept adjacent and pinned by a test that recomputes the
+# v3.1 base score from the vector.
+#
+# CORRECTED 2026-08-15. This comment used to say "nothing in the report pipeline does" and to cite a
+# report-honesty function by a name that has never existed. The name was indeed wrong; what followed
+# from it was not. The GUARANTEE is implemented, as `report.report_integrity_check`, and it runs LIVE
+# in the report path
+# (report.py:2800), not only in tests. MEASURED: a finding carrying score 2.0 with an
+# AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H vector produces "CVSS score 2.0 disagrees with its vector
+# (computes to 9.8)" plus a severity-band violation. A wrong function NAME is a stale citation; it is
+# not a missing guard, and the difference matters because one is a comment fix and the other would be
+# 241 unchecked scores.
 _CVSS_VECTOR = "CVSS:3.1/AV:N/AC:L/PR:L/UI:N/S:U/C:H/I:H/A:N"
 _CVSS_SCORE = 8.1
 

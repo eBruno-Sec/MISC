@@ -16,7 +16,7 @@ What is an HONEST ESTIMATE (clearly labelled, NOT the FIRST normative calculator
     scores lower.
 
 RULES: CVSS scores ATOMIC vulnerabilities only. A chain severity is Apolaki impact-path severity, NEVER a
-CVSS vector (see report_integrity.reject_chain_cvss).
+CVSS vector (see report_integrity.chain_cvss_violations).
 """
 from __future__ import annotations
 

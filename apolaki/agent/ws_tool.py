@@ -432,7 +432,7 @@ def evaluate(authed: dict, control: dict, markers=None, had_cookie: bool = False
 # CVSS v3.1: network, low complexity, no privileges, user must visit the attacker page (UI:R),
 # scope unchanged. C:H because the socket streams the victim's authenticated data. I:N ON PURPOSE --
 # this engine reads ONE inbound frame and never sends an application frame, so write impact is not
-# proven and must not be scored. `report.check_report_honesty` recomputes this from the vector and
+# proven and must not be scored. `report.report_integrity_check` recomputes this from the vector and
 # rejects a disagreement over 0.5, so vector and score are kept together here.
 _CVSS_VECTOR = "CVSS:3.1/AV:N/AC:L/PR:N/UI:R/S:U/C:H/I:N/A:N"
 _CVSS_SCORE = 6.5

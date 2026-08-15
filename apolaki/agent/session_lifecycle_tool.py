@@ -343,7 +343,7 @@ _BASE_TAGS = ["session", "session-lifecycle", "cwe-613"]
 #   AC:H  the attacker must already hold a token the app was supposed to have retired — a condition
 #         outside their control, and the same call `session_fixation_tool` makes.
 #   UI:R  the user has to have signed out / rotated / gone idle for the retired token to exist at all.
-# `report.check_report_honesty` recomputes this from the vector and rejects a score that disagrees with
+# `report.report_integrity_check` recomputes this from the vector and rejects a score that disagrees with
 # it by more than 0.5, so these two constants must be kept together. test_session_lifecycle pins them.
 _CVSS_VECTOR = "CVSS:3.1/AV:N/AC:H/PR:N/UI:R/S:U/C:H/I:H/A:N"
 _CVSS_SCORE = 6.8       # CVSS v3.1 base for the vector above; band = medium
