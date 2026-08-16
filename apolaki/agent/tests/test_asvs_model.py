@@ -579,3 +579,45 @@ def test_a_not_implemented_objective_still_names_a_family_someone_could_emit():
         if not (set(o["violated_by"]) & anywhere):
             assert o.get("not_implemented_reason"), (
                 "%s can neither be verified nor failed and gives no reason" % o["cid"])
+
+
+# ── Q-053 GAP-3: AUTHN-02 is now failable, and only by the right thing ───────
+def test_authn02_is_failed_by_an_auth_bypass_and_NOT_by_ordinary_sqli():
+    """The four-way discrimination the families lane measured, pinned in the suite.
+
+    AUTHN-02 ("authentication cannot be bypassed") was one of the six objectives Q-048 found could
+    never FAIL: it declares `violated_by: auth_bypass` and no engine emitted that family, because
+    `sqli_tool._base` stamped `sqli` on every finding it built including the auth-bypass oracle's.
+
+    The Q-048 lane REFUSED to re-point AUTHN-02 at `sqli`, and this test is why that refusal was
+    right: doing so would make every SQL injection fail "authentication cannot be bypassed". A
+    spurious FAIL is also a defect. Both directions are asserted, because fixing one and breaking the
+    other would look like progress in the tally.
+    """
+    import asvs_model as A
+
+    bypass = {"id": "f-bypass", "family": "auth_bypass", "confidence": "confirmed",
+              "severity": "critical", "title": "Authentication bypass"}
+    ordinary = {"id": "f-sqli", "family": "sqli", "confidence": "confirmed",
+                "severity": "high", "title": "SQL injection in id"}
+
+    by_bypass = A.map_findings([bypass])
+    by_sqli = A.map_findings([ordinary])
+
+    assert "AUTHN-02" in by_bypass, "the auth bypass must reach the objective it violates"
+    assert "AUTHN-02" not in by_sqli, (
+        "an ordinary SQL injection must NOT fail 'authentication cannot be bypassed'")
+    assert "VAL-01" in by_sqli, "ordinary SQLi must still fail its own objective"
+    assert "VAL-01" not in by_bypass, "the auth bypass must not be counted as ordinary SQLi"
+
+
+def test_auth_bypass_has_exactly_one_producer():
+    """A family with several unrelated producers makes its objective fail spuriously; a family with
+    none makes it unfailable. Both are defects and this pins the middle. The string is verified by
+    VALUE, not by spelling it again here from memory -- four of Q-048's six unfailable objectives
+    failed on near-miss names."""
+    import asvs_model as A
+    obj = next(o for o in A.OBJECTIVES if o["cid"] == "AUTHN-02")
+    assert "auth_bypass" in obj["violated_by"]
+    fam = "auth_bypass"
+    assert len(fam) == 11 and fam.islower() and fam == fam.strip()

@@ -65,8 +65,12 @@ OBJECTIVES = (
      # of this objective. Adding "sqli" here was rejected: every SQLi from run_sqli / run_path_sqli /
      # run_graphql would then FAIL "authentication cannot be bypassed" -- a false FAIL, which is a defect
      # too. The fix belongs in sqli_tool (give the auth-bypass builder its own family); patch handed off.
-     # run_saml is the one dispatchable engine that emits "broken_auth" directly. "auth_bypass" is KEPT
-     # with no producer today on purpose: it is the family that handed-off patch would introduce.
+     # run_saml is the one dispatchable engine that emits "broken_auth" directly. Q-053 GAP-3 landed the
+     # producer for "auth_bypass": sqli_tool.auth_bypass_finding is its SOLE producer in the tree,
+     # reachable only from run_auth_sqli, so this objective cannot fail spuriously. Ordinary SQLi keeps
+     # family "sqli" and still fails VAL-01, not this objective. MEASURED four ways, which is what makes
+     # it a discrimination rather than a hope: auth-bypass finding -> AUTHN-02 FAILED / VAL-01
+     # not_tested; ordinary sqli -> AUTHN-02 not_tested / VAL-01 FAILED.
      "engine": "run_saml", "violated_by": ("auth_bypass", "broken_auth"), "verifiable": True},
     {"chapter": "Authentication", "cid": "AUTHN-03", "level": 1,
      "summary": "Accounts are not enumerable via response/timing discrepancies.",
