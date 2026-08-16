@@ -155,9 +155,14 @@ def test_island_lead_families_are_quarantined_from_the_asvs_model():
     assert "recon" not in consumers
 
 
+# `run_ferox` was the third case here until Q-057 deleted it, its two siblings and their shared
+# driver -- three specs advertising content discovery with no binary in the image. `run_dork_gen` is
+# the surviving producer of a `recon` lead (tools.py:1299), so the routing rule is still exercised
+# against a family that something actually emits. Naming a deleted engine in a test is the stale
+# citation `test_cited_functions_exist.py` exists to catch, one file over.
 @pytest.mark.parametrize("tool,family", [("enumerate_ids", "idor"),
                                          ("run_metadata", "exposure"),
-                                         ("run_ferox", "recon")])
+                                         ("run_dork_gen", "recon")])
 def test_island_leads_never_enter_the_confirmed_report(tool, family):
     """The quarantine that makes the above safe, asserted at the routing function itself.
 

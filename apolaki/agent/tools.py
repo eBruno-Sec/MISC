@@ -231,9 +231,13 @@ TOOL_PERMISSIONS = {
     "run_sourcemap": PermissionLevel.ACTIVE,       # fetches *.js.map from in-scope host
     "run_metadata": PermissionLevel.ACTIVE,        # fetches a file, extracts EXIF/metadata
     "run_hash_crack": PermissionLevel.INTRUSIVE,   # OFFLINE dictionary crack of a supplied hash (never live auth)
-    "run_ferox": PermissionLevel.INTRUSIVE,        # optional feroxbuster adapter
-    "run_dirsearch": PermissionLevel.INTRUSIVE,    # optional dirsearch adapter
-    "run_gobuster": PermissionLevel.INTRUSIVE,     # optional gobuster adapter
+    # Q-057: run_ferox / run_dirsearch / run_gobuster REMOVED 2026-08-16. All three binaries were
+    # absent from the image (MEASURED: `command -v` finds none; driven live against Juice Shop all
+    # three returned `not installed`, 0 findings, 0 URLs added), so the product advertised content
+    # discovery to the model in three tool specs and could never perform it. The capability is wired
+    # natively -- run_content_discovery + run_ffuf, planner-dispatched, both carrying a soft-404
+    # baseline the adapters had no equivalent of. The last argument for feroxbuster was recursion,
+    # and the adapter passed --no-recursion.
     "run_nosqlmap": PermissionLevel.INTRUSIVE,     # optional NoSQLMap adapter
     "run_dir_harvest": PermissionLevel.INTRUSIVE,  # browsable-dir file harvest + null-byte bypass
     # ── LLM investigative action primitives ──
@@ -960,18 +964,6 @@ CLAUDE_TOOLS = [
          "hash": {"type": "string"}, "hash_type": {"type": "string", "description": "optional; auto-identified if omitted"},
          "wordlist": {"type": "string", "description": "catalog id or absolute path; defaults to the common-passwords list"}},
          "required": ["hash"]}},
-    {"name": "run_ferox",
-     "description": "INTRUSIVE: Recursive content discovery via feroxbuster (optional; skips gracefully if unavailable). Native content_discovery + ffuf remain the default.",
-     "input_schema": {"type": "object", "properties": {
-         "url": {"type": "string"}, "wordlist": {"type": "string"}}, "required": ["url"]}},
-    {"name": "run_dirsearch",
-     "description": "INTRUSIVE: Content discovery via dirsearch (optional; skips gracefully if unavailable).",
-     "input_schema": {"type": "object", "properties": {
-         "url": {"type": "string"}, "wordlist": {"type": "string"}}, "required": ["url"]}},
-    {"name": "run_gobuster",
-     "description": "INTRUSIVE: Directory brute-force via gobuster (optional; skips gracefully if unavailable).",
-     "input_schema": {"type": "object", "properties": {
-         "url": {"type": "string"}, "wordlist": {"type": "string"}}, "required": ["url"]}},
     {"name": "run_nosqlmap",
      "description": "INTRUSIVE: NoSQL-injection testing via NoSQLMap (optional; skips gracefully if unavailable). Native run_nosqli remains the default.",
      "input_schema": {"type": "object", "properties": {"url": {"type": "string"}}, "required": ["url"]}},
@@ -1485,44 +1477,14 @@ class ToolRegistry:
                                           "Recover the plaintext"]}
         return ToolResult("hash_crack", "", True, f"hash cracked offline ({engine})", [finding])
 
-    async def _bin_discovery(self, tool: str, cmd: list, url: str) -> ToolResult:
-        """Shared driver for optional content-discovery binaries (ferox/dirsearch/gobuster).
-        Scope-guarded, arg-array (no shell), graceful skip when the binary is absent."""
-        if not self.scope.validate(url)[0]:
-            return ToolResult(tool, url, False, "Off-scope", [])
-        out, err = await self._cmd(cmd, timeout=300)
-        if err.startswith("__MISSING__"):
-            return ToolResult(tool, url, False, "", [], f"{cmd[0]} not installed (native content_discovery + ffuf remain available)")
-        paths = sorted(set(re.findall(r"https?://[^\s\"']+", out or "")))[:400]
-        in_scope = [p for p in paths if self.scope.validate(p)[0]]
-        self._add_urls(in_scope)
-        leads = []
-        if in_scope:
-            leads.append({"title": f"Content discovered via {cmd[0]} ({len(in_scope)} path(s))",
-                          "severity": "info", "family": "recon", "confidence": "lead", "target": url,
-                          "tags": ["content-discovery", cmd[0]],
-                          "description": f"{cmd[0]} enumerated in-scope paths (verify each before reporting).",
-                          "evidence": "\n".join(in_scope[:60])})
-        return ToolResult(tool, url, True, f"{cmd[0]}: {len(in_scope)} in-scope path(s)", leads)
-
-    async def _run_ferox(self, inp: dict) -> ToolResult:
-        url = (inp.get("url") or "").strip()
-        wl = inp.get("wordlist") or "/usr/share/seclists/Discovery/Web-Content/common.txt"
-        return await self._bin_discovery("ferox", ["feroxbuster", "-u", url, "-w", wl,
-                                                   "--silent", "--no-recursion", "-k"], url)
-
-    async def _run_dirsearch(self, inp: dict) -> ToolResult:
-        url = (inp.get("url") or "").strip()
-        cmd = ["dirsearch", "-u", url, "-q", "--format=plain"]
-        if inp.get("wordlist"):
-            cmd += ["-w", inp["wordlist"]]
-        return await self._bin_discovery("dirsearch", cmd, url)
-
-    async def _run_gobuster(self, inp: dict) -> ToolResult:
-        url = (inp.get("url") or "").strip()
-        wl = inp.get("wordlist") or "/usr/share/seclists/Discovery/Web-Content/common.txt"
-        return await self._bin_discovery("gobuster", ["gobuster", "dir", "-u", url, "-w", wl,
-                                                      "-q", "--no-color", "-k"], url)
+    # `_bin_discovery` REMOVED with its only three callers (Q-057). It was the shared driver for the
+    # ferox/dirsearch/gobuster adapters; with those gone it is unreachable, and leaving it would have
+    # been a fourth thing in this file claiming a capability nothing performs.
+    #
+    # One property of it is worth keeping in mind if content discovery is ever re-adapted: its URL
+    # extraction was a bare `https?://` regex over stdout, with NO soft-404 baseline. The native
+    # engines it "supplemented" have one. So the adapters were not a stronger option that happened to
+    # be uninstalled -- they were a weaker one.
 
     async def _run_nosqlmap(self, inp: dict) -> ToolResult:
         """Optional NoSQLMap adapter; native run_nosqli remains the default engine."""
