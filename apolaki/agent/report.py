@@ -373,7 +373,7 @@ def generate_report(program: str, findings: list, scope: dict,
     findings = sanitize_finding_urls(findings)   # collapse any duplicated-host URL from prior-scan memory
     findings = _with_capec(findings)
     delta_block = "\n".join(_delta_lines(delta, findings))
-    ledger_block = "\n".join(_ledger_md(tool_ledger) + _arsenal_md(tool_ledger))
+    ledger_block = "\n".join(_ledger_md(tool_ledger) + _arsenal_md(tool_ledger) + _technique_md())
     status_banner = _status_note(status)          # only failed/stopped/interrupted
     exec_note = _exec_note(execution)             # strategy + AI usage (always for det/low-AI)
     banner = "\n\n".join(b for b in (status_banner, exec_note) if b)
@@ -1681,6 +1681,68 @@ def _arsenal_md(ledger: dict) -> list:
         if rest:
             lines += ["", "  Available but not selected: %s" % ", ".join("`%s`" % s for s in rest[:16])]
     return lines + [""]
+
+
+def technique_coverage() -> dict:
+    """The technique registry's honest coverage view, or an explicit failure.
+
+    Q-051. `techniques.coverage_matrix()` has existed, complete and correct, and was called by NOTHING
+    -- it sat in the qualified-dead-code list while the question it answers ("which techniques does
+    this product actually have behind it?") went unanswered in every report.
+
+    Returns the four numbers that mean different things and are constantly conflated:
+      total        techniques in the registry
+      proven       earned -- a liveness run produced the artifact
+      claimed      a human typed a `validated_on` value
+      generalized  >= 2 RESOLVABLE labs AND a liveness artifact
+
+    `claimed - proven` IS THE HONESTY DEBT and is reported, not hidden. Before the derived lab
+    vocabulary landed, two invented lab ids conferred `generalized` and a fabricated claim scored
+    90/100; `generalized` is now 1 rather than a flattering number, and 1 is the true one.
+    """
+    out = {"total": 0, "proven": 0, "claimed": 0, "unverified": 0, "generalized": 0,
+           "transferable": 0, "per_mission_tracked": False, "error": ""}
+    try:
+        import techniques as _T
+        m = _T.coverage_matrix()
+        v = _T.taxonomy_view("owasp")
+        out.update(total=m["techniques_total"], transferable=m["transferable_total"],
+                   generalized=m["generalized_total"], proven=v["proven"],
+                   claimed=v["claimed"], unverified=v["unverified"])
+    except Exception as exc:                       # noqa: BLE001 - recorded, never silent
+        out["error"] = "%s: %s" % (type(exc).__name__, str(exc)[:160])
+    return out
+
+
+def _technique_md() -> list:
+    """The technique-coverage section.
+
+    It states a LIMIT rather than implying coverage it cannot demonstrate: a technique record carries
+    `maps_to`, `validated_on` and `oracle`, but NO engine binding, so nothing links a technique to the
+    tools a mission dispatched. This report therefore cannot say which techniques ran against THIS
+    target, and says so instead of printing a number that would be read as if it could. That is the
+    same rule the arsenal section follows -- an absent measurement is not a zero.
+    """
+    tc = technique_coverage()
+    if tc["error"]:
+        return ["## Technique coverage", "",
+                "**NOT ESTABLISHED** — the technique registry could not be read: `%s`" % tc["error"], ""]
+    if not tc["total"]:
+        return []
+    debt = tc["claimed"] - tc["proven"]
+    return ["## Technique coverage", "",
+            "_What the platform has techniques FOR, and how much of that is earned rather than "
+            "asserted._", "",
+            "- **Techniques in the registry:** %d (%d transferable)" % (tc["total"], tc["transferable"]),
+            "- **Proven** — a liveness run produced the artifact: **%d**" % tc["proven"],
+            "- **Claimed** — a `validated_on` value was written by hand: %d" % tc["claimed"],
+            "- **Unverified claims (the honesty debt):** %d" % debt,
+            "- **Generalized** — 2+ resolvable labs AND a liveness artifact: %d" % tc["generalized"],
+            "",
+            "> **Not measured here:** which techniques ran against THIS target. Technique records "
+            "carry no engine binding, so nothing connects a technique to the tools this mission "
+            "dispatched. That gap is real and is not being papered over with the registry totals "
+            "above, which describe the PRODUCT and not this engagement.", ""]
 
 
 def _ledger_md(ledger: dict) -> list:
