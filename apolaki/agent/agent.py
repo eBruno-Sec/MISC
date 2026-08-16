@@ -367,6 +367,26 @@ def sweep_targets(urls, forms, in_scope, limit: int = SWEEP_TARGET_CAP) -> list:
     return _spread_by_shape(targets)[:limit]
 
 
+def _gate_refusal(res) -> str:
+    """The reason a GATED dispatch refused to run, or "" when it did not refuse.
+
+    `_exec_internal` reports a passive-mode or intrusive-HITL refusal as a `{"ran": false,
+    "blocked": ...}` carrier rather than raising, so that callers keep their `.findings` handling.
+    That design has a trap: a caller which only inspects `.findings` cannot tell "the gate said no"
+    from "the engine ran and found nothing", and will book a refusal as a clean dismissal.
+
+    A false negative manufactured by a safety gate is worse than the unsafe dispatch it replaced,
+    because it is invisible. Every caller that routes a validator through the gate must ask this.
+    """
+    try:
+        d = json.loads(str(getattr(res, "output", "") or "") or "{}")
+    except Exception:
+        return ""
+    if isinstance(d, dict) and d.get("ran") is False:
+        return str(d.get("blocked") or "gate refused the dispatch")
+    return ""
+
+
 class BBHAgent:
     # execution strategies (how tools are chosen), orthogonal to `mode` (which
     # tiers of tool are allowed). Default budgets: manual/deterministic use no AI,
@@ -966,12 +986,25 @@ class BBHAgent:
             elif fam == "jsonp":
                 rec["attempted"] = True
                 try:
-                    r = await self.tools.execute("run_jsonp", {"url": n["raw_target"] or self._primary_base()}, session_id)
+                    # GATED (#2 / Q-052). This was the ONE branch in this chain still calling
+                    # `self.tools.execute` directly. That path enforces scope and nothing else -- no
+                    # passive-mode check, no intrusive HITL -- so a PASSIVE mission fetched a live
+                    # callback endpoint, which is exactly the contact `agent.py`'s passive branch
+                    # refuses served-JS harvesting to avoid. Its three siblings above (run_exposure,
+                    # run_stored_xss, run_bfla) were already routed through `_exec_internal`; this
+                    # one was missed, and nothing in the suite could see the difference.
+                    r = await self._exec_internal("run_jsonp", {"url": n["raw_target"] or self._primary_base()}, session_id)
+                    _refused = _gate_refusal(r)
                     if r.findings:
                         promoted = r.findings[0]; state = cp.CONFIRMED
                         rec["evidence"] = str(r.output or "")[:120]
                     elif "SCOPE BLOCK" in str(r.error or ""):
                         state, rec["missing_prerequisite"] = cp.BLOCKED, "target out of scope"
+                    elif _refused:
+                        # The gate refused, so this candidate was never tested. Booking it DISMISSED
+                        # would convert the safety gate into a silent false negative.
+                        rec["attempted"] = False
+                        state, rec["missing_prerequisite"] = cp.BLOCKED, _refused
                     else:
                         state = cp.DISMISSED; rec["evidence"] = str(r.output or "no executable JSONP wrapper with sensitive data")[:120]
                 except Exception as e:

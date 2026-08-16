@@ -271,3 +271,88 @@ def test_active_and_full_are_distinguishable_at_the_dispatcher():
     assert active != full, (
         "`active` and `full` are indistinguishable at the dispatcher: both admit %r. The mode the "
         "operator selects has no effect above `passive`." % (sorted(t.value for t in active),))
+
+
+# ── DEFECT C: the gate that a caller can walk around ─────────────────────────
+#
+# `_run_tool` and `_exec_internal` are the two GATED dispatch paths: both enforce passive-mode and
+# the intrusive HITL gate. `ToolRegistry.execute` enforces SCOPE ONLY (tools.py `execute`: a scope
+# check, then `getattr(self, "_" + tool_name)`), so any caller that reaches for it directly gets
+# neither gate. `_exec_internal` exists precisely because that used to happen -- its own docstring
+# says "previously these called self.tools.execute() straight through, skipping both gates".
+#
+# MEASURED: the candidate-validation pipeline runs for EVERY strategy and has NO mode guard
+# (agent.py:2714), and inside it `run_jsonp` is dispatched through the ungated path while its three
+# siblings in the same if/elif chain (`run_exposure`, `run_stored_xss`, `run_bfla`) all go through
+# `_exec_internal` with a `# gated (#2)` comment. It is the one that was missed.
+
+
+class _RecordingTools(_Tools):
+    """A registry whose `execute` records instead of running. Nothing here reaches the network."""
+
+    def __init__(self, urls=()):
+        super().__init__(list(urls))
+        self.executed = []
+
+    async def execute(self, name, inp, _sid):
+        self.executed.append(name)
+
+        class _R:
+            tool, target, success = name, "", True
+            output, findings, error = "{}", [], None
+
+        return _R()
+
+
+def _validate_in_passive(lead):
+    """Run the REAL candidate-validation pipeline at `mode='passive'`; return the engines it ran."""
+    eng = scope_mod.ScopeEngine()
+    eng.load_manual(["*.t"], [], "gate")
+    tools = _RecordingTools(["https://t/index.html", "https://t/app.html"])
+    ag = agent_mod.BBHAgent(eng, tools, asyncio.Event(), strategy="deterministic", mission_id=None)
+    ag.mode = "passive"
+    ag.leads = [dict(lead)]
+
+    async def run():
+        async for _ in ag._validate_candidates_impl("s"):
+            pass
+
+    asyncio.run(run())
+    return tools.executed
+
+
+def test_passive_mode_blocks_the_jsonp_validator():
+    """PASSIVE means OSINT only, no direct target contact -- the guarantee `agent.py:2594` states in
+    so many words when it skips served-JS harvesting. `run_jsonp` is an ACTIVE engine that fetches a
+    live callback endpoint, and the candidate pipeline reached it through the ungated
+    `self.tools.execute`, so a passive scan made live requests the operator forbade."""
+    ran = _validate_in_passive({"title": "JSONP callback endpoint", "family": "jsonp",
+                                "target": "https://t/api?callback=cb"})
+    assert "run_jsonp" not in ran, (
+        "PASSIVE mode dispatched the ACTIVE engine run_jsonp at a live target: %r" % (ran,))
+
+
+def test_a_gate_blocked_validator_is_BLOCKED_not_DISMISSED():
+    """The half of the fix that is easy to get wrong. A validator the gate refused produced no
+    findings, and "no findings" is one line away from "dismissed -- no JSONP wrapper found". Booking
+    a refusal as a clean result is a false negative manufactured by a safety fix, so the candidate
+    must come back BLOCKED with the reason named."""
+    import candidate_pipeline as cp
+    eng = scope_mod.ScopeEngine()
+    eng.load_manual(["*.t"], [], "gate")
+    tools = _RecordingTools(["https://t/index.html"])
+    ag = agent_mod.BBHAgent(eng, tools, asyncio.Event(), strategy="deterministic", mission_id=None)
+    ag.mode = "passive"
+    ag.leads = [{"title": "JSONP callback endpoint", "family": "jsonp",
+                 "target": "https://t/api?callback=cb"}]
+
+    async def run():
+        async for _ in ag._validate_candidates_impl("s"):
+            pass
+
+    asyncio.run(run())
+    rec = next((r for r in ag._candidate_assurance if r.get("family") == "jsonp"), None)
+    assert rec is not None, "the jsonp candidate produced no assurance record at all"
+    assert rec["result"] == cp.BLOCKED, (
+        "a gate-blocked validator was booked as %r, not BLOCKED: %r" % (rec["result"], rec))
+    assert rec["missing_prerequisite"], "BLOCKED with no named prerequisite is not actionable: %r" % (rec,)
