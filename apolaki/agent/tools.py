@@ -40,6 +40,35 @@ def _target_client(*args, _rate_policy=True, **kwargs):
     )
 
 
+class Identity(dict):
+    """Headers that COMPLETELY specify who a request is made as.
+
+    Q-032. `self.session_headers` is the MISSION's identity and the transports merge it into every
+    request, which is right for the ~45 probes that deliberately act as the mission and wrong for
+    every request made as somebody else. A plain dict cannot express the difference between "I did
+    not specify an identity, inherit the mission's" and "I specified an identity, and it is this
+    one (possibly nobody)". `Identity` is that difference, and it is a `dict` subclass so it flows
+    through `**h`, `.get`, `.items` and every existing call site unchanged.
+
+      Identity()                      -> anonymous. A REAL input meaning "as nobody", never
+                                         upgraded to the mission session. An empty header dict is
+                                         the anonymous control row of the authorization matrix, and
+                                         silently authenticating it makes missing_authentication
+                                         over-fire while suppressing bfla and cross-user IDOR.
+      Identity({"Cookie": ...})       -> exactly this persona, nothing inherited.
+      {} or None or a plain dict      -> no opinion. Inherits the mission session, as today.
+
+    A transport MUST NOT merge `session_headers` into an `Identity`. Dropping it wholesale (rather
+    than filtering "credential-looking" keys off it) is correct and is the smaller rule: the field
+    is built ONLY from the operator's `auth_headers` and from a login response's session headers
+    (`main.py` `session_headers = {... req.auth_headers ...}` then `.update(res["headers"])`, and
+    `agent.py`'s auth artery), so it is an identity bundle by construction. A denylist of
+    credential header names would be a guess that fails silently on the first name it does not know.
+    """
+
+    __slots__ = ()
+
+
 def _collapse_dup_host(u: str) -> str:
     """Collapse a duplicated host (scheme://host//host/… or a leading /host/ repeat) into one
     well-formed URL, at the single choke point where URLs enter the surface. Guards against a
@@ -1610,7 +1639,7 @@ class ToolRegistry:
         import httpx
         if not self.budget.charge():
             raise RuntimeError("mission request budget exhausted (%d requests)" % self.budget.limit)
-        h = {"User-Agent": _UA, **(self.session_headers or {}), **(headers or {})}
+        h = self._merge_identity(headers)
         await _browser_engine.target_rate_policy.wait_async(url)
         # Safety backoff is not target latency. Starting this timer before the wait would let a 429
         # cooldown contaminate any caller's timing differential and turn a no-DoS fix into a finding.
@@ -1681,13 +1710,39 @@ class ToolRegistry:
         except Exception:
             pass
 
+    def _merge_identity(self, headers) -> dict:
+        """The ONE place a request's identity is decided (Q-032).
+
+        An `Identity` says who the request is made as, so the mission session is NOT merged into it
+        -- including the empty `Identity()`, which means anonymous and must stay anonymous. Anything
+        else expresses no opinion and inherits the mission session exactly as before.
+        """
+        if isinstance(headers, Identity):
+            return {"User-Agent": _UA, **headers}
+        return {"User-Agent": _UA, **(self.session_headers or {}), **(headers or {})}
+
+    def _identity(self, role) -> Identity:
+        """Headers for a stored persona, as an `Identity` so no transport can add the mission's
+        session to them. The SINGLE read accessor for `self._sessions` -- reading that dict raw
+        yields a plain dict, which silently inherits the mission identity at the transport, so
+        `tests/test_session_identity.py` ratchets the raw-read count to keep new ones out.
+
+        An unknown role returns `Identity()` = anonymous, never the mission session: a persona that
+        failed to mint must degrade to "as nobody" (a control row that proves nothing), never to
+        "as the mission" (a row that silently proves the wrong thing).
+        """
+        return Identity(dict(self._sessions.get(role) or {}))
+
     def _resolve_headers(self, inp: dict) -> dict:
         """Merge explicit headers with a named acquired session (inp['session'] → role).
-        The session's real token is injected here and NEVER returned to the model."""
+        The session's real token is injected here and NEVER returned to the model.
+
+        Returns an `Identity` ONLY when a role was actually resolved -- a caller that named no role
+        keeps today's inheriting behaviour, which is what the mission-identity probes rely on."""
         h = dict(inp.get("headers") or {})
         role = inp.get("session")
         if role and role in self._sessions:
-            h = {**self._sessions[role], **h}
+            return Identity({**self._identity(role), **h})
         return h
 
     async def _acquire_session(self, inp: dict) -> ToolResult:
@@ -1851,11 +1906,15 @@ class ToolRegistry:
 
     def _role_headers(self, inp: dict, prefix: str) -> dict:
         """Resolve headers for a named role: {prefix}_session (from acquire_session) merged
-        with {prefix}_headers. Used to test an object across TWO identities."""
+        with {prefix}_headers. Used to test an object across TWO identities.
+
+        Returns an `Identity` when a role resolved, so the two identities this drives stay distinct
+        from each other AND from the mission's -- a Bearer persona and a Cookie mission do not
+        collide on a dict key, so without this both rode the same request (Q-032)."""
         h = dict(inp.get(prefix + "_headers") or {})
         role = inp.get(prefix + "_session")
         if role and role in self._sessions:
-            h = {**self._sessions[role], **h}
+            return Identity({**self._identity(role), **h})
         return h
 
     async def _confirm_idor(self, inp: dict) -> ToolResult:
@@ -2016,7 +2075,13 @@ class ToolRegistry:
         anon_role = next((r["role"] for r in roles if r.get("rank", 1) == 0), None)
 
         def _headers_for(role, rank):
-            return {} if rank == 0 else dict(self._sessions.get(role, {}))
+            # Q-032: BOTH branches are an Identity. rank 0 is the anonymous CONTROL row -- it is an
+            # assertion that this request is made as nobody, not an absence of headers. It used to
+            # be a plain `{}`, which the transport upgraded to the mission session, so on an
+            # authenticated scan the control row was authenticated: missing_authentication fired on
+            # every protected endpoint (false positive) while bfla and every cross-user IDOR
+            # confirmation, both of which require anon to be DENIED, were suppressed.
+            return Identity() if rank == 0 else self._identity(role)
 
         # REAL transport counters (CHAD re-audit #2): PROVE authenticated requests actually happened
         # per persona, instead of inferring matrix_ops*personas. attempted = a request that carried
@@ -2101,7 +2166,7 @@ class ToolRegistry:
                                     ctrl_url = ctrl_req if ctrl_req.startswith("http") else base.rstrip("/") + ctrl_req
                                     if self.scope.validate(ctrl_url)[0]:
                                         rc, _ = await self._http_send("GET", ctrl_url,
-                                                                      dict(self._sessions.get(attacker, {})), None, True)
+                                                                      self._identity(attacker), None, True)
                                         cb = (rc.text or "")[:8000]
                                         if _authz._accessed(rc.status_code, cb):
                                             csim = difflib.SequenceMatcher(None, ba, cb).ratio()
@@ -2206,8 +2271,8 @@ class ToolRegistry:
         base = (inp.get("base_url") or "").strip().rstrip("/")
         owner, attacker = inp.get("owner"), inp.get("attacker")
         specs = list(inp.get("specs") or self._CREATE_IDOR_SPECS.get(inp.get("app", ""), []))
-        owner_h = dict(self._sessions.get(owner, {}))
-        atk_h = dict(self._sessions.get(attacker, {}))
+        owner_h = self._identity(owner)
+        atk_h = self._identity(attacker)
         # GENERAL (no lab hardcoding): discover REST object-collection endpoints from the recon surface,
         # learn each object's shape from a sample GET as the OWNER, and derive create-specs — so create-object
         # BOLA is confirmed on ANY REST API, not just known apps. Bounded + scope-gated.
@@ -2308,8 +2373,8 @@ class ToolRegistry:
         import read_object_idor as _ro
         import create_object_idor as _co
         base = (inp.get("base_url") or "").strip().rstrip("/")
-        owner_h = dict(self._sessions.get(inp.get("owner"), {}))
-        atk_h = dict(self._sessions.get(inp.get("attacker"), {}))
+        owner_h = self._identity(inp.get("owner"))
+        atk_h = self._identity(inp.get("attacker"))
         if not base or not owner_h or not atk_h:
             return ToolResult("read_object_idor", base, True,
                               json.dumps({"ran": False, "note": "need base + two sessions"}), [])
@@ -2634,8 +2699,8 @@ class ToolRegistry:
         import bie as _bie
         base = (inp.get("base_url") or "").strip().rstrip("/")
         owner, attacker = inp.get("owner") or "user_a", inp.get("attacker") or "user_b"
-        owner_h = dict(self._sessions.get(owner, {}))
-        atk_h = dict(self._sessions.get(attacker, {}))
+        owner_h = self._identity(owner)
+        atk_h = self._identity(attacker)
         if not base or not owner_h or not atk_h:
             return ToolResult("browser_persona_bola", base, True,
                               json.dumps({"ran": False, "note": "need base_url + two persona sessions"}), [])
@@ -3276,7 +3341,7 @@ class ToolRegistry:
                     body: str = None, capture: bool = True, finding_id: str = None):
         """Send one request via httpx; optionally capture a redacted exchange."""
         import httpx
-        req_headers = {"User-Agent": _UA, **(self.session_headers or {}), **(headers or {})}
+        req_headers = self._merge_identity(headers)
         try:
             await _browser_engine.target_rate_policy.wait_async(url)
             async with _target_client(verify=False, follow_redirects=True, timeout=15,

@@ -90,10 +90,8 @@ def _send(reg, headers):
 
 # ── shape 1: the anonymous control row ──────────────────────────────────────────────────────────
 
-@pytest.mark.xfail(strict=True, reason="Q-032 MEASURED defect: _http_send merges the mission "
-                                       "session into an explicitly anonymous request")
 def test_an_anonymous_persona_request_carries_no_mission_session(monkeypatch):
-    """The defect that matters. `_headers_for(role, rank=0)` returns {} to mean 'as nobody'.
+    """The defect that matters. `_headers_for(role, rank=0)` declares 'as nobody'.
 
     If the mission session rides that request, the anon row of the authorization matrix is
     authenticated, and `authz.build_matrix` then reports missing_authentication on every protected
@@ -102,11 +100,42 @@ def test_an_anonymous_persona_request_carries_no_mission_session(monkeypatch):
     """
     reg = _registry({"Cookie": "sid=THE-MISSION-SESSION"})
     with _wiretap(monkeypatch) as seen:
-        _send(reg, {})                      # exactly what _headers_for returns for rank 0
+        _send(reg, tools.Identity())        # exactly what _headers_for returns for rank 0
     wire = seen[0]
     assert "THE-MISSION-SESSION" not in str(wire), (
         "the anonymous control row carried the mission session; the matrix's anon baseline is "
         "authenticated, so missing_authentication over-fires and bfla/IDOR are suppressed: %r" % wire)
+
+
+def test_the_real_authz_matrix_drives_a_genuinely_anonymous_control_row(monkeypatch):
+    """End-to-end, through the REAL `_run_authz_matrix` on a REAL authenticated registry.
+
+    This is the behavioural guard: it asserts the FACT (no request on the wire carried the mission
+    session unless it was supposed to), not the declaration that `_headers_for` returns an Identity.
+    Nothing here is monkeypatched above `_target_client`, so the merge under test really runs --
+    unlike tests/test_authz_matrix_driver.py, which replaces `_http_send` itself and therefore
+    cannot see this class of defect at all.
+    """
+    reg = _registry({"Cookie": "sid=THE-MISSION-SESSION"})
+    reg._sessions["user_a"] = {"Cookie": "s=A"}
+    reg._sessions["user_b"] = {"Cookie": "s=B"}
+    roles = [{"role": "anonymous", "rank": 0}, {"role": "user_a", "rank": 1},
+             {"role": "user_b", "rank": 1}]
+    inp = {"base_url": BASE, "roles": roles,
+           "operations": [{"request": "/basket/2", "path": "/basket/2"}],
+           "pair": ("user_a", "user_b"), "owner_identity": "carlos@t.local"}
+    with _wiretap(monkeypatch, status=401, text="unauthorized") as seen:
+        asyncio.new_event_loop().run_until_complete(reg._run_authz_matrix(inp))
+
+    assert seen, "the matrix made no requests at all -- this guard would pass vacuously"
+    anon = [w for w in seen if "s=A" not in str(w) and "s=B" not in str(w)]
+    assert anon, "no anonymous row was driven; expected one request carrying neither persona"
+    for wire in anon:
+        assert "THE-MISSION-SESSION" not in str(wire), (
+            "the matrix's anonymous control row reached the wire carrying the mission session: %r" % wire)
+    for wire in seen:
+        assert not ("THE-MISSION-SESSION" in str(wire) and ("s=A" in str(wire) or "s=B" in str(wire))), (
+            "a persona row carried the mission session alongside its own: %r" % wire)
 
 
 def test_an_explicitly_anonymous_request_is_distinguishable_from_an_absent_one(monkeypatch):
@@ -121,8 +150,6 @@ def test_an_explicitly_anonymous_request_is_distinguishable_from_an_absent_one(m
 
 # ── shape 2: cross-scheme bleed between two live identities ─────────────────────────────────────
 
-@pytest.mark.xfail(strict=True, reason="Q-032 MEASURED defect: a Bearer persona request also "
-                                       "carries the Cookie-authenticated mission session")
 def test_a_bearer_persona_request_does_not_also_carry_the_missions_cookie(monkeypatch):
     """Cookie-mission + Bearer-persona do not collide on a key, so both ride the same request and
     the server chooses which identity served it. Every BOLA proof depends on that choice being ours."""
@@ -135,6 +162,110 @@ def test_a_bearer_persona_request_does_not_also_carry_the_missions_cookie(monkey
     assert "THE-MISSION-SESSION" not in str(wire), (
         "the attacker persona's request also carried the mission's cookie — two identities on one "
         "request, and the server picks: %r" % wire)
+
+
+def test_every_persona_header_producer_returns_an_identity():
+    """The three resolvers that turn a role name into headers must all mark the result, or the
+    transport will quietly inherit the mission session into it."""
+    reg = _registry({"Cookie": "sid=THE-MISSION-SESSION"})
+    reg._sessions["r"] = {"Cookie": "s=R"}
+    assert isinstance(reg._identity("r"), tools.Identity)
+    assert isinstance(reg._resolve_headers({"session": "r"}), tools.Identity)
+    assert isinstance(reg._role_headers({"o_session": "r"}, "o"), tools.Identity)
+
+
+def test_an_unknown_persona_degrades_to_anonymous_never_to_the_mission():
+    """A persona that failed to mint must become a control row that proves nothing, not a row that
+    silently proves the wrong thing. `x or DEFAULT` where the default is the mission identity is
+    exactly how a BOLA control stops running without anyone noticing."""
+    reg = _registry({"Cookie": "sid=THE-MISSION-SESSION"})
+    ident = reg._identity("never-minted")
+    assert isinstance(ident, tools.Identity) and ident == {}
+
+
+# ── the ratchet: a new raw-global reference must not appear ─────────────────────────────────────
+
+def _tools_ast():
+    import ast
+    import pathlib
+    src = pathlib.Path(tools.__file__).read_text(encoding="utf-8")
+    tree = ast.parse(src)
+    owner = {}
+    for fn in ast.walk(tree):
+        if isinstance(fn, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            for node in ast.walk(fn):
+                owner.setdefault(node, fn.name)
+    return src, tree, owner
+
+
+def test_self_sessions_is_read_through_exactly_one_accessor():
+    """RATCHET. Reading `self._sessions` raw yields a plain dict, which the transport silently
+    upgrades to the mission session -- the Q-032 defect. `_identity` is the only sanctioned read;
+    writes are unaffected. A new raw read fails here with the reason, not a diff.
+    """
+    import ast
+    src, tree, owner = _tools_ast()
+
+    def _is_sessions(n):
+        return (isinstance(n, ast.Attribute) and n.attr == "_sessions"
+                and isinstance(n.value, ast.Name) and n.value.id == "self")
+
+    bad = []
+    for node in ast.walk(tree):
+        # The defect shape is EXTRACTING ONE ROLE'S HEADERS to send as a request:
+        #   self._sessions[role]        (Load)      /  self._sessions.get(role)
+        # A membership test (`role in self._sessions`) reveals no headers, and the whole-dict
+        # `.items()` sweep in `_session_kill_is_safe` compares secrets rather than sending them --
+        # neither can contaminate a request, so neither is flagged. Narrowing this to the real
+        # shape matters: a rule broad enough to flag them would have been silenced as noise.
+        hit = False
+        if isinstance(node, ast.Subscript) and _is_sessions(node.value) \
+                and isinstance(node.ctx, ast.Load):
+            hit = True
+        elif isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute) \
+                and node.func.attr == "get" and _is_sessions(node.func.value):
+            hit = True
+        if not hit:
+            continue
+        fn = owner.get(node, "<module>")
+        if fn not in ("_identity",):
+            bad.append("%s (line %d)" % (fn, node.lineno))
+    assert not bad, (
+        "raw read of self._sessions outside the _identity accessor: %s. Use self._identity(role) -- "
+        "it returns an Identity, which the transport will not merge the mission session into. A "
+        "plain dict from a raw read looks identical and is contaminated at the wire." % bad)
+
+
+def test_the_mission_session_is_merged_with_caller_headers_in_one_sanctioned_place():
+    """RATCHET. The contaminating shape is `{**self.session_headers, **caller_headers}`: it makes a
+    request that is BOTH the mission and somebody else. `_merge_identity` is the one place allowed
+    to decide that, because it is the one place that honours `Identity`.
+
+    `_run_race` is allowlisted: it merges the mission session with explicitly supplied `inp` headers
+    and never resolves a persona role, so it is a mission-identity probe by construction.
+    """
+    import ast
+    src, tree, owner = _tools_ast()
+    allowed = {"_merge_identity", "_run_race"}
+    bad = []
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Dict):
+            continue
+        unpacks = [i for i, k in enumerate(node.keys) if k is None]
+        if len(unpacks) < 2:
+            continue
+        segs = [ast.get_source_segment(src, node.values[i]) or "" for i in unpacks]
+        # a session_headers unpack followed by at least one further unpack = two identities merged
+        for pos, seg in enumerate(segs[:-1]):
+            if "session_headers" in seg:
+                fn = owner.get(node, "<module>")
+                if fn not in allowed:
+                    bad.append("%s (line %d)" % (fn, node.lineno))
+                break
+    assert not bad, (
+        "the mission session is merged with caller-supplied headers outside %s: %s. Route the "
+        "request through self._merge_identity(headers) so an Identity (including the empty, "
+        "anonymous one) is honoured instead of being silently authenticated." % (sorted(allowed), bad))
 
 
 def test_two_personas_do_not_contaminate_each_other(monkeypatch):

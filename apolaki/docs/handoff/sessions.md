@@ -109,9 +109,147 @@ defective line is never executed under test. The suite is not weak here; it is p
 the contamination boundary. Any test for this class of defect must patch below it — these do, at
 `tools._target_client`.
 
+### A site that got it RIGHT, MEASURED
+
+`_run_bfla` (`tools.py`) computes the same anonymous baseline (`anon_results[m] = await send(c, m, {})`)
+and is NOT contaminated: it builds its own `_target_client` and sends
+`headers={"User-Agent": _UA, **h}`, never merging the global. The defect is not "anonymous baselines
+are hard" -- it is specific to engines that route through `_http_send`/`_http`. Two engines with the
+same requirement, one safe by having its own transport, one contaminated by sharing the mission's.
+
 ### Falsified sub-hypothesis
 
 "Two personas contaminate each other." NOT REPRODUCED. Persona-to-persona is clean: both go through
 `_role_headers`, they collide on the same key when they use the same auth scheme, and the caller's
 headers win the merge. `test_two_personas_do_not_contaminate_each_other` PASSES on HEAD and is kept
 as a negative control. The contamination is specifically **mission -> persona**, one direction.
+
+---
+
+## Slice 2 — the fix: `Identity`, a marked header dict
+
+### The change
+
+`tools.Identity(dict)` — a dict subclass meaning "these headers COMPLETELY specify who this request
+is made as". Because it IS a dict, it flows through `**h`, `.get`, `.items` and every existing call
+site unchanged; nothing had to be rewritten to accept it.
+
+```
+Identity()                 -> anonymous. A REAL input meaning "as nobody".
+Identity({"Cookie": ...})  -> exactly this persona, nothing inherited.
+{} / None / a plain dict   -> no opinion. Inherits the mission session, exactly as before.
+```
+
+One decision point, `ToolRegistry._merge_identity(headers)`:
+
+```python
+if isinstance(headers, Identity):
+    return {"User-Agent": _UA, **headers}
+return {"User-Agent": _UA, **(self.session_headers or {}), **(headers or {})}
+```
+
+Both transports (`_http_send` line 1613, `_http` line 3279) now call it instead of open-coding the
+merge. One read accessor, `ToolRegistry._identity(role)`, returns `Identity(dict(self._sessions.get(role) or {}))`.
+
+**Why the mission session is dropped WHOLESALE for an Identity, rather than filtering
+credential-looking keys off it:** `session_headers` is built only from the operator's
+`req.auth_headers` and from a login response's headers (`main.py:554,563`; `agent.py:1527`), so it
+is an identity bundle by construction. A denylist of credential header names would be a guess that
+fails silently on the first name it does not know -- the same shape as the defect being fixed.
+
+**Why an unknown role returns `Identity()` and not the mission session:** a persona that failed to
+mint must degrade to "as nobody" (a control row that proves nothing), never to "as the mission" (a
+row that silently proves the wrong thing). This is the `x or DEFAULT` trap the codebase has paid
+for four times; here the wrong default is an identity.
+
+### Sites migrated vs left, MEASURED
+
+| | count | disposition |
+|---|---|---|
+| `self.session_headers` in `tools.py` | 54 -> 52 | the 2 open-coded transport merges became `_merge_identity` |
+| ...of which read-only mission probes | 45 | **LEFT UNCHANGED** - correct today; they act as the mission on purpose |
+| persona header producers | 3 | `_resolve_headers`, `_role_headers`, `_authz_matrix._headers_for` -> return `Identity` |
+| raw `self._sessions` role reads | 7 -> 0 | all routed through `_identity()` |
+| `self._sessions` membership / whole-dict reads | 4 | **LEFT** - `in` tests and `_session_kill_is_safe`'s `.items()` sweep reveal no headers and send no request |
+| files touched | 2 | `agent/tools.py`, `agent/tests/test_session_identity.py` |
+
+`agent/bie.py` was NOT touched and needs no patch: `grep -n "session_headers\|_sessions\|_identity"
+agent/bie.py` returns nothing, so the BOLA engine has no identity touchpoint of its own.
+
+### The guard, and proof it is not checking a declaration
+
+Two AST ratchets over `tools.py` source, both mutation-tested:
+
+1. `test_self_sessions_is_read_through_exactly_one_accessor` - flags `self._sessions[role]` (Load)
+   and `self._sessions.get(role)` outside `_identity`. Deliberately does NOT flag `role in
+   self._sessions` or `.items()`: a rule broad enough to flag those would have been silenced as
+   noise. First draft DID flag all four and was narrowed to the real shape.
+2. `test_the_mission_session_is_merged_with_caller_headers_in_one_sanctioned_place` - flags any dict
+   literal unpacking `session_headers` followed by a further unpack, outside `_merge_identity` and
+   the allowlisted `_run_race` (a mission-identity probe that resolves no persona role).
+
+Plus the behavioural guard `test_the_real_authz_matrix_drives_a_genuinely_anonymous_control_row`,
+which drives the REAL `_run_authz_matrix` with a wiretap at `_target_client` and asserts on wire
+headers -- a fact, not a declaration.
+
+### Verification, MEASURED
+
+Negative control (the guard must fail on the unfixed code):
+```
+$ git archive 22cbff1~1 | tar -x -C <head>   # HEAD before the fix, + the new test file
+$ docker run ... pytest tests/test_session_identity.py::test_the_real_authz_matrix_drives_a_genuinely_anonymous_control_row
+E  AssertionError: the matrix's anonymous control row reached the wire carrying the mission session:
+E    {'User-Agent': '...', 'Cookie': 'sid=THE-MISSION-SESSION'}
+1 failed
+```
+
+Mutation A - reintroduce a raw `_sessions` read (verified applied: `grep -c` returned 2):
+```
+E  assert not ['_confirm_create_object_idor (line 2274)', '_confirm_browser_persona_bola (line 2702)']
+1 failed, 8 passed      <- ratchet 1 KILLED it and named both functions
+```
+
+Mutation B - make `_merge_identity` ignore `Identity` (`if isinstance(...)` -> `if False:`,
+verified applied: `grep -c '        if False:'` returned 1):
+```
+FAILED test_an_anonymous_persona_request_carries_no_mission_session
+FAILED test_the_real_authz_matrix_drives_a_genuinely_anonymous_control_row
+FAILED test_a_bearer_persona_request_does_not_also_carry_the_missions_cookie
+3 failed, 6 passed      <- KILLED by the behavioural tests including end-to-end
+```
+Snapshot restored and byte-compared to the working tree before the regression run.
+
+Full suite, isolated snapshot of HEAD + this change (Rule 8c):
+```
+2659 passed, 11 skipped, 11 xfailed, 9 warnings in 497.30s
+```
+Ticket baseline was 2641/11/9. The delta is fully accounted for: +9 from this lane's new test file,
+and +9 passed / +2 xfailed already present at HEAD from the islands lane's commit b49ce80 (its
+message states "two MEASURED defects pinned as strict xfails"). **0 failed.**
+
+---
+
+## For the Coordinator
+
+`agent/mutation_gate.py` is not mine. If `Identity` counts as a confirmed-producing path, the
+mutant that belongs in `tests/test_mutation_gate.py` is the one proven above:
+
+> In `ToolRegistry._merge_identity`, change `if isinstance(headers, Identity):` to `if False:`.
+> Expected to be killed by `tests/test_session_identity.py` (3 tests, including the end-to-end
+> `test_the_real_authz_matrix_drives_a_genuinely_anonymous_control_row`).
+
+## Observations for other lanes (NOT acted on -- outside this ticket)
+
+- `_run_bfla` builds `test_headers` from `inp["headers"]` only and never merges the mission session.
+  Its "authenticated" row is therefore authenticated ONLY if a caller passed headers explicitly. On
+  an `authenticated_scan` run where the caller passes none, both its rows are anonymous and
+  `authz.analyze_methods` compares anonymous to anonymous. UNVERIFIED whether any caller passes
+  them; worth a lane. This is the mirror image of the Q-032 defect (there the anon row was
+  authenticated; here the authed row may be anonymous).
+- `agent/agent.py:1527` rebinds `self.tools.session_headers` mid-mission, so engines dispatched
+  before and after the auth artery run as different identities. Announced in an event and gated on
+  `authenticated_scan and verified`, so not a defect on its own -- but it is what makes the
+  contamination above reachable in a real run, and it means "which identity did this finding come
+  from" is not recoverable from a finding record. Binding the identity into the finding at
+  construction (the Q-051 shape) would close that.
+
