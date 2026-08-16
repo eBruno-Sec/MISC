@@ -1,5 +1,32 @@
 # QUEUE — the one canonical, dependency-ordered work queue
 
+## LANE OWNERSHIP — cycle 7, 2026-08-16. TWO lanes, and the count is the point.
+
+`agent/tools.py` is the universal bottleneck: every engine-wiring ticket needs it, and exactly one
+lane can hold it. Spawning a third and fourth Builder would have produced collisions, not throughput
+— rule 1, agents are a budget and two lanes answering into one file are one lane.
+
+| owner | files it may WRITE | ticket |
+|---|---|---|
+| **Builder · techintel** | `agent/fingerprint.py` · `agent/dependency_intel.py` · `agent/memory.py` · `agent/tools.py` · their tests · `docs/handoff/techintel.md` | **Q-021C–F** — detected technology drives no testing; mid-fix on a real regression |
+| **Breaker · islands** | `docs/handoff/islands.md` · `agent/tests/test_island_soundness.py` (new) | **Q-050(b) soundness** — a verdict per island, wiring NOTHING |
+| **Coordinator (main thread)** | `docs/*` · `agent/report.py` · `agent/main.py` · `agent/db.py` · `agent/asvs_model.py` · `agent/mutation_gate.py` · `scripts/` | ledgers, recovery, sequencing |
+
+The islands lane is deliberately diagnosis-only and therefore collision-free: the six engines cannot
+be wired until someone can argue their oracles are sound, and **an engine that has never run has never
+had its false-positive behaviour measured**. wp1 is the precedent — an engine added to the always-on
+sweep on a coverage argument scored the best headline the project had produced and was reverted on a
+pre-registered condition, because only 5 of its 12 confirmed findings were class-correct.
+
+**AUTOMATED CONTINUATION, 2026-08-16.** Scheduled task `apolaki-autocontinue` runs every 3h: recovers
+uncommitted work from killed lanes, continues the top open item, no-ops on a clean tree. It **retires
+itself** after three consecutive runs where the queue is empty, the tree is clean, the suite is green
+and STATUS carries no unproven claims — then records the retirement in LEDGERS. Six lanes were killed
+by session limits in one session; the noticing is now automated, the commit-per-slice discipline is
+not and stays in every prompt.
+
+---
+
 ## STATE SWEEP — 2026-08-16. Authoritative. Updated in the same commit as the closes.
 
 **CLOSED this cycle**, with commits: `Q-051` (engine bound at `ToolResult` + report attribution +
