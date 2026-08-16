@@ -25,8 +25,8 @@ is a new measurement, not a coverage fix.
 | `run_gobuster` | no (lead only) | `recon` | **UNSOUND (as shipped)** | same |
 | `run_external_surface` | no (emits `[]`) | n/a | **SOUND** (and it is not a detector) | cannot produce a finding of any kind; seeds UNVERIFIED graph candidates, and nothing reads its output either |
 | `run_metadata` | no (lead only) | `exposure` | **UNSOUND as shipped** | 0 false positives on 14 negative controls, but MEASURED clean on a file proven to carry EXIF GPS |
-| `run_workflow` | no (emits `[]`), and DROPS its steps' findings | n/a | **UNSOUND as a finding path** | `workflow.run` reads only `res.output/success`; inner `confirm_idor` findings are discarded |
-| `enumerate_ids` | no (lead only) | `idor` | **SOUND as a lead engine** | baseline-differenced against a nonexistent id; it is a target-selector, not an oracle |
+| `run_workflow` | no (emits `[]`), and DROPS its steps' findings | n/a | **UNSOUND as a finding path** | MEASURED: an `enumerate_ids` lead exists on a direct call and is gone through `workflow.run` |
+| `enumerate_ids` | no (lead only) | `idor` | **SOUND as a lead engine** | nonexistent-id baseline suppressed 8/8 hits on a catch-all-200 route; hard cap 52 requests |
 
 Detail, evidence and the exact settling measurement for each is below.
 
@@ -361,9 +361,221 @@ none of which is EXIF.
 
 ---
 
-## Method / status of the remaining engines
+## 4. `run_workflow` -- UNSOUND as a finding path: it is a finding SINK, and its docstring says otherwise
 
-| engine | status |
-|---|---|
-| `run_workflow` | in progress |
-| `enumerate_ids` | in progress |
+### The claim, and the code
+
+`tools.py:3186`, `_run_workflow`'s own docstring:
+
+> *"Confirmed findings still come from the confirm_* steps inside it (truth-first)."*
+
+`asvs_model.py:308` leans on that sentence to justify dropping `run_workflow` from BUSL-01. The
+sentence is not true of the return value. `workflow.run` (`workflow.py:136`) does:
+
+```python
+res = await getattr(reg, meth)(inp)
+last_out = res.output or "{}"
+entry = {"step": i, "do": do, "ok": res.success}
+```
+
+It reads `res.output`, `res.success` and `res.error`. **`res.findings` is never read.** The returned
+dict is `{ran, asserted, log, variables, produced}` -- there is no field a finding could travel in.
+`_run_workflow` then returns `ToolResult("run_workflow", ..., json.dumps(res)[:4000], [])`.
+
+### MEASURED: the same engine, the same target, the finding disappears
+
+One step (`enumerate_ids` over `http://juice-shop:3000/api/Products/{id}`, ids 1..8) run two ways
+against the same live lab:
+
+```
+########## A) enumerate_ids called DIRECTLY
+POSITIVE  real object collection     accessible=[1, 2, 3, 4, 5, 6, 7, 8] leads=1
+     family=idor conf=lead sev=medium title=Enumerable objects by id (8 in 1..8)
+     evidence='accessible ids: [1, 2, 3, 4, 5, 6, 7, 8]'
+
+########## B) the SAME step through workflow.run
+{"ran": true, "asserted": true,
+ "log": [{"step": 0, "do": "enumerate_ids", "ok": true}],
+ "variables": {}, "produced": []}
+any finding anywhere in the workflow result? -> False
+
+########## C) _run_workflow, the actual island entry point
+ToolResult.findings = []
+ToolResult.output   = {"ran": true, "asserted": true, "log": [{"step": 0, "do": "enumerate_ids",
+                       "ok": true}], "variables": {}, "produced": []}
+```
+
+The lead exists on path A and does not exist on path B. This is not specific to `enumerate_ids`: the
+same drop applies to `confirm_idor` (which emits a **confirmed**, CWE-639, high-severity finding at
+`tools.py:1890`) and to `test_numeric_abuse`. The flagship pack `idor_read` (`packs.py:14`) is built
+entirely around `confirm_idor` -- so the one pack whose whole purpose is to CONFIRM a cross-user read
+would confirm it, record a capability, and report no finding.
+
+Nor do the inner engines store findings by side effect: `_confirm_idor`'s confirming branch calls
+`self.state.add_capability(...)` and `self.state.add_object(...)` and nothing else
+(`tools.py:1902-1903`). The finding lives only in the `ToolResult` that `workflow.run` discards.
+
+### The SECOND sink, downstream
+
+Even a fixed `workflow.run` would still lose them today. `agent.py:627` auto-stores only for
+`tool_name in _AUTO_STORE_TOOLS` (`agent.py:95`). `"confirm_idor"` and `"run_metadata"` are in that
+set; **`"run_workflow"`, `"enumerate_ids"`, `"run_external_surface"`, `"run_dirsearch"`,
+`"run_ferox"` and `"run_gobuster"` are not.** So a wiring change alone produces nothing: the fix is
+two edits in two files, and either one on its own is invisible.
+
+### What it CAN do soundly
+
+`run_workflow` is not a detector and does not pretend to be one where it counts: it emits no family,
+so it cannot fail or verify any ASVS objective, and `asvs_model`'s decision to drop it from BUSL-01 is
+correct **for the reason stated in the code comment** (it emits no family), even though the docstring
+it cites is wrong. Its oracle, `_assert_ok` (`workflow.py:100`), is genuinely deterministic:
+`{capability: X}` checks engagement state, `{field: F, equals: V}` checks a named field of the last
+step's JSON. No string sniffing, no status-code inference. `_subst` is a plain `{var}` replace with no
+eval; `_extract` allows only JSONPath-lite / one-group regex / header. **There is no model-authored
+code path.** That part is well built.
+
+### Cost
+
+Bounded at 20 steps (`workflow.py:126`). Each step's cost is the underlying primitive's, so the worst
+case today is one `enumerate_ids` step at 52 requests. `_seed_harvest` runs per step and is
+in-process. Cheap relative to the sweep.
+
+**VERDICT: UNSOUND as a finding path, SOUND as an execution engine.** Wiring it today would run real
+attacks against a target and record no findings from them, which is worse than not running it: the
+mission pays the requests and the report says nothing happened. That is the false-clean shape this
+project keeps rediscovering.
+
+**Patch this lane wants (owner: the `tools.py`/`agent.py` lane, NOT applied here):**
+
+1. `agent/workflow.py` -- accumulate `res.findings` per step into the returned dict, e.g.
+   `findings: [...]`, and count them in the `log` entry so a step that found something is legible.
+2. `agent/tools.py:3202` -- return those findings on the `ToolResult` instead of `[]`.
+3. `agent/agent.py:95` -- add `"run_workflow"` to `_AUTO_STORE_TOOLS`, otherwise (1) and (2) change
+   nothing in a deterministic mission.
+4. `agent/tools.py:3186` -- fix the docstring sentence, and re-check the `asvs_model.py:308` comment
+   that quotes it. Once findings flow, `run_workflow` CAN emit family `idor` / `business_logic`
+   through its steps, and BUSL-01 / ATHZ-00 / ATHZ-01 need re-reading before it is wired.
+
+**Do (1)-(3) as one commit with a test that FAILS before it.** Doing (1) alone is the wp1 shape: a
+change that looks like a fix and moves nothing.
+
+---
+
+## 5. `enumerate_ids` -- SOUND as a lead engine; a target selector, not an oracle
+
+### What it confirms, and on what evidence
+
+`tools.py:1942`. It fetches `tmpl.replace("{id}", "99999999")` as a **baseline first**, then walks the
+range and keeps id `i` only when the response is `200`, longer than 2 bytes, and *distinct from the
+baseline* (`difflib.SequenceMatcher(...).ratio() < 0.95`). It emits ONE lead when `len(accessible) >= 2`,
+`family: "idor"`, `confidence: "lead"`, `severity: "medium"`.
+
+It never claims access control is broken. The lead text is explicitly conditional: *"If these belong to
+other users this is a bulk IDOR -- confirm ownership with confirm_idor."* Since it uses ONE identity it
+cannot know whose objects those are, and it does not pretend to.
+
+### NEGATIVE CONTROL: present, and it RUNS on the confirming path
+
+The nonexistent-id baseline is fetched before the loop and every candidate is differenced against it.
+MEASURED against a live lab -- one positive and two negatives, same engine, same call shape:
+
+```
+POSITIVE  real object collection  /api/Products/{id}          accessible=[1..8]  leads=1
+NEG-CTRL  soft-404 SPA catch-all  /notarealpath-zzz/{id}      accessible=[]      leads=0
+NEG-CTRL  auth-required endpoint  /api/Users/{id}             accessible=[]      leads=0
+```
+
+The middle row is the one that matters: Juice Shop answers **HTTP 200 with the SPA shell for any
+path**, so a status-code oracle would have reported 8 accessible objects on a route that does not
+exist. The baseline difference suppressed all 8. **This is the negative control the three
+content-discovery adapters do not have, working, on the confirming path.**
+
+### Family cross-check, character for character
+
+Emitted string: `"idor"`. Measured against the model rather than read off the page:
+`[o['cid'] for o in asvs_model.OBJECTIVES if 'idor' in o['violated_by']] == ['ATHZ-00', 'ATHZ-01']`.
+Both are real consumers, so the family is not invisible. It is also not a spurious-FAIL risk, twice
+over: the emission is `confidence: "lead"`, so `agent._is_confirmed` routes it to `self.leads`, and
+`report.py` passes only confirmed findings to `asvs_model.assess`. `candidate_pipeline.PRIMARY_HANDLED`
+maps family `idor` to *"the two-user authorization matrix (confirm_idor)"*, i.e. an `idor` lead is
+explicitly deferred for confirmation and has no auto-promotion path (`agent._promote_leads` handles
+XSS-class only).
+
+### The one real objection: class-correctness, read the wp1 way
+
+On the positive case above the 8 "accessible objects" are Juice Shop's **public product catalogue**.
+A `family: "idor"`, `severity: "medium"` lead on a public collection is a class mislabel even though
+the wording hedges -- exactly the "read by CLASS, not by count" failure that reverted wp1. The engine
+cannot distinguish a public collection from a private one, because distinguishing them requires a
+second identity and it only has one.
+
+This is survivable ONLY because the emission is a lead and leads are quarantined. It is the reason
+this engine must never be promoted, never be counted in a headline, and never have its `family`
+changed to something a consumer treats as a violation without a `confirm_idor` step behind it.
+
+### Cost -- bounded, and the tightest of the seven
+
+`hi = min(int(inp.get("end", lo + 20)), lo + 50)` (`tools.py:1957`) is a hard cap: **at most 51 range
+requests + 1 baseline = 52 requests per call**, regardless of what the caller asks for. Sequential (no
+concurrency), each scope-validated.
+
+**VERDICT: SOUND as a lead engine.** Real baseline-differenced evidence, a negative control that runs
+and demonstrably suppresses a catch-all-200 target, a hard request cap, a family with real consumers
+and no promotion path.
+
+### Is it a second-order island, or a separate island wearing a dependency?
+
+**A separate island wearing a dependency.** `enumerate_ids` has its OWN top-level dispatch alias
+(`tools.py:1986 _enumerate_ids`) and its OWN `CLAUDE_TOOLS` entry (`tools.py:1003`), added
+specifically so a top-level call would not fail -- so it is directly reachable by the model without
+`run_workflow` at all. It is unreachable from the deterministic product for the ordinary reason (no
+dispatch site), not because `run_workflow` is broken.
+
+Therefore: **wiring `run_workflow` is NOT the way to resurrect it, and resurrecting it via
+`run_workflow` would be actively wrong today** -- routing a sound lead engine through a proven finding
+sink (section 4) means its leads vanish. If `enumerate_ids` is wanted in the deterministic path, give
+it its own dispatch site with a real precondition (an observed numeric-id endpoint), which is one
+change, testable on its own, and independent of everything in section 4.
+
+Its remaining problem is a caller, not soundness: nothing decides WHICH `{id}` template to point it
+at. `authz_matrix.is_object_path` already recognises object paths and the graph already records
+`object` nodes (`tools.py:3244`), so the precondition exists in the codebase; only the wiring does
+not.
+
+---
+
+## Cross-cutting: reachability RE-MEASURED, not inherited
+
+The prior lane's classification was re-derived rather than trusted. For each of the seven, every
+non-test reference in `agent/`, `ui/` and `scripts/`:
+
+| engine | references outside tests | any dispatch site? |
+|---|---|---|
+| `run_external_surface` | `tools.py:220` registry, `tools.py:461` schema, `tools.py:553` a comment about itself | **no** |
+| `run_metadata` | `tools.py:203` registry, `tools.py:920` schema, `agent.py:103` `_AUTO_STORE_TOOLS` membership | **no** |
+| `run_dirsearch` | `tools.py:206` registry, `tools.py:938` schema | **no** |
+| `run_ferox` | `tools.py:205` registry, `tools.py:934` schema | **no** |
+| `run_gobuster` | `tools.py:207` registry, `tools.py:942` schema | **no** |
+| `run_workflow` | `tools.py:234` registry, `tools.py:1058` schema, its own returns, two `asvs_model` comments | **no** |
+| `enumerate_ids` | registry + schema + `workflow.py:18` handler map + `packs.py:64` + `agent.py:3885` dedup-exemption list + `agent.py:144` system prompt | **no** (the handler map is driven only by `run_workflow`; the dedup list and prompt are not dispatchers) |
+
+**No island was falsified.** All seven stand. `agent.py:103` and `agent.py:3885` are membership lists,
+and `agent.py:144` is prompt text -- naming an engine in a list is a declaration, having a dispatch
+site is a fact.
+
+## Cross-cutting: what "wire it" would actually cost
+
+Ranked by requests added per target, so the sweep-budget argument is quantitative:
+
+| engine | requests per target per call | notes |
+|---|---|---|
+| `run_external_surface` | 2-5 | at most 2 to the target; permutation is offline; CT gated off |
+| `run_metadata` | 1 per file | but nothing selects the files; unbounded on a media-heavy target |
+| `enumerate_ids` | <= 52 | hard cap `lo+50` plus the baseline |
+| `run_workflow` | sum of <= 20 steps | today's worst single step is `enumerate_ids` at 52 |
+| `run_ferox` / `run_gobuster` | 0 as shipped (binary absent); ~4,700 with SecLists `common.txt` | vs `run_content_discovery`'s `max_paths=120` |
+| `run_dirsearch` | 0 as shipped | dirsearch's own default wordlist is larger still |
+
+For scale: the browser tier already costs 33 HTTP targets per browser target, and the sweep is 92% of
+dispatches. Only `run_external_surface` is free enough to wire without a budget conversation -- and it
+is the one with nothing downstream to consume it.
