@@ -1,5 +1,23 @@
 # QUEUE — the one canonical, dependency-ordered work queue
 
+## LANE OWNERSHIP — cycle 6, assigned 2026-08-15. Declared BEFORE spawning.
+
+Cycles 3-5 lost every lane to session limits and lost nothing of substance, because each committed
+per slice. Same discipline. `tools.py` is again the bottleneck, so exactly ONE lane holds it.
+
+| owner | files it may WRITE | ticket |
+|---|---|---|
+| **Builder · tiers** | `agent/agent.py` · `agent/planner.py` · `agent/tests/test_permission_tiers.py` (new) · `docs/handoff/tiers.md` | **Q-052** — `active` and `full` are the same mission, and the sweep swallows every engine error |
+| **Builder · provenance** | `agent/tools.py` · `agent/tests/test_finding_provenance.py` (new) · `docs/handoff/provenance.md` | **Q-051 part 2** + **Q-053 GAP-1/GAP-2** — bind the producing ENGINE and the missing FAMILY at the point the finding is built |
+| **Builder · families** | `agent/sqli_tool.py` · `agent/transport_posture.py` · their tests · `docs/handoff/families.md` | **Q-053 GAP-3/GAP-4** — a confirmed auth bypass labelled `sqli`; one family shared across three properties |
+| **Coordinator (main thread)** | `docs/*` · `agent/report.py` · `agent/main.py` · `agent/db.py` · `agent/web_security.py` · `agent/techniques.py` · `agent/mutation_gate.py` · `scripts/` | the report half of Q-051, the technique coverage matrix, ledgers, recovery |
+
+Sequencing note: the provenance lane binds `engine` onto findings; the report half that PRINTS
+per-finding attribution is mine and lands after it, because rendering a field nothing writes is the
+island defect in the other direction.
+
+---
+
 ## LANE OWNERSHIP — cycle 5, assigned 2026-08-15. Two lanes RESUMED, not respawned.
 
 Cycles 3 and 4 were each wiped by a single session limit. **Resuming beats respawning**: an agent
