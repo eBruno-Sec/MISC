@@ -229,6 +229,66 @@ message states "two MEASURED defects pinned as strict xfails"). **0 failed.**
 
 ---
 
+## Coordinator side-task: delete the run_ferox / run_dirsearch / run_gobuster specs — BLOCKED, needs a decision
+
+Attempted, MEASURED, and REVERTED unlanded. The two halves of the instruction ("delete the three
+`CLAUDE_TOOLS` entries" and "leave the `_run_*` methods and `TOOL_PERMISSIONS` alone") are mutually
+exclusive, and an existing gate proves it rather than merely suggesting it.
+
+I removed the three spec entries and ran the tests named in the request:
+
+```
+$ pytest tests/test_bbh.py tests/test_engine_reachability.py tests/test_deadcode_gate.py \
+         tests/test_island_soundness.py
+2 failed, 275 passed, 2 xfailed in 223.20s
+```
+
+- **`test_engine_reachability.py::test_no_engine_is_defined_without_any_possible_caller`** FAILS:
+  ```
+  E  AssertionError: engines with no possible caller (implemented but unrunnable):
+  E    ['run_dirsearch', 'run_ferox', 'run_gobuster']
+  ```
+  This gate is CORRECT and is the whole point of the no-islands rule: `reachable = _spec_names() |
+  _planner_names()`, and these three engines are in neither once the specs go. The specs were the
+  only thing making the methods reachable, so removing the specs converts them from "advertised and
+  always failing" into "implemented and unrunnable". Both are defects; the gate refuses to trade one
+  for the other.
+- **`test_bbh.py::test_new_optional_binaries_and_permissions`** FAILS on
+  `assert t in specs and hasattr(tools.ToolRegistry, "_" + t)` for all three names.
+- `test_deadcode_gate.py` PASSED - no opinion.
+- `test_island_soundness.py` PASSED, including its `("run_ferox", "recon")` parametrization: it
+  tests `_is_confirmed` lead-routing by family, not spec presence. That lane's file is unaffected
+  either way, and I did not touch it.
+
+Not landed, and I did not delete further or adjust a ratchet baseline, per the instruction. Reverted
+with `git checkout -- agent/tools.py`; the Identity work from 4982d3b is unaffected and
+`tests/test_engine_reachability.py` + `tests/test_session_identity.py` are green (13 passed).
+
+**The decision is yours, and it is a real one.** The subtractive framing ("purely subtractive, needs
+no oracle argument") does not survive contact with the reachability gate: there is no edit that
+removes the advertisement and leaves the implementation, because this codebase forbids exactly that
+state. Three coherent options:
+
+1. **Delete the specs AND the three `_run_*` methods AND their `TOOL_PERMISSIONS` entries.** The only
+   option that is genuinely subtractive and leaves every gate green as written. Also requires
+   updating the three names out of `test_bbh.py::test_new_optional_binaries_and_permissions`, whose
+   purpose is "every advertised tool has a spec and a transport" - dropping names for tools that are
+   deliberately no longer advertised is a correct update, not a weakening, but it is still a test
+   edit and `test_bbh.py` is not in my write set.
+2. **Keep the specs, fix the false advertisement instead.** Leave reachability untouched and rewrite
+   the three descriptions to stop promising a capability the image cannot deliver - in particular
+   drop "Recursive" from `run_ferox` (contradicted by the `--no-recursion` flag at `tools.py:1483`)
+   and state that the native `run_content_discovery` + `run_ffuf` are preferred and carry a soft-404
+   baseline these do not. This addresses the stated harm ("the product advertises a capability it
+   cannot perform") with no gate conflict.
+3. **Install the binaries** in the agent image, making the advertisement true. Costs image size for
+   a capability the lane measured as a worse duplicate of a working native one; recorded for
+   completeness, not recommended.
+
+My read, offered as input rather than a decision: option 1 is what the request actually wants, and
+its blocker is only that it needs one more file than the request allowed. Option 2 is the smaller
+change and fixes the stated harm, but leaves three dead adapters in the tree.
+
 ## For the Coordinator
 
 `agent/mutation_gate.py` is not mine. If `Identity` counts as a confirmed-producing path, the
