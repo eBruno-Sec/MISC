@@ -339,6 +339,91 @@ defend.
 
 ---
 
+## ★ A PASSIVE MISSION WAS MAKING LIVE REQUESTS. 2026-08-16
+
+Found while diagnosing something else, which is where the real ones come from.
+
+`ToolRegistry.execute` enforces SCOPE and nothing else — no passive-mode check, no intrusive HITL.
+`_run_tool` and `_exec_internal` are the two GATED paths, and `_exec_internal` exists *because*
+callers used to reach past them. **One caller still did.** `_validate_candidates` runs for every
+strategy with no mode guard, and its `jsonp` branch called `self.tools.execute("run_jsonp", ...)`
+directly while its three siblings in the SAME if/elif chain were routed through `_exec_internal` with
+a `# gated` comment beside them.
+
+```
+PASSIVE mode dispatched the ACTIVE engine run_jsonp at a live target: ['run_jsonp']
+```
+
+**The second half is the better half.** `_exec_internal` reports a refusal as a
+`{"ran": false, "blocked": ...}` CARRIER rather than raising, so a caller that only checks
+`.findings` books the refusal as *"dismissed — no JSONP wrapper found"*. Routing the call through the
+gate without teaching the caller to read the refusal would have **replaced an unsafe dispatch with an
+invisible false negative** — a straight trade of one defect class for another, and the harder one to
+find. Both halves fixed together.
+
+---
+
+## ★ Q-052 — THE TIER DECISION, AND MY PROPOSAL DID NOT SURVIVE IT. 2026-08-16
+
+I proposed narrowing `active` to exclude engines that modify state or carry exploitation risk. The
+lane measured it and the disproof is the deliverable.
+
+**Cost of narrowing, MEASURED** by running the real `_inject_sweep_surface` over a 44-URL surface and
+classifying every dispatch: **477 dispatches, 236 of them INTRUSIVE. 49.5% of the sweep disappears
+and 7 of 18 engines stop entirely** — including `run_sqli`, `run_sqli_structural` and
+`run_path_sqli`, which are the entire SQLi surface.
+
+**And it would not buy what I claimed**, because the INTRUSIVE tier is not the "modifies state" set.
+Counterexamples in both directions, from the engines' own docstrings: `run_hash_crack` is INTRUSIVE
+and *"never contacts a live auth endpoint"*, while `run_session_lifecycle` is ACTIVE and *"mints a
+SACRIFICIAL account through the target's own signup"* and changes its password. **An operator
+selecting a narrowed `active` would still get account creation and credential rotation, having lost
+every SQL injection check.** Four engines' docstrings disagree with their own registry entry.
+
+**DECISION: the tier is an aggression/cost axis, not a consent axis, and is roughly honest as one.**
+Rename rather than narrow; put side-effect consent on a separate orthogonal flag. The minimal honest
+change is to make the default `full` and have `_run_tool` honour `planner._ALLOWED` — **zero
+dispatches move, and `active` starts meaning something.**
+
+**Also disproved, and it was one of my three questions:** the OWASP Benchmark harness must NOT declare
+`full`. `owasp_bench.py` builds a `ToolRegistry` and calls engines by name — no `BBHAgent`, no
+`_run_tool`, no mode, no `TOOL_PERMISSIONS`. It has never been subject to the gate and no tier outcome
+changes a single dispatch it makes. Only the whole-product harness is affected.
+
+**This is the third hypothesis of mine a lane has falsified with measurement in two days**, and the
+pattern in all three is the same: I reasoned from a constant's name instead of from what the code
+does with it.
+
+---
+
+## Q-051 / Q-053 CLOSED — provenance, and four families that could not be reported. 2026-08-16
+
+**Every finding now names the engine that produced it**, bound at `ToolResult.__post_init__` — one
+point that neither the dispatcher nor engine-to-engine calls can bypass, covering all 312 construction
+sites at once. The report prints it, and two INDEPENDENT records now cross-check: the tool ledger says
+what was dispatched, `finding["engine"]` says what produced each result, and a disagreement is printed
+rather than reconciled. That only works because the name is bound at construction rather than
+back-filled from the ledger — a source and a copy of itself cannot catch each other.
+
+**All four Q-053 gaps closed**, and three of them turned up a defect beyond the ticket:
+- **GAP-3** a confirmed auth bypass was labelled `sqli`. It also **failed `validate_confirmed`** —
+  `family_of` routed it to the `sql_injection` proof rule whose signals its evidence never carried, so
+  the mislabel was failing the proof gate *for the wrong reason*: judged against an oracle it never ran.
+- **GAP-4** two transport callers shipped `confidence: "confirmed"` findings whose evidence **failed
+  their own proof contract** (`['reproduction_or_request_response', 'evidence_signal:->']`).
+- **GAP-1** a detected subdomain takeover could never be reported: candidates carried no `family`, so
+  ASVS COMM-04 was unreachable by construction.
+- **GAP-2** dalfox findings carried no family at all.
+
+**AUTHN-02 can now FAIL, and only on an actual auth bypass** — pinned four ways, because fixing one
+direction and breaking the other would look like progress in the tally: an auth bypass fails AUTHN-02
+and not VAL-01; an ordinary SQLi fails VAL-01 and not AUTHN-02. `auth_bypass` has exactly one
+producer, verified against a real emitted record (11 chars, hex `617574685f627970617373`) rather than
+spelled from memory — four of Q-048's six unfailable objectives failed on near-miss names, and a fifth
+would have been mine.
+
+---
+
 ## ★ Q-048 CLOSED — six objectives could never FAIL, and four failed on SPELLING. 2026-08-15
 
 A family-producer map built from source with `ast` (per function, which `family` values it can emit,

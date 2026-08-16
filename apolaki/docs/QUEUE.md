@@ -1,5 +1,31 @@
 # QUEUE — the one canonical, dependency-ordered work queue
 
+## STATE SWEEP — 2026-08-16. Authoritative. Updated in the same commit as the closes.
+
+**CLOSED this cycle**, with commits: `Q-051` (engine bound at `ToolResult` + report attribution +
+ledger/finding cross-check) `620fcbb`/`bc60727` · `Q-053` all four gaps `7ce79bb`/`fb6f457`/`7fbd1bf`
++ AUTHN-02 `44a6cbf` · `Q-052` slice 1 (nine bare swallows) `b8cf4ef`, slice 3 (**a PASSIVE mission
+was making live requests**) `2707caa`, and the **DECISION** `f3eb1cb`.
+
+**Q-052 REMAINING — the decision is made, the change is not.** The lane's measured recommendation:
+the tier is an **aggression/cost axis, not a consent axis**. Do NOT narrow `active` (49.5% of the
+sweep and 7 of 18 engines disappear, including the entire SQLi surface, and it still permits account
+creation and credential rotation). Instead: **default to `full` and have `_run_tool` honour
+`planner._ALLOWED`** — zero dispatches move and `active` starts meaning something — then put
+side-effect consent on a separate orthogonal flag. Also: four engines' docstrings disagree with their
+own `TOOL_PERMISSIONS` entry, which is its own small ticket.
+
+**Q-050(b) REMAINING** — engines reachable at their tier that are simply never selected (`run_jwt`,
+`run_saml`, `run_enumerate_ids`, `run_default_creds`, `run_metadata`, `run_jsonp`,
+`run_session_lifecycle`, `run_workflow`, `run_external_surface`, dirsearch/ferox/gobuster). A
+selection/precondition problem, NOT a permission one. Diagnose before fixing.
+
+**Still open from before**: Q-021C–F · Q-032/033/034 · Q-002 (WebSocket engine exists, not in the
+sweep) · Q-004 · Q-005/006 · Q-030/035/036 · B-011+ · the baseline's ninth case `00438` · the
+unexplained sublinear per-URL cost.
+
+---
+
 ## LANE OWNERSHIP — cycle 6, assigned 2026-08-15. Declared BEFORE spawning.
 
 Cycles 3-5 lost every lane to session limits and lost nothing of substance, because each committed
