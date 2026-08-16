@@ -282,12 +282,32 @@ def auth_bypass_finding(url: str, field: str, payload: str, signal: str) -> dict
               (f"A SQL-injection payload in the '{field}' body field of a login request "
                f"bypassed authentication: {signal}. The field is concatenated into the "
                "authentication query, so its WHERE clause can be neutralised."),
-              f"{signal} via {field}={payload!r}",
+              # Replayable exchange, not a bare prose signal. The old string ("<signal> via
+              # <field>=<payload>") carried no request, no verb and no outcome, so proof_schema
+              # REJECTED this finding's own `confirmed` label (missing evidence_signal) -- a
+              # confirmed finding failing its own proof contract. State the request that did it.
+              f"POST {url}  {field}={payload!r}  ->  {signal}",
               [f"POST the login request with '{field}' set to {payload!r}",
                "Observe authentication succeed without valid credentials (token issued / 200)",
                "Log in as the first/admin account, or enumerate users via UNION"])
     f["impact"] = ("Full authentication bypass: sign in as any user (typically the first/admin row) "
                    "without credentials, then read or modify that account's data.")
+    # Q-053 GAP-3: the family a finding carries is decided by WHAT THE ORACLE PROVED, not by which
+    # module built it. Every other oracle in this file proves "the parameter is concatenated into a
+    # SQL statement" (family `sqli`). This one proves something categorically stronger -- that
+    # AUTHENTICATION WAS BYPASSED -- and is the sole producer of that property here. While it wore
+    # `sqli` it was indistinguishable by family from an injection in a search box, so ASVS AUTHN-02
+    # ("authentication cannot be bypassed"), which declares violated_by=auth_bypass, could not fail
+    # in ANY run: the family it names had no producer in the tree.
+    #
+    # Deliberately NOT re-pointing AUTHN-02 at `sqli` instead (Q-048 rejected that): it would make
+    # every ordinary SQLi fail "authentication cannot be bypassed", and a spurious FAIL is a defect
+    # too. tests/test_sqli_tool.py pins both directions.
+    #
+    # CWE-89 and the `sqli` tag are KEPT on purpose -- the mechanism really is SQL injection, and
+    # they are what the CWE-keyed consumers (benchmark._canon_class, main.py:937) and the tag-keyed
+    # one (remediation.remediation_for) resolve through, so neither degrades on this change.
+    f["family"] = "auth_bypass"
     return f
 
 
