@@ -387,9 +387,16 @@ def finding(issue: dict, target: str, *, kind: str, evidence: str = "") -> dict:
     # Evidence must be REPLAYABLE, not a sentence: state the observation against the concrete target so a
     # reviewer can re-derive it. (The platform's proof_schema enforces exactly this, and rightly rejected
     # the prose-only first version.)
-    ev = evidence or issue.get("evidence") or ""
-    if not ev:
-        ev = "%s %s -> %s" % (_PROBE_VERB.get(kind, "GET"), target, issue.get("detail", ""))
+    #
+    # That composition used to apply ONLY when no explicit evidence was passed, so the two callers that DO
+    # pass it -- tls_deprecated_protocol ("handshake pinned to TLSv1 completed") and tls_weak_cipher
+    # ("negotiated cipher: ...") -- shipped a bare fragment carrying no verb, no target and no arrow.
+    # MEASURED at clean HEAD, both then FAILED proof_schema.validate_confirmed with
+    # ['reproduction_or_request_response', 'evidence_signal:->'] while claiming confidence "confirmed":
+    # a confirmed finding failing its own proof contract. The observation is unchanged and no less
+    # specific -- it is now stated against the target it was made on, which is what makes it replayable.
+    ev = evidence or issue.get("evidence") or issue.get("detail", "")
+    ev = "%s %s -> %s" % (_PROBE_VERB.get(kind, "GET"), target, ev)
     return {
         "title": title + " — " + target,
         "severity": sev,

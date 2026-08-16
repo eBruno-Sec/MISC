@@ -258,3 +258,31 @@ def test_scope_findings_reach_findings_for_and_pass_the_proof_contract():
         if f["confidence"] == "confirmed":
             ok, missing = proof_schema.validate_confirmed(f)
             assert ok, (f["title"], missing)
+
+
+def test_every_confirmed_posture_finding_carries_replayable_evidence():
+    """A `confirmed` finding must carry proof a reviewer can replay. `finding()` composed that
+    ("<probe verb> <target> -> <detail>") ONLY when no explicit evidence was supplied; the callers
+    that DID supply evidence -- the TLS protocol and cipher findings -- bypassed it and shipped a
+    bare fragment with no verb, no target and no arrow. MEASURED at clean HEAD, both failed their
+    own proof contract with ['reproduction_or_request_response', 'evidence_signal:->'] while
+    claiming confidence 'confirmed'. The observation stays exactly as specific as it was; it is now
+    stated against the target it was made on."""
+    import proof_schema
+    fs = tp.findings_for("https://t.example",
+                         protocols={"TLSv1": True, "TLSv1.2": True, "TLSv1.3": False},
+                         cipher="ECDHE-RSA-RC4-SHA", hostname="t.example", is_https=True,
+                         set_cookies=["sid=abc; Path=/; Domain=example.com"],
+                         headers={"content-type": "text/html"}, allow_header="GET, PUT, TRACE",
+                         trace_status=200, trace_body="Apolaki-Trace-dead",
+                         trace_marker="Apolaki-Trace-dead")
+    confirmed = [f for f in fs if f["confidence"] == "confirmed"]
+    assert len(confirmed) >= 6, "fixture must produce confirmed findings or this proves nothing"
+    for f in confirmed:
+        ok, missing = proof_schema.validate_confirmed(f)
+        assert ok, (f["title"], missing)
+    # the two that regressed are specifically the explicit-evidence ones -- pin them by name
+    byid = {f["tags"][2]: f for f in fs}
+    assert "handshake pinned to TLSv1 completed" in byid["tls_deprecated_protocol"]["evidence"]
+    assert "https://t.example" in byid["tls_deprecated_protocol"]["evidence"]
+    assert "ECDHE-RSA-RC4-SHA" in byid["tls_weak_cipher"]["evidence"]
