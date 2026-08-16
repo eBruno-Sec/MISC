@@ -1638,14 +1638,23 @@ def arsenal_gap(ledger: dict) -> dict:
     try:
         import tools as _t
         registered = {n for n in _t.TOOL_PERMISSIONS}
-        mode = str((ledger or {}).get("strategy") or (ledger or {}).get("mode") or "").lower()
-        allowed = None
-        if mode:
-            try:
-                import planner as _p
-                allowed = _p._ALLOWED.get(mode)
-            except Exception:
-                allowed = None
+        # THE MODE KEY IS `mode`. `strategy` is a DIFFERENT axis -- deterministic / low_ai / agentic --
+        # and reading it first meant a real ledger yielded `_ALLOWED.get("deterministic")` = None, so
+        # the permission-tier split NEVER RENDERED in any real report. My own test passed because its
+        # fixture put the mode string in the `strategy` key: a guard green only against a ledger shape
+        # that does not exist. Third fixture defect of mine in this session, and the same family as the
+        # other two -- an invented fixture proves the code works on the fixture.
+        # `strategy` is still consulted as a fallback, but ONLY when it names a real mode, so a
+        # single-key ledger from an older artifact still resolves instead of silently yielding nothing.
+        try:
+            import planner as _p
+            table = dict(_p._ALLOWED)
+        except Exception:
+            table = {}
+        raw_mode = str((ledger or {}).get("mode") or "").lower()
+        raw_strategy = str((ledger or {}).get("strategy") or "").lower()
+        mode = raw_mode if raw_mode in table else (raw_strategy if raw_strategy in table else "")
+        allowed = table.get(mode) if mode else None
         missing = sorted(n for n in registered if n not in ran and n.replace("run_", "") not in ran)
         out["not_dispatched"] = missing
         if allowed is not None:
@@ -2409,6 +2418,13 @@ def generate_html_report(program: str, findings: list, scope: dict,
                          f"<pre class='ev'>{e(str(f.get('dom_snippet')))}</pre>")
         prov = proof_provenance(f)
         prov_html = f"<span>Tool &amp; settings: <code>{e(prov)}</code></span>" if prov else ""
+        # Q-051: WHICH ENGINE FOUND THIS, in the client-facing artifact too. Distinct from
+        # `proof_provenance`, which describes the settings a proof was taken under; this is the
+        # producer's own name for itself, bound at ToolResult construction. Rendered only when
+        # present -- ~1052 findings predate the binding and "unknown" would be a provenance claim
+        # this report cannot make.
+        prov_html += (f"<span>Found by: <code>{e(str(f['engine']))}</code></span>"
+                      if f.get("engine") else "")
         fpc = str(f.get("false_positive_check") or "").strip()
         fpc_html = f"<h4>False-positive check</h4><p>{e(fpc)}</p>" if fpc else ""
         # canonical classification: the finding's own CWE wins; only show the triage
@@ -2883,6 +2899,48 @@ def generate_html_report(program: str, findings: list, scope: dict,
             "</div>"
             f"<p class='sub'><b>ZAP (DAST):</b> <span style='color:{zcls}'>{e(_zap_status_text(zs))}</span> · "
             f"<b>Auth:</b> {e(auth)}</p>" + tbl)
+        # Q-050/Q-051: the arsenal gap and technique coverage reach the HTML report too.
+        #
+        # THEY DID NOT, AND THAT WAS AN ISLAND I BUILT MYSELF. Both sections were wired into
+        # `generate_report` (markdown) and neither appeared in `generate_html_report` -- the
+        # CLIENT-FACING artifact. A section that says "what the platform did NOT run" is worth most
+        # to the person reading the deliverable, and it was visible only in the format they do not
+        # get. Exactly the registration-is-not-invocation defect this codebase keeps finding, written
+        # by the person who has been writing the tickets about it. `test_report_sections_reach_both_renderers`
+        # now pins BOTH renderers so a third format cannot quietly skip them either.
+        _gap = arsenal_gap(tool_ledger)
+        _dis = ledger_finding_disagreement(tool_ledger, findings)
+        if not _gap["error"]:
+            method_html += (
+                "<h3>Arsenal coverage</h3>"
+                "<p class='sub'>What the platform did NOT run, so the finding list can be read with "
+                "its bounds visible. An engine that ran and found nothing is a RESULT; one never "
+                "dispatched is a gap.</p>"
+                f"<p class='sub'><b>Dispatched:</b> {len(_gap['dispatched'])} · "
+                f"<b>Ran and found nothing:</b> {len(_gap['silent'])} · "
+                f"<b>Never dispatched:</b> {len(_gap['not_dispatched'])}"
+                + (f" · <b>Blocked by permission tier:</b> {len(_gap['blocked_by_mode'])}"
+                   if _gap["blocked_by_mode"] else "") + "</p>")
+            if _dis["produced_but_unlogged"]:
+                method_html += (
+                    "<div class='biz' style='border-left-color:#c0392b'><p><b style='color:#c0392b'>"
+                    "&#9888; Ledger disagreement</b> &mdash; "
+                    + e(", ".join(_dis["produced_but_unlogged"]))
+                    + " produced findings but the tool ledger has no record of running them. Two "
+                      "independent records of this mission do not agree.</p></div>")
+        _tc = technique_coverage()
+        if not _tc["error"] and _tc["total"]:
+            method_html += (
+                "<h3>Technique coverage</h3>"
+                f"<p class='sub'><b>{_tc['total']}</b> techniques &middot; "
+                f"<b>{_tc['proven']}</b> proven (a liveness run produced the artifact) &middot; "
+                f"{_tc['claimed']} claimed &middot; "
+                f"<b>{_tc['claimed'] - _tc['proven']}</b> unverified claims &middot; "
+                f"{_tc['generalized']} generalized</p>"
+                "<p class='sub'><b>Not measured here:</b> which techniques ran against THIS target. "
+                "Technique records carry no engine binding, so nothing connects a technique to the "
+                "tools this mission dispatched. These totals describe the PRODUCT, not this "
+                "engagement.</p>")
 
     # report integrity — a visible self-check that headline metrics agree with the
     # findings beneath them (Apolaki's guardrail against the self-contradicting

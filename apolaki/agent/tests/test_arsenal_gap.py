@@ -15,8 +15,11 @@ thorough.
 import report
 
 
-def _ledger(tools, strategy="active", **kw):
-    return {"strategy": strategy, "tools": tools, **kw}
+def _ledger(tools, mode="active", strategy="deterministic", **kw):
+    # THE REAL LEDGER SHAPE: `strategy` is deterministic/low_ai/agentic, `mode` is passive/active/full.
+    # An earlier version of this helper put the MODE string in the STRATEGY key -- an invented shape --
+    # so the tier assertions passed while the product rendered nothing. Fixtures mirror reality here.
+    return {"strategy": strategy, "mode": mode, "tools": tools, **kw}
 
 
 def test_an_engine_that_ran_and_found_nothing_is_a_RESULT_not_a_gap():
@@ -143,3 +146,90 @@ def test_findings_without_engines_do_not_manufacture_a_disagreement():
     led = _ledger([{"tool": "run_sqli", "calls": 9, "findings": 1}])
     dis = report.ledger_finding_disagreement(led, [_finding(), _finding()])
     assert dis["produced_but_unlogged"] == [] and dis["productive"] == []
+
+
+# ── both renderers, or it is an island ───────────────────────────────────────
+_LEDGER = {"strategy": "deterministic", "mode": "active",
+           "tools": [{"tool": "run_sqli", "calls": 400, "findings": 20},
+                     {"tool": "run_xss", "calls": 55, "findings": 0}]}
+
+
+def _both(findings):
+    return (report.generate_report("P", findings, {"in_scope": ["x"]}, tool_ledger=_LEDGER),
+            report.generate_html_report("P", findings, {"in_scope": ["x"]}, tool_ledger=_LEDGER))
+
+
+def test_every_new_section_reaches_BOTH_renderers():
+    """AN ISLAND THE COORDINATOR BUILT, caught by checking rather than assuming.
+
+    Arsenal coverage, technique coverage and per-finding attribution were all wired into
+    `generate_report` (markdown) and NONE of them appeared in `generate_html_report` -- the
+    CLIENT-FACING artifact. A section whose entire purpose is "what the platform did NOT run" is worth
+    most to the person reading the deliverable, and it was visible only in the format they do not get.
+
+    Same registration-is-not-invocation defect this codebase has now found seven times, written by the
+    person who has been filing the tickets about it. Pinned across BOTH renderers so a third output
+    format cannot silently skip them either.
+    """
+    md, html = _both([_finding("run_sqli")])
+    for section in ("Arsenal coverage", "Technique coverage", "Found by"):
+        assert section in md, "%s missing from the MARKDOWN report" % section
+        assert section in html, "%s missing from the HTML report" % section
+
+
+def test_the_ledger_disagreement_warning_reaches_both():
+    """The two findings must differ in FAMILY as well as engine.
+
+    The first draft gave both `family: "sqli"` and the HTML renderer merged them, so the ghost
+    disappeared and the warning did not render -- while `ledger_finding_disagreement()` still
+    returned ['run_ghost'] when called directly. The code was right and the FIXTURE was wrong, which
+    is the third fixture collision in this project to masquerade as a product defect (the sweep
+    allocator's class names collapsing to one shape was the same shape of mistake). Check the helper
+    before the code.
+    """
+    ghost = dict(_finding("run_ghost", "G"), family="open_redirect", target="http://y/?next=2")
+    md, html = _both([_finding("run_sqli"), ghost])
+    assert "Ledger disagreement" in md, "missing from the MARKDOWN report"
+    assert "Ledger disagreement" in html, "missing from the HTML report"
+    assert "run_ghost" in md and "run_ghost" in html
+
+
+def test_a_consistent_mission_warns_in_NEITHER():
+    """The negative control on both paths at once: a check that fires on healthy input is noise, and
+    noise in the client-facing report is worse than noise in the markdown one."""
+    md, html = _both([_finding("run_sqli")])
+    assert "Ledger disagreement" not in md and "Ledger disagreement" not in html
+
+
+def test_the_tier_line_RENDERS_on_a_real_ledger_shape():
+    """THE TEST THAT WAS MISSING, and its absence hid a guard that had never once fired.
+
+    `arsenal_gap` read `strategy` before `mode`. A real ledger carries `strategy: "deterministic"`
+    (the AI axis: deterministic / low_ai / agentic) and `mode: "active"` (the permission axis), so
+    `_ALLOWED.get("deterministic")` was None and the permission-tier split NEVER RENDERED in any real
+    report. Every tier assertion in this file passed because the fixture put the MODE string in the
+    STRATEGY key -- a ledger shape the product does not produce.
+
+    Caught by a lane reading the code rather than the tests. Third fixture defect of mine this
+    session; all three shared one cause: a fixture invented rather than copied from reality proves
+    only that the code works on the invention.
+    """
+    real = {"strategy": "deterministic", "mode": "active",
+            "tools": [{"tool": "run_sqli", "calls": 5, "findings": 0}]}
+    gap = report.arsenal_gap(real)
+    assert gap["blocked_by_mode"], (
+        "the tier split is empty on a REAL ledger shape -- the guard is not firing")
+    assert "run_cmdi" in gap["blocked_by_mode"]
+    assert "Of those, unable to run at this permission tier" in "\n".join(report._arsenal_md(real))
+
+
+def test_an_unrecognised_mode_yields_no_tier_claim_rather_than_a_wrong_one():
+    """The negative control on the fallback: `strategy` is still read, but ONLY when it names a real
+    mode. A ledger whose mode is missing or unknown must make NO tier claim -- silence is honest,
+    while defaulting to a tier would excuse engines that were never excused."""
+    unknown = {"strategy": "deterministic", "mode": "sideways",
+               "tools": [{"tool": "run_sqli", "calls": 5, "findings": 0}]}
+    assert report.arsenal_gap(unknown)["blocked_by_mode"] == []
+    legacy = {"strategy": "active", "tools": [{"tool": "run_sqli", "calls": 5, "findings": 0}]}
+    assert report.arsenal_gap(legacy)["blocked_by_mode"], (
+        "an older single-key artifact whose strategy names a real mode must still resolve")
