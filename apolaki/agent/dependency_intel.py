@@ -314,7 +314,12 @@ def extract_script_srcs(html):
 
 def fingerprint_js_content(content, location=""):
     """Libraries whose self-declared version banner appears in a served JS body
-    (CONFIRMED — the file states its own version)."""
+    (CONFIRMED — the file states its own version).
+
+    Q-021C: each detection ALSO carries the applicability probes that ran against THESE bytes.
+    They are attached here and not recomputed later, because here is the only place the served
+    artifact is in hand — re-deriving it downstream is the Q-046 failure shape (a value parsed
+    back out of a rendering it was never meant to survive)."""
     out, seen = [], set()
     for sig in LIB_SIGNATURES:
         rx = sig.get("content")
@@ -323,8 +328,10 @@ def fingerprint_js_content(content, location=""):
         m = rx.search(content or "")
         if m and (sig["name"], m.group(1)) not in seen:
             seen.add((sig["name"], m.group(1)))
-            out.append(make_component(sig["name"], m.group(1), "js-content-banner",
-                                      CONFIRMED, _snippet(content, m.group(1)), location))
+            comp = make_component(sig["name"], m.group(1), "js-content-banner",
+                                  CONFIRMED, _snippet(content, m.group(1)), location)
+            comp["applicability"] = probe_applicability(comp, content)
+            out.append(comp)
     return out
 
 
@@ -391,6 +398,262 @@ def _vlt(a, b):
     return ta < tb
 
 
+# ══════════════════════════════════════════════════════════════════════════════════════════════
+# Q-021C — APPLICABILITY: is the advisory's own code in the artifact we were actually served?
+# ══════════════════════════════════════════════════════════════════════════════════════════════
+# A version number matched against a CVE list is a LEAD. The rung above it on TECH_PROOF_LADDER is
+# APPLICABILITY_CONFIRMED, and this is what earns it: the detected library AND VERSION select a
+# probe, and the probe reads the bytes the target served for the *specific code the CVE is about*.
+#
+# This is what makes detection drive testing rather than reporting. Nothing looks for jQuery's
+# deep-merge `__proto__` guard until a jQuery version inside CVE-2019-11358's range is detected;
+# once it is, that exact question is asked of that exact artifact.
+#
+# It is NOT exploitation and this module never pretends otherwise. A corroborated probe raises
+# `proof_state` to APPLICABILITY_CONFIRMED and leaves `confidence`/`component_status` exactly where
+# `behaviour_proof_ok` puts them. The rungs above (SAFELY_PROBED, ORACLE_CONFIRMED) still require a
+# live behaviour differential.
+#
+# The verdict this pipeline needed most is REFUTED. Measured on a live lab: Bootstrap 4.5.3's own
+# dependency-check error string ("...requires at least jQuery v1.9.1 but less than v4.0.0") is read
+# by LIB_SIGNATURES as jquery 1.9.1 at CONFIRMED, which raises a medium
+# `Potentially vulnerable component: jquery@1.9.1 (CVE-2020-11022, +2 more)` on a file containing no
+# jQuery at all. A version table cannot see that. Asking the artifact can.
+
+CORROBORATED = "corroborated"     # the CVE's vulnerable code is present in the served artifact
+REFUTED = "refuted"               # the patch is present, or the library itself is not in this file
+INCONCLUSIVE = "inconclusive"     # the probe ran and could not decide — never treated as either
+APPLICABILITY_VERDICTS = (CORROBORATED, REFUTED, INCONCLUSIVE)
+
+
+def _clip(s, n=200):
+    return re.sub(r"\s+", " ", str(s or ""))[:n]
+
+
+# ── jQuery: is the library REALLY here? ───────────────────────────────────────────────────────
+# The negative control for every jQuery probe, and the one that fires on the measured false
+# positive. A version banner is a STRING; the library is a RUNTIME. Both markers are required
+# (AND, not OR) because a single marker is what made this class of check wrong in the first place:
+# `.fn.jquery` was the obvious presence test and it is measurably WORSE than useless here — it is
+# present in bootstrap.bundle.min.js (which checks the host page's jQuery version) and ABSENT from
+# the minified jQuery 2.1.4/3.4.1/3.5.1 that three live labs actually serve.
+#
+# Measured over 6 real served artifacts (mutillidae jquery 1.8.3, webgoat 2.1.4, webgoat 3.4.1,
+# dvga 3.5.1, dvga bootstrap.bundle 4.5.3, dvga graphql.js): both markers true on 4/4 real jQuery,
+# both false on 2/2 non-jQuery.
+_JQ_RUNTIME = (
+    ("jQuery prototype constructor (`.fn.init`)", _rx(r"[\w$]+\.fn\.init\b")),
+    ("jQuery version property (`jquery:`)", _rx(r"\bjquery\s*:\s*[\w\"']")),
+)
+
+# `X.extend = X.fn.extend = function()` — the deep-merge CVE-2019-11358 is about. Survives
+# minification (measured: `n.extend=n.fn.extend=function`, `k.extend=k.fn.extend=function`,
+# `S.extend=S.fn.extend=function`) and reads identically in the unminified source.
+_JQ_EXTEND_SITE = _rx(r"[\w$]+\.extend\s*=\s*[\w$]+\.fn\.extend\s*=\s*function")
+
+# The fix shipped in 3.4.0: `if ( name === "__proto__" || target === copy ) { continue; }`.
+# Searched ONLY inside the extend body — `__proto__` appears in unrelated code elsewhere (measured:
+# once in bootstrap.bundle.min.js, in its prototype-chain helper), so a whole-file search would
+# refute a genuinely vulnerable file that happens to mention it.
+_JQ_PROTO_GUARD = _rx(r"[\"']__proto__[\"']")
+
+# Widest measured distance from the site to the guard is ~1.1kB (unminified 3.4.1); the minified
+# builds put it ~200 bytes in. 2400 is that with margin, and `test_the_extend_window_covers_the_
+# unminified_guard` pins it against an unminified-shaped body.
+_JQ_EXTEND_WINDOW = 2400
+
+# CVE-2020-11022/11023: `rxhtmlTag` rewrote self-closing tags in htmlPrefilter. jQuery 3.5.0 deleted
+# the rewrite outright (`htmlPrefilter: function( html ) { return html; }`), so the regex literal's
+# own alternation is a direct read of whether the vulnerable transform is still in this build.
+# Measured present in 1.8.3 / 2.1.4 / 3.4.1 and absent in 3.5.1.
+_JQ_SELFCLOSE_REWRITE = _rx(r"area\|br\|col\|embed\|hr\|img\|input\|link\|meta\|param")
+
+
+def _probe_jquery_extend_proto(text):
+    """CVE-2019-11358 — prototype pollution via `$.extend` deep merge.
+
+    Returns (verdict, observed, reason, evidence).
+    """
+    site = _JQ_EXTEND_SITE.search(text)
+    if not site:
+        # The library IS here (the caller checked) but this artifact does not contain the merge
+        # implementation — a split bundle, or a build that exports it from elsewhere. Undecidable,
+        # and saying so is the whole point: an INCONCLUSIVE probe drops nothing.
+        return (INCONCLUSIVE, "the `X.extend = X.fn.extend = function` deep-merge site is not in "
+                              "this artifact", "site_not_located", "")
+    window = text[site.start(): site.start() + _JQ_EXTEND_WINDOW]
+    guard = _JQ_PROTO_GUARD.search(window)
+    if guard:
+        return (REFUTED, "the deep-merge loop DOES guard `__proto__` (the fix shipped in 3.4.0)",
+                "patched_in_served_artifact",
+                _clip(window[max(0, guard.start() - 100): guard.start() + 60]))
+    return (CORROBORATED, "the deep-merge loop copies every own key with NO `__proto__` guard",
+            "vulnerable_code_present_in_served_artifact", _clip(window[:180]))
+
+
+def _probe_jquery_selfclosing_rewrite(text):
+    """CVE-2020-11022 / CVE-2020-11023 — XSS via jQuery's self-closing-tag HTML rewrite."""
+    m = _JQ_SELFCLOSE_REWRITE.search(text)
+    if not m:
+        return (REFUTED, "the self-closing-tag rewrite regex is absent (removed in 3.5.0)",
+                "patched_in_served_artifact", "")
+    return (CORROBORATED, "the self-closing-tag rewrite regex is still present and applied to "
+                          "untrusted HTML", "vulnerable_code_present_in_served_artifact",
+            _clip(text[max(0, m.start() - 70): m.start() + 120]))
+
+
+#: library -> the probes that may run against its served artifact. `cves` is the ONLY link to the
+#: advisory table; the version range is DERIVED from KNOWN_VULN by those ids (`_probe_in_range`) so
+#: a probe can never claim to cover a range the table does not actually have. Two hand-maintained
+#: copies of the same range is how a gate drifts out of step with its detector.
+APPLICABILITY_PROBES = (
+    {"id": "jquery-extend-proto-guard", "library": "jquery",
+     "cves": ("CVE-2019-11358",),
+     "looked_for": "jQuery's `$.extend` deep-merge loop, and the `__proto__` guard added in 3.4.0",
+     "probe": _probe_jquery_extend_proto},
+    {"id": "jquery-selfclosing-rewrite", "library": "jquery",
+     "cves": ("CVE-2020-11022", "CVE-2020-11023"),
+     "looked_for": "jQuery's self-closing-tag HTML rewrite (`rxhtmlTag`), removed in 3.5.0",
+     "probe": _probe_jquery_selfclosing_rewrite},
+)
+
+#: library -> its runtime-presence markers. A library with no entry cannot be probed at all, which
+#: is correct: without a presence control the `library_absent` refutation has no basis.
+_RUNTIME_MARKERS = {"jquery": _JQ_RUNTIME}
+
+#: How much artifact an ABSENCE argument needs before it means anything.
+#:
+#: `library_absent_from_artifact` is an absence-of-evidence claim, and it is only decisive when
+#: there was somewhere for the evidence to be. 84kB of Bootstrap with no jQuery runtime in it
+#: settles the question; a 55-byte body that is nothing but a version comment settles nothing, and
+#: refuting on it turns a truncated read into a false negative. Measured smallest real served
+#: library artifact across the labs: 13,955 bytes (dvga graphql.js); the four real jQuery files are
+#: 84kB-268kB. 2048 sits far below every real artifact and far above every banner stub.
+#:
+#: Below the floor the verdict is INCONCLUSIVE, which by construction drops nothing.
+_MIN_ARTIFACT_FOR_ABSENCE = 2048
+
+#: Reasons a presence check can fail. Named so the probe can tell "this is not the library" from
+#: "there was not enough here to tell" — one refutes, the other must not.
+_ABSENT = "absent"
+_TOO_SMALL = "too_small"
+
+
+def _library_present(library, text):
+    """(state, observed) — is the LIBRARY, not merely its name, in these bytes?
+
+    `state` is True, `_ABSENT` or `_TOO_SMALL`. Fails closed: an unknown library is `_ABSENT` with
+    an explicit reason, so adding a probe without a presence control can never silently produce a
+    refutation.
+    """
+    markers = _RUNTIME_MARKERS.get(str(library or "").lower())
+    if not markers:
+        return _ABSENT, "no runtime marker is defined for this library"
+    body = text or ""
+    missing = [label for label, rx in markers if not rx.search(body)]
+    if not missing:
+        return True, "the library's own runtime is present (%s)" % \
+            "; ".join(label for label, _ in markers)
+    if len(body) < _MIN_ARTIFACT_FOR_ABSENCE:
+        return _TOO_SMALL, ("only %d bytes were served — too little for the absence of the "
+                            "library's runtime to mean anything" % len(body))
+    return _ABSENT, "the library's own runtime is absent from this artifact (missing: %s)" % \
+        "; ".join(missing)
+
+
+def _probe_in_range(component_version, probe):
+    """Does this version fall in a KNOWN_VULN range carrying one of the probe's CVE ids?
+
+    DERIVED from KNOWN_VULN rather than restated on the probe — the probe declares WHICH advisory
+    it tests, never the boundary of that advisory."""
+    ids = {str(c).upper() for c in probe.get("cves") or ()}
+    lib = str(probe.get("library") or "").lower()
+    for rule_lib, ceiling, cves, _sev, _summary in KNOWN_VULN:
+        if rule_lib == lib and ids & {str(c).upper() for c in cves} and _vlt(component_version, ceiling):
+            return True
+    return False
+
+
+def probe_applicability(component, artifact_text):
+    """Run every in-range applicability probe for this component against the SERVED artifact.
+
+    Returns a list of records — one per probe that was in range — each naming what was looked for,
+    what was observed, the presence control and its observation. An EMPTY list means no probe was
+    applicable (no version, no artifact, unknown library, or the version is outside every range
+    this module has a probe for). That is deliberately distinct from a probe that ran and returned
+    INCONCLUSIVE: emptiness must never be read as a verdict.
+    """
+    name = str((component or {}).get("name") or "").lower()
+    ver = str((component or {}).get("version") or "").strip()
+    text = artifact_text if isinstance(artifact_text, str) else ""
+    if not name or not ver or not text:
+        return []
+    present, present_obs = _library_present(name, text)
+    out = []
+    for p in APPLICABILITY_PROBES:
+        if p["library"] != name or not _probe_in_range(ver, p):
+            continue
+        rec = {"probe": p["id"], "library": name, "version": ver,
+               "cves": [str(c).upper() for c in p["cves"]],
+               "looked_for": p["looked_for"],
+               "control": "the artifact carries the library's own runtime, not merely its name",
+               "control_observed": present_obs,
+               "location": canon_location((component or {}).get("location") or "")}
+        if present is True:
+            verdict, observed, reason, ev = p["probe"](text)
+            rec.update({"verdict": verdict, "observed": observed, "reason": reason, "evidence": ev})
+        elif present == _ABSENT:
+            # The presence control failed on an artifact large enough for that to mean something,
+            # so the version reading did not come from this library. This is the refutation that
+            # removes the measured Bootstrap-banner false positive.
+            rec.update({"verdict": REFUTED, "reason": "library_absent_from_artifact",
+                        "observed": "the version string was read from an artifact that does not "
+                                    "contain the library", "evidence": ""})
+        else:
+            # _TOO_SMALL. There was not enough artifact for absence to argue anything, so this
+            # probe decides nothing and (INCONCLUSIVE) drops nothing. MEASURED consequence of
+            # getting this wrong: `retest.evaluate` re-fingerprints a replacement body and asks
+            # `assess_component` whether the new version is still in range. Refuting on a short
+            # body made a still-vulnerable upgrade (3.4.0 -> 3.4.1, still inside <3.5.0) verdict
+            # CLOSED -- a remediation lie, and the exact false negative this ladder exists to
+            # prevent. Caught by test_q021a_sca_proof::test_retest_upgrade_that_is_still_in_range.
+            rec.update({"verdict": INCONCLUSIVE, "reason": "artifact_too_small_to_prove_absence",
+                        "observed": "the library's runtime is not in these bytes, but there are "
+                                    "too few bytes for that to mean anything", "evidence": ""})
+        out.append(rec)
+    return out
+
+
+def applicability_records(component):
+    """The probe records carried by a component. `or []` is safe HERE and only here: absent, None
+    and empty all mean the same thing — no probe ran. Every verdict is inside a record."""
+    recs = (component or {}).get("applicability") or []
+    return [r for r in recs if isinstance(r, dict)]
+
+
+def refuted_cves(component) -> set:
+    """CVE ids an applicability probe REFUTED against the served artifact. INCONCLUSIVE is not a
+    refutation and never appears here."""
+    out = set()
+    for r in applicability_records(component):
+        if r.get("verdict") == REFUTED:
+            out |= {str(c).upper() for c in (r.get("cves") or [])}
+    return out
+
+
+def corroborated_records(component, cve_ids=()) -> list:
+    """CORROBORATED probe records, optionally restricted to the CVE ids a finding actually matched."""
+    want = {str(c).upper() for c in (cve_ids or ())}
+    out = []
+    for r in applicability_records(component):
+        if r.get("verdict") != CORROBORATED:
+            continue
+        if want and not (want & {str(c).upper() for c in (r.get("cves") or [])}):
+            continue
+        out.append(r)
+    return out
+
+
 def cve_eligible(component):
     return bool(component.get("version")) and component.get("confidence") in CVE_ELIGIBLE
 
@@ -398,13 +661,27 @@ def cve_eligible(component):
 def assess_component(component):
     """Return [{"ids", "severity", "summary"}] of known vulns affecting this exact
     component version — ONLY when the version evidence is strong enough (guardrail).
-    A component with no matching rule returns []."""
+    A component with no matching rule returns [].
+
+    Q-021C: a range whose CVE ids were ALL refuted by an applicability probe against the served
+    artifact is dropped. Three properties this keeps:
+
+      * a component with NO applicability records is assessed exactly as before. Absent means "not
+        probed", never "refuted" — the version table stays the answer when nothing tested it.
+      * only REFUTED drops. INCONCLUSIVE drops nothing, so a split bundle we could not read never
+        becomes a false negative.
+      * the drop is not invisible: the refuting record was written onto the component by the
+        detector that ran the probe and travels with it into the graph and the report.
+    """
     if not cve_eligible(component):
         return []
     name, ver = component["name"], component["version"]
+    refuted = refuted_cves(component)
     out = []
     for lib, ceiling, cves, sev, summary in KNOWN_VULN:
         if name == lib and _vlt(ver, ceiling):
+            if refuted and {str(c).upper() for c in cves} <= refuted:
+                continue
             out.append({"ids": cves, "severity": sev, "summary": summary})
     return out
 
@@ -511,11 +788,29 @@ def vulnerable_component_finding(component, vulns, behaviour_proof=None):
     p = behaviour_proof if isinstance(behaviour_proof, dict) else {}
     base_ev = f"{comp}@{ver} from {component['source']}: {component.get('evidence','')}"[:300]
 
+    # Q-021C — the applicability rung. `corr` are the probes that read the SERVED artifact and found
+    # the CVE's own vulnerable code still in it. They do NOT raise `confidence` or
+    # `component_status`: locating vulnerable code is not observing exploitation, and the two
+    # questions Q-021A separated must stay separated. What they do change is the rung this finding
+    # reaches and what its evidence can honestly say.
+    corr = corroborated_records(component, ids)
+    applic_sentence = ""
+    if corr:
+        applic_sentence = " | ".join(
+            f"applicability probe {r['probe']} read the served artifact: looked for "
+            f"{r['looked_for']}; OBSERVED {r['observed']}; control - {r['control_observed']}"
+            for r in corr)
+    elif applicability_records(component):
+        applic_sentence = "; ".join(
+            f"applicability probe {r['probe']}: {r['verdict']} ({r.get('reason', '')})"
+            for r in applicability_records(component))
+
     if ok:
         title = f"Vulnerable component: {comp}@{ver} ({lead}{extra})"
         evidence = (f"{base_ev} | {str(p.get('cve')).upper()} behaviour differential: trigger "
                     f"{p.get('trigger')} -> {p.get('observed')}; negative control (trigger absent) "
-                    f"{p.get('control')} -> {p.get('control_observed')}")[:600]
+                    f"{p.get('control')} -> {p.get('control_observed')}"
+                    + (f" | {applic_sentence}" if applic_sentence else ""))[:900]
         impact = (f"Exploitable on this target: the {str(p.get('cve')).upper()} behaviour was OBSERVED here and a "
                   f"structurally identical request with the trigger absent did not reproduce it (upstream CVE "
                   f"severity: {worst}). Rated MEDIUM pending a full impact demonstration.")
@@ -525,10 +820,33 @@ def vulnerable_component_finding(component, vulns, behaviour_proof=None):
                  f"Confirm the version banner/filename reports {comp} {ver}",
                  f"Send the trigger: {p.get('trigger')} -> expect: {p.get('observed')}",
                  f"Send the negative control: {p.get('control')} -> expect: {p.get('control_observed')}"]
+    elif corr:
+        # ADVISORY_MATCHED + the advisory's own code located in the artifact this target served.
+        # Still a lead — but no longer a version-table lead, and the evidence says which bytes.
+        title = f"Potentially vulnerable component: {comp}@{ver} ({lead}{extra})"
+        evidence = (f"{base_ev} | version-range match against {', '.join(ids)}, and {applic_sentence}"
+                    f" | no CVE-specific runtime behaviour differential was run ({', '.join(gaps)})")[:900]
+        impact = (f"Known-vulnerable dependency (upstream CVE severity: {worst}). The vulnerable code the CVE "
+                  "describes was LOCATED IN THE ARTIFACT THIS TARGET SERVES, so this is not a version-table "
+                  "guess — but exploitability still depends on the application reaching that code with "
+                  "attacker-controlled input, which was NOT observed. Rated MEDIUM. Run the CVE behaviour "
+                  "probe to escalate.")
+        oracle = (f"the served artifact reports {comp} {ver} AND an applicability probe read that artifact and "
+                  f"found the code {lead or 'the referenced CVE'} describes still present "
+                  f"({'; '.join(r['observed'] for r in corr)}), with the control confirming the artifact really "
+                  f"contains the library. APPLICABILITY-confirmed only. Confirmation requires a "
+                  f"{lead or 'CVE'}-specific behaviour differential: the trigger reproduces the vulnerable "
+                  "behaviour and a trigger-absent control does not.")
+        steps = [f"Load {component.get('location') or 'the served script'}",
+                 f"Confirm the version banner/filename reports {comp} {ver}",
+                 *[f"Applicability: search the served bytes for {r['looked_for']} -> expect: {r['observed']}"
+                   for r in corr],
+                 f"Run a {lead or 'CVE'}-specific behaviour probe plus its trigger-absent control to confirm"]
     else:
         title = f"Potentially vulnerable component: {comp}@{ver} ({lead}{extra})"
         evidence = (f"{base_ev} | version-range match only against {', '.join(ids)}; no CVE-specific "
-                    f"behaviour probe confirmed it ({', '.join(gaps)})")[:600]
+                    f"behaviour probe confirmed it ({', '.join(gaps)})"
+                    + (f" | {applic_sentence}" if applic_sentence else ""))[:900]
         impact = (f"Known-vulnerable dependency (upstream CVE severity: {worst}). Rated MEDIUM here because "
                   "exploitability depends on a reachable sink, which was NOT confirmed in this test — this is a "
                   "version-range match, not an observed exploit. Probe the CVE behaviour to escalate.")
@@ -562,10 +880,19 @@ def vulnerable_component_finding(component, vulns, behaviour_proof=None):
         "component_status": status,
         "component": comp, "component_version": ver,
         "success_oracle": oracle,
+        # Q-021C — WHICH RUNG. Stated as a field rather than inferred from prose, because a consumer
+        # that has to regex a title to learn how well something was proven is the Q-046/Q-051 shape.
+        "proof_state": (ORACLE_CONFIRMED if ok else
+                        APPLICABILITY_CONFIRMED if corr else
+                        ADVISORY_MATCHED),
+        # every probe that ran against the served artifact, refutations included
+        "applicability": applicability_records(component),
     }
     if not ok:
         out["proof_gap"] = gaps
         out["tags"] = out["tags"] + ["needs-confirmation"]
+        if corr:
+            out["tags"] = out["tags"] + ["applicability-confirmed"]
     return out
 
 

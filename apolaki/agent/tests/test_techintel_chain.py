@@ -55,13 +55,26 @@ def _jq(version, *, patched_proto=False, selfclosing=True, runtime=True, extend=
 #: The MEASURED false positive, reduced to its cause. Bootstrap 4.5.3's own dependency check names
 #: a jQuery version in an error string; `LIB_SIGNATURES` reads that as a CONFIRMED jquery 1.9.1 and
 #: (before this ticket) raised a medium finding against a file containing no jQuery.
+#:
+#: The error-string line is copied from the `evidence` field of the component record
+#: `fingerprint_js_content` really emitted for
+#: http://apolaki-dvga-1:5013/static/bootstrap/js/bootstrap.bundle.min.js, not composed here:
+#:   "'s JavaScript requires at least jQuery v1.9.1 but less than v4.0.0\")}};l.jQueryDetect"
+#: `test_the_bootstrap_fixture_reproduces_the_component_record_measured_live` pins that.
+#:
+#: The filler exists because the real artifact is 84,152 bytes and the refutation is an
+#: absence-of-evidence argument that is only allowed to fire on an artifact big enough to have
+#: carried the evidence (`_MIN_ARTIFACT_FOR_ABSENCE`). A fixture that skipped the bulk would have
+#: tested a branch the real file never takes.
 _BOOTSTRAP_BUNDLE = (
     "/*! Bootstrap v4.5.3 (https://getbootstrap.com/) */"
     '!function(t,e){"object"==typeof exports?e(exports,require("jquery")):e(t.bootstrap={},t.jQuery)}'
     '(this,function(t,e){var n=e.fn.jquery.split(" ")[0].split(".");'
     'if(n[0]<2&&n[1]<9)throw new Error("Bootstrap\'s JavaScript requires at least jQuery v1.9.1 '
     'but less than v4.0.0")});se.prototype.__proto__=ne;'
+    + "".join("var _w%d=function(o){return o&&1===o.nodeType?o:null};" % i for i in range(60))
 )
+assert len(_BOOTSTRAP_BUNDLE) >= 2048, "fixture must be large enough to reach the absence branch"
 
 
 def _first(comps, name):
@@ -173,15 +186,74 @@ def test_the_presence_control_needs_the_runtime_and_not_a_mention_of_the_name():
     the host page's jQuery version) and ABSENT from the minified jQuery 2.1.4 / 3.4.1 / 3.5.1 that
     three labs serve. Picking the obvious marker would have inverted this check on real bytes.
     """
+    pad = "var _p=1;" * 400                                       # past _MIN_ARTIFACT_FOR_ABSENCE
     assert ".fn.jquery" in _BOOTSTRAP_BUNDLE                      # the trap is present in the fixture
-    assert dep._library_present("jquery", _BOOTSTRAP_BUNDLE)[0] is False
+    assert dep._library_present("jquery", _BOOTSTRAP_BUNDLE)[0] == dep._ABSENT
     assert dep._library_present("jquery", _jq("3.3.1"))[0] is True
     # both markers required: either one alone is not the library
-    assert dep._library_present("jquery", 'k.fn.init=function(){};')[0] is False
-    assert dep._library_present("jquery", 'x={jquery:"3.3.1"};')[0] is False
+    assert dep._library_present("jquery", 'k.fn.init=function(){};' + pad)[0] == dep._ABSENT
+    assert dep._library_present("jquery", 'x={jquery:"3.3.1"};' + pad)[0] == dep._ABSENT
     # FAILS CLOSED: a library with no runtime marker can never be refuted by absence
-    present, why = dep._library_present("lodash", "anything at all")
-    assert present is False and "no runtime marker" in why
+    state, why = dep._library_present("lodash", "anything at all")
+    assert state == dep._ABSENT and "no runtime marker" in why
+
+
+def test_the_bootstrap_fixture_reproduces_the_component_record_measured_live():
+    """The fixture is only worth anything if it produces the record the real bytes produced.
+
+    MEASURED against http://apolaki-dvga-1:5013/static/bootstrap/js/bootstrap.bundle.min.js on
+    unpatched HEAD:
+        {"name": "jquery", "version": "1.9.1", "source": "js-content-banner",
+         "confidence": "confirmed", "evidence": "'s JavaScript requires at least jQuery v1.9.1 ..."}
+        assess: [CVE-2020-11022/11023, CVE-2019-11358]
+        TITLE: Potentially vulnerable component: jquery@1.9.1 (CVE-2020-11022, +2 more)
+    An invented fixture that merely LOOKED like this is how three defects shipped in one session
+    elsewhere in this project, so the shape is asserted field by field.
+    """
+    jq = _first(dep.fingerprint_js_content(_BOOTSTRAP_BUNDLE, "https://t/js/bootstrap.bundle.min.js"),
+                "jquery")
+    assert jq["version"] == "1.9.1"
+    assert jq["source"] == "js-content-banner" and jq["confidence"] == dep.CONFIRMED
+    assert "requires at least jQuery v1.9.1" in jq["evidence"]
+    # and the phantom really did reach a finding before the probes existed
+    plain = dep.make_component("jquery", "1.9.1", "js-content-banner", dep.CONFIRMED)
+    f = dep.vulnerable_component_finding(plain, dep.assess_component(plain))
+    assert f["title"] == "Potentially vulnerable component: jquery@1.9.1 (CVE-2020-11022, +2 more)"
+    assert f["severity"] == "medium"
+
+
+def test_absence_is_only_a_refutation_when_there_was_room_for_the_evidence():
+    """REGRESSION, caught by a test this lane does not own.
+
+    `library_absent_from_artifact` is an absence-of-evidence argument. On 84kB of Bootstrap it is
+    decisive; on a 55-byte body that is nothing but a version comment it proves nothing, and
+    refuting there turns a short read into a FALSE NEGATIVE.
+
+    The live victim: `retest.evaluate` re-fingerprints a replacement body and asks
+    `assess_component` whether the new version is still in range. `test_q021a_sca_proof.py::
+    test_retest_upgrade_that_is_still_in_range_stays_open` upgrades 3.4.0 -> 3.4.1 with the fixture
+    body below -- still inside `<3.5.0`, so the finding must stay OPEN. Refuting on it reported
+    CLOSED: a remediation lie.
+    """
+    stub = "/*! jQuery JavaScript Library v3.4.1 */ ;(function(){})();"
+    assert len(stub) < dep._MIN_ARTIFACT_FOR_ABSENCE
+    state, why = dep._library_present("jquery", stub)
+    assert state == dep._TOO_SMALL and "too little" in why
+    comp = _first(dep.fingerprint_js_content(stub, "https://t/assets/jquery-3.4.0.js"), "jquery")
+    rec = comp["applicability"][0]
+    assert rec["verdict"] == dep.INCONCLUSIVE
+    assert rec["reason"] == "artifact_too_small_to_prove_absence"
+    # INCONCLUSIVE drops nothing, so the still-in-range advisory survives and the retest stays open
+    assert dep.refuted_cves(comp) == set()
+    assert [g["ids"] for g in dep.assess_component(comp)] == [["CVE-2020-11022", "CVE-2020-11023"]]
+    import retest
+    finding = dep.vulnerable_component_finding(
+        dep.make_component("jquery", "3.4.0", "js-content-banner", dep.CONFIRMED,
+                           "jQuery JavaScript Library v3.4.0", "https://t/assets/jquery-3.4.0.js"),
+        dep.assess_component(dep.make_component("jquery", "3.4.0", "js-content-banner",
+                                                dep.CONFIRMED)))
+    v = retest.evaluate(finding, 200, stub)
+    assert v["verdict"] == "open" and "3.4.1" in v["detail"]
 
 
 # ── 3. what a probe may and may not change ───────────────────────────────────────────────────
