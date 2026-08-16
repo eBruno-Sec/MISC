@@ -31,6 +31,26 @@ APP_DIR = os.path.dirname(os.path.abspath(__file__))
 # Each mutant WEAKENS an FP guard. The exact node id is load-bearing: a collection error, broken fixture,
 # or unrelated failing test must not be credited with killing the mutant.
 MUTANTS = [
+    # Q-021C. Handed off by the techintel lane, which ran both as a one-shot harness and verified each
+    # APPLIED and KILLED before writing them out. They guard the false-POSITIVE and false-NEGATIVE
+    # edges of the applicability chain, which is why both are here rather than just the FP one.
+    #
+    # The first has a MEASURED live victim: dvga serves `bootstrap.bundle.min.js`, and Bootstrap
+    # 4.5.3's own dependency-check error string was read as a CONFIRMED `jquery 1.9.1`, raising a
+    # three-CVE finding on a file containing no jQuery at all. The presence control is what refutes it.
+    ("dependency_intel.py", "probe_applicability: drop the library-presence control -- a version "
+                            "string in ANY file becomes the library (measured: Bootstrap's "
+                            "dependency-check banner raised a 3-CVE jquery@1.9.1 finding)",
+     r"        if present is True:\n", "        if True:\n",
+     "tests/test_techintel_chain.py::test_a_version_read_from_a_file_that_does_not_contain_the_library_is_refuted"),
+    # The second guards the opposite edge, and the lane caused this regression itself before catching
+    # it with a test it did not own: refuting by ABSENCE on a 55-byte body made a still-vulnerable
+    # jQuery upgrade retest CLOSED. Absence only argues when there was room for the evidence to appear
+    # -- a remediation lie is worse than a missed finding, because someone acts on it.
+    ("dependency_intel.py", "probe_applicability: remove the absence floor -- a body too short to "
+                            "argue absence refutes anyway, and a still-vulnerable upgrade retests CLOSED",
+     r"_MIN_ARTIFACT_FOR_ABSENCE = 2048", "_MIN_ARTIFACT_FOR_ABSENCE = 0",
+     "tests/test_techintel_chain.py::test_absence_is_only_a_refutation_when_there_was_room_for_the_evidence"),
     # Q-011. Added when mass_assign_tool.py landed, keeping the ceiling at 46 by earning it. This is
     # the guard that separates "the server BOUND my privileged attribute" from "the server echoes any
     # attribute it is handed": an invented control field coming back on the re-read means persistence

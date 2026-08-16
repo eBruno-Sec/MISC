@@ -339,6 +339,66 @@ defend.
 
 ---
 
+## ★ Q-021C — DETECTION NOW DRIVES TESTING, for one library, end to end. 2026-08-16
+
+The chain that was missing since Q-021B built the facts:
+
+```
+served artifact -> library + VERSION (CONFIRMED)
+                -> advisory ranges DERIVED from KNOWN_VULN by CVE id
+                -> THE VERSION SELECTS WHICH PROBES RUN
+                -> each probe reads the SERVED BYTES for the code its CVE is about
+                -> a presence control decides whether the library is in that file at all
+                -> CORROBORATED raises the rung / REFUTED deletes the finding / INCONCLUSIVE changes nothing
+```
+
+**What it now tests that nothing tested before:** whether a served jQuery carries the `__proto__`
+guard in `$.extend`'s deep-merge loop, or the self-closing-tag rewrite regex `rxhtmlTag`. Those
+questions are asked *only* because a version inside CVE-2019-11358 / CVE-2020-11022's range was
+detected, and only of the artifact that version came from. **jQuery 3.6.0 is asked nothing; 3.4.1 is
+asked one of the two and not the other — the VERSION picks the probe set, not the library.**
+
+**A measured false positive removed:** dvga serves `bootstrap.bundle.min.js`, and Bootstrap 4.5.3's
+own dependency-check *error string* was being read as a CONFIRMED `jquery 1.9.1`, raising a three-CVE
+medium finding on a file containing no jQuery. Both probes now return
+`REFUTED / library_absent_from_artifact` and the finding is gone.
+
+**What it still is NOT, stated by the lane rather than extracted from it:** the entire
+server/language/CMS half is still a version reporter — `Server: Apache/2.4.7`, `X-Powered-By`,
+`<meta generator>` are LOW, never CVE-eligible, and drive no test. And the chain reaches
+`APPLICABILITY_CONFIRMED`, not `ORACLE_CONFIRMED`: **locating vulnerable code is not observing
+exploitation**, so confidence stays `lead` and SARIF output is byte-identical to before.
+
+**Three things went wrong and each bought something:**
+- **A hypothesis falsified on real bytes.** `.fn.jquery` is the obvious presence marker and is
+  *inverted* in practice — present in Bootstrap's banner, absent from the minified jQuery three labs
+  actually serve. The control is now `.fn.init` AND `jquery:`.
+- **A regression the lane caused and a test it did not own caught.** Refuting by absence on a 55-byte
+  body made a still-vulnerable jQuery upgrade retest **CLOSED** — a remediation lie, which is worse
+  than a missed finding because someone acts on it. Absence only argues when there was room for the
+  evidence.
+- **A surviving mutant exposed a vacuous test of the lane's own**, not a code defect. 14 mutants, 14
+  killed, each verified APPLIED.
+
+**Slice 2, found by checking an adjacent claim instead of assuming it:** `reconcile_components` exists
+to remove one specific false positive, is covered by tests, and its only production caller was
+`retest.py`. **The scan path never called it**, so the FP it exists to remove shipped on every scan.
+
+---
+
+## Q-050(b) SOUNDNESS — the islands, judged rather than wired. 2026-08-16
+
+Verdicts landed one commit at a time, wiring nothing. The headline: **the content-discovery trio is
+UNSOUND as shipped and all three binaries are ABSENT.** Three adapters, one capability, zero
+installed — the product implies content discovery it cannot perform. `run_workflow` is a finding
+**SINK** (measured), `run_external_surface` is SOUND, `run_metadata` is UNSOUND on a proven positive,
+and `enumerate_ids` is SOUND *as a lead engine*.
+
+That is exactly why this was a Breaker lane and not a Builder: wiring six engines on a static reading
+would have been the wp1 mistake six times over.
+
+---
+
 ## ★ A PASSIVE MISSION WAS MAKING LIVE REQUESTS. 2026-08-16
 
 Found while diagnosing something else, which is where the real ones come from.
