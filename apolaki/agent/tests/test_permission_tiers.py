@@ -217,6 +217,84 @@ def _dispatch_perms(mode, perms):
 _TIERS = (PermissionLevel.PASSIVE, PermissionLevel.ACTIVE, PermissionLevel.INTRUSIVE)
 
 
+def _gate_events(mode, tier, auto_approve, preset_state=None):
+    """Drive the REAL `_run_tool` for one tier and report (event types, engines executed).
+
+    The generator is closed as soon as an approval is requested, so an un-answered gate does not
+    block the test (`APPROVAL_TIMEOUT` defaults to 0 = wait forever).
+    """
+    eng = scope_mod.ScopeEngine()
+    eng.load_manual(["*.t"], [], "gate")
+    tools = _Tools([])
+    executed = []
+
+    class _Result:
+        def __init__(self, name):
+            self.tool, self.target, self.success = name, "", True
+            self.output, self.findings, self.error = "{}", [], None
+
+    async def execute(name, _inp, _sid):
+        executed.append(name)
+        return _Result(name)
+
+    tools.execute = execute
+    ag = agent_mod.BBHAgent(eng, tools, asyncio.Event(), strategy="deterministic", mission_id=None)
+    ag.mode = mode
+    ag.auto_approve = auto_approve
+    if preset_state is not None:
+        ag.intrusive_state = preset_state
+
+    name = "__probe_%s" % tier.value
+    tools_mod.TOOL_PERMISSIONS[name] = tier
+    events = []
+    try:
+        async def run():
+            agen = ag._run_tool(name, {"url": "https://t/"}, "s")
+            async for ev in agen:
+                events.append(ev.get("type") or "_content")
+                if ev.get("type") == "approval_required":
+                    await agen.aclose()
+                    return
+
+        asyncio.run(run())
+    finally:
+        tools_mod.TOOL_PERMISSIONS.pop(name, None)
+    return events, executed
+
+
+def test_active_mode_ASKS_before_running_an_intrusive_engine():
+    """The ticket's premise, tested rather than assumed -- and it does not hold.
+
+    "An operator who selects `active` gets SQL, XPath and LDAP injection fired at their application"
+    is FALSE for an interactive run. `active` + `auto_approve=False` reaches `_await_gate`, which
+    emits `approval_required` and BLOCKS the mission until the operator answers. That is exactly the
+    contract the mode selector advertises: "Active -- + scanning (1 approval gate)".
+    """
+    events, executed = _gate_events("active", PermissionLevel.INTRUSIVE, auto_approve=False)
+    assert "approval_required" in events, (
+        "an INTRUSIVE engine ran in `active` with no operator approval requested: %r" % (events,))
+    assert executed == [], "the engine executed before the operator answered the gate: %r" % (executed,)
+
+
+def test_a_denied_gate_stops_the_intrusive_engine():
+    """Fail-closed, and the negative control for the test above. `_await_gate` also defaults to
+    'denied' on timeout (`agent.py`: `self._approval_result or "denied"`), so silence is refusal."""
+    events, executed = _gate_events("active", PermissionLevel.INTRUSIVE, auto_approve=False,
+                                    preset_state="denied")
+    assert executed == [], "a DENIED intrusive gate still executed the engine: %r" % (executed,)
+    assert "scope_block" in events, events
+
+
+def test_an_autonomous_run_pre_authorises_and_says_so():
+    """The other half: `auto_approve=True` IS the operator's pre-authorisation of the intrusive
+    phase, and the dispatcher announces it. wp3's 700 `run_sqli` dispatches were consented to here,
+    not smuggled past a broken tier check."""
+    events, executed = _gate_events("active", PermissionLevel.INTRUSIVE, auto_approve=True)
+    assert executed, "a pre-authorised autonomous run failed to execute the intrusive engine"
+    assert "approval_required" not in events, (
+        "a pre-authorised run still stopped to ask: %r" % (events,))
+
+
 def test_passive_mode_is_enforced_at_the_dispatcher():
     """The half that works, asserted so a change to the other half cannot quietly break it."""
     assert _dispatch_perms("passive", _TIERS) == {PermissionLevel.PASSIVE}

@@ -242,12 +242,11 @@ The minimal honest change, if only one thing is done: **change the default from 
 (`main.py:56`, `main.py:111`, `agent.py:377`, `agent.py:415`) and make `_run_tool` honour
 `planner._ALLOWED`.** Every mission that runs today keeps dispatching exactly what it dispatches
 today, because today's `active` already behaves as `full`. The operator who wants less can then
-select `active` and actually get less. Nothing published moves. This converts a silent
-misrepresentation into an explicit default, which is the whole of the consent defect.
+select `active` and actually get less. Nothing published moves.
 
-`main.py` and `agent.py:377/415` -- the default-mode literals -- are the Coordinator's and mine
-respectively; I have not changed either, because the choice of default is the product decision this
-handoff exists to hand back.
+> **RETRACTED 2026-08-16 -- see "The decision does not survive implementation" below. The
+> "nothing moves" claim above is WRONG on two independent counts, both MEASURED. It is left in
+> place, struck, because the correction is the result.**
 
 ### What moves if the decision goes the other way (narrow `active`)
 
@@ -281,6 +280,137 @@ decision can change a single dispatch it makes. Its scores are unaffected by any
 The whole-product harness is the one that IS affected: `scripts/whole_product_rerun.py:91` reads
 `MODE = os.environ.get("WP_MODE", "active")` and passes it to `BBHAgent(mode=MODE, auto_approve=True)`
 (line 333). That is the harness that produced wp1 and wp3.
+
+---
+
+## SLICE 4 -- the decision does not survive implementation, and I am not applying it
+
+I was told to apply my own decision. I went to implement it, measured the two things it depends on,
+and both were false. Recording the disproof instead, because landing it would have shipped a
+regression I had just finished arguing against.
+
+### Retraction 1 -- flipping the default does not reach any real mission
+
+The "nothing moves" claim assumed missions rely on the Pydantic default. MEASURED, they do not.
+`ui/index.html:340-344` is the mode selector:
+
+```html
+<option value="passive">Passive -- recon + playbook only</option>
+<option value="active" selected>Active -- + scanning (1 approval gate)</option>
+<option value="full">Full -- + deep probing (gated)</option>
+```
+
+and `ui/index.html:1327` sends `mode: document.getElementById("mode").value`. **Every UI-launched
+mission sends `"active"` explicitly.** `main.py:56`'s default is never consulted on that path. So
+changing the defaults and making `_run_tool` honour `_ALLOWED` would NOT be a no-op -- it would cut
+49.5% of the sweep, and every SQLi check, from every mission launched from the product's own UI.
+The fix would have to include `ui/index.html`, which nobody's file list mentioned.
+
+### Retraction 2 -- `full` is not `active` plus INTRUSIVE
+
+The recommendation assumed `full` is a superset differing only in permitted tiers. MEASURED, `full`
+is differentiated by four ad-hoc checks that have nothing to do with the tier table:
+
+```
+main.py:566     lab_mode=(req.mode == "full")            -> ToolRegistry.lab_mode = True
+agent.py:2169   if self.mode == "full" and pair:         -> the horizontal WRITE test
+agent.py:2202   "allow_write": (self.mode == "full" or self.authenticated_scan)
+planner.py:212  intrusive = 15 if mode == "full" else 0  -> planner intrusive budget
+planner.py:230  nuclei_heavy ... and mode == "full"
+```
+
+`lab_mode` reaches `tools.py:6151` and changes how traversal probes are BUILT and how their verdicts
+are ANALYSED (`ws.build_traversal_probes(..., lab_mode=lab)`, `ws.analyze_traversal_pair(...,
+lab_mode=lab)`). So defaulting missions to `full` would turn lab-calibrated traversal semantics on
+against production targets, and turn ON a state-changing horizontal write test.
+
+**The consent fix would have enabled writes by default.** That is the exact trade the ticket was
+written to prevent, arrived at from the opposite direction.
+
+### What that leaves, and the premise it disproves
+
+`full` and `active` ARE distinguishable in the product -- through those five checks -- just not in
+`_run_tool`. The strict xfail's reason stays accurate as written because it says "at the dispatcher".
+
+More importantly, the ticket's consent premise itself does not hold. It states that "an operator who
+selects `active` expecting non-intrusive testing gets SQL, XPath and LDAP injection fired at their
+application today". MEASURED by driving the real `_run_tool`, that is FALSE for an interactive run:
+
+- `active` + `auto_approve=False` + an INTRUSIVE tool reaches `_await_gate`, which yields
+  `approval_required` and BLOCKS the mission until the operator answers. The engine does not run.
+- A denied gate never executes the engine.
+- `_await_gate` sets `self.intrusive_state = self._approval_result or "denied"`, so a timeout is a
+  REFUSAL. The gate is fail-closed.
+- `auto_approve=True` skips the modal and says so ("Intrusive phase pre-authorized (autonomous
+  run)"). That flag IS the operator's pre-authorisation, and it is what wp3 set.
+
+So the 700 `run_sqli` dispatches in wp3 were consented to by `auto_approve=True`, not smuggled past
+a broken tier check. And the mode selector's own label for `active` is "**+ scanning (1 approval
+gate)**" -- one approval gate is precisely what `_run_tool` implements. The dispatcher matches the
+product's operator-facing contract; `planner._ALLOWED` is the mechanism that contradicts it.
+
+Note on my earlier measurement: `_dispatch_perms` sets `auto_approve = True`, so
+"`active` admits INTRUSIVE" was measured under pre-authorisation. That qualification was missing
+from the first version of this handoff and it matters.
+
+Four characterisation tests now pin all of this (`test_active_mode_ASKS_before_running_an_intrusive_engine`,
+`test_a_denied_gate_stops_the_intrusive_engine`, `test_an_autonomous_run_pre_authorises_and_says_so`).
+They were GREEN on unmodified HEAD `a22ee43` -- they are not fix-driven tests, they record a
+disproof and stop the behaviour from drifting.
+
+### Revised recommendation
+
+The evidence now points at **loosening `planner._ALLOWED["active"]` to include INTRUSIVE**, which
+the ticket explicitly forbade as "deleting the honest half". I am not doing it unilaterally, but I
+am obliged to report that the evidence no longer supports the planner being the honest half:
+
+1. The UI contract for `active` is "scanning, 1 approval gate". The gate exists, is fail-closed, and
+   is what `_run_tool` runs. The planner's table forbids what that contract promises.
+2. `full`'s real meaning is carried by the five checks above, not by the tier table -- so the table
+   is not what separates the modes today, and making it authoritative would change the modes'
+   meanings rather than enforce them.
+3. The planner's exclusion is the direct cause of the Q-050 coverage defect: `run_cmdi`,
+   `run_web_probes`, `run_ssrf`, `run_nosqli`, `run_bfla` and `run_content_discovery` cannot be
+   SCHEDULED in the default mode, which is why `run_cmdi` has 0 dispatches in 151 missions.
+4. The INTRUSIVE tier is not a consent set anyway (`run_hash_crack` / `run_session_lifecycle`).
+
+If the tier model is to be the consent mechanism, the ordering is: split the overloaded couplings
+off `full` FIRST (lab_mode from an explicit lab flag, writes from an explicit write consent --
+`authenticated_scan` already is one), THEN make the table authoritative, THEN move the default and
+the UI's `selected` attribute in the same change. Doing step two alone is the 49.5% regression.
+
+### Whole-product harness patch (scripts/ is the Coordinator's -- NOT edited)
+
+If the default ever moves, `scripts/whole_product_rerun.py:91` must stop defaulting:
+
+```python
+# was: MODE = os.environ.get("WP_MODE", "active")
+# A whole-product artifact is only comparable to fab8a46e / 951dc0a0 if its mode is RECORDED
+# rather than inherited from a default that has since moved. Fail loudly instead.
+MODE = os.environ.get("WP_MODE") or ""
+if MODE not in ("passive", "active", "full"):
+    raise SystemExit("WP_MODE must be set explicitly (passive|active|full) -- a whole-product "
+                     "artifact inherits no default, or it stops being comparable to earlier seals.")
+```
+
+`docs/handoff/orchestration.md:998` carries the reproduction line `-e WP_MODE=active` and would need
+the same treatment.
+
+### Docstring vs registry disagreements -- their own ticket, on the record
+
+Four engines' docstrings contradict their own `TOOL_PERMISSIONS` entry. This is the
+declaration-vs-fact defect written in prose: the docstring is the declaration an engineer reads, the
+registry is the fact the gate enforces.
+
+| engine | docstring says | registry says |
+|---|---|---|
+| `confirm_authz_write` | ACTIVE | INTRUSIVE |
+| `confirm_create_object_idor` | ACTIVE | INTRUSIVE |
+| `run_external_surface` | PASSIVE | ACTIVE |
+| `run_param_mine` | ACTIVE | INTRUSIVE |
+
+`run_external_surface` is the one to look at first: it is declared PASSIVE, registered ACTIVE, and
+has NO dispatch site at all (below), so all three of its facts disagree.
 
 ---
 
@@ -348,13 +478,90 @@ silent falsehood with a loud one.
 
 ---
 
-## Q-050 part (b) -- selection gaps
+## Q-050 part (b) -- selection gaps, DIAGNOSED (not fixed)
 
-NOT STARTED. Slice 2 consumed the available budget. The diagnosis question is stated in the ticket
-(preconditions never satisfied vs planner ranking vs no dispatch site at all) and is unanswered here.
-One fact already collected that bears on it: `run_external_surface` is registered ACTIVE while its
-own docstring declares PASSIVE, which is a tier/declaration disagreement independent of whether it
-has a dispatch site.
+Method: for each named engine, search every non-test module for the name appearing in a dispatching
+construct (`_run_tool("x"`, `_exec_internal("x"`, `planner._step("x"`, a sweep tuple, or a
+declarative pack entry). An engine whose only references are its `TOOL_PERMISSIONS` row and its
+`CLAUDE_TOOLS` schema has no dispatch site: nothing in the product can ever call it except the model
+choosing it by name in agentic mode.
 
-Constraint carried forward from the Coordinator: do NOT fix any of this by adding engines to
-`_SWEEP_HTTP_ENGINES`. wp1 measured that cost.
+The three causes the ticket asked me to separate are all present, and they are three different
+repairs.
+
+### Cause A -- NO DISPATCH SITE AT ALL (islands). 6 engines.
+
+Registry row + tool schema and nothing else. These cannot be selected because there is no selector.
+
+| engine | tier | only references |
+|---|---|---|
+| `run_external_surface` | ACTIVE | `tools.py:220` registry, `tools.py:461` schema |
+| `run_dirsearch` | INTRUSIVE | `tools.py:206` registry, `tools.py:938` schema |
+| `run_ferox` | INTRUSIVE | `tools.py:205` registry, `tools.py:934` schema |
+| `run_gobuster` | INTRUSIVE | `tools.py:207` registry, `tools.py:942` schema |
+| `run_metadata` | ACTIVE | `tools.py:203` registry, `tools.py:920` schema (+ a name-list at `agent.py:103`) |
+| `run_workflow` | INTRUSIVE | `tools.py:234` registry, `tools.py:1058` schema |
+
+`run_external_surface` is confirmed still a pure island, matching the Coordinator's recollection.
+The dirsearch/ferox/gobuster trio are three adapters for one capability (directory brute force) and
+none of the three is wired -- so the gap is one capability, not three engines.
+
+`run_metadata`'s `agent.py:103` mention is a membership list, not a call. Naming an engine in a list
+is the declaration; having a dispatch site is the fact.
+
+**Second-order island:** `enumerate_ids` (INTRUSIVE) IS reachable -- but only through
+`workflow.py:18`'s handler map, which is only driven by `run_workflow`, which is itself an island.
+It is reachable from an unreachable thing, so it never runs. A reachability gate that treats
+"referenced by some dispatcher" as reachable would pass it; that is the shape this project calls a
+guard checking a declaration.
+
+### Cause B -- DISPATCH SITE EXISTS, PRECONDITION NEVER SATISFIED. 4 engines.
+
+These are correctly wired. They do not run because their guard is rarely or never true. This is a
+precondition problem and a coverage question, NOT a permission or ranking one.
+
+| engine | dispatch site | precondition |
+|---|---|---|
+| `run_jwt` | `planner.py:645` `_step("run_jwt", {"token": ...})` | a JWT must have been OBSERVED (regex match); no token, no step |
+| `run_default_creds` | `agent.py:3524` sweep | `default_creds_tool.match(path)` -- only a recognised Tomcat Manager / JBoss jmx-console path |
+| `run_saml` | `agent.py:2424` `_exec_internal` | SAML URLs present |
+| `run_session_lifecycle` | `agent.py:1905` `_exec_internal` | `agent.py:1900`: `if not self.authenticated_scan or self.mode == "passive": return` |
+
+`run_default_creds` is the clearest: its guard is a two-product allowlist, so on any target that is
+not Tomcat or JBoss it correctly never fires. That is not a defect, and "wire it harder" would be
+wrong. `run_session_lifecycle` requires an authenticated scan by design -- it mints a sacrificial
+account, so gating it behind explicit auth opt-in is correct.
+
+### Cause C -- planner ranking. 0 engines found.
+
+No engine in the named list is blocked by ranking or budget. I looked for it and did not find it;
+recording the negative result so the next lane does not re-search the same ground.
+
+### `run_jsonp` -- reclassified
+
+The ticket listed it as never-selected. MEASURED, it HAS a dispatch site (`agent.py:969`, the
+candidate-validation pipeline) and it DOES run -- the defect was that it ran through the UNGATED
+`self.tools.execute`, including in passive mode. Fixed in slice 3 (`2707caa`). It belongs to the
+consent ticket, not the selection one.
+
+### What the repairs are, and what they are NOT
+
+Three different repairs, and the constraint carried forward from the Coordinator applies to all of
+them: do NOT fix any of this by adding engines to `_SWEEP_HTTP_ENGINES`. wp1 measured what an
+unproven engine on the always-on path costs -- a false positive that took two days and three dead
+hypotheses to explain.
+
+- **Cause A (islands)** needs a dispatch site with a real precondition, engine by engine, each with
+  the evidence that the engine's oracle is sound enough to be trusted first. The trio also needs a
+  product decision: one directory-brute-force capability with three interchangeable adapters wants a
+  single selection point that picks whichever binary is installed, not three separate wirings.
+- **Cause B** needs no code change. It needs the report to distinguish "precondition not met" from
+  "never dispatched", which is `arsenal_gap`'s job and which is broken for an unrelated reason
+  (slice 2b).
+- **`enumerate_ids`** is fixed by whatever fixes `run_workflow`; it should not be wired separately.
+
+**Unblocking note:** all six Cause-A repairs need a dispatch site in `agent.py` or `planner.py`,
+which are this lane's files, but each also needs an oracle-soundness argument that this lane has not
+made and cannot make from static reading alone. Landing six new always-on dispatch sites on that
+basis is precisely the wp1 mistake. They are diagnosed and left for a lane that can measure each
+engine against a lab.
