@@ -3460,14 +3460,14 @@ class BBHAgent:
                     async for ev in self._run_tool("fetch_openapi", {"url": b + _spec}, session_id):
                         if "_content" not in ev:
                             yield ev
-                except Exception:
-                    pass
+                except Exception as _e:
+                    self.tools._swallow(_e, "sweep.fetch_openapi", b + _spec)
             try:
                 async for ev in self._run_tool("run_graphql", {"url": b}, session_id):
                     if "_content" not in ev:
                         yield ev
-            except Exception:
-                pass
+            except Exception as _e:
+                self.tools._swallow(_e, "sweep.run_graphql", b)
         # PATH-PARAMETER SQLi on REST endpoints: an OpenAPI-seeded /users/v1/{id} carries its id in the PATH,
         # which the query-string injection sweep below never touches. Fuzz the id segment of each distinct
         # numeric-path endpoint (the API half's flagship injection vector). Bounded + deduped by path shape.
@@ -3486,8 +3486,8 @@ class BBHAgent:
                 async for ev in self._run_tool("run_path_sqli", {"url": u}, session_id):
                     if "_content" not in ev:
                         yield ev
-            except Exception:
-                pass
+            except Exception as _e:
+                self.tools._swallow(_e, "sweep.run_path_sqli", u)
             if len(_seen_psig) >= 25:
                 break
         # THE BUDGET IS PASSED EXPLICITLY (Q-019). The call site used to omit `limit`, so the function
@@ -3510,8 +3510,8 @@ class BBHAgent:
                 async for ev in self._run_tool("run_encoded_cookie", {"url": hb}, session_id):
                     if "_content" not in ev:
                         yield ev
-            except Exception:
-                pass
+            except Exception as _e:
+                self.tools._swallow(_e, "sweep.run_encoded_cookie", hb)
         # default-credentials check on any discovered KNOWN admin interface (Tomcat Manager / JBoss jmx-console).
         # Planner-independent coverage guarantee; the tool self-skips non-product paths + tries ONE vendor default.
         import default_creds_tool as _dc
@@ -3524,8 +3524,8 @@ class BBHAgent:
                 async for ev in self._run_tool("run_default_creds", {"url": u}, session_id):
                     if "_content" not in ev:
                         yield ev
-            except Exception:
-                pass
+            except Exception as _e:
+                self.tools._swallow(_e, "sweep.run_default_creds", u)
         # TWO TIERS, TWO BUDGETS (Q-019). MEASURED per URL on a live lab: the eight HTTP-only engines
         # below total 1.1 s, run_xss 10 s and run_dom_trace 9 s. Running all ten on every target made
         # the sweep 20x more expensive than its evidence justified, which is what forced the cap to 20.
@@ -3539,8 +3539,12 @@ class BBHAgent:
                     async for ev in self._run_tool(tool, {"url": u}, session_id):
                         if "_content" not in ev:
                             yield ev
-                except Exception:
-                    pass
+                except Exception as _e:
+                    # THE 92% SITE (Q-052). MEASURED on a whole-product mission this loop is 3350 of
+                    # 4059 dispatches, so a bare `pass` here made most of the product's engine
+                    # failures indistinguishable from a clean target. The handler still swallows --
+                    # one broken engine must not abort a mission -- but the failure is now RECORDED.
+                    self.tools._swallow(_e, "sweep.%s" % tool, u)
         # HTML-PAGE coverage guarantee: many injection points live on pages with NO query string — a POST
         # form (login username -> reflected XSS), or a client param the page reads that no crawl edge links
         # (/login?redirect, /catalog?category -> DOM data / CSTI). The parameterized sweep above skips them.
@@ -3609,21 +3613,25 @@ class BBHAgent:
                         async for ev in self._run_tool(tool, {"url": u}, session_id):
                             if "_content" not in ev:
                                 yield ev
-                    except Exception:
-                        pass
+                    except Exception as _e:
+                        self.tools._swallow(_e, "sweep.html.%s" % tool, u)
                 # the CSTI/prototype-pollution/gadget DOM audit is browser-heavy — run it only where param
                 # discovery found a reflecting/JS-read param (a real DOM/CSTI candidate), so it stays bounded.
                 try:
                     disc = await self.tools._discover_params(u)
-                except Exception:
+                except Exception as _e:
+                    # A crash here does not merely lose one engine: `disc` falling back to [] SKIPS
+                    # run_dom_audit entirely, so the CSTI/prototype-pollution class goes untested and
+                    # the run reports clean. Recording it is what tells those two cases apart.
+                    self.tools._swallow(_e, "sweep.discover_params", u)
                     disc = []
                 if disc:
                     try:
                         async for ev in self._run_tool("run_dom_audit", {"url": u}, session_id):
                             if "_content" not in ev:
                                 yield ev
-                    except Exception:
-                        pass
+                    except Exception as _e:
+                        self.tools._swallow(_e, "sweep.run_dom_audit", u)
 
     async def _run_deterministic(self, session_id: str):
         yield {"type": "info", "content": f"Deterministic scan planner engaged ({self.mode} mode, no AI) — "
