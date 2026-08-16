@@ -386,16 +386,66 @@ to remove one specific false positive, is covered by tests, and its only product
 
 ---
 
-## Q-050(b) SOUNDNESS — the islands, judged rather than wired. 2026-08-16
+## ★ Q-050(b) SOUNDNESS — seven verdicts, and FOUR engines describe what they do not do. 2026-08-16
 
-Verdicts landed one commit at a time, wiring nothing. The headline: **the content-discovery trio is
-UNSOUND as shipped and all three binaries are ABSENT.** Three adapters, one capability, zero
-installed — the product implies content discovery it cannot perform. `run_workflow` is a finding
-**SINK** (measured), `run_external_surface` is SOUND, `run_metadata` is UNSOUND on a proven positive,
-and `enumerate_ids` is SOUND *as a lead engine*.
+Judged, not wired. Landed one verdict per commit, which is why a session-limit kill mid-way cost
+nothing.
 
-That is exactly why this was a Breaker lane and not a Builder: wiring six engines on a static reading
-would have been the wp1 mistake six times over.
+| engine | verdict | reason |
+|---|---|---|
+| `run_ferox` | **UNSOUND — delete** | binary absent; no oracle, no negative control; `--no-recursion` disables the only thing it would add |
+| `run_dirsearch` | **UNSOUND — delete** | binary absent; duplicates a wired native engine that HAS the soft-404 baseline it lacks |
+| `run_gobuster` | **UNSOUND — delete** | binary absent; same duplication, same missing oracle |
+| `run_external_surface` | **SOUND** | returns `ToolResult(..., [])` on every path — no finding, no FP surface; scope control runs on the confirming path |
+| `run_metadata` | **UNSOUND as shipped** | 0 FPs on 14 negative controls, and reports clean on a file PROVEN to leak GPS |
+| `run_workflow` | **UNSOUND as a finding path** | it is a finding SINK, measured |
+| `enumerate_ids` | **SOUND as a lead engine** | nonexistent-id baseline suppressed 8/8 hits on a catch-all-200 route; hard cap 52 requests |
+
+**Content discovery: keep NONE of the three.** Not "three engines are unwired" — **a capability the
+product ADVERTISES TO THE MODEL in three tool specs and cannot perform.** `command -v` finds none of
+feroxbuster/dirsearch/gobuster in the image; driven live against Juice Shop all three return `not
+installed`, 0 findings, 0 URLs added. The capability is already wired natively
+(`run_content_discovery` + `run_ffuf`, planner-dispatched, both carrying a soft-404 baseline
+`_bin_discovery` has no equivalent of). The last argument for feroxbuster was recursion:
+`tools.py:935` sells *"Recursive content discovery"* and `tools.py:1483` passes `--no-recursion`.
+Their only coverage is a declaration test. **Deleting the three specs is the highest-value,
+lowest-risk item in the queue: purely subtractive, no oracle argument required.**
+
+**`run_workflow` is a finding sink, and TWO sinks deep.** Same engine, same live target, two paths:
+`enumerate_ids` over `/api/Products/{id}` emits an `idor` lead on a direct call and **nothing**
+through `workflow.run`, which reads `res.output/success/error` and never `res.findings`. The same sink
+swallows `confirm_idor`'s confirmed CWE-639 finding — the one the flagship `idor_read` pack is built
+on — while `_run_workflow`'s docstring claims the opposite and `asvs_model.py:308` leans on that
+claim. Second sink downstream: `run_workflow` is not in `_AUTO_STORE_TOOLS`, so fixing `workflow.py`
+alone changes nothing. **Wiring it before the fix would spend real requests on real attacks and report
+nothing.**
+
+**`run_metadata`'s false negative, with the coordinates decoded by hand:** 59°25'16.17"N 24°48'4.32"E
+read straight out of the GPS IFD of the Juice Shop geo-stalking photo, while the engine returned "No
+sensitive metadata". Two causes compose — exiftool is not in the image, and the native fallback's only
+JPEG branch matches the ASCII string `b"GPS"`, which real binary EXIF never contains
+(`b"GPS" in data == False` on the file that HAS GPS).
+
+**THE CROSS-CUTTING FINDING, which is worth more than any single verdict: four of the seven carry a
+description the code does not support** — ferox's recursion, metadata's EXIF, workflow's docstring,
+external_surface's PASSIVE-vs-ACTIVE. One defect class, and precisely why static reading could never
+have settled these: **a reachability gate cannot catch any of them, because every one of these engines
+is present, registered and implemented.** The gap is between what the engine SAYS and what it DOES,
+and only running it closes that.
+
+`enumerate_ids` is **a separate island wearing a dependency**, not a second-order one — it has its own
+top-level alias and spec. Resurrecting it via `run_workflow` would route a sound lead engine through a
+proven sink.
+
+Two UNKNOWNs, each with the experiment that settles it: whether `_bin_discovery`'s URL regex fits real
+gobuster/dirsearch stdout at all (does not change the delete verdict, only whether deletion also
+removes a latent false-clean), and whether `run_metadata` would fire with exiftool present.
+
+Reachability was re-measured independently and **no island was falsified**; all seven stand.
+
+**A measurement-hygiene note the lane volunteered:** its first pass ran against the working tree,
+which carried another live lane's 79 uncommitted lines in `tools.py`. It re-ran everything against
+committed HEAD and all results reproduced identically. Rule 8c again, caught by the lane itself.
 
 ---
 

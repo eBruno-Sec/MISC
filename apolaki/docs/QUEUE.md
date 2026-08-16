@@ -1,5 +1,45 @@
 # QUEUE — the one canonical, dependency-ordered work queue
 
+### Q-054 · `run_workflow` is a FINDING SINK, two sinks deep · **HIGH** · `proposed`
+
+MEASURED by the islands lane. Same engine, same live target, two paths: `enumerate_ids` over
+`/api/Products/{id}` emits an `idor` lead on a direct call and **nothing** through `workflow.run`,
+which reads `res.output/success/error` and **never `res.findings`**. The same sink swallows
+`confirm_idor`'s confirmed CWE-639 finding — the finding the flagship `idor_read` pack is built on.
+
+`_run_workflow`'s docstring claims the opposite, and `asvs_model.py:308` leans on that claim.
+**Second sink downstream**: `run_workflow` is not in `_AUTO_STORE_TOOLS`, so repairing `workflow.py`
+alone changes nothing. **DoD: both sinks fixed, proven by a finding surviving a real workflow run —
+and do NOT wire the engine before that, or it spends real requests on real attacks and reports
+nothing.**
+
+### Q-055 · `run_metadata` reports clean on a file proven to leak GPS · **MEDIUM** · `proposed`
+
+MEASURED: 59°25'16.17"N 24°48'4.32"E decoded by hand from the GPS IFD of the Juice Shop geo-stalking
+photo; the engine returned "No sensitive metadata". Two causes compose — exiftool is absent from the
+image, AND the native fallback's only JPEG branch matches the ASCII string `b"GPS"`, which real binary
+EXIF never contains (`b"GPS" in data == False` on the file that HAS GPS). Fixing the Dockerfile alone
+leaves a fallback that cannot work; fixing the fallback alone leaves the better reader missing.
+
+### Q-056 · FOUR engines describe capability their code does not have · **HIGH** · `proposed`
+
+The cross-cutting result of the islands audit, and worth more than any single verdict: `run_ferox`
+advertises recursion while passing `--no-recursion`; `run_metadata` advertises EXIF it cannot read;
+`_run_workflow`'s docstring claims findings it discards; `run_external_surface` is described PASSIVE
+and registered ACTIVE. **A reachability gate cannot catch any of these — every engine is present,
+registered and implemented.** The gap is between what an engine SAYS and what it DOES, and only
+running it closes that. DoD: a check that compares each engine's advertised behaviour against its
+measured behaviour, or an explicit decision that this is a review discipline rather than a gate.
+
+### Q-057 · DELETE the three content-discovery specs · **HIGH** · `handed to the sessions lane`
+
+Purely subtractive, no oracle argument needed. All three binaries absent from the image; the
+capability is already wired natively with a soft-404 baseline the adapters lack; only coverage is a
+declaration test. Apolaki advertises content discovery to the model in three `CLAUDE_TOOLS` entries
+and cannot perform it. Patch handed to the lane holding `tools.py`.
+
+---
+
 ## LANE OWNERSHIP — cycle 7, 2026-08-16. TWO lanes, and the count is the point.
 
 `agent/tools.py` is the universal bottleneck: every engine-wiring ticket needs it, and exactly one
