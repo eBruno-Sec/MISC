@@ -23,8 +23,8 @@ is a new measurement, not a coverage fix.
 | `run_ferox` | no (lead only) | `recon` | **UNSOUND (as shipped)** | binary absent from the shipped image; MEASURED to return `not installed` on every call |
 | `run_dirsearch` | no (lead only) | `recon` | **UNSOUND (as shipped)** | same, and its stdout shape almost certainly does not match the one parser |
 | `run_gobuster` | no (lead only) | `recon` | **UNSOUND (as shipped)** | same |
-| `run_external_surface` | no (emits `[]`) | n/a | **SOUND, and it is not a detector** | cannot produce a finding of any kind; it seeds UNVERIFIED graph candidates |
-| `run_metadata` | no (lead only) | `exposure` | **SOUND-with-caveat** | evidence is real extracted metadata; the key-selection heuristic is substring-based |
+| `run_external_surface` | no (emits `[]`) | n/a | **SOUND** (and it is not a detector) | cannot produce a finding of any kind; seeds UNVERIFIED graph candidates, and nothing reads its output either |
+| `run_metadata` | no (lead only) | `exposure` | **UNSOUND as shipped** | 0 false positives on 14 negative controls, but MEASURED clean on a file proven to carry EXIF GPS |
 | `run_workflow` | no (emits `[]`), and DROPS its steps' findings | n/a | **UNSOUND as a finding path** | `workflow.run` reads only `res.output/success`; inner `confirm_idor` findings are discarded |
 | `enumerate_ids` | no (lead only) | `idor` | **SOUND as a lead engine** | baseline-differenced against a nonexistent id; it is a target-selector, not an oracle |
 
@@ -158,11 +158,212 @@ skipped for a missing binary". Not this lane's file to fix; recorded for the own
 
 ---
 
+## 2. `run_external_surface` -- SOUND, because it is not a detector at all
+
+### It cannot emit a finding of any kind
+
+`tools.py:2559` -- the single return on the success path:
+
+```python
+return ToolResult("external_surface", host, True, json.dumps(out), [])
+```
+
+The findings list is a literal `[]`. There is no other return that carries a finding. So the whole
+false-positive question is moot for this engine: **it has no oracle because it makes no claim.** It
+harvests ASN/BGP, a favicon hash, offline hostname permutations and (gated) CT names, and it seeds them
+as UNVERIFIED graph candidates.
+
+That is also the honest reading of its own docstring -- *"Everything here produces CANDIDATES, not
+findings... never promoted without a live check"* -- and the code matches the docstring, which in this
+codebase is worth checking rather than assuming.
+
+### MEASURED live against a local lab
+
+Driver: `ToolRegistry(ScopeEngine scoped to juice-shop:3000, lab_mode=True)`, method called directly,
+inside `apolaki-agent` on `apolaki_default`.
+
+```
+=== input {'domain': 'http://juice-shop:3000'} scope juice-shop:3000
+  success  = True    error = None    findings = []
+  host        = juice-shop
+  asn         = {"domain": "juice-shop", "ips": [], "asn": {}}
+  favicon     = {"hash": -145098554, "bytes": 9903, "pivots": {"shodan": "http.favicon.hash:-145098554", ...}}
+  permutations= 0 []
+  ct          = {"enabled": false, "query": "https://crt.sh/?q=%25.juice-shop&output=json",
+                 "note": "ct_logs is gated (CT_LOGS_ENABLED); the query is provided for the operator ..."}
+  candidates  = 0
+  recon[external_surface] = {"juice-shop": {"asn": {...}, "favicon_hash": -145098554,
+                             "ct_enabled": false, "candidates": 0}}
+```
+
+### NEGATIVE CONTROL: present, and it RUNS on the confirming path
+
+`tools.py:2500` `if not host or not self.scope.validate(host)[0]: return ... "SCOPE BLOCK"`, and the
+favicon fetch re-validates the full URL at `tools.py:2514`. Measured by driving an out-of-scope host
+with the scope pinned to another lab:
+
+```
+=== input {'domain': 'http://vampi:5000'} scope juice-shop:3000
+  success  = False   error = 'SCOPE BLOCK'   findings = []
+```
+
+The control is on the same code path as the success case (not a branch that the confirming path
+skips), which is the distinction this codebase has been burned by.
+
+### Cost per target -- small and bounded
+
+| step | requests | to whom |
+|---|---|---|
+| `dns_recon.ip_intel` | 1 DoH A-record lookup, + 1 ASN lookup only if an A record resolved | third-party resolver, NOT the target |
+| favicon | at most 2 (`https` then `http`, breaks on the first 200) | the in-scope target |
+| `permute` | 0 | offline, pure |
+| CT | 0 by default (gated off; MEASURED `enabled: false`) or 1 to crt.sh when `CT_LOGS_ENABLED` | crt.sh |
+
+**2 to 5 requests per target, at most 2 of them to the target.** This is the cheapest of the seven
+islands by a wide margin. `max_permutations` defaults to 120 and permutation is pure CPU.
+
+### The real objection: its OUTPUT is an island too
+
+MEASURED by grep -- outside `tools.py` and the tests, **nothing reads `recon["external_surface"]` or
+`recon["external_candidates"]`** (zero hits across `agent/` and `ui/`). The graph candidates are
+seeded with `confidence=0.2, reachable="unverified", provenance_kind="generated"`
+(`recon_expand.py:138`), and the only consumer of a `"subdomain"` node is `graph_export.py:25`, which
+maps it to a `Domain` node in an export. Nothing probes them, nothing promotes them, nothing reports
+them as findings.
+
+So wiring `run_external_surface` today produces: a favicon hash nobody reads, an ASN nobody reads, and
+up to 120 generated `Domain` nodes per host in a graph export. **The engine is sound; the value is
+close to zero until a consumer exists.**
+
+Note it is also declared PASSIVE in its docstring and registered ACTIVE
+(`tools.py:220`) -- see `docs/handoff/tiers.md:409`, already ticketed elsewhere. It does make live
+requests to the target (the favicon), so ACTIVE is the correct registration and the docstring is what
+is wrong.
+
+**VERDICT: SOUND.** Zero false-positive surface by construction, a real negative control that runs,
+and the lowest cost of the seven. **Wiring it is safe and nearly pointless** -- do the consumer first
+(promotion of a candidate on a live reachability check, which is the thing its own docstring says has
+to happen), then wire the producer.
+
+---
+
+## 3. `run_metadata` -- no false positives measured, and a PROVEN false negative on the one positive case
+
+### What it confirms
+
+Nothing. `tools.py:1396` emits a single lead: `family: "exposure"`, `confidence: "lead"`,
+`severity: "medium"` when a matched key contains gps/location/coord, else `"low"`. Its evidence is
+real extracted key/value pairs from bytes the target served, so it passes the "did the target produce
+this observation" test.
+
+Family cross-check, character for character against the emitted record: the string is `"exposure"`;
+`asvs_model.OBJECTIVES` carries `"exposure"` in exactly one objective's `violated_by`, **COMM-03**
+(measured, not read: `[o['cid'] for o in A.OBJECTIVES if 'exposure' in o['violated_by']] ==
+['COMM-03']`). COMM-03's named engines are `run_exposure` and `run_dir_harvest`, so `run_metadata`
+cannot stamp it verified. And because the emission is `confidence: "lead"`, `agent._is_confirmed`
+(`agent.py:706`) routes it to `self.leads`, and `report.py` passes only confirmed `raw_findings` to
+`asvs_model.assess` -- so it cannot spuriously FAIL COMM-03 either. **No consumer problem in either
+direction.**
+
+### MEASURED: 14 negative controls, zero false positives
+
+Driven directly against Juice Shop -- 6 real product images, a PDF path, the SPA index, a JSON API
+response, a soft-404 that returns the SPA shell, a Markdown file, plus 4 real uploaded images:
+
+```
+/assets/public/images/products/apple_juice.jpg      findings=0  No sensitive metadata (native)
+/assets/public/images/products/artwork2.jpg         findings=0  No sensitive metadata (native)
+/assets/public/images/products/fan_hoodie.jpg       findings=0  No sensitive metadata (native)
+/assets/public/images/products/holo_sticker.png     findings=0  No sensitive metadata (native)
+/assets/public/images/products/carrot_juice.jpeg    findings=0  No sensitive metadata (native)
+/assets/public/images/uploads/ipsum.pdf             findings=0  No sensitive metadata (native)
+/                             (HTML SPA index)      findings=0  No sensitive metadata (native)
+/api/Products                 (JSON)                findings=0  No sensitive metadata (native)
+/assets/.../does-not-exist-zzz.jpg  (soft-404)      findings=0  No sensitive metadata (native)
+/ftp/legal.md                 (text)                findings=0  No sensitive metadata (native)
+```
+
+No false positive on a soft-404, on JSON, on HTML or on plain text. The substring key filter
+(`gps|location|author|creator|artist|owner|software|make|model|email|coord`) did not fire on anything
+it should not have.
+
+### MEASURED: it reports CLEAN on a file that is provably leaking GPS
+
+Positive control, chosen from the target's own API (`GET /rest/memories`) rather than guessed:
+`assets/public/images/uploads/magn(et)ificent!-1571814229653.jpg`.
+
+Ground truth first, decoded independently of Apolaki by walking the JPEG segments and dereferencing
+the GPS IFD:
+
+```
+file: assets/public/images/uploads/magn(et)ificent!-1571814229653.jpg  107952 bytes
+GPS IFD tags: ['0x0', '0x1', '0x1d', '0x2', '0x3', '0x4', '0x5', '0x6', '0x7', '0xb']
+GPSLatitudeRef : b'N\x00\x00\x00'
+GPSLatitude    : [59.0, 25.0, 16.17]
+GPSLongitudeRef: b'E\x00\x00\x00'
+GPSLongitude   : [24.0, 48.0, 4.32]
+
+ASCII 'GPS' anywhere in the file: False
+XMP packet present               : False
+PDF info dict present            : False
+```
+
+That file discloses 59 deg 25' 16.17" N, 24 deg 48' 4.32" E. Now the engine on that exact URL:
+
+```
+== assets/public/images/uploads/magn(et)ificent!-1571814229653.jpg
+   http 200 ct=image/jpeg bytes=107952
+   upload_tool.extract_metadata() direct -> {}
+   engine findings=0 output=No sensitive metadata (native)
+```
+
+**MECHANISM (root cause, not a symptom).** Two independent facts compose into the miss:
+
+1. `exiftool` is **not installed in the shipped agent image** (MEASURED, same command as the trio).
+   So `shutil.which("exiftool")` is always false and the engine always takes the native fallback.
+2. `upload_tool.extract_metadata` (`upload_tool.py:186`) reads only three things: an XMP packet, a PDF
+   info dictionary, and -- for JPEG -- the **ASCII** substring `b"GPS"` in the first 64KB
+   (`upload_tool.py:214`). Real EXIF GPS is the **binary** IFD pointer tag `0x8825`; the ASCII string
+   "GPS" never appears. Measured on this file: `b"GPS" in data == False`, no XMP, no PDF dict.
+
+So the one branch that claims to detect EXIF GPS cannot fire on real EXIF GPS, and the branch that
+could (exiftool) is absent from the image. **1 positive case available in the local labs, 0 detected.**
+
+This is the same shape as the memory note *"probe with observed values / an engine reports clean on a
+vulnerable field"*: the engine's clean verdicts were indistinguishable from a working engine until a
+proven-positive case was put in front of it.
+
+### Negative control: NONE
+
+There is no baseline and nothing the engine compares against. Its "clean" answer is
+`if not interesting: return ... "No sensitive metadata"` -- an absence of matches, never a
+demonstrated absence of metadata. That is precisely why the false negative above was invisible.
+
+### Cost
+
+One GET per file, capped at 8 MB, 25 s timeout; plus one `exiftool` subprocess when installed. Trivial
+per call. The cost question is what would DRIVE it: there is no discovered-file feed today, so wiring
+it means someone must also decide which files to point it at -- at one request per file, an
+images-and-documents sweep over a media-heavy target is unbounded unless capped.
+
+**VERDICT: UNSOUND AS SHIPPED -- not in the false-positive direction (0/14), but because the
+capability it advertises does not exist in the shipped image.** Wiring it today adds requests and
+detects nothing on the only proven positive case available.
+
+**Exact measurement that would settle the remaining unknown:** install `exiftool` in a throwaway
+container and re-run the same driver against
+`http://juice-shop:3000/assets/public/images/uploads/magn(et)ificent!-1571814229653.jpg`. If the
+exiftool path emits the GPS lead, the fix is a Dockerfile line (`agent/Dockerfile`, owner: the
+`tools.py` lane) and the verdict flips to SOUND-with-caveat. If it does not, the engine is dead
+regardless of the binary. Either way `upload_tool.extract_metadata` needs a binary EXIF IFD reader
+before the native path can be claimed as a fallback -- today it is a fallback that reads three formats
+none of which is EXIF.
+
+---
+
 ## Method / status of the remaining engines
 
 | engine | status |
 |---|---|
-| `run_external_surface` | in progress |
-| `run_metadata` | in progress |
 | `run_workflow` | in progress |
 | `enumerate_ids` | in progress |
