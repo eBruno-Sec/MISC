@@ -36,6 +36,7 @@ import asyncio
 import os
 import tempfile
 
+import asvs_model
 import db as dbmod
 import dns_recon
 import scope as scope_mod
@@ -165,3 +166,100 @@ def test_engine_of_a_real_dispatch_reaches_storage():
     assert fid, "finding was rejected by the gate -- the storage proof would be vacuous"
     stored = [f for f in dbmod.get_findings(mid) if f.get("id") == fid][0]
     assert stored.get("engine") == "takeover"
+    assert stored.get("family") == "takeover"       # Q-053 GAP-1, same round trip
+
+
+# ── Q-053 GAP-1: takeover is DETECTED and now also REPORTABLE ────────────────
+def _takeover(status, body, cname="dead.x.tld.s3.amazonaws.com"):
+    reg = _registry()
+    reg.recon["subdomains"] = ["dead.x.tld"]
+
+    async def fake_cname(sub):
+        return cname
+
+    async def fake_http(url, **kw):
+        return {"status": status, "body": body}
+
+    dns_recon.resolve_cname, reg._http = fake_cname, fake_http
+    return _run(reg._check_takeover({}))
+
+
+def test_takeover_candidate_is_finding_shaped():
+    """`match_takeover` returns {subdomain, service, cname, severity, reason} -- no family, no title,
+    no target. `_auto_store` keys on `severity` to spot a finding and `db._gate` keys on `target` for
+    scope, so the promotion has to supply the rest at the point of construction."""
+    f = _takeover(404, "NoSuchBucket").findings[0]
+    assert f["family"] == "takeover"
+    assert f["target"] == "https://dead.x.tld"
+    assert "dead.x.tld" in f["title"]
+    assert f["severity"], "severity is the discriminator _auto_store uses -- it must survive"
+
+
+def test_takeover_family_is_the_exact_string_comm04_keys_on():
+    """SPELLING CONTROL. Four of the six objectives Q-048 found incapable of failing failed on a
+    near-miss family name. This asserts the literal COMM-04 declares, read out of asvs_model itself,
+    so a rename on either side breaks the test instead of silently un-wiring the objective."""
+    comm04 = [o for o in asvs_model.OBJECTIVES if o["cid"] == "COMM-04"][0]
+    assert _takeover(404, "NoSuchBucket").findings[0]["family"] in comm04["violated_by"]
+
+
+def test_takeover_finding_maps_to_comm04():
+    """REACHABILITY PROOF: COMM-04 had ZERO producers for `takeover`, so it could never be
+    contradicted. A real engine's real output now maps to the objective it was written for."""
+    mapped = asvs_model.map_findings(_takeover(404, "NoSuchBucket").findings)
+    assert "COMM-04" in mapped, f"takeover still unreachable from COMM-04: {mapped}"
+
+
+def test_takeover_is_the_sole_producer_of_its_family():
+    """SPURIOUS-FAIL CONTROL. A family emitted by several unrelated engines makes an objective fail
+    for the wrong reason. `takeover` maps to exactly one objective, so this engine must be its only
+    producer -- and a false FAIL is a defect too."""
+    owners = [o["cid"] for o in asvs_model.OBJECTIVES if "takeover" in o.get("violated_by", ())]
+    assert owners == ["COMM-04"]
+
+
+def test_takeover_body_signature_hit_is_confirmed():
+    """A provider `unclaimed-resource` signature in the body IS the proof, so the producer grades it
+    at the point it knows, rather than leaving the grade to a name-matching table elsewhere."""
+    f = _takeover(200, "NoSuchBucket").findings[0]
+    assert f["confidence"] == "confirmed"
+    assert f["evidence"], "_is_confirmed downgrades a proofless 'confirmed' -- evidence must be set"
+
+
+def test_takeover_404_only_is_not_confirmed():
+    """NEGATIVE CONTROL against over-claiming, and the one that decides whether this fix is honest.
+
+    A bare 404 under a provider CNAME is, in match_takeover's own words, a "possible dangling record,
+    verify manually". Grading BOTH branches `confirmed` would have passed every other test here."""
+    f = _takeover(404, "totally unrelated page").findings[0]
+    assert f["confidence"] == "candidate"
+
+
+def test_takeover_grade_tracks_the_body_not_the_status():
+    """The confirmed/candidate split is decided by the BODY signature alone: a 404 with the signature
+    is confirmed, a 200 without it produces nothing at all. Pins that the grade is not a re-reading
+    of the status code, and that the second `match_takeover` call is what actually decides."""
+    assert _takeover(404, "NoSuchBucket").findings[0]["confidence"] == "confirmed"
+    assert _takeover(200, "an ordinary page").findings == []
+
+
+def test_takeover_grading_has_no_second_copy_of_the_fingerprint_table():
+    """The grade must come from `dns_recon.match_takeover`, the ONE implementation, so it cannot
+    drift from TAKEOVER_FINGERPRINTS. Proven by MUTATING the shared table at runtime: if the grader
+    held its own copy of the signatures, emptying the real one would not change the verdict."""
+    saved = dns_recon.TAKEOVER_FINGERPRINTS
+    try:
+        dns_recon.TAKEOVER_FINGERPRINTS = []
+        assert _takeover(404, "NoSuchBucket").findings == []
+    finally:
+        dns_recon.TAKEOVER_FINGERPRINTS = saved
+    assert _takeover(404, "NoSuchBucket").findings[0]["confidence"] == "confirmed"
+
+
+def test_takeover_cites_no_cwe_it_cannot_support():
+    """No CWE actually means "dangling DNS record to an unclaimed provider". A plausible-looking
+    wrong identifier is worse than an absent one -- consumers key on `cwe` and would file this under
+    another weakness. WSTG-CONF-10 is cited instead: guidance._rule_takeover already uses it here."""
+    f = _takeover(404, "NoSuchBucket").findings[0]
+    assert "cwe" not in f
+    assert f["wstg"] == "WSTG-CONF-10"

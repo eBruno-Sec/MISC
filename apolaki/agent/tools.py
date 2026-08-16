@@ -5738,6 +5738,58 @@ class ToolRegistry:
         return ToolResult("oauth", endpoint, True,
                           f"{len(findings)} OAuth signal(s), {conf} confirmed", findings)
 
+    @staticmethod
+    def _takeover_finding(sub: str, cname: str, body: str, cand: dict) -> dict:
+        """Q-053 GAP-1: turn a takeover CANDIDATE into a finding-shaped dict, here, where every fact
+        needed to classify and grade it is still in hand.
+
+        THE DEFECT. `dns_recon.match_takeover` returns {subdomain, service, cname, severity, reason}
+        and NO `family`. ASVS objective COMM-04 declares `violated_by: ("takeover",)`, so family
+        "takeover" had zero producers and the objective was UNREACHABLE BY CONSTRUCTION: a real
+        dangling CNAME was detected, appended to `recon["takeover_candidates"]`, and could never be
+        contradicted by a finding. The objective was honest; the plumbing was not.
+
+        THE FAMILY STRING IS `takeover`, CHARACTER FOR CHARACTER. Four of the six objectives the Q-048
+        lane found incapable of failing failed on near-miss SPELLING (`default_creds` vs
+        `default_credentials`, `username_enum` vs `username_enumeration`, `weak_session` vs
+        `weak_session_token`). A phantom family fails loudly; a near-miss fails silently and in the
+        flattering direction. MEASURED: family "takeover" appears in exactly one objective's
+        `violated_by` (COMM-04) and has no other producer in the tree, so this engine becomes its SOLE
+        producer and no other objective can be made to fail spuriously by it.
+
+        GRADING, WITHOUT A SECOND COPY OF THE FINGERPRINT TABLE. `match_takeover` has two hit
+        branches and they are not equally strong: a provider's unclaimed-resource signature IN THE
+        BODY is a proof, while a bare 404 under a provider CNAME is, in its own words, a "possible
+        dangling record, verify manually". Only the first deserves `confirmed`. The branch is not
+        recoverable from the returned dict -- and re-deriving it by re-walking
+        TAKEOVER_FINGERPRINTS here would be a second implementation of a predicate that already
+        exists, free to drift from it. So we ASK THE SAME PURE FUNCTION a narrower question: with
+        `status=0` the 404 branch cannot fire, so a hit means a body signature matched. One
+        implementation, no duplicated table, no parsing of the rendered `reason` prose (Q-046).
+
+        The body-signature scan may match a different provider entry than the original call did (the
+        original returns at the FIRST cname-matching fingerprint, even if a later one carries the body
+        hit). That does not weaken the grade: the question answered is "was any provider's
+        unclaimed-resource signature present in this body", and that is the proof either way."""
+        # status=0 disables the `status == 404` branch, so a hit here means: a BODY signature matched.
+        body_signature_hit = bool(dns_recon.match_takeover(sub, cname, 0, body))
+        f = dict(cand)
+        f["family"] = "takeover"                     # exact string COMM-04's violated_by keys on
+        f["title"] = f"Subdomain takeover: {sub} -> {cand.get('service') or 'unclaimed provider'}"
+        f["target"] = f"https://{sub}"               # the URL actually fetched; scope + fingerprint read it
+        f["confidence"] = "confirmed" if body_signature_hit else "candidate"
+        # `reason` IS the proof; copy it to the key `_is_confirmed` and the report both read first.
+        # Not an `or` default: an empty reason stays empty, which correctly costs the finding its
+        # promotion rather than dressing a proofless claim as confirmed.
+        f["evidence"] = cand.get("reason", "")
+        # NO `cwe`. WSTG-CONF-10 is the reference `guidance._rule_takeover` already cites for exactly
+        # this check, so it is verifiable in-tree. There is no CWE that actually means "dangling DNS
+        # record to an unclaimed provider" -- CWE-350 is reverse-DNS reliance, which is a different
+        # bug -- and a plausible-looking wrong identifier is worse than an absent one: consumers key
+        # on `cwe` and would silently file this under someone else's weakness.
+        f["wstg"] = "WSTG-CONF-10"
+        return f
+
     async def _check_takeover(self, inp: dict) -> ToolResult:
         subs = inp.get("subdomains") or list(dict.fromkeys(self.recon.get("subdomains", [])))
         subs = [s for s in subs if self.scope.validate(s)[0]][:40]
@@ -5752,13 +5804,16 @@ class ToolRegistry:
                 if not cname:
                     return
                 r = await self._http(f"https://{sub}", capture=False)
-                cand = dns_recon.match_takeover(sub, cname, r.get("status", 0), r.get("body", ""))
+                body = r.get("body", "")
+                cand = dns_recon.match_takeover(sub, cname, r.get("status", 0), body)
                 if cand:
-                    candidates.append(cand)
+                    candidates.append(self._takeover_finding(sub, cname, body, cand))
 
         await asyncio.gather(*[check(s) for s in subs])
         self.recon["takeover_candidates"].extend(candidates)
-        return ToolResult("takeover", "", True, f"{len(candidates)} takeover candidate(s)", candidates)
+        conf = sum(1 for c in candidates if c.get("confidence") == "confirmed")
+        return ToolResult("takeover", "", True,
+                          f"{len(candidates)} takeover candidate(s), {conf} confirmed", candidates)
 
     # ── INTRUSIVE ────────────────────────────────────────────────
     async def _run_ffuf(self, inp: dict) -> ToolResult:
