@@ -87,3 +87,59 @@ def test_the_section_reaches_the_rendered_report():
     assert "Arsenal coverage" in md
     assert "Never dispatched this mission" in md
     assert "run_cmdi" in md, "the tier-blocked engines must be named, not just counted"
+
+
+# ── Q-051: per-finding attribution, and the two-record cross-check ───────────
+def _finding(engine=None, title="SQLi"):
+    f = {"title": title, "severity": "high", "family": "sqli", "confidence": "confirmed",
+         "target": "http://x/?id=1"}
+    if engine:
+        f["engine"] = engine
+    return f
+
+
+def test_a_finding_names_the_engine_that_produced_it():
+    md = report.generate_report("P", [_finding("run_sqli")], {"in_scope": ["x"]})
+    assert "**Found by:** `run_sqli`" in md
+
+
+def test_a_finding_with_no_engine_says_NOTHING_rather_than_unknown():
+    """~1052 findings were stored before the binding existed. 'Found by: unknown' would be a claim
+    about provenance this report cannot make; absence is the honest rendering."""
+    md = report.generate_report("P", [_finding()], {"in_scope": ["x"]})
+    assert "Found by" not in md
+
+
+def test_an_engine_that_produced_a_finding_is_reported_as_productive():
+    led = _ledger([{"tool": "run_sqli", "calls": 9, "findings": 1}])
+    dis = report.ledger_finding_disagreement(led, [_finding("run_sqli")])
+    assert dis["productive"] == ["run_sqli"]
+    assert dis["produced_but_unlogged"] == []
+    assert dis["counts"]["run_sqli"] == 1
+
+
+def test_a_finding_from_an_ENGINE_THE_LEDGER_NEVER_RAN_is_flagged():
+    """THE cross-check, and the reason the engine name is bound at construction rather than
+    back-filled from the ledger: two records that share a source cannot disagree, so they can never
+    catch each other. Here they can."""
+    led = _ledger([{"tool": "run_sqli", "calls": 9, "findings": 1}])
+    dis = report.ledger_finding_disagreement(led, [_finding("run_sqli"), _finding("run_ghost", "G")])
+    assert dis["produced_but_unlogged"] == ["run_ghost"]
+    md = "\n".join(report._arsenal_md(led, [_finding("run_ghost", "G")]))
+    assert "Ledger disagreement" in md and "run_ghost" in md
+
+
+def test_agreement_prints_no_warning():
+    """The negative control: a consistent mission must not carry a scary banner. A check that fires
+    on healthy input gets ignored, and an ignored check is not a check."""
+    led = _ledger([{"tool": "run_sqli", "calls": 9, "findings": 1}])
+    md = "\n".join(report._arsenal_md(led, [_finding("run_sqli")]))
+    assert "Ledger disagreement" not in md
+
+
+def test_findings_without_engines_do_not_manufacture_a_disagreement():
+    """Legacy findings carry no engine. They must not be read as 'produced by an unlogged engine' --
+    that would make every pre-binding mission report a false contradiction."""
+    led = _ledger([{"tool": "run_sqli", "calls": 9, "findings": 1}])
+    dis = report.ledger_finding_disagreement(led, [_finding(), _finding()])
+    assert dis["produced_but_unlogged"] == [] and dis["productive"] == []

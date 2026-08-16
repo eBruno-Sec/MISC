@@ -373,7 +373,7 @@ def generate_report(program: str, findings: list, scope: dict,
     findings = sanitize_finding_urls(findings)   # collapse any duplicated-host URL from prior-scan memory
     findings = _with_capec(findings)
     delta_block = "\n".join(_delta_lines(delta, findings))
-    ledger_block = "\n".join(_ledger_md(tool_ledger) + _arsenal_md(tool_ledger) + _technique_md())
+    ledger_block = "\n".join(_ledger_md(tool_ledger) + _arsenal_md(tool_ledger, findings) + _technique_md())
     status_banner = _status_note(status)          # only failed/stopped/interrupted
     exec_note = _exec_note(execution)             # strategy + AI usage (always for det/low-AI)
     banner = "\n\n".join(b for b in (status_banner, exec_note) if b)
@@ -452,6 +452,12 @@ def generate_report(program: str, findings: list, scope: dict,
             f"**Severity:** {sev}",
             f"**Target:** `{f.get('target', '')}`",
         ]
+        # Q-051: WHICH ENGINE FOUND THIS. Bound at the ToolResult boundary, so it is the producer's
+        # own name for itself rather than something inferred here. Printed only when present -- a
+        # finding stored before the binding landed says nothing rather than guessing, and "unknown"
+        # would be a claim about provenance that this report cannot make.
+        if f.get("engine"):
+            lines.append(f"**Found by:** `{f['engine']}`")
         _cv = estimated_cvss(f)
         _cvss_line = (f"{_cv[0]}{' (est.)' if _cv[2] else ''}" + (f" {_cv[1]}" if _cv[1] else "")) if _cv else "N/A"
         lines += [f"**CVSS:** {_cvss_line}", f"**CWE:** {f.get('cwe', 'N/A')}"]
@@ -1650,7 +1656,35 @@ def arsenal_gap(ledger: dict) -> dict:
     return out
 
 
-def _arsenal_md(ledger: dict) -> list:
+def ledger_finding_disagreement(ledger: dict, findings: list) -> dict:
+    """Engines named on FINDINGS but absent from the mission's tool LEDGER, and vice versa.
+
+    Q-051. Two independent records now describe the same run: the ledger says what was dispatched,
+    and `finding["engine"]` says what produced each result. They must agree, and where they do not,
+    one of them is wrong about a mission that has already shipped.
+
+    - `produced_but_unlogged`: an engine credited with a finding that the ledger never recorded
+      running. Either the ledger is incomplete or the finding's provenance is wrong; both are
+      reportable, and neither is visible from either record alone.
+    - `productive`: engines that ran AND produced at least one finding -- the honest complement to
+      `arsenal_gap()["silent"]`, computed from the findings rather than from the ledger's own count.
+
+    This is only possible because the two records are INDEPENDENT. A cross-check between a source and
+    a copy of itself proves nothing, which is why the engine name is bound at construction and not
+    back-filled from the ledger.
+    """
+    logged = {str(t.get("tool") or "") for t in ((ledger or {}).get("tools") or []) if t.get("tool")}
+    produced: dict = {}
+    for f in (findings or []):
+        eng = str((f or {}).get("engine") or "")
+        if eng:
+            produced[eng] = produced.get(eng, 0) + 1
+    return {"productive": sorted(e for e in produced if e in logged),
+            "produced_but_unlogged": sorted(e for e in produced if e not in logged),
+            "counts": produced}
+
+
+def _arsenal_md(ledger: dict, findings: list = None) -> list:
     """The arsenal-gap section. Prints nothing when there is no ledger to reason from — an absent
     ledger is not evidence that nothing was skipped, and saying "0 engines skipped" from no data is
     the failure mode this whole section is against."""
@@ -1680,6 +1714,18 @@ def _arsenal_md(ledger: dict) -> list:
         rest = [n for n in gap["not_dispatched"] if n not in set(gap["blocked_by_mode"])]
         if rest:
             lines += ["", "  Available but not selected: %s" % ", ".join("`%s`" % s for s in rest[:16])]
+    # Q-051: the two independent records, cross-checked. `findings` is threaded in so this can be
+    # computed from what was PRODUCED rather than from the ledger's own account of itself.
+    dis = ledger_finding_disagreement(ledger, findings)
+    if dis["productive"]:
+        lines += ["- **Produced at least one finding:** %d — %s" % (
+            len(dis["productive"]),
+            ", ".join("`%s` (%d)" % (e, dis["counts"][e]) for e in dis["productive"][:10]))]
+    if dis["produced_but_unlogged"]:
+        lines += ["", "> ⚠ **Ledger disagreement:** %s produced findings but the tool ledger has no "
+                      "record of running them. Two independent records of this mission do not agree, "
+                      "so one of them is wrong: either the ledger is incomplete or a finding's "
+                      "provenance is." % ", ".join("`%s`" % e for e in dis["produced_but_unlogged"])]
     return lines + [""]
 
 
