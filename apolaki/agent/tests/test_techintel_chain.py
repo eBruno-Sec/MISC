@@ -403,6 +403,48 @@ def test_the_extend_window_covers_the_guard_in_an_unminified_build():
     assert verdict == dep.REFUTED and reason == "patched_in_served_artifact"
 
 
+# ── 6. the composition rule lives in one place ───────────────────────────────────────────────
+def test_the_scan_path_reconciles_a_stale_filename_against_the_served_body():
+    """A tested guard that never ran where it mattered.
+
+    `reconcile_components` was written to remove exactly this false positive and is covered by
+    `test_q021a_sca_proof.py`. MEASURED on this tree: its only production caller was
+    `retest.py:123`. `tools._run_js_review` hand-rolled the same composition WITHOUT reconciling,
+    so the false positive shipped on every scan and was cleaned up only when someone retested.
+    """
+    url = "https://t/assets/jquery-3.4.0.js"          # the label an in-place patch never renames
+    body = "/*! jQuery JavaScript Library v3.6.0 */"  # what is actually served, and patched
+    raw = dep.fingerprint_js_content(body, url) + dep.fingerprint_url(url)
+    assert {c["version"] for c in raw} == {"3.6.0", "3.4.0"}      # both readings really are produced
+    assert any(dep.assess_component(c) for c in raw)              # and the stale one really does fire
+
+    comps = dep.components_for_artifact(body, url)
+    assert [(c["name"], c["version"], c["confidence"]) for c in comps] == \
+        [("jquery", "3.6.0", dep.CONFIRMED)]
+    assert [dep.assess_component(c) for c in comps] == [[]]       # no finding survives
+
+
+def test_reconciling_the_scan_path_does_not_drop_a_consistent_or_unlabelled_artifact():
+    """NEGATIVE CONTROL, against the two shapes every real lab artifact actually has.
+
+    Measured live: webgoat serves `jquery-2.1.4.min.js` whose body ALSO says 2.1.4 (label and body
+    agree), and `jquery.min.js` whose filename carries no version at all. Reconciliation must be a
+    no-op on both, or it would delete true positives to remove a false one.
+    """
+    agree = dep.components_for_artifact("/*! jQuery v2.1.4 | (c) jQuery Foundation */" + _JQ_RUNTIME,
+                                        "https://t/js/libs/jquery-2.1.4.min.js")
+    assert [(c["name"], c["version"]) for c in agree] == [("jquery", "2.1.4")]
+    assert dep.assess_component(agree[0])                         # still a finding, as it must be
+
+    unlabelled = dep.components_for_artifact(_jq("3.4.1"), "https://t/js/libs/jquery.min.js")
+    assert [(c["name"], c["version"]) for c in unlabelled] == [("jquery", "3.4.1")]
+    assert dep.assess_component(unlabelled[0])
+
+    # and the applicability records survive reconciliation -- they are the reason the finding is
+    # more than a version match, so losing them here would silently undo Q-021C
+    assert [r["probe"] for r in unlabelled[0]["applicability"]] == ["jquery-selfclosing-rewrite"]
+
+
 def test_probe_helpers_tolerate_junk_records():
     """`applicability` arrives from persisted engagement state, so it must survive junk without
     crashing the assessment of a real component."""

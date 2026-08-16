@@ -5,8 +5,13 @@ detection drives no testing.**
 
 Writable this cycle: `agent/fingerprint.py`, `agent/dependency_intel.py`, `agent/memory.py`,
 `agent/tests/test_tech_fingerprint_facts.py`, `agent/tests/test_dependency_intel.py`,
-`agent/tests/test_techintel_chain.py`, this file. `tools.py` / `agent.py` / `planner.py` /
-`report.py` belong to other lanes.
+`agent/tests/test_techintel_chain.py`, this file - plus `agent/tools.py`, handed over mid-ticket
+when the tiers lane closed. `agent.py` / `planner.py` / `report.py` / `retest.py` /
+`mutation_gate.py` belong to other lanes and are untouched.
+
+FILES ACTUALLY WRITTEN: `agent/dependency_intel.py`, `agent/tests/test_techintel_chain.py` (new),
+`agent/tools.py` (one line, section 7d), this file. `agent/fingerprint.py` and `agent/memory.py`
+were writable and were NOT needed - see section 9.
 
 Predecessor: [tech_intel.md](tech_intel.md) (Q-021B - persist the fact, with evidence).
 
@@ -18,17 +23,24 @@ Every claim below is MEASURED (command + real output) or marked UNVERIFIED.
 
 MEASURED. The premise holds, with one correction worth recording.
 
-`recon["technology"]` - the evidence-carrying `TechnologyFact` records Q-021B built - has exactly
-one consumer in the whole tree:
+`recon["technology"]` - the evidence-carrying `TechnologyFact` records Q-021B built - is READ in
+exactly one place that is not its own writer or persistence:
 
 ```
-$ grep -rn "recon.get(\"technology\")" --include=*.py agent/ | grep -v tests/
+$ grep -rn 'recon\.get("technology")\|recon\["technology"\]' --include=*.py agent/ | grep -v "^agent/tests/"
 agent/asset_graph.py:610:    for fact in (recon.get("technology") or []):
-agent/main.py:239 (warm-start merge)
-agent/memory.py:207 (snapshot)
+agent/fingerprint.py:321:    value is precisely what `_run_fingerprint` threw away. `recon["technology"]` accumulates facts
+agent/fingerprint.py:332:    recon["technology"] = _di.merge_tech_facts(list(recon.get("technology") or []) + facts)
+agent/main.py:239:    tools.recon["technology"] = _di.merge_tech_facts(
+agent/main.py:240:        list(tools.recon.get("technology") or []) + facts)
+agent/memory.py:207:        "technology": sorted((recon.get("technology") or []),
+agent/tools.py:3778:        # record_facts merges TechnologyFacts by IDENTITY into recon["technology"] and records every
+agent/tools.py:3787:        # recon["technology"], so the facts reach the durable graph without touching the plan.
 ```
 
-`asset_graph.build_from_engagement` projects them into the DURABLE graph at report time.
+`fingerprint.py` is the writer, `main.py:239` is the warm-start merge, `memory.py:207` is the
+snapshot, and the two `tools.py` hits are comments. That leaves `asset_graph.py:610` as the only
+consumer: `build_from_engagement` projects them into the DURABLE graph at report time.
 `technique_planner` reads `graph.to_observations()` on the LIVE planning graph, which
 `_run_fingerprint` deliberately does not write. `planner.py` mentions technology exactly once, and
 it is an nmap/nuclei tag string (`"tags": "tech,misconfig,exposed-panels,takeovers"`), not a fact.
@@ -67,8 +79,10 @@ one of the two questions and not the other - **the version, not the library, pic
 `agent/tools.py:5625` (`_run_js_review`) already calls `dependency_intel.fingerprint_js_content(text,
 label)` with the body it just fetched over the real transport. The probes run there, at the one
 moment the served artifact is in hand. `assess_component` and `vulnerable_component_finding`
-(tools.py:5631-5633) consume the verdicts. **`agent/tools.py` is byte-unchanged by this lane** and
-no `deadcode_gate` exemption was taken: there is no island.
+(tools.py:5631-5633) consume the verdicts. **`agent/tools.py` was byte-unchanged by slice 1** - the
+probes reached production through a dispatch that already existed - and no `deadcode_gate` exemption
+was taken: there is no island. (Slice 2, section 7d, later changes exactly one line in that file for
+an unrelated defect found while checking this one.)
 
 `asvs_model.py:249` already names `run_js_review` as the sole engine that can emit
 `vulnerable_component`, which is the same dispatch.
@@ -305,6 +319,80 @@ the window anyway. The test was wrong, not the code. It now pads the mention pas
 `_JQ_EXTEND_WINDOW` and uses the quoted form a real bundled sanitiser carries. That is the second
 time in this project a mutant has exposed a vacuous test rather than a code defect.
 
+## 7c. Full regression - MEASURED
+
+| run | result |
+|---|---|
+| baseline, clean HEAD `93ca3dd` (Coordinator) | `2619 passed, 11 skipped, 9 xfailed, 0 failed` |
+| slice 1 - the chain (`824e870`) | `2639 passed, 11 skipped, 9 xfailed, 0 failed` |
+| slice 2 - the reconcile fix (section 7d) | `2641 passed, 11 skipped, 9 xfailed, 0 failed` |
+
+`2639 - 2619 = 20`, exactly the number of tests in `test_techintel_chain.py` at that commit, and
+`2641 - 2639 = 2`, exactly the two tests slice 2 adds. **No pre-existing test changed state in
+either direction, in either run.** Skips and xfails are identical throughout, so nothing was
+quietly disabled - a suite that grows by exactly the tests you wrote is the only version of "green"
+worth quoting.
+
+Rule 8c was load-bearing, not ceremonial: the shared tree carried another lane's uncommitted edits
+to `agent/report.py` and `agent/tests/test_arsenal_gap.py` throughout. Every run above is against
+`git archive HEAD agent` plus this lane's files only.
+
+One measurement discipline worth recording: `agent/pytest.ini` already sets `addopts = -q`, so
+passing `-q` again makes it `-qq`, which **suppresses the final count line entirely**. Two full runs
+produced no total and looked ambiguous before that was diagnosed. Run the suite with no `-q`.
+
+---
+
+## 7d. Slice 2 - a tested guard that never ran where it mattered
+
+Found while checking an adjacent claim rather than assuming it. `reconcile_components` exists to
+remove one specific false positive, is covered by `test_q021a_sca_proof.py`, and its **only
+production caller was `retest.py:123`**:
+
+```
+$ grep -rn "reconcile_components" --include=*.py agent/ | grep -v tests/
+agent/dependency_intel.py:692:def reconcile_components(...)
+agent/retest.py:119,123
+```
+
+`tools._run_js_review:5625` hand-rolled the same composition
+(`fingerprint_js_content(...) + fingerprint_url(...)`) and did NOT reconcile. Reproduced on this
+tree:
+
+```
+url  = https://t/assets/jquery-3.4.0.js       (the label an in-place patch never renames)
+body = /*! jQuery JavaScript Library v3.6.0   (what is actually served, and patched)
+
+components _run_js_review iterates: [('jquery','3.6.0','js-content-banner'),
+                                     ('jquery','3.4.0','script-filename')]
+findings on the SCAN path : ['Potentially vulnerable component: jquery@3.4.0 (CVE-2020-11022, +1 more)']
+findings WITH reconcile   : []
+```
+
+So the guard shipped, was tested, and the false positive it removes went out on every scan - it was
+only cleaned up if someone later ran a retest. Two copies of one composition rule with the guard on
+only one of them.
+
+**Fix:** `dependency_intel.components_for_artifact(content, location)` - the composition AND the
+reconciliation, in the module that owns the rule. `tools.py:5625` becomes a single call to it.
+`retest.py` is not this lane's file and already reconciles, so it is untouched; it could adopt the
+same helper later.
+
+**Negative control, and it is the important half:** reconciliation must be a no-op on the two shapes
+every real lab artifact actually has. Measured live - webgoat serves `jquery-2.1.4.min.js` whose
+body also says 2.1.4 (label and body agree) and `jquery.min.js` whose filename carries no version
+at all. `test_reconciling_the_scan_path_does_not_drop_a_consistent_or_unlabelled_artifact` pins both,
+and additionally pins that the Q-021C `applicability` records survive reconciliation - losing them
+there would silently undo slice 1.
+
+The live `ToolRegistry.execute("run_js_review", ...)` proof was re-run against the four labs with
+this change in place: **4/4, byte-identical verdicts**. On real artifacts the label and the body
+either agree or the label carries no version, so reconciliation is a no-op there - which is the
+result that says this removes a false positive without touching a true one.
+
+This is the one time `agent/tools.py` was written by this lane: one line, replacing a duplicated
+rule with a call to the module that owns it.
+
 ## 8. For the Coordinator
 
 ### 8a. The report shape, since `report.py` is not mine
@@ -326,11 +414,40 @@ The tag `applicability-confirmed` is the exact string emitted (verified against 
 `test_a_corroborated_probe_raises_the_rung_and_nothing_else`); it is NOT `applicability_confirmed`,
 which is the `proof_state` VALUE. Two spellings, two meanings, deliberately.
 
-### 8b. The dispatch site I was offered and did not take
+**The new fields survive persistence and export.** MEASURED, on the finding a real
+`components_for_artifact` produced from webgoat's live jQuery 2.1.4:
 
-`tools.py` was freed to this lane mid-ticket. It was not needed and was not touched.
+```
+JSON round-trip           : OK | 5274 bytes
+proof_schema.is_confirmed : False (must be False -- still a lead)
+demote_unproven keeps lead: lead
+sarif level               : warning | security-severity 5.0 | confidence lead
+proof_state survives      : applicability_confirmed
+applicability survives    : [('jquery-extend-proto-guard','corroborated'),
+                             ('jquery-selfclosing-rewrite','corroborated')]
+```
 
-What WOULD need it is the server/language half - `Server: Apache/2.4.7`, `X-Powered-By: PHP/5.5.9` -
+The SARIF level and security-severity are IDENTICAL to the version-only finding, which is the
+point: the applicability rung changed what the evidence can say, not how loudly the finding shouts.
+
+**Name-collision check on `proof_state`, done before shipping it, because a key that already means
+something else is the worst kind of near-miss.** MEASURED:
+
+* `asset_graph.py:292` already reads `f.get("proof_state") or _di.tech_proof_state(f)` - on a
+  TechnologyFact, using the SAME `TECH_PROOF_LADDER` vocabulary. Shared meaning, not a collision.
+* `sarif_io.py:42 def _proof_state(f)` is a FUNCTION NAME, not a key read. It delegates to
+  `proof_schema.is_confirmed`, which reads only `confidence` (verified at
+  `proof_schema.py:171-176`). The new key is inert to SARIF, and since these findings keep
+  `confidence="lead"` the SARIF demotion behaves exactly as before.
+
+### 8b. The dispatch site I was offered, and what it was actually spent on
+
+`tools.py` was freed to this lane mid-ticket. **The chain did not need it** - slice 1 reached
+production through `_run_js_review`, a dispatch that already existed. The one line it was spent on
+is slice 2 (section 7d): replacing a duplicated composition rule with a call to the module that
+owns it, which removed a false positive that had been shipping past a guard written to stop it.
+
+What WOULD need a genuinely new dispatch site is the server/language half - `Server: Apache/2.4.7`, `X-Powered-By: PHP/5.5.9` -
 where the artifact is not a file we can read but a service we would have to ASK. That is a probe
 that makes a request, and it is **not built, not tested and not designed here**. UNVERIFIED. The
 honest handover is the measurement in section 6, not a design I have not run: I would rather this
@@ -373,8 +490,10 @@ halves of Q-021C speak one vocabulary.
   different question.
 * **No change to `guidance._rule_tech`.** It reads `live_hosts[i]["tech"]` and emits advice; it is
   not this lane's file and rewriting it would move the report's playbook section.
-* **`agent/fingerprint.py` and `agent/memory.py` untouched.** The chain that could be closed and
-  proven runs entirely through `dependency_intel`. Touching the fingerprint fact model without a
-  dispatch site for a fact-driven probe would have produced exactly the island the ticket warns
-  about.
+* **`agent/fingerprint.py` and `agent/memory.py` untouched, and this was a CHOICE, not a
+  constraint.** Both were writable all cycle and `tools.py` became writable mid-ticket, so a
+  fact-driven request probe for banner versions was available to start. It was not started. The
+  chain that could be closed AND PROVEN end to end runs entirely through `dependency_intel`, and a
+  second half-built chain would have bought a wiring box ticked from a declaration instead of a
+  second proof. Section 6 says exactly what that leaves undone.
 * **No benchmark file, case, label, denominator or scorer touched.**

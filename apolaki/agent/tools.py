@@ -5622,7 +5622,16 @@ class ToolRegistry:
             endpoints += res["endpoints"]
             # SCA: fingerprint library version from content + URL, map exact,
             # evidence-backed versions to known CVEs (guardrail: no version, no CVE).
-            comps = dep.fingerprint_js_content(text, label) + dep.fingerprint_url(label)
+            #
+            # Q-021C: `components_for_artifact` composes the two readings AND reconciles them,
+            # in the module that owns the rule. This line used to be
+            # `fingerprint_js_content(...) + fingerprint_url(...)` with no reconciliation, while
+            # `retest.evaluate` hand-rolled the same composition and DID reconcile -- so the
+            # stale-filename false positive `reconcile_components` exists to remove shipped on
+            # every scan and was cleaned up only if someone later retested. Measured on this tree:
+            # /assets/jquery-3.4.0.js serving a patched 3.6.0 raised
+            # `Potentially vulnerable component: jquery@3.4.0 (CVE-2020-11022, +1 more)`.
+            comps = dep.components_for_artifact(text, label)
             for comp in comps:
                 key = (comp["name"], comp["version"])
                 if not comp["version"] or key in seen_comp:

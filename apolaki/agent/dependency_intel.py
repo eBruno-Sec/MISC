@@ -723,6 +723,28 @@ def reconcile_components(components) -> list:
     return [c for key in order for _, c in best[key]]
 
 
+def components_for_artifact(content, location=""):
+    """Every component ONE served artifact yields, with contradictory readings reconciled.
+
+    One definition of "what did this file tell us about its libraries". `tools._run_js_review` and
+    `retest.evaluate` each hand-rolled `fingerprint_js_content(...) + fingerprint_url(...)`, and
+    only ONE of them went on to reconcile. That is why the false positive `reconcile_components`
+    was written to remove still shipped on every scan and was removed only at retest time:
+
+        url  = https://t/assets/jquery-3.4.0.js      (the label)
+        body = /*! jQuery JavaScript Library v3.6.0  (what is actually served, and patched)
+
+        scan path today   -> Potentially vulnerable component: jquery@3.4.0 (CVE-2020-11022, +1)
+        with reconcile    -> (nothing)
+
+    MEASURED on this tree before the fix, and `reconcile_components`'s only production caller was
+    `retest.py:123`. Two copies of a composition rule with the guard on only one of them is how a
+    tested function ends up never running where it matters.
+    """
+    return reconcile_components(fingerprint_js_content(content, location)
+                                + fingerprint_url(location))
+
+
 def behaviour_proof_ok(proof, cve_ids=()) -> tuple:
     """(ok, gaps[]) — did a CVE-SPECIFIC BEHAVIOUR DIFFERENTIAL demonstrate this vulnerability?
 
