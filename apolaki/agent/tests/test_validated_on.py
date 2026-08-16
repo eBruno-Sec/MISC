@@ -242,10 +242,15 @@ def test_every_validated_on_claim_is_backed_by_a_recorded_artifact():
     assert unbacked == [], "%d claims with no recorded proof: %s" % (len(unbacked), unbacked[:6])
 
 
-@pytest.mark.xfail(strict=True, reason=(
-    "MEASURED: capability_matrix.py:63 states 'Cross-lab generalization' as live_proven citing "
-    "'validated_on across juiceshop/dvwa/ginandjuice', but no generalized technique involves dvwa. "
-    "validate() checks evidence is a non-empty STRING, never that the string is true."))
+# FIXED. Was a strict xfail reading: "capability_matrix.py:63 states 'Cross-lab generalization' as
+# live_proven citing 'validated_on across juiceshop/dvwa/ginandjuice', but no generalized technique
+# involves dvwa. validate() checks evidence is a non-empty STRING, never that the string is true."
+#
+# The marker is gone because the lane's own repair closed it, and STRICT is what made that visible:
+# the fix landed, the test XPASSed, and the suite went red until someone retired the marker on
+# purpose. That is the entire argument for strict over plain xfail -- a plain one would have gone
+# green silently and left a "known defect" in the file for a defect that no longer exists, which is
+# the same declaration-vs-fact rot this ticket was raised to remove.
 def test_capability_matrix_generalization_row_cites_only_real_labs():
     import capability_matrix as CM
     real = {lab for tid in T.generalized() for lab in T.TECHNIQUES[tid]["validated_on"]}
@@ -253,3 +258,36 @@ def test_capability_matrix_generalization_row_cites_only_real_labs():
         if "generaliz" in c["name"].lower():
             assert set(c["labs"]) <= real, "cites labs backing no generalized technique: %s" % (
                 sorted(set(c["labs"]) - real),)
+
+
+# ── one rule for "proven", enforced at the API boundary too ──────────────────
+def test_packs_and_techniques_now_report_the_SAME_proven_number():
+    """The closing half of the two-subsystems-disagree defect.
+
+    MEASURED before the fix: `/packs` summed `proven` as `len(validated_on) > 0` and reported **48**,
+    while `techniques` reported **16** about the same registry. A count is not a display detail -- it
+    is the number a reader uses to decide what this product can do, and two of them cannot both be it.
+
+    This asserts the API's arithmetic against the shared predicate rather than against a literal, so
+    it keeps holding as techniques are added or their evidence changes.
+
+    ASSERTED ON BEHAVIOUR, NOT ON SOURCE TEXT. The first draft grepped main.py for the old expression
+    and failed against the FIX'S OWN COMMENT, which quotes it. That is the second time in one day a
+    source-scanning assertion matched a historical citation rather than live code -- the same shape as
+    the `check_report_honesty` guard. A test that reads prose tests prose.
+    """
+    import techniques as _T
+
+    old_rule = sum(1 for t in _T.TECHNIQUES.values() if t.get("validated_on"))
+    shared = sum(1 for t in _T.TECHNIQUES.values() if _T.is_proven(t))
+    view = _T.taxonomy_view("owasp")["proven"]
+
+    assert shared == view, ("the shared predicate and the taxonomy view disagree: %d vs %d"
+                            % (shared, view))
+    assert old_rule > shared, (
+        "the old rule no longer over-counts (%d vs %d), so this test has stopped discriminating"
+        % (old_rule, shared))
+
+    # And the predicate is the strict one: a fabricated lab cannot buy `proven`.
+    fake = {"id": "x", "vuln_class": "sqli", "validated_on": ["apolaki_not_a_lab"]}
+    assert not _T.is_proven(fake), "a lab id that names no target must not confer proven"

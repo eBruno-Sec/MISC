@@ -17,9 +17,19 @@ transferable=True  -> genuine real-world vuln-class capability (counts as "capab
 transferable=False -> lab-local trivia (e.g. "browse to the hidden score-board URL"): counts
                       toward a CTF's completion %, but is NOT claimed as capability.
 
-A technique is GENERALIZED once `validated_on` lists >= 2 independent labs. Until then it is a
-candidate — proven on one lab, not yet shown to transfer. The coverage matrix reports both
-numbers so the headline claim ("general capability" vs "lab completion") stays honest.
+A technique is GENERALIZED once it names >= 2 independent labs AND a liveness run has produced the
+artifact. Until then it is a candidate — claimed on one lab, not yet shown to transfer. The coverage
+matrix reports both numbers so the headline claim ("general capability" vs "lab completion") stays
+honest.
+
+`validated_on` IS TYPED; WHAT IT IS WORTH IS DERIVED. Every value in this file is a literal somebody
+wrote, so the field alone can never be evidence. Three functions decide what a literal buys:
+  - known_labs()        the legal vocabulary, derived from target registries + liveness runs, so a
+                        lab id that names no real target cannot be spelled here at all;
+  - validation_record() recorded / not_recorded / not_applicable, the Q-012 three-way split;
+  - is_proven()         THE single shared predicate — every module that says "proven" calls this one,
+                        because two subsystems disagreeing about the word is how /packs reported 48
+                        while /techniques reported 16 about the same registry.
 
 No external dependencies; pure data + accessors. Safe to import without a target present.
 """
@@ -948,19 +958,35 @@ def classes() -> list[str]:
 
 
 def is_generalized(t: dict) -> bool:
-    return len(set(t.get("validated_on", []))) >= GENERALIZED_MIN_LABS
+    """>= 2 RESOLVABLE labs. A lab id that names no target cannot contribute to transferability:
+    two invented strings used to confer `generalized` (and +8 confidence in technique_model), which
+    is how a fabricated claim scored 90/100 in the `high` tier. See known_labs()."""
+    legal = known_labs()
+    return len({l for l in (t.get("validated_on") or []) if l in legal}) >= GENERALIZED_MIN_LABS
 
 
 def generalized() -> list[str]:
-    return [t["id"] for t in TECHNIQUES.values() if is_generalized(t)]
+    """Techniques whose transferability is EARNED: >= 2 resolvable labs AND a liveness artifact.
+
+    Requiring the artifact is the Q-012 discipline applied to transferability. Without it this
+    returned csti and vulnerable_component on the strength of typed strings alone; neither has ever
+    been re-confirmed by a run, so neither was general capability in any sense a reader would expect."""
+    return [t["id"] for t in TECHNIQUES.values()
+            if is_generalized(t) and validation_record(t)["status"] == VALIDATION_RECORDED]
 
 
 def all_labs() -> list[str]:
-    labs = set()
-    for t in TECHNIQUES.values():
-        labs.update(t.get("validated_on", []))
-        labs.update((t.get("maps_to") or {}).keys())
-    return sorted(labs)
+    """THE legal lab vocabulary.
+
+    This used to build the answer by unioning `validated_on` across the registry -- so the set of
+    valid labs was DEFINED as the set of labs somebody had typed, and the question "is this a real
+    lab?" answered "yes, because you spelled it". That circularity is the root vacuity behind every
+    other symptom in this file. The vocabulary is now derived (known_labs); `maps_to` keys are still
+    unioned in because targeting a lab is a different claim from being validated on one, but they
+    are filtered through the same vocabulary so a name that resolves to nothing cannot enter here."""
+    legal = known_labs()
+    targets = {lab for t in TECHNIQUES.values() for lab in (t.get("maps_to") or {})}
+    return sorted(legal | (targets & legal))
 
 
 def coverage_matrix(lab_ids: list[str] | None = None) -> dict:
@@ -984,8 +1010,11 @@ def coverage_matrix(lab_ids: list[str] | None = None) -> dict:
             "execution": t.get("execution", "auto"),
             "targets": {lab: maps.get(lab, []) for lab in labs if lab in maps},
             "validated_on": sorted(validated & set(labs)) if lab_ids else sorted(validated),
-            "transferability_score": len(validated),
+            # transferability counts RESOLVABLE labs only -- an id naming no target is not a data
+            # point about transferring, it is a typo or a claim about a lab that was never stood up.
+            "transferability_score": len(validation_record(t)["labs"]),
             "generalized": is_generalized(t),
+            "validation": validation_record(t),
         })
     total = len(TECHNIQUES)
     return {
@@ -1219,6 +1248,9 @@ def taxonomy_view(lens: str = "owasp") -> dict:
             "permission": t["permission"], "transferable": t["transferable"],
             "generalized": is_generalized(t), "validated_on": t.get("validated_on", []),
             "status": technique_status(t),
+            # what the claim is actually worth: recorded / not_recorded / not_applicable, plus any
+            # lab id that resolves to no target at all (reported, never silently dropped).
+            "validation": validation_record(t),
             "maps_to": t.get("maps_to") or {}, "refs": t.get("refs", []),
             "execution": t.get("execution", "auto"),
             # the in-app lesson — learn the method without leaving Apolaki
@@ -1243,6 +1275,15 @@ def taxonomy_view(lens: str = "owasp") -> dict:
         "claimed": sum(1 for t in TECHNIQUES.values() if t.get("validated_on")),
         "transferable": sum(1 for t in TECHNIQUES.values() if t["transferable"]),
         "generalized": len(generalized()),
+        # The three-way honesty split (Q-012 vocabulary). `not_recorded` is the number that must not
+        # be allowed to hide inside `catalogued`: those techniques CLAIM a validation and no run has
+        # ever produced the artifact. `unresolved_labs` names ids that point at no target at all.
+        "recorded": sum(1 for t in TECHNIQUES.values()
+                        if validation_record(t)["status"] == VALIDATION_RECORDED),
+        "not_recorded": sum(1 for t in TECHNIQUES.values()
+                            if validation_record(t)["status"] == VALIDATION_NOT_RECORDED),
+        "unresolved_labs": sorted({l for t in TECHNIQUES.values()
+                                   for l in validation_record(t)["unresolved"]}),
     }
 
 
@@ -1258,6 +1299,81 @@ def _liveness_verified() -> set:
             return set(json.load(fh).get("live") or [])
     except Exception:
         return set()
+
+
+# ── the lab vocabulary, DERIVED ──────────────────────────────────────────────────────────────
+# A hand-maintained allowlist of lab names would be the same defect one level up: a second typed
+# field, guarding the first. So the legal set is derived from artifacts that MUST already exist for
+# a lab to be real, and each source is independent of `validated_on`:
+#
+#   (a) a target registry names it  -- benchmark.MANIFESTS (to SCORE it), bench_all.LAB_URLS (to
+#       REACH it), labs.LABS (to FINGERPRINT it). None of these exist for the benefit of this field.
+#   (b) a liveness-confirmed technique claims it -- the technique was re-proven end to end by a RUN,
+#       so whatever target it names demonstrably answered. This is the only source derived from
+#       execution, and it is what legitimises real labs nobody wired into the benchmark registry
+#       (openfmb, domsource) without legitimising labs that were never stood up (natas, sessionlife).
+#
+# To spell a new lab id you must therefore either make it scoreable/reachable or actually confirm a
+# technique against it. Neither can be done by typing a string into this file.
+def _registry_labs() -> set:
+    ids = set()
+    for mod, attr in (("benchmark", "MANIFESTS"), ("bench_all", "LAB_URLS"), ("labs", "LABS")):
+        try:
+            ids |= set(getattr(__import__(mod), attr, {}) or {})
+        except Exception:
+            continue          # a missing optional registry narrows the vocabulary, never widens it
+    return ids
+
+
+def _liveness_vouched_labs() -> set:
+    out = set()
+    for tid in _liveness_verified():
+        rec = TECHNIQUES.get(tid)
+        if rec:
+            out |= set(rec.get("validated_on") or [])
+    return out
+
+
+def known_labs() -> set:
+    """The lab ids a `validated_on` entry is allowed to name. Fails CLOSED: if every source errors
+    the set is empty, which demotes every claim to unresolved rather than silently accepting all."""
+    return _registry_labs() | _liveness_vouched_labs()
+
+
+# ── what a claim is worth, three-valued ──────────────────────────────────────────────────────
+# Mirrors proof_schema.control_status(): the third value is the point. A technique nothing has ever
+# run must SAY so rather than carry a string somebody typed, exactly as Q-012 made a capability the
+# product does not have report `not_implemented` instead of hiding inside `not_tested`.
+VALIDATION_RECORDED = "recorded"              # a liveness RUN produced the artifact
+VALIDATION_NOT_RECORDED = "not_recorded"      # claims labs, but no run has ever confirmed it
+VALIDATION_NOT_APPLICABLE = "not_applicable"  # claims nothing -- catalogued, and honest about it
+
+
+def validation_record(t: dict) -> dict:
+    """{status, labs, unresolved} for one technique. THE single definition of what a claim is worth.
+
+    `labs` are the claim's resolvable targets; `unresolved` are names that resolve to nothing and are
+    reported rather than dropped, so a bad id is visible instead of silently vanishing."""
+    vo = list(dict.fromkeys(t.get("validated_on") or []))
+    legal = known_labs()
+    resolved = [l for l in vo if l in legal]
+    unresolved = [l for l in vo if l not in legal]
+    if not vo:
+        status = VALIDATION_NOT_APPLICABLE
+    elif t.get("id") in _liveness_verified():
+        status = VALIDATION_RECORDED
+    else:
+        status = VALIDATION_NOT_RECORDED
+    return {"status": status, "labs": resolved, "unresolved": unresolved}
+
+
+def is_proven(t: dict) -> bool:
+    """THE shared predicate. Every module that wants to say "proven" must call this one function.
+
+    Two subsystems disagreeing about the same word is not a display bug: /packs summed
+    `len(validated_on) > 0` and reported 48 while /techniques reported the liveness-earned 16, in the
+    same product, about the same registry. One definition, one place, both read it."""
+    return technique_status(t) == "proven"
 
 
 def technique_status(t: dict) -> str:
@@ -1278,6 +1394,6 @@ def technique_status(t: dict) -> str:
     """
     if t.get("solver_only"):
         return "solver_only"
-    if t["id"] in _liveness_verified():
+    if t.get("id") in _liveness_verified():
         return "proven"
     return "unverified" if t.get("validated_on") else "catalogued"

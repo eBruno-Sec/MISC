@@ -24,6 +24,30 @@ def _c(name, area, state, evidence, labs=None):
     return {"name": name, "area": area, "state": state, "evidence": evidence, "labs": labs or []}
 
 
+def _generalization_row():
+    """The cross-lab generalization capability, DERIVED from the registry instead of typed.
+
+    Typed, this row read `live_proven` citing "validated_on across juiceshop/dvwa/ginandjuice" -- and
+    dvwa backed no generalized technique at all. The evidence string was never wrong in a way anything
+    could catch, because validate() only checked that a string was non-empty, never that it was true.
+    Deriving it means the row cannot drift from what the registry can actually support: if no technique
+    has >= 2 resolvable labs AND a liveness artifact, the row reports `unfinished` and says so, rather
+    than claiming the matrix's top state on the strength of three lab names somebody remembered."""
+    try:
+        import techniques as T
+        gen = sorted(T.generalized())
+        labs = sorted({l for tid in gen for l in T.validation_record(T.TECHNIQUES[tid])["labs"]})
+    except Exception as e:                      # fail CLOSED: unprovable => not claimed
+        return _c("Cross-lab generalization (>=2 independent labs)", "lab", "unfinished",
+                  "registry unreadable (%s); generalization cannot be evidenced" % e, [])
+    if not gen:
+        return _c("Cross-lab generalization (>=2 independent labs)", "lab", "unfinished",
+                  "no technique yet has >=2 resolvable labs AND a liveness artifact", [])
+    return _c("Cross-lab generalization (>=2 independent labs)", "lab", "live_proven",
+              "techniques.generalized() = %s; liveness-confirmed across %s"
+              % (", ".join(gen), "/".join(labs)), labs)
+
+
 # Honest, evidence-backed snapshot (2026-08-03). Each evidence is a named mission / test / artifact.
 CAPABILITIES = [
     _c("Passive recon (subfinder/crtsh/wayback/dns/asn)", "recon", "live_proven",
@@ -60,8 +84,7 @@ CAPABILITIES = [
        "benchmark_results/repeat_*.json, 58/58 sealed", ["juiceshop"]),
     _c("Juice Shop solver pack (lab-mode, isolated from detector)", "lab", "live_proven",
        "juiceshop_solvers.py; board 75/113 via labs.solve", ["juiceshop"]),
-    _c("Cross-lab generalization (>=2 independent labs)", "lab", "live_proven",
-       "techniques.py generalized set; validated_on across juiceshop/dvwa/ginandjuice", ["juiceshop", "dvwa", "ginandjuice"]),
+    _generalization_row(),
     _c("Linode cloud posture review (read-only)", "cloud", "blocked",
        "collect_linode_live implemented + fixture-tested; needs operator read-only token", []),
     _c("AWS/Azure/GCP live cloud enumeration", "cloud", "unfinished",
@@ -89,8 +112,19 @@ def state_rank(state: str) -> int:
 
 
 def validate():
-    """Enforce the invariants so the matrix can never silently lie. Returns a list of violations."""
+    """Enforce the invariants so the matrix can never silently lie. Returns a list of violations.
+
+    The lab check is the one that had teeth missing. Requiring a NON-EMPTY labs list is a check on a
+    declaration: any string satisfies it, which is how a live_proven row cited a lab that backed
+    nothing. A named lab must now RESOLVE through techniques.known_labs() -- the derived vocabulary,
+    where a name only exists if a target registry carries it or a liveness run confirmed something
+    against it. An invented lab name is now a violation instead of evidence."""
     issues = []
+    try:
+        import techniques as T
+        legal = T.known_labs()
+    except Exception:
+        legal = None                            # registry unavailable: skip resolution, never pass-by-default
     for c in CAPABILITIES:
         if c["state"] not in STATES:
             issues.append("bad state %r for %s" % (c["state"], c["name"]))
@@ -98,4 +132,8 @@ def validate():
             issues.append("no evidence for %s" % c["name"])
         if c["state"] == "live_proven" and not c.get("labs"):
             issues.append("live_proven without a named lab: %s" % c["name"])
+        if legal is not None:
+            unknown = sorted(set(c.get("labs") or []) - legal)
+            if unknown:
+                issues.append("%s names labs that resolve to no target: %s" % (c["name"], unknown))
     return issues

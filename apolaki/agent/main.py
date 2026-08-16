@@ -2126,7 +2126,14 @@ async def list_packs():
     for t in T.TECHNIQUES.values():
         by_class.setdefault(t["vuln_class"], []).append(t)
     for cls, ts in sorted(by_class.items()):
-        proven = sum(1 for t in ts if t.get("validated_on"))
+        # THE SHARED PREDICATE, not a second definition of the word. This was
+        # `sum(1 for t in ts if t.get("validated_on"))` -- true for any non-empty list, including one
+        # holding a lab id that names no target. MEASURED: /packs reported 48 "proven" while
+        # /techniques reported 16 about the SAME registry, and a fabricated claim scored 90/100 in the
+        # `high` tier because two invented strings conferred `generalized`. Same defect as Q-015,
+        # where `risk_signals` was the unfiltered twin of `risk_score`: when two places compute one
+        # word, one of them is eventually wrong, and the report contradicts itself in public.
+        proven = sum(1 for t in ts if T.is_proven(t))
         gen = sum(1 for t in ts if T.is_generalized(t))
         packs.append({"id": "tech:" + cls, "kind": "technique",
                       "name": cls.replace("_", " ").title() + " pack", "count": len(ts),
