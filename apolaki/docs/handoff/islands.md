@@ -20,9 +20,9 @@ is a new measurement, not a coverage fix.
 
 | engine | can it emit CONFIRMED? | family | verdict | one-line reason |
 |---|---|---|---|---|
-| `run_ferox` | no (lead only) | `recon` | **UNSOUND (as shipped)** | binary absent from the shipped image; MEASURED to return `not installed` on every call |
-| `run_dirsearch` | no (lead only) | `recon` | **UNSOUND (as shipped)** | same, and its stdout shape almost certainly does not match the one parser |
-| `run_gobuster` | no (lead only) | `recon` | **UNSOUND (as shipped)** | same |
+| `run_ferox` | no (lead only) | `recon` (no consumer) | **UNSOUND -- DELETE** | binary absent (MEASURED); no oracle, no negative control; and `--no-recursion` disables the only thing it would add |
+| `run_dirsearch` | no (lead only) | `recon` (no consumer) | **UNSOUND -- DELETE** | binary absent (MEASURED); duplicates a wired native engine that has a soft-404 baseline it lacks |
+| `run_gobuster` | no (lead only) | `recon` (no consumer) | **UNSOUND -- DELETE** | binary absent (MEASURED); same duplication, same missing oracle |
 | `run_external_surface` | no (emits `[]`) | n/a | **SOUND** (and it is not a detector) | cannot produce a finding of any kind; seeds UNVERIFIED graph candidates, and nothing reads its output either |
 | `run_metadata` | no (lead only) | `exposure` | **UNSOUND as shipped** | 0 false positives on 14 negative controls, but MEASURED clean on a file proven to carry EXIF GPS |
 | `run_workflow` | no (emits `[]`), and DROPS its steps' findings | n/a | **UNSOUND as a finding path** | MEASURED: an `enumerate_ids` lead exists on a direct call and is gone through `workflow.run` |
@@ -32,7 +32,20 @@ Detail, evidence and the exact settling measurement for each is below.
 
 ---
 
-## 1. `run_dirsearch` / `run_ferox` / `run_gobuster` -- three adapters, one capability
+## 1. `run_dirsearch` / `run_ferox` / `run_gobuster` -- a capability the product IMPLIES and CANNOT PERFORM
+
+**Read this one as a product statement, not a wiring statement.** Apolaki tells the model, in three
+separate `CLAUDE_TOOLS` entries, that it can do recursive content discovery with feroxbuster, content
+discovery with dirsearch, and directory brute force with gobuster. **None of the three binaries exists
+in the shipped image.** Every one of those three offers is an offer the product cannot honour, and the
+model has been reading all three for 151 missions.
+
+That is worse than "three engines are unwired". An unwired engine is capability the product has and
+does not use. This is capability the product advertises and does not have.
+
+**The recommendation is ZERO of the three, not one.** The evidence for that is below and it is not
+close: the capability is already wired natively with a better oracle, and the single differentiator
+that would have justified keeping feroxbuster is disabled by Apolaki's own invocation.
 
 ### The capability is already wired; these three are not the capability
 
@@ -136,18 +149,58 @@ and that a `_run_X` method exists. `_bin_discovery`'s parser, its lead shape and
 side effect have **zero** test coverage. A test that checks a declaration passes exactly the thing it
 exists to catch.
 
-### Does the product need three? NO -- it does not need any of them
+### The last argument for keeping one of them does not survive reading the invocation
 
-- The capability is wired and native, with a real negative control the adapters do not have.
-- Zero of the three can run in the shipped image.
-- All three funnel through one parser written for one tool's output shape.
+The obvious case for keeping `run_ferox` is recursion: feroxbuster recurses into discovered
+directories and the native `run_content_discovery` does not. Its own spec sells exactly that
+(`tools.py:935`):
 
-**Recommendation (a patch for an owning lane, not applied by this lane):** keep at most `run_ferox`
-(recursive discovery is the one thing the native engine does not do) and only after (a) the binary is
-added to `agent/Dockerfile`, (b) its real stdout is captured into a fixture, (c) `_bin_discovery`
-grows the native engine's soft-404 baseline before `_add_urls` is allowed to widen the surface.
-Delete `run_dirsearch` and `run_gobuster`, or mark them operator-only and remove them from
-`CLAUDE_TOOLS` so the model stops being told the product has a capability it cannot execute.
+> `"INTRUSIVE: Recursive content discovery via feroxbuster (optional; skips gracefully if unavailable)."`
+
+And `tools.py:1483` invokes it as:
+
+```python
+["feroxbuster", "-u", url, "-w", wl, "--silent", "--no-recursion", "-k"]
+```
+
+**`--no-recursion`.** The one thing feroxbuster would add over the engine that is already wired is
+switched off by the call that would add it. So even with the binary installed and the parser fixed,
+`run_ferox` would be a slower, oracle-less, 4,700-request re-implementation of a wired 120-request
+engine -- with the differentiator disabled. There is no version of this where the adapter wins.
+
+(This is also a fourth instance of the shape that recurs through these seven: the description and the
+code disagree, and the description is what a reader -- or the model -- believes. See also
+`run_workflow`'s docstring in section 4, `run_external_surface` declaring PASSIVE while registered
+ACTIVE, and `run_metadata` advertising EXIF GPS it cannot read.)
+
+### Does the product need three? It does not need ANY of them.
+
+| claim | status |
+|---|---|
+| the capability is missing | **false** -- `run_content_discovery` + `run_ffuf` are both planner-dispatched |
+| the adapters are better | **false** -- the native engine has a soft-404 baseline; `_bin_discovery` has no oracle at all |
+| the adapters can run | **false, MEASURED** -- all three binaries absent from the shipped image |
+| ferox at least adds recursion | **false** -- `--no-recursion` is hardcoded in the invocation |
+| they are cheap | **false** -- ~4,700 requests on the default wordlist vs the native `max_paths=120`, plus an unbounded `_add_urls` of up to 400 paths |
+| they are tested | **false** -- one declaration test; the parser and the side effect have zero coverage |
+
+**RECOMMENDATION -- delete all three** (owner: the `tools.py` lane; this lane applies nothing):
+
+1. Remove `run_ferox`, `run_dirsearch`, `run_gobuster` from `CLAUDE_TOOLS` (`tools.py:934/938/942`)
+   **first and on its own**. This is the part that is purely subtractive and needs no oracle argument:
+   it stops the product claiming a capability it cannot perform. It is also the only change here that
+   improves anything today.
+2. Remove the three `TOOL_PERMISSIONS` rows (`tools.py:205/206/207`), `_run_ferox`, `_run_dirsearch`,
+   `_run_gobuster` and `_bin_discovery`.
+3. If recursive discovery is genuinely wanted, it is a feature request against
+   `run_content_discovery` -- which is already dispatched, already has the negative control, and is
+   already inside the budget model. Adding recursion there costs one engine's worth of oracle work
+   instead of three adapters' worth of parser, wordlist, Dockerfile and fixture work.
+
+If someone would rather keep an adapter than delete it, the burden is (a) the binary in
+`agent/Dockerfile`, (b) its REAL stdout recorded as a fixture, (c) a soft-404 baseline in
+`_bin_discovery` before `_add_urls` may widen the surface, and (d) dropping `--no-recursion`, with a
+re-measure of cost. That is four changes to reach parity with an engine that already ships.
 
 ### Secondary observation: a missing binary leaves no provenance
 
@@ -579,3 +632,118 @@ Ranked by requests added per target, so the sweep-budget argument is quantitativ
 For scale: the browser tier already costs 33 HTTP targets per browser target, and the sweep is 92% of
 dispatches. Only `run_external_surface` is free enough to wire without a budget conversation -- and it
 is the one with nothing downstream to consume it.
+
+## Cross-cutting: the recurring shape is a DESCRIPTION that outruns the CODE
+
+Four of the seven carry a claim that a reader (or the model, which reads `CLAUDE_TOOLS`) would act on
+and the code does not support. This is one defect class, not four coincidences, and it is the reason
+static reading was never going to settle these verdicts:
+
+| where | the claim | the code |
+|---|---|---|
+| `tools.py:935` | "Recursive content discovery via feroxbuster" | `--no-recursion` hardcoded at `tools.py:1483`, binary absent |
+| `tools.py:920` | run_metadata extracts "EXIF GPS" | exiftool absent; the native branch matches ASCII `b"GPS"`, which real EXIF never contains |
+| `tools.py:3186` | "Confirmed findings still come from the confirm_* steps inside it" | `workflow.run` never reads `res.findings` |
+| `tools.py:2475` vs `:220` | docstring says PASSIVE | registered ACTIVE, and it does fetch the target's favicon (ACTIVE is right, the docstring is wrong) |
+
+A reachability gate cannot catch any of these, because each engine is present, registered and
+implemented. Only running them does.
+
+---
+
+## THE UNKNOWNS, each with the experiment that closes it
+
+Per the ticket: an UNKNOWN with a named measurement is a finished verdict, not a gap. There are two,
+and neither blocks its engine's verdict.
+
+**U-1. Does `_bin_discovery`'s parser fit gobuster's and dirsearch's output at all?**
+Its only extractor is `re.findall(r"https?://[^\s\"']+", out)`. `feroxbuster --silent` prints bare
+URLs; `gobuster dir -q` and `dirsearch -q` print status-prefixed PATHS. If that holds, both parse to
+zero and report success with 0 findings on a target full of discoverable content -- a silent
+false-clean. **This lane did not install the binaries, so this is UNVERIFIED, recorded as a
+hypothesis.**
+*Experiment:* in a throwaway container, install each binary, run it against `http://juice-shop:3000/`
+with a 20-line wordlist, capture the REAL stdout to a file, and assert
+`len(re.findall(r"https?://[^\s\"']+", stdout)) > 0` per binary. The captured stdout is the only
+legitimate fixture; inventing the output shape is the defect class that has bitten this project three
+times.
+*Does it change the verdict?* **No.** DELETE is already the recommendation on five independent
+grounds. U-1 only decides whether the deletion also removes a latent false-clean or merely dead code.
+
+**U-2. Would `run_metadata` detect the GPS with exiftool installed?**
+The engine has two extraction paths and only the absent one is capable. MEASURED: the native fallback
+returns `{}` on a file whose GPS IFD this lane decoded. The exiftool path is untested because the
+binary is not in the image.
+*Experiment:* `docker run --rm --network apolaki_default <image-with-exiftool>` -- install `exiftool`,
+mount the agent, re-run this lane's driver against
+`http://juice-shop:3000/assets/public/images/uploads/magn(et)ificent!-1571814229653.jpg`, and check
+for a lead with a `gps`-containing key.
+*What each outcome means:* if it fires, the fix is one `agent/Dockerfile` line plus a binary EXIF
+reader in `upload_tool.py`, and the verdict becomes SOUND-with-caveat. If it does not, the engine is
+dead regardless of the binary and should be deleted like the trio. **Either way the native path needs
+a binary EXIF IFD reader before it can be called a fallback -- today it reads XMP, PDF info dicts and
+an ASCII string, none of which is EXIF.**
+
+## WHAT THIS LANE RECOMMENDS, in dependency order
+
+Nothing below was applied here. Every item names its owning file.
+
+1. **Delete the three content-discovery adapters** (`tools.py`). Start with the `CLAUDE_TOOLS`
+   removal alone -- purely subtractive, needs no oracle argument, and stops the product advertising a
+   capability it cannot perform. **Highest value, lowest risk item in this lane.**
+2. **Fix the `run_workflow` finding sink as ONE commit** across `workflow.py`, `tools.py:3202` and
+   `agent.py:95`. Any subset is invisible. `agent/tests/test_island_soundness.py` already holds the
+   failing test and the half-fix tripwire.
+3. **Do not wire `run_workflow` before (2).** Wiring it first spends real requests on real attacks and
+   reports nothing.
+4. **`run_metadata`: run U-2 before deciding.** Do not wire it either way until it detects the one
+   proven positive case in the labs.
+5. **`enumerate_ids`: sound, and its gap is a caller, not an oracle.** If wanted deterministically,
+   give it its own dispatch site keyed on an observed numeric-id endpoint
+   (`authz_matrix.is_object_path` and the graph's `object` nodes already supply the precondition).
+   **Do not route it through `run_workflow`** -- that puts a sound lead engine behind a proven sink.
+6. **`run_external_surface`: build the consumer before wiring the producer.** It is safe and cheap and
+   currently pointless; the promotion-on-live-check step its own docstring describes is the missing
+   half.
+7. **Fix the four description/code disagreements** listed above. They are cheap and they are what made
+   this diagnosis take a lane.
+
+---
+
+## QA record
+
+Full suite, rule 8c -- an isolated snapshot of committed HEAD (`b49ce80`) plus this lane's files, in a
+throwaway container:
+
+```
+docker run --rm --network apolaki_default -v <snapshot>/agent:/app -w /app apolaki-agent \
+  python -m pytest tests/ -p no:cacheprovider
+-> tests=2672  failures=0  errors=0   (2650 passed, 11 skipped, 11 xfailed)
+```
+
+Re-baselined against the coordinator's 2641 passed / 11 skipped / 9 xfailed: this lane adds exactly
+**+9 passed and +2 xfailed**, and moves nothing else.
+
+Both new xfails were confirmed to fail on the intended assertion (`--runxfail`):
+
+```
+E  AssertionError: workflow.run returned no findings although its only step emitted one
+E  AssertionError: extract_metadata returned {} for a file carrying a GPS IFD
+```
+
+The two lab-gated metadata tests were re-run with `--network none` and SKIP cleanly -- they do not
+error, and a skip inside the strict xfail does not trip the marker.
+
+**All live measurements in this document were re-run against the committed HEAD snapshot and
+reproduce identically.** The first pass had used the working tree, which carried another lane's 79
+uncommitted lines in `agent/tools.py`; every number here is from HEAD, not from unlanded code.
+
+## Lane state
+
+**COMPLETE.** Seven verdicts, all measured. Commits: `4818f0d` (trio), `1ca3842`
+(`run_external_surface` + `run_metadata`), `d725c01` (`run_workflow` + `enumerate_ids`), `b49ce80`
+(`agent/tests/test_island_soundness.py`), plus this file.
+
+This lane wired nothing and edited no product module, which was the point: the verdicts are usable by
+whichever lane picks up the recommendations, and none of them had to be trusted to a lane that also
+had an interest in the answer.
