@@ -1,6 +1,40 @@
 # QUEUE — the one canonical, dependency-ordered work queue
 
-### Q-054 · `run_workflow` is a FINDING SINK, two sinks deep · **HIGH** · `proposed`
+## STATE SWEEP — 2026-08-16 evening. Authoritative. Supersedes every marker below.
+
+**I let this rot again.** Q-050/051/052/053/057 all still read `proposed` further down while being
+wholly or partly closed. The rule I wrote after the last rot — *closing a ticket updates this block in
+the same commit* — I then broke across six closes. A queue whose state cannot be trusted is the same
+declaration-vs-fact defect the code keeps producing, and it is the one artifact every lane reads first.
+
+**CLOSED, with commits:**
+- **Q-051** — engine bound at `ToolResult`, per-finding attribution in BOTH renderers, ledger/finding
+  cross-check, technique coverage section. `620fcbb` `bc60727` `da798bc` `93ca3dd`
+- **Q-053** — all four family gaps + AUTHN-02 now failable. `7ce79bb` `fb6f457` `7fbd1bf` `44a6cbf`
+- **Q-057** — three content-discovery adapters deleted entirely (specs, methods, permissions,
+  `_bin_discovery`). `466bae8`
+- **Q-021C** — one technology-intelligence chain closed end to end (version selects the probe set).
+  `2480c75` and the techintel lane's own commits
+- **Q-032** — `Identity`: a persona request can no longer carry the mission's session. `4982d3b`
+- **Q-050(a)/(b)** — measured and DIAGNOSED in full; seven soundness verdicts landed. The *wiring* is
+  deliberately not done and is not a loose end: three engines were deleted, and the rest each need an
+  oracle-soundness argument the audit says cannot be made from static reading.
+
+**OPEN, and honestly ranked:**
+- **Q-054** `run_workflow` finding sink, two sinks deep — IN FLIGHT (truthful lane)
+- **Q-055** `run_metadata` false negative on proven GPS + the bfla mirror — IN FLIGHT (truthful lane)
+- **Q-056** four engines describe what they do not do — IN FLIGHT (descriptions lane)
+- **Q-052** tier semantics — BOTH proposals measured and REJECTED (narrowing `active` costs 49.5% of
+  the sweep; defaulting to `full` would enable state-changing writes and lab-mode traversal semantics
+  against production). Evidence points at loosening `planner._ALLOWED`, which needs a decision, not a
+  patch. **This is the oldest unresolved item and it is a product question, not an engineering one.**
+- **Q-021 (server/language half)** — still a version reporter; needs a probe that makes a request
+- **Q-002/003/004/005/006**, **Q-030/035/036**, **B-011+**, the baseline's ninth case `00438`, and the
+  unexplained sublinear per-URL cost
+
+---
+
+### Q-054 · `run_workflow` is a FINDING SINK, two sinks deep · **HIGH** · `IN FLIGHT`
 
 MEASURED by the islands lane. Same engine, same live target, two paths: `enumerate_ids` over
 `/api/Products/{id}` emits an `idor` lead on a direct call and **nothing** through `workflow.run`,
@@ -13,7 +47,7 @@ alone changes nothing. **DoD: both sinks fixed, proven by a finding surviving a 
 and do NOT wire the engine before that, or it spends real requests on real attacks and reports
 nothing.**
 
-### Q-055 · `run_metadata` reports clean on a file proven to leak GPS · **MEDIUM** · `proposed`
+### Q-055 · `run_metadata` reports clean on a file proven to leak GPS · **MEDIUM** · `IN FLIGHT`
 
 MEASURED: 59°25'16.17"N 24°48'4.32"E decoded by hand from the GPS IFD of the Juice Shop geo-stalking
 photo; the engine returned "No sensitive metadata". Two causes compose — exiftool is absent from the
@@ -21,7 +55,7 @@ image, AND the native fallback's only JPEG branch matches the ASCII string `b"GP
 EXIF never contains (`b"GPS" in data == False` on the file that HAS GPS). Fixing the Dockerfile alone
 leaves a fallback that cannot work; fixing the fallback alone leaves the better reader missing.
 
-### Q-056 · FOUR engines describe capability their code does not have · **HIGH** · `proposed`
+### Q-056 · FOUR engines describe capability their code does not have · **HIGH** · `IN FLIGHT`
 
 The cross-cutting result of the islands audit, and worth more than any single verdict: `run_ferox`
 advertises recursion while passing `--no-recursion`; `run_metadata` advertises EXIF it cannot read;
@@ -31,7 +65,7 @@ registered and implemented.** The gap is between what an engine SAYS and what it
 running it closes that. DoD: a check that compares each engine's advertised behaviour against its
 measured behaviour, or an explicit decision that this is a review discipline rather than a gate.
 
-### Q-057 · DELETE the three content-discovery specs · **HIGH** · `handed to the sessions lane`
+### Q-057 · DELETE the three content-discovery adapters · **CLOSED** `466bae8` — specs, methods, permissions and `_bin_discovery` all removed; test_bbh asserts their absence
 
 Purely subtractive, no oracle argument needed. All three binaries absent from the image; the
 capability is already wired natively with a soft-404 baseline the adapters lack; only coverage is a
