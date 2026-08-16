@@ -67,6 +67,48 @@ class ToolResult:
     findings: list = field(default_factory=list)
     error: Optional[str] = None
 
+    def __post_init__(self):
+        """Q-051: BIND THE PRODUCING ENGINE onto every finding, here, at the boundary that already
+        knows its name.
+
+        THE DEFECT. A 400-finding sample carried zero keys naming a tool, engine or source. The
+        mission `tool_ledger` recorded which engines RAN, but nothing connected an individual finding
+        to its producer — so "which engine found this?" was unanswerable, and its corollary "which
+        engines produced nothing?" cost a SQL query over 151 missions to answer once.
+
+        WHY HERE AND NOT IN EACH PRODUCER. `tool` IS the producer's own name for itself; it is already
+        an argument at every one of the 312 construction sites across 113 methods. Adding a field
+        module-by-module is 312 chances to forget one, and a forgotten one is indistinguishable from
+        an engine that legitimately found nothing — the same false-clean that this whole ticket is
+        about. It also has to cover both emitters: `execute()` dispatches by
+        `getattr(self, "_" + tool_name)`, but engines ALSO call each other directly
+        (`self._run_xss(...)`), so a binding placed in the dispatcher would miss every internal call.
+        The constructor is the one point neither path can bypass.
+
+        THREE RULES, each with a negative control in tests/test_finding_provenance.py:
+          * An empty/blank/None `tool` stamps NOTHING. `x or DEFAULT` where empty is a real input has
+            bitten this codebase three times; `engine: ""` would be a producer-less finding wearing a
+            producer's key, and a report section listing engines would render it as real.
+          * A finding that already names a real engine KEEPS it. Aggregating tools re-emit inner
+            results, and attribution must name who FOUND the finding, not who last carried it.
+          * Non-dict entries are skipped, not coerced. Several engines put raw URLs/scalars in
+            `findings`; raising here would be swallowed upstream and become an invisible false
+            negative for the entire tool.
+
+        The stamp is in-place on the caller's dicts, deliberately: those same dict objects are what
+        `agent._auto_store` shallow-copies and hands to `db.add_finding`, so copying here would bind
+        the value to an object that storage never sees."""
+        name = self.tool.strip() if isinstance(self.tool, str) else ""
+        if not name:
+            return                                   # "" is a real input — record nothing, not a lie
+        for f in (self.findings or []):
+            if not isinstance(f, dict):
+                continue                             # raw URL/scalar payloads: not findings, never coerce
+            existing = f.get("engine")
+            if isinstance(existing, str) and existing.strip():
+                continue                             # the inner producer already named itself
+            f["engine"] = name
+
 
 TOOL_PERMISSIONS = {
     "run_subfinder": PermissionLevel.PASSIVE,
