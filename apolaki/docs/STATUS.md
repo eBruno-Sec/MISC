@@ -3,20 +3,44 @@
 Updated by the Coordinator. Numbers here must match [LEDGERS.md](LEDGERS.md); if they disagree, the
 ledger wins and this file is stale.
 
-**Last update**: 2026-08-13.
+**Last update**: 2026-08-16 evening. The previous update was 08-13 and had rotted badly — it named
+lanes closed days earlier and a tree three days out of date. **This file is one of four criteria the
+`apolaki-autocontinue` watchdog checks before retiring itself, so leaving it stale silently disables
+that retirement.** Updating it is not bookkeeping.
 
 ## Lanes right now
 
 | lane | owner | state |
 |---|---|---|
-| Trust-boundary dataflow | Claude | live — **1684 uncommitted lines in `codereview.py`**, 2 dead-code gate failures are its |
-| Orchestration / Q-031 triggers | Claude | live — U1 measured and committed; closing its own UI island |
-| Q-040 blind-SQLi stability | **Codex** (leased) | `sqli_tool.py` + `tools.py` + the strict-xfail test file |
-| Probe repertoire | — | **CLOSED.** Both hypotheses falsified by its own measurements |
+| Truthful engines (Q-054/055/055b) | Claude | **live** — the workflow finding sink, metadata's GPS false negative, the bfla mirror |
+| Description gate (Q-056) | Claude | **live** — can "says X, does Y" be gated at all, or is it a review discipline |
+| Islands soundness (Q-050b) | — | **CLOSED.** 7 verdicts; 3 engines deleted outright |
+| Sessions / `Identity` (Q-032) | — | **CLOSED.** The anonymous authz row was carrying the mission's session |
+| Tech intelligence (Q-021C) | — | **CLOSED.** One chain end to end; the server/language half is still a version reporter |
 
-Tree at HEAD: **2142 passed / 9 skipped / 5 xfailed / 2 failed**, the 2 failures being the dataflow
-lane's uncommitted work. The 5 xfails are *strict* markers pinning named live defects — removing one
-without fixing what it pins is forbidden (Q-040, Q-041, Q-042).
+Tree at HEAD: **2658 passed / 13 skipped / 10 xfailed / 0 failed.** Every xfail is a STRICT marker
+pinning a named live defect — removing one without fixing what it pins is forbidden, and when the
+defect *is* fixed the marker XPASSes and turns the suite red on purpose, forcing a deliberate
+retirement.
+
+## Unproven claims and open blockers — read this before quoting a number
+
+- **Q-052 is a PRODUCT question, not an engineering one, and it is the oldest unresolved item.** Both
+  proposals were measured and rejected: narrowing `active` costs 49.5% of the sweep and 7 of 18
+  engines including the entire SQLi surface; defaulting to `full` would enable state-changing writes
+  and lab-calibrated traversal semantics against production targets. The evidence points at loosening
+  `planner._ALLOWED`. **Nobody should ship a third proposal without deciding what `active` means.**
+- **`00438`** — the ninth of the nine budget-starved sqli cases — is still unprobed at cap 700.
+- **Per-URL cost is SUBLINEAR in target count and nobody knows why.** The 400→700 raise predicted
+  +57% elapsed from a linear model and measured +22%. Any future budget change priced on the linear
+  model will be wrong in the expensive direction.
+- **The 08-11 seal `a95670f9` is abandoned, not explained.** Baseline counts are re-derivable
+  (`fab8a46e`); that seal string is not, and its sealing script was never committed.
+- **The wp2 `00042` traversal FP mechanism was never fully isolated** — the engine returns 0 findings
+  standalone. `run_web_probes` remains out of the sweep for that reason.
+- **`run_metadata` and `_run_workflow` are known to misreport as of this writing** (Q-055, Q-054, both
+  in flight). Until those land, a clean metadata result and a workflow run producing no findings are
+  both UNRELIABLE and must not be quoted as evidence of a clean target.
 
 ## Two hypotheses tested and FALSIFIED — both were mine
 
