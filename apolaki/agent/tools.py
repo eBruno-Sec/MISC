@@ -1403,7 +1403,7 @@ class ToolRegistry:
             except Exception:
                 meta = {}
         if not meta:
-            meta = upload_tool.extract_metadata(data)  # native XMP/PDF/EXIF-ASCII fallback
+            meta = upload_tool.extract_metadata(data)  # native XMP/PDF + binary EXIF fallback (Q-055)
         interesting = {k: v for k, v in (meta or {}).items()
                        if any(h in k.lower() for h in ("gps", "location", "author", "creator", "artist",
                                                        "owner", "software", "make", "model", "email", "coord"))}

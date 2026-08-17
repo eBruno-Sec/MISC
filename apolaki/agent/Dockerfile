@@ -33,8 +33,20 @@ ENV BBH_DB_PATH=/app/data/bbh.db
 
 # These CLI tools are optional — the agent skips any that are missing and uses its
 # native equivalents — so a transient apt hiccup must not fail the build.
+#
+# libimage-exiftool-perl (Q-055): `run_metadata` has always advertised "exiftool or native" and
+# exiftool was NOT in this image, so `shutil.which("exiftool")` was always false and the engine
+# always took the native fallback — an engine advertising a capability the image does not have.
+# MEASURED cost of adding it: +67.2 MB filesystem delta including apt lists (the `rm -rf` below
+# reclaims those; net ~64 MB), i.e. +2.3% on a 2.81 GB image. It pulls perl, perl-modules-5.36,
+# libperl5.36 and libgdbm-compat4. Bought for coverage the native reader genuinely cannot give:
+# PNG eXIf/tEXt, WebP, HEIC, MP4/MOV moov GPS, and office containers.
+# It is an ADDITION, not a dependency: `upload_tool.read_exif` now parses JPEG/TIFF EXIF on its
+# own, so a failed apt leaves the GPS capability intact rather than reinstating the false negative.
+# Cross-validated on the Juice Shop geo photo: exiftool reports 59.4211583333333 / 24.8012 and the
+# native reader reports 59.421158 / 24.8012 — agreement to 6 dp between independent readers.
 RUN apt-get update -o Acquire::Retries=3 -q && \
-    apt-get install -y --no-install-recommends -q nmap whatweb dirb sqlmap \
+    apt-get install -y --no-install-recommends -q nmap whatweb dirb sqlmap libimage-exiftool-perl \
       || echo "[WARN] apt security tools skipped; native equivalents will be used"; \
     rm -rf /var/lib/apt/lists/*
 

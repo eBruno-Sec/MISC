@@ -181,13 +181,196 @@ def no_restriction_lead(field: str) -> dict:
 
 # ── Native metadata extraction (fallback when exiftool is absent) ────────────────
 import re as _re
+import struct as _struct
+
+# ── Binary EXIF (Q-055) ──────────────────────────────────────────────────────────
+# THE DEFECT THIS REPLACES. `extract_metadata`'s only JPEG branch was
+#     if data[:2] == b"\xff\xd8" and b"GPS" in data[:65536]: ...
+# an ASCII substring match. Real EXIF stores GPS as the BINARY IFD-pointer tag 0x8825; the
+# characters "GPS" never appear. MEASURED on the Juice Shop geo-stalking photo, which provably
+# leaks 59d25'16.17"N 24d48'4.32"E:
+#     b"GPS" in data                     -> False
+#     IFD0 tag 0x8825 (GPS IFD pointer)  -> present
+#     extract_metadata(data)             -> {}
+#     run_metadata                       -> "No sensitive metadata (native)", findings=0
+# So the string match was BOTH a guaranteed false negative on every real EXIF GPS file and a
+# false-positive surface on any JPEG that happens to contain the letters "GPS" in a comment. It
+# is deleted rather than kept alongside: a parser supersedes it in both directions.
+#
+# TIFF/EXIF type -> bytes per component (TIFF 6.0 §2). Unknown types are skipped, never guessed.
+_TIFF_TYPE_SIZE = {1: 1, 2: 1, 3: 2, 4: 4, 5: 8, 6: 1, 7: 1, 8: 2, 9: 4, 10: 8, 11: 4, 12: 8}
+
+_IFD0_TAGS = {0x010F: "Make", 0x0110: "Model", 0x0131: "Software",
+              0x013B: "Artist", 0x8298: "Copyright", 0x0132: "ModifyDate"}
+_EXIF_SUB_TAGS = {0x9003: "DateTimeOriginal", 0xA430: "OwnerName",
+                  0xA431: "BodySerialNumber", 0xA433: "LensMake", 0xA434: "LensModel"}
+_GPS_TAGS = {0x0001: "GPSLatitudeRef", 0x0002: "GPSLatitude", 0x0003: "GPSLongitudeRef",
+             0x0004: "GPSLongitude", 0x0006: "GPSAltitude", 0x001D: "GPSDateStamp"}
+_EXIF_IFD_PTR, _GPS_IFD_PTR = 0x8769, 0x8825
+
+
+def _jpeg_exif_block(data: bytes) -> bytes:
+    """The TIFF block inside the APP1 'Exif\\x00\\x00' segment, found by WALKING the JPEG segment
+    table — not by `data.find(b"Exif\\x00\\x00")`, which can match inside compressed image data and
+    would hand the parser a bogus TIFF base. Returns b"" when there is no APP1/Exif segment."""
+    if data[:2] != b"\xff\xd8":
+        return b""
+    i, n = 2, len(data)
+    while i + 4 <= n:
+        if data[i] != 0xFF:
+            return b""                      # not a marker boundary: stop rather than resynchronise
+        marker = data[i + 1]
+        if marker == 0xFF:                  # fill byte, legal between markers
+            i += 1
+            continue
+        if marker in (0x01, 0xD8) or 0xD0 <= marker <= 0xD7:
+            i += 2                          # standalone markers carry no length
+            continue
+        if marker in (0xD9, 0xDA):
+            return b""                      # EOI / start of entropy-coded scan: no more segments
+        seglen = _struct.unpack(">H", data[i + 2:i + 4])[0]
+        if seglen < 2 or i + 2 + seglen > n:
+            return b""                      # truncated/garbage length: refuse, do not guess
+        if marker == 0xE1 and data[i + 4:i + 10] == b"Exif\x00\x00":
+            return data[i + 10:i + 2 + seglen]
+        i += 2 + seglen
+    return b""
+
+
+def _tiff_block(data: bytes) -> bytes:
+    """The TIFF/EXIF byte block for either container shape: a JPEG APP1 segment, or a bare TIFF
+    file (which IS its own TIFF block)."""
+    if data[:2] in (b"II", b"MM") and len(data) >= 8:
+        return data
+    return _jpeg_exif_block(data)
+
+
+def _read_ifd(tiff: bytes, offset: int, bo: str, wanted: dict, ptrs: tuple = ()) -> tuple:
+    """Read one IFD. Returns ({name: decoded_value}, {ptr_tag: sub_ifd_offset}).
+
+    Every read is bounds-checked against `tiff`, so a truncated or hostile file yields fewer tags
+    rather than an exception — this runs inside `run_metadata`, where a raised error would be
+    caught upstream and become an invisible false negative for the whole engine (the exact defect
+    class this ticket is about). Nothing here can raise on adversarial input, so nothing here needs
+    a swallow."""
+    vals, found_ptrs = {}, {}
+    if offset < 2 or offset + 2 > len(tiff):
+        return vals, found_ptrs
+    count = _struct.unpack(bo + "H", tiff[offset:offset + 2])[0]
+    if count > 512:                          # sane cap; real IFDs are tens of entries
+        count = 512
+    for j in range(count):
+        e = offset + 2 + j * 12
+        if e + 12 > len(tiff):
+            break
+        tag, typ, n = _struct.unpack(bo + "HHI", tiff[e:e + 8])
+        if tag in ptrs:
+            found_ptrs[tag] = _struct.unpack(bo + "I", tiff[e + 8:e + 12])[0]
+            continue
+        if tag not in wanted:
+            continue
+        unit = _TIFF_TYPE_SIZE.get(typ)
+        if not unit or n == 0 or n > 4096:
+            continue                         # unknown type / absurd count: skip, never guess
+        size = unit * n
+        if size <= 4:
+            raw = tiff[e + 8:e + 8 + size]
+        else:
+            off = _struct.unpack(bo + "I", tiff[e + 8:e + 12])[0]
+            if off + size > len(tiff):
+                continue                     # points outside the block: skip
+            raw = tiff[off:off + size]
+        if len(raw) < size:
+            continue
+        val = _decode_tiff_value(raw, typ, n, bo)
+        if val is not None:
+            vals[wanted[tag]] = val
+    return vals, found_ptrs
+
+
+def _decode_tiff_value(raw: bytes, typ: int, n: int, bo: str):
+    """ASCII -> str, RATIONAL/SRATIONAL -> float or [float], SHORT/LONG -> int or [int]."""
+    if typ in (1, 2, 7):                                  # BYTE / ASCII / UNDEFINED
+        s = raw.split(b"\x00")[0].decode("ascii", "replace").strip()
+        return s or None
+    if typ in (3, 4, 9):                                  # SHORT / LONG / SLONG
+        code = {3: "H", 4: "I", 9: "i"}[typ]
+        out = list(_struct.unpack(bo + code * n, raw))
+        return out[0] if n == 1 else out
+    if typ in (5, 10):                                    # RATIONAL / SRATIONAL
+        code = "II" if typ == 5 else "ii"
+        out = []
+        for k in range(n):
+            num, den = _struct.unpack(bo + code, raw[k * 8:(k + 1) * 8])
+            out.append(float(num) / den if den else 0.0)
+        return out[0] if n == 1 else out
+    return None
+
+
+def _dms(parts, ref: str) -> tuple:
+    """[deg, min, sec] + N/S/E/W -> ("59 deg 25' 16.17\\" N", 59.421158) or (None, None).
+
+    The ref is a REAL input even when absent: a coordinate with no hemisphere is ambiguous, so it
+    is reported as-is rather than silently defaulting to the northern/eastern hemisphere."""
+    if not isinstance(parts, list) or len(parts) < 3:
+        return None, None
+    d, m, s = (float(parts[0]), float(parts[1]), float(parts[2]))
+    if not (0 <= d <= 180 and 0 <= m < 60 and 0 <= s < 60):
+        return None, None                     # not a coordinate; report nothing rather than nonsense
+    dec = d + m / 60.0 + s / 3600.0
+    r = (ref or "").strip().upper()[:1]
+    if r in ("S", "W"):
+        dec = -dec
+    def _n(x):
+        return ("%g" % round(x, 6))
+    label = "%s deg %s' %s\"" % (_n(d), _n(m), _n(s))
+    return (label + " " + r if r else label + " (no hemisphere ref)"), round(dec, 6)
+
+
+def read_exif(data: bytes) -> dict:
+    """Binary EXIF reader for JPEG (APP1) and bare TIFF: GPS coordinates plus the device/authorship
+    tags exiftool would surface. Flat {`EXIF:<Tag>`: value}; {} when the file carries no EXIF."""
+    tiff = _tiff_block(data or b"")
+    if len(tiff) < 8 or tiff[:2] not in (b"II", b"MM"):
+        return {}
+    bo = "<" if tiff[:2] == b"II" else ">"
+    if _struct.unpack(bo + "H", tiff[2:4])[0] != 42:      # TIFF magic; anything else is not TIFF
+        return {}
+    ifd0_off = _struct.unpack(bo + "I", tiff[4:8])[0]
+    vals, ptrs = _read_ifd(tiff, ifd0_off, bo, _IFD0_TAGS, (_EXIF_IFD_PTR, _GPS_IFD_PTR))
+    out = {"EXIF:" + k: v for k, v in vals.items()}
+
+    if _EXIF_IFD_PTR in ptrs:
+        sub, _ = _read_ifd(tiff, ptrs[_EXIF_IFD_PTR], bo, _EXIF_SUB_TAGS)
+        out.update({"EXIF:" + k: v for k, v in sub.items()})
+
+    if _GPS_IFD_PTR in ptrs:
+        gps, _ = _read_ifd(tiff, ptrs[_GPS_IFD_PTR], bo, _GPS_TAGS)
+        lat, lat_dec = _dms(gps.get("GPSLatitude"), gps.get("GPSLatitudeRef") or "")
+        lon, lon_dec = _dms(gps.get("GPSLongitude"), gps.get("GPSLongitudeRef") or "")
+        if lat:
+            out["EXIF:GPSLatitude"] = lat
+        if lon:
+            out["EXIF:GPSLongitude"] = lon
+        if lat_dec is not None and lon_dec is not None:
+            out["EXIF:GPSPosition"] = "%s, %s" % (lat_dec, lon_dec)
+        if gps.get("GPSDateStamp"):
+            out["EXIF:GPSDateStamp"] = gps["GPSDateStamp"]
+        if not lat and not lon:
+            # The pointer tag 0x8825 IS present but no coordinate decoded. Say exactly that, keyed
+            # on the binary tag actually observed — an honest degraded claim, never the old ASCII
+            # guess. `gps` keys are still namespaced so nothing is invented.
+            out["EXIF:GPSIFDPresent"] = ("GPS IFD (tag 0x8825) present, coordinates not decodable "
+                                         "from tags %s" % sorted(gps) or "[]")
+    return out
 
 
 def extract_metadata(data: bytes) -> dict:
     """Dependency-free metadata extraction used when exiftool is not installed. Pulls the
-    XMP packet (images/PDF), the PDF info dictionary, and notes an EXIF GPS IFD. Returns a
-    flat {tag: value} dict. Best-effort and deterministic — exiftool is richer, but this
-    catches the common disclosures (author, device, software, XMP GPS, PDF producer)."""
+    XMP packet (images/PDF), the PDF info dictionary, and a REAL binary EXIF parse (Q-055 —
+    this used to be an ASCII `b"GPS"` substring match that real EXIF never satisfies). Returns a
+    flat {tag: value} dict. Best-effort and deterministic — exiftool is richer across container
+    formats, but this carries the JPEG/TIFF EXIF capability on its own."""
     if not data:
         return {}
     out = {}
@@ -211,6 +394,8 @@ def extract_metadata(data: bytes) -> dict:
         mm = _re.search(r"/%s\s*\(([^)]{1,200})\)" % tag, text)
         if mm:
             out["PDF:" + tag] = mm.group(1).strip()
-    if data[:2] == b"\xff\xd8" and b"GPS" in data[:65536] and "GPSLatitude" not in out:
-        out["EXIF:GPS"] = "GPS IFD marker present (install exiftool for exact coordinates)"
+    # Binary EXIF LAST and namespaced under `EXIF:`, so it can neither overwrite nor be overwritten
+    # by the XMP values above. Two sources reporting the same fact is not a defect; hiding one is —
+    # the old code suppressed its EXIF branch whenever XMP had already produced a GPSLatitude.
+    out.update(read_exif(data))
     return out
