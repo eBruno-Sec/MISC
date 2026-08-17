@@ -1,4 +1,4 @@
-# routing lane — Q-066 / Q-020 / Q-065
+# routing lane -- Q-066 / Q-020 / Q-065
 
 One root cause, one ticket. This file records what HAPPENED, in order. Every claim is MEASURED
 (command + real output) or UNVERIFIED.
@@ -12,17 +12,17 @@ MSYS_NO_PATHCONV=1 docker run --rm --network apolaki_default -e PYTHONPATH=/app 
 
 ---
 
-## STEP 1 — does a join already exist? MEASURED: NO. But the ticket's mechanism is wrong.
+## STEP 1 -- does a join already exist? MEASURED: NO. But the ticket's mechanism is wrong.
 
 **Verdict: no join exists, and Q-066's DoD stands. The ticket's headline measurement is a category
 error that points the fix at the wrong pair of tables.**
 
 ### What I read (field/attribute names stated, because two probes in this thread lied about theirs)
 
-- `tools.TOOL_PERMISSIONS` — dict, **keys** are the registered engine names. 111.
-- `tools.CLAUDE_TOOLS` — list of dicts, **`["name"]`** per item. 76.
-- `techniques.TECHNIQUES` — dict, **keys** are technique ids. 88.
-- `engine_descriptor.PRECONDITIONS` / `.EFFECTS` / `.ALWAYS_ON` — dict **keys**. 42 / 13 / 45.
+- `tools.TOOL_PERMISSIONS` -- dict, **keys** are the registered engine names. 111.
+- `tools.CLAUDE_TOOLS` -- list of dicts, **`["name"]`** per item. 76.
+- `techniques.TECHNIQUES` -- dict, **keys** are technique ids. 88.
+- `engine_descriptor.PRECONDITIONS` / `.EFFECTS` / `.ALWAYS_ON` -- dict **keys**. 42 / 13 / 45.
 - `engine_descriptor.build()` -> `{id: descriptor}`, and `descriptor()`'s full **output keys**.
 - every field name present on every technique record, enumerated rather than guessed (25 of them).
 - `asvs_model` rows, **`["engine"]`**.
@@ -30,7 +30,7 @@ error that points the fix at the wrong pair of tables.**
 Positive control for the apparatus: `"run_jwt" in tools.TOOL_PERMISSIONS` -> `True`. The registry
 was loaded and readable, so a zero below is a fact and not an empty instrument.
 
-### M1 — EFFECTS and PRECONDITIONS are the SAME vocabulary. This is the ticket's error.
+### M1 -- EFFECTS and PRECONDITIONS are the SAME vocabulary. This is the ticket's error.
 
 ```
 EFFECTS keys that ARE technique ids   : 13 of 13
@@ -45,7 +45,7 @@ The ticket reads `PRECONDITIONS 42 of 42 ARE technique ids -> techniques DO bind
 `EFFECTS 0 of 13 are registered engine names -> nothing binds to the engine registry`. Those two
 rows are measured against **different reference sets**, which makes the contrast an artifact of the
 probe rather than a property of the code. Measured against the same set: **PRECONDITIONS binds to
-the engine registry exactly as poorly as EFFECTS does — 0 of 42.** `jwt_forge` and
+the engine registry exactly as poorly as EFFECTS does -- 0 of 42.** `jwt_forge` and
 `jwt_key_confusion` are not a separate "capability vocabulary": both are technique ids and both
 appear in `PRECONDITIONS` (lines 77 and 89) as well as `EFFECTS`.
 
@@ -53,7 +53,7 @@ So the defect is NOT "effects speak a different language from preconditions". Th
 one. The defect is that **the technique vocabulary as a whole has no route to the engine registry**,
 and that is true for all 88 techniques, not the 13 with effects.
 
-### M2 — no technique record carries an engine binding, in any field
+### M2 -- no technique record carries an engine binding, in any field
 
 Exact value equality against the 111 registered names, over every field on every record:
 
@@ -69,7 +69,7 @@ prose fields mentioning a real engine (run_*/confirm_* token): NONE
 The prose fields name *modules* (`jwt_tool`, `sqli_tool`, `saml_tool`), never *engines*. A module is
 not dispatchable.
 
-### M5 — `descriptor()` and `build()` add nothing. This is the part the Coordinator could not see.
+### M5 -- `descriptor()` and `build()` add nothing. This is the part the Coordinator could not see.
 
 The ticket correctly flagged that only the public surface had been checked. I read the function
 bodies. `descriptor(tech, preconditions, always_on)` emits exactly these keys:
@@ -80,14 +80,14 @@ bodies. `descriptor(tech, preconditions, always_on)` emits exactly these keys:
 ```
 
 No `engine`, `tool`, `executor` or `dispatch` key. `build()` is `{t["id"]: descriptor(...)}` over
-`techniques.TECHNIQUES` — it introduces no new field. **A join is not hiding inside `build()` or
+`techniques.TECHNIQUES` -- it introduces no new field. **A join is not hiding inside `build()` or
 `descriptor()`.**
 
 Positive control that the apparatus would have SEEN an engine binding: the same probe read
 `asvs_model` and found **29 of 33 rows carry `["engine"]`**. The instrument detects engine bindings
 where they exist.
 
-### M3 — the one join that DOES exist, and its exact extent
+### M3 -- the one join that DOES exist, and its exact extent
 
 `ALWAYS_ON` values are prose reasons, and 23 of them name a real engine in that prose.
 `engine_descriptor.verify_always_on()` already exploits this: it extracts identifiers from the
@@ -102,7 +102,7 @@ ALWAYS_ON naming NO registered engine: client_side_authz, client_supplied_identi
   vnc_no_auth, vulnerable_component, weak_ssh_crypto
 ```
 
-### M4 — the evidence-gated half has no route at all
+### M4 -- the evidence-gated half has no route at all
 
 ```
 PRECONDITIONS techniques with an ALWAYS_ON engine name: 0 of 42
@@ -125,14 +125,14 @@ seen from the planner side.
 ### A correction to Q-065's concrete case, MEASURED
 
 The ticket pairs `run_jwt` with `weak_secret_forgery`. Those are not the same capability.
-`techniques.py:832` — `weak_secret_forgery` is CWE-330, "forge a signed artifact (token/coupon/
+`techniques.py:832` -- `weak_secret_forgery` is CWE-330, "forge a signed artifact (token/coupon/
 continue-code) whose secret is weak", precondition `has_coupon`, validated on the Juice Shop
 *Forged Coupon* challenge. The JWT techniques are `jwt_forge` / `jwt_key_confusion`, CWE-347,
 precondition `authenticated`. Whatever emitted `weak_secret_forgery` was not naming `run_jwt`'s
 capability. `codeintel.py:57` binds source-pattern rule `weak_crypto` -> technique
 `weak_secret_forgery`, which is a plausible emitter of that string on a JS-heavy target.
 
-This does not weaken Q-066 — it is another instance of the same shape (a technique id surfaced to
+This does not weaken Q-066 -- it is another instance of the same shape (a technique id surfaced to
 the operator with no route to an engine). It does mean the "`run_jwt` never fires" symptom needs its
 own measurement rather than being assumed to be a routing miss; see the note under Step 2.
 
@@ -146,7 +146,7 @@ own measurement rather than being assumed to be a routing miss; see the note und
 
 ---
 
-## STEP 2 — the join, derived rather than typed
+## STEP 2 -- the join, derived rather than typed
 
 ### An instrument error I made and retracted, recorded because the retraction matters
 
@@ -171,11 +171,11 @@ Two sources, both already in the tree and both already maintained for another pu
 
 **Two sources measured and REJECTED**, because a wrong route is worse than no route:
 
-- `wstg_catalog.PARTIAL` — the catalog defines it as "a related tool touches it but does not confirm
+- `wstg_catalog.PARTIAL` -- the catalog defines it as "a related tool touches it but does not confirm
   the specific scenario", i.e. the negation of an executor. Would add 13 techniques and gets them
   wrong in kind: `weak_secret_forgery` (forge a salt-less coupon) would route to `run_hash_id`, which
   identifies hash primitives and forges nothing.
-- `asvs_model` technique `vuln_class` -> row `violated_by` — a family-name coincidence, not a
+- `asvs_model` technique `vuln_class` -> row `violated_by` -- a family-name coincidence, not a
   binding. Measured: **disagreed with the kept sources on 22 of the 33 techniques it covered**, e.g.
   adding `run_bfla` (function-level) to `idor_bola_read` alongside the correct `confirm_idor`
   (object-level).
@@ -197,7 +197,7 @@ modbus_exposed    -> ['run_service_pack'] {'run_service_pack': ['always_on_reaso
 ```
 
 `descriptor()` now carries `engines`, `routed_by` and `routable`, so the join is on the descriptor's
-**public surface** — the place the Coordinator looked and found nothing. `build()` resolves the
+**public surface** -- the place the Coordinator looked and found nothing. `build()` resolves the
 routing once and passes it in, so the derivation is not re-run 88 times.
 
 ### The concrete case, end to end
@@ -214,7 +214,7 @@ effect_producers_unrouted, ok}`.
 
 **`phantom` is found by SHAPE over the source prose, never by re-filtering `routes()` output.**
 `routes()` only ever emits names that are already in the registry, so asserting "every routed engine
-is registered" would be true by construction — the guard-that-cannot-fail trap this codebase has hit
+is registered" would be true by construction -- the guard-that-cannot-fail trap this codebase has hit
 eight times, and `test_techniques.py:17` is still a live example of it.
 
 MEASURED mutation kill, the Q-011 phantom `run_mass_assignment` injected into the catalog:
@@ -251,14 +251,14 @@ that cannot fail.
 
 Committed as `cea1e2e`.
 
-### Q-065 half — a plan that cannot be executed now says so
+### Q-065 half -- a plan that cannot be executed now says so
 
 `effect_search.plan()` returned `reachable: True` for paths through techniques with no executor, and
 a consumer had no way to distinguish "run this" from "there is no code for this". `plan()` is now a
 thin annotating wrapper over the **unchanged** search (`_plan_core`), adding `engines`, `unroutable`
 and `dispatchable`; `frontier()` gains `unroutable_now`.
 
-A descriptor with no `engines` KEY is reported as neither routed nor unroutable — absence of a
+A descriptor with no `engines` KEY is reported as neither routed nor unroutable -- absence of a
 measurement is not a negative result.
 
 MEASURED mutation kill (drop `and not unroutable` from `dispatchable`): **3 tests fail**, including
@@ -273,18 +273,68 @@ have no engine the platform can derive, and 8 of them have no `wstg` value or a 
 entry names no engine. Closing those is engine work, not routing work, and is out of this lane's
 scope.
 
+### The routing layer is wired, not an island
+
+By this codebase's own doctrine a declare-only module is an island, so a join nothing reads would be
+this ticket's defect one level up. `technique_planner.orchestration_audit()` now returns `unroutable`
+and `routing`, and `main.orchestration_audit()` splats that dict (`{**a, ...}`), so both reach the
+`/orchestration` endpoint **without `main.py` being edited** -- which matters, because this lane does
+not own it.
+
+MEASURED on the production endpoint:
+
+```
+no_islands : True     <- every technique is DECLARED reached
+unroutable : 13       <- and no engine executes any of these 13
+routing    : {"routed": 75, "total": 88, "phantom": [], "registry_readable": true,
+              "effect_producers_unrouted": [default_credentials, saml_signature_bypass,
+                                            soft_deleted_login, weak_password_reset]}
+```
+
+That contrast on one payload is Q-020's point made visible in production rather than asserted in a
+test that cannot fail. All 13 sit inside `gated` or `always_on` -- the no-island guard certified every
+one of them.
+
+Routing is strictly additive and cannot break the island answer: if the registry cannot be read, the
+audit still answers, sets `unroutable` to `None` rather than `[]`, and reports
+`registry_readable: false`. Pinned by a monkeypatched-failure test, because an unreadable registry
+reading as "nothing unroutable" is the same silent-zero I have already produced once in this thread.
+Committed as `7a73f7b`.
+
+### QA
+
+Full suite on the agent image, own throwaway container, `--network apolaki_default`:
+
+```
+MSYS_NO_PATHCONV=1 docker run --rm --network apolaki_default \
+  -v ".../apolaki/agent:/app" -w /app apolaki-agent python -m pytest tests/ -p no:cacheprovider
+
+EXIT=0    2799 passed, 11 skipped, 9 xfailed, 0 failed, 0 errors   (2819 outcomes)
+```
+
+31 of those are new here: `test_engine_routing.py` 18, `test_effect_search_routing.py` 10,
+`test_planner_jwt_gate.py` 3. No existing test was weakened, and the T7 snapshot
+(`OBSERVATIONS`/`PRECONDITIONS`/`ALWAYS_ON`) is untouched -- the routing tables are derived, not added
+to those.
+
+An earlier background run of this suite was **discarded, not reported**: it had been started before
+the last two commits and the agent directory is a live mount, so it was reading a mixed tree. The
+number above is from a clean run against the final tree.
+
 ### What is NOT done, stated plainly
 
-- **Nothing consumes the new route yet.** `descriptor()["engines"]` is published and tested, but
-  `planner.py`'s phase pipeline still hard-codes its dispatch names and does not read it. Wiring a
-  consumer is the obvious next slice and I have not done it.
+- **`planner.py`'s dispatch still hard-codes its tool names.** The route is published, tested and
+  served, but the phase pipeline at `planner.py:560-650` does not read `descriptor()["engines"]` to
+  decide what to run. Making the deterministic pipeline route THROUGH the join is the obvious next
+  slice and I did not do it -- it changes what a mission actually executes, which needs its own
+  measured before/after, not a tail-end commit.
 - The 13 unrouted techniques remain unrouted.
 - Q-065's original symptom (`run_jwt` never firing on a JWT-authenticated target) has a **second,
   independent cause I did not fix**, recorded below.
 
 ---
 
-## Q-065's SECOND cause — the FIFTH instance of the same defect shape
+## Q-065's SECOND cause -- the FIFTH instance of the same defect shape
 
 **This is not a routing problem, and fixing Q-066 does not fix it.** Found while measuring Q-066.
 
@@ -309,8 +359,8 @@ dict at all. Grepping the whole tree, the string `auth_headers` appears as a dic
 exactly one place outside the request model and the tests: the planner's own read.
 
 **So `state.get("auth_headers")` is always `{}`, and only a JWT carried in a COOKIE can ever schedule
-`run_jwt`.** A Bearer-token JWT — the normal case, and every SPA that keeps its token in
-localStorage, which is Juice Shop's shape — cannot reach the gate.
+`run_jwt`.** A Bearer-token JWT -- the normal case, and every SPA that keeps its token in
+localStorage, which is Juice Shop's shape -- cannot reach the gate.
 
 This is the same shape as Q-066: producer and consumer name the same thing differently and never
 meet. `mode`/`strategy`, ToolResult-name/dispatch-name, technique-id/engine-name, `blocked_by_mode`,
@@ -318,7 +368,7 @@ and now `session_headers`/`auth_headers`.
 
 ### MEASURED, by driving the real `planner.next_batch` through its phases
 
-Not by reimplementing the regex — a reimplemented gate would pass while the shipped one did nothing.
+Not by reimplementing the regex -- a reimplemented gate would pass while the shipped one did nothing.
 
 ```
 WITH auth_headers          -> run_jwt scheduled: True  | distinct tools: 34
@@ -356,3 +406,31 @@ is real on the instance the agent holds. After applying, flip
 A second, better option worth considering instead: have the gate read the token from wherever the
 auth artery already stores it, so the planner does not depend on a header dict being copied into
 state at all. I did not measure whether such a store exists.
+
+---
+
+## Ticket status, and what the next lane should NOT re-derive
+
+| ticket | state | evidence |
+| --- | --- | --- |
+| Q-066 | **closed** -- join built, derived, wired, tested | `cea1e2e` `7a73f7b`; 75 of 88 routed, 0 phantom |
+| Q-020 | **closed as measured** -- the unfailable guard now has a failable partner | `7a73f7b`; 13 declared-reached techniques have no executor, pinned as an exact set |
+| Q-065 | **partly closed** -- routing half done; SECOND cause found, diagnosed, NOT fixed | `0f735bc` `2ea0c35`; fix needs `agent.py`, patch above |
+
+Corrections to the ticket as filed, so nobody re-derives them:
+
+1. `EFFECTS` and `PRECONDITIONS` are the same vocabulary. The "42 of 42 vs 0 of 13" contrast was
+   measured against different reference sets. Both are technique ids; neither binds to the registry.
+2. `weak_secret_forgery` is not a JWT technique. It is CWE-330 signed-artifact forgery gated on
+   `has_coupon`. Pairing it with `run_jwt` conflated two capabilities.
+3. `run_jwt` not firing is **not** primarily a routing failure. The routing gap was real and is
+   fixed; the reason `run_jwt` does not fire on a Bearer-token target is the dead `auth_headers`
+   state key, which routing does not touch.
+
+Standing note on the defect shape, now at five instances: `mode`/`strategy`,
+ToolResult-name/dispatch-name, technique-id/engine-name, `blocked_by_mode`, and
+`session_headers`/`auth_headers`. Every one was a producer and a consumer naming the same thing
+differently with nothing joining them, and every one was invisible to a green suite. The cheap
+detector is to enumerate both vocabularies and intersect them, with a positive control proving the
+apparatus can see a match when one exists -- that is what found this, and what caught my own two
+instrument errors.
