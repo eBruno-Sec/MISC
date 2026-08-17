@@ -72,7 +72,45 @@ def successor(descriptors, observations, technique_id) -> frozenset:
     return frozenset(obs)
 
 
+def _routing(descriptors, steps):
+    """({step: [engine, ...]}, [unroutable step, ...]) for a plan's steps.
+
+    Q-066/Q-065. A step names a TECHNIQUE; an executor needs an ENGINE, and until the descriptor
+    carried `engines` there was no route between the two — which is how a mission's autonomy loop came
+    to recommend a capability it had no way to dispatch.
+
+    A descriptor with no `engines` KEY AT ALL is reported as neither routed nor unroutable: absence of
+    a measurement is not a negative result, and the synthetic descriptors the algorithm tests are built
+    from legitimately have no routing. Only an `engines` key that is present and EMPTY means "this
+    technique has no engine". Pure."""
+    eng, unroutable = {}, []
+    for s in steps:
+        d = descriptors.get(s) or {}
+        if "engines" not in d:
+            continue
+        e = list(d.get("engines") or [])
+        eng[s] = e
+        if not e:
+            unroutable.append(s)
+    return eng, sorted(set(unroutable))
+
+
 def plan(descriptors, observations, goal, *, max_depth: int = 6) -> dict:
+    """Shortest engine sequence to `goal`, annotated with whether its steps can actually be DISPATCHED.
+
+    `_plan_core` answers the planning question; this wrapper answers the execution one. A plan that is
+    `reachable` but not `dispatchable` is the honest statement of Q-065's symptom: the search found a
+    real path and the platform has no engine for one of its steps. Silently returning such a plan is
+    what let a ranked capability look actionable when nothing could run it. Pure."""
+    r = _plan_core(descriptors, observations, goal, max_depth=max_depth)
+    eng, unroutable = _routing(descriptors, r["plan"])
+    r["engines"] = eng
+    r["unroutable"] = unroutable
+    r["dispatchable"] = bool(r["reachable"]) and not unroutable
+    return r
+
+
+def _plan_core(descriptors, observations, goal, *, max_depth: int = 6) -> dict:
     """Shortest sequence of engines that reaches `goal` from `observations`, or an honest failure.
 
     Breadth-first, so the first path found is the shortest — Automated Planning §4.2's forward search with
@@ -169,9 +207,13 @@ def frontier(descriptors, observations) -> dict:
     obs = frozenset(observations or ())
     now = applicable(descriptors, obs)
     goals = sorted({g for d in descriptors.values() for g in d["establishes"]} - set(obs))
+    _, unroutable_now = _routing(descriptors, now)
     return {
         "observations": sorted(obs),
         "applicable_now": now,
+        # Applicable but not dispatchable. The decision surface must show this or a consumer reads
+        # "runnable now" and finds nothing to run — the Q-065 symptom, one layer up.
+        "unroutable_now": unroutable_now,
         "reachable_goals": {g: plan(descriptors, obs, g) for g in goals},
         "consequences": {t: {"unlocks": unlocks(descriptors, obs, t), "breaks": breaks(descriptors, obs, t)}
                          for t in now if descriptors[t]["establishes"] or descriptors[t]["invalidates"]},
