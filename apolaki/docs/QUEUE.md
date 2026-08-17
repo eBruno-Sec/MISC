@@ -1,5 +1,68 @@
 # QUEUE — the one canonical, dependency-ordered work queue
 
+## STATE SWEEP — 2026-08-17, the stale tail. Verified against CODE, not against markers.
+
+Erwin asked whether the queue was empty. The honest answer was that I could not tell: everything
+below the previous sweep still read `proposed`/`ready` from before six closes. So I checked the claims
+instead of the labels. **Every line below is measured, with the probe stated, because two of my first
+three probes were wrong and produced false results I nearly recorded.**
+
+**CLOSED — verified in the running container:**
+- **Q-008 / Q-011** (`run_mass_assignment` phantom, and `mass_assignment` the "second phantom"):
+  `agent/mass_assign_tool.py` exists; `run_mass_assign` is registered, dispatchable AND advertised;
+  the phantom name `run_mass_assignment` is absent. Both closed.
+- **Q-012** (six ASVS engine names resolve to nothing): **0 unresolvable names across 33 ASVS rows.**
+  My first probe said 12 — it was wrong: `engine` may hold a TUPLE of names, and `n/a` is a
+  deliberate sentinel. Fixing the probe took the count to zero.
+
+**OPEN and CONFIRMED, with the measurement:**
+- **Q-020** (technique records declare no executor, so the no-island guard checks a declaration):
+  **CONFIRMED.** All **88 of 88** techniques carry `execution: "auto"` — the field has exactly one
+  value across the whole registry — and `agent/tests/test_techniques.py:17` asserts
+  `execution in ("auto", "operator")`, a guard that **cannot fail**. My first probe here also lied:
+  it read `engine`/`executor` and reported "88 of 88 declare no executor", which was my wrong field
+  name, not a finding. The real record key is `execution`.
+
+**NEW, and it upgrades two tickets into one root cause — see Q-066.**
+
+### Q-066 · Two vocabularies for the same thing, and nothing joins them · **HIGH** · `ready`
+
+MEASURED via `agent/engine_descriptor.py`'s public surface:
+
+```
+PRECONDITIONS  42 keys, 42 of 42 ARE technique ids          -> techniques DO bind here
+EFFECTS        13 keys,  0 of 13 are registered engine names -> nothing binds to the registry
+  sample EFFECTS keys: browser_persona_bola, default_credentials, exposed_files_harvest,
+                       graphql_introspection, jwt_forge, jwt_key_confusion
+```
+
+The effects model speaks capability names (`jwt_forge`, `jwt_key_confusion`); the engine registry
+speaks engine names (`run_jwt`). **No join was found on the descriptor's public surface.** That is
+precisely why the planner can rank a technique it has no route to execute — **Q-065 (`run_jwt` never
+fires while the autonomy loop writes "next-best actions: weak_secret_forgery") is not an isolated
+gap, it is this.** And `execution: "auto"` (Q-020) is the same hole seen from the technique side:
+"something will handle this" without saying what.
+
+**This is the FOURTH instance of one defect shape in this codebase: two vocabularies describing the
+same thing that never meet.**
+1. `mode` vs `strategy` in the tool ledger — the fallback could never fire (FIXED).
+2. ToolResult name vs dispatch name — a false integrity alarm (Q-064).
+3. Technique/effect names vs engine names — the planner cannot route (this, Q-020, Q-065).
+4. And the same shape produced the original `blocked_by_mode` merge.
+
+DoD: one measured join between the effects model and the engine registry, or an explicit decision
+that routing is intentionally indirect plus a guard that FAILS when a technique or effect names
+something unroutable. **Do not close Q-020 or Q-065 separately from this.** Note the honest limit of
+the current measurement: only the descriptor's public surface was checked, so a join implemented
+inside `build()`/`descriptor()` would not have been seen — establish that before building anything.
+
+**STILL UNSWEPT, and I am not guessing:** `Q-001`–`Q-006`, `Q-015`–`Q-019`, `Q-022`, `Q-023`,
+`Q-030`/`035`/`036`, `Q-040`–`Q-044`, `B-011+`, the ninth baseline case `00438`, and the unexplained
+sublinear per-URL cost. Their markers predate several closes and I have not verified their claims
+against code. **Treat every one as UNKNOWN rather than open.** Q-040/041/042 are pinned by strict
+xfails that still exist in the tree, which is evidence those three at least are real.
+
+
 ## STATE SWEEP — 2026-08-16 evening. Authoritative. Supersedes every marker below.
 
 **I let this rot again.** Q-050/051/052/053/057 all still read `proposed` further down while being
