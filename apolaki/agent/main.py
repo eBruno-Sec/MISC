@@ -892,6 +892,58 @@ def _coverage(session_id: str) -> dict:
 #: engine-side literal in `agent/tools.py`.
 NEGATIVE_RESULT_TOKEN = "NOT PRESENT:"
 
+#: Q-069. How many DISTINCT error messages a tool row carries into the report and the JSON export,
+#: and how much of each one is quoted in the human-read table cell. Bounded ON PURPOSE: the ledger
+#: note is read in one cell of a table that already carries a verdict, a finding note and a
+#: scope-block count, so a tool that errors with a unique message per call must SUMMARISE rather
+#: than paste. Trading "one message, no count" for "48 stack traces" would be the same bug wearing
+#: the opposite coat.
+ERROR_KINDS_KEPT = 5
+_ERROR_MSG_BUDGET = 90
+
+
+def _rank_errors(kinds: dict) -> list:
+    """{message: count} -> [(message, count)] ordered by count desc, message asc.
+
+    The tie-break on the message is not cosmetic: this project is deterministic-first, and two
+    identical runs must not produce two different report sentences because a dict iterated
+    differently."""
+    return sorted((kinds or {}).items(), key=lambda kv: (-kv[1], kv[0]))
+
+
+def _error_digest(kinds: dict, total: int) -> str:
+    """Q-069. One table-cell summary of a tool's error histogram.
+
+    The producer used to keep `a["error"] = <latest>` — last write wins, no count, no histogram — so
+    a tool that failed 48 times displayed one sentence and a reader could not tell it from one flaky
+    request. MEASURED over all 153 missions in the live DB: 65 tool rows ever carried an error, 48
+    of them (74%) carried more than one, and 16 (25%) carried more than one DISTINCT message. The
+    worst row collapsed 48 errors (31x NXDOMAIN + 17x "no address associated") into one line.
+
+    Three properties this owes the reader:
+
+    * the COUNT is the higher-value half (`distinct == 1` is the majority case, 48 rows vs 16);
+    * the digest leads with the DOMINANT failure, not the last one written — "last" was an artifact
+      of dispatch order (the five http:// probes of mission 57cc3b49 ran after the five https://);
+    * a lone failure keeps reading exactly as it did, because "1 call errored, 1 distinct" is
+      bookkeeping noise in a cell that has better things to say.
+    `kinds` is keyed on the FULL message: distinctness must never be an artifact of the display
+    budget, or two 200-char stack traces sharing a prefix would count as one fault.
+    """
+    ranked = _rank_errors(kinds)
+    if not ranked:
+        return ""
+    if total <= 1 and len(ranked) == 1:
+        return ranked[0][0][:140]            # exactly the pre-Q-069 note for a single failure
+    if len(ranked) == 1:
+        return "%s (%d calls, same error)" % (ranked[0][0][:_ERROR_MSG_BUDGET], total)
+    shown = ranked[:2]
+    rest = len(ranked) - len(shown)
+    return "%d calls errored, %d distinct: %s%s" % (
+        total, len(ranked),
+        "; ".join("%dx %s" % (n, m[:_ERROR_MSG_BUDGET]) for m, n in shown),
+        ("; +%d more" % rest) if rest else "")
+
 
 def _tool_ledger(session_id: str) -> dict:
     """Per-tool execution ledger (executed / skipped / failed + why) plus ZAP status,
@@ -908,7 +960,8 @@ def _tool_ledger(session_id: str) -> dict:
             continue
         a = agg.setdefault(t, {"calls": 0, "findings": 0, "note": "", "error": "",
                                "ok": 0, "scope_blocks": 0, "scope_note": "",
-                               "negatives": 0, "negative_note": ""})
+                               "negatives": 0, "negative_note": "",
+                               "errors": 0, "error_kinds": {}})
         typ = l.get("type")
         if typ == "tool_call":
             a["calls"] += 1
@@ -963,6 +1016,16 @@ def _tool_ledger(session_id: str) -> dict:
                     if _err.startswith(NEGATIVE_RESULT_TOKEN) else _err[:140]
             else:
                 a["error"] = _err[:140]
+                # Q-069. The line above is last-write-wins and always was; what it lost was the
+                # COUNT and the SHAPE of the failure. Keep both beside it rather than replacing it,
+                # because the status heuristic below reads `a["error"]` and a verdict/scope split
+                # that Q-067 and 936f6bd measured must not shift under a reporting change.
+                # Counted only for a non-empty message, exactly like the assignment above: an
+                # empty-bodied error row contributes nothing today and this ticket is not the place
+                # to start reclassifying tools on it.
+                if _err:
+                    a["errors"] += 1
+                    a["error_kinds"][_err] = a["error_kinds"].get(_err, 0) + 1
     # Was SQLi confirmed by a native tool? Used to reword sqlmap's "No SQLi confirmed"
     # note so it reads as corroboration, not a contradiction next to a confirmed SQLi.
     _sqli_confirmed = any(
@@ -983,7 +1046,10 @@ def _tool_ledger(session_id: str) -> dict:
         # like ten negative results was five verdicts plus five [SSL: WRONG_VERSION_NUMBER] faults
         # that never reached the target at all.
         if a["error"] and not a["ok"] and not a["negatives"]:
-            status, note = "failed", a["error"]
+            # Q-069: a failed row's note IS its error, so this is where the histogram earns the
+            # most — "48 calls errored, 2 distinct: 31x NXDOMAIN; 17x no-address" is a different
+            # diagnosis from the single sentence this used to print.
+            status, note = "failed", (_error_digest(a["error_kinds"], a["errors"]) or a["error"])
         elif any(k in low for k in ("not configured", "skipped", "skip cleanly", "disabled")):
             status, note = "skipped", a["note"]
         elif not a["ok"] and not a["negatives"] and a["scope_blocks"]:
@@ -1002,7 +1068,15 @@ def _tool_ledger(session_id: str) -> dict:
                 extra.append("%d path%s concluded not present" % (
                     a["negatives"], "" if a["negatives"] == 1 else "s"))
             if a["error"]:                      # a real error on one call, others still ran
-                extra.append("1+ call errored")
+                # Q-069: this said "1+ call errored", which is equally true of 2 failures and of
+                # 48. Counts only here, and no error prose: on an EXECUTED row the finding or the
+                # verdict is the headline, and a second engine-worded sentence competes with it for
+                # the reader's attention (the same argument the negatives branch above makes). The
+                # full histogram is on the row itself for the JSON export and for `arsenal_gap`.
+                _kinds = len(a["error_kinds"])
+                extra.append("%d call%s errored%s" % (
+                    a["errors"], "" if a["errors"] == 1 else "s",
+                    (", %d distinct" % _kinds) if _kinds > 1 else ""))
             if a["scope_blocks"]:
                 extra.append("%d off-scope target%s skipped" %
                              (a["scope_blocks"], "" if a["scope_blocks"] == 1 else "s"))
@@ -1016,8 +1090,15 @@ def _tool_ledger(session_id: str) -> dict:
                     "enrichment confirmed the injection and extracted DB metadata"
                     if _sqli_confirmed else
                     "sqlmap found no injection on the tested endpoints")
+        # Q-069: `errors` / `error_distinct` / `error_kinds` are the machine-readable half. The note
+        # is prose for one table cell and is deliberately bounded; the JSON report export carries
+        # the ledger wholesale, so the full ranked histogram (top ERROR_KINDS_KEPT) travels with it
+        # and a consumer never has to re-parse the sentence.
+        _ranked = _rank_errors(a["error_kinds"])
         tools.append({"tool": t, "status": status, "calls": a["calls"],
-                      "findings": a["findings"], "note": note})
+                      "findings": a["findings"], "note": note,
+                      "errors": a["errors"], "error_distinct": len(_ranked),
+                      "error_kinds": [[m, n] for m, n in _ranked[:ERROR_KINDS_KEPT]]})
     # ZAP status is reported honestly: if no ZAP daemon is configured (ZAP_ADDR unset)
     # the report says "Skipped — not configured", NOT "Not Invoked" — the latter is
     # reserved for the case where ZAP IS configured but the scan mode/plan didn't run
