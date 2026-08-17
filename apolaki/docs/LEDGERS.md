@@ -339,6 +339,67 @@ defend.
 
 ---
 
+## ★★★ ERWIN'S QUESTION, ANSWERED WITH A NUMBER — and the instrument was wrong. 2026-08-17
+
+Mission `57cc3b49` (juice-shop:3000, `mode=active`, run to completion on a deployment verified clean
+on all three bake-drift edges). Denominator **111 registered engines**, stated with every figure
+because run 1's 42-of-112 was computed against the stale build and is void.
+
+| class | count |
+|---|---|
+| A `blocked_by_mode` — could not run at this tier, NOT a gap | **31** |
+| B never planned | **35** |
+| C ran and found nothing — a RESULT | **28** (26 really tested, 2 no-op) |
+| D **ran and ERRORED** — the valuable class | **4** |
+| scope-blocked (correct enforcement) | 1 |
+| productive | 12 |
+| **sum, asserted on every run** | **111** |
+
+`blocked_by_mode` came back **31, not 0**, which was the falsifiable prediction attached to the
+producer fix: it is live, not regressed. **40 of 111 (36.0%) are structurally unselectable at
+`active`.**
+
+**The headline for a reader: "66 never dispatched" overstates the actionable gap by more than 4x.**
+Class B splits into 3 unmeasurable, 6 LLM-affordance, 11 wrong-service, and **15 genuinely missing**.
+Reporting the raw number would have been true and useless.
+
+**THE CROWN JEWEL — the ledger measures a wrapper's declaration, not dispatch.** `Tools.execute()`
+(`tools.py:1227`) writes no log row; only `_run_tool` and `_exec_internal` do, and **10 of the 12
+`self.tools.execute(` sites in `agent.py` bypass them** (Coordinator-verified independently).
+`browser_navigate`, `acquire_session` and `http_read` have no other path, so they read "never
+dispatched" in every deterministic mission regardless of what they did. Proven, not inferred: the same
+mission acquired and **verified** two sessions and confirmed **35 authz findings** off them while
+reporting `acquire_session` as never dispatched. **The declaration-vs-fact family for the ninth time,
+this time inside the measuring instrument** — which means every "never dispatched" count this project
+has ever published is an upper bound. Filed Q-061.
+
+**Two browser worlds, and only one is used.** Every engine call site is `pw.chromium.launch()`;
+`connect_over_cdp` appears **zero** times. The `headless-chrome` sidecar served **0 sessions across 12
+consecutive periods**. The control closed properly — the counter has non-zero history, the lane drove
+the sidecar by hand, and it went 0, 0, **1** — so the sidecar is healthy and reachable and simply not
+selected. **Reachability does not imply consumption**, which retires run 1's inference. One correction
+to the lane's framing, applied before filing: the CDP path is NOT dead code (`cdp.py:86`,
+`browser_engine.py:306` drive browserless over HTTP `/function`), so the honest claim is "wired but
+unselected", and `capability_preflight.py:51` advertises the capability from the env var alone. Q-062.
+
+Browser automation itself is emphatically NOT idle: `confirm_browser_persona_bola` drove two real
+contexts, issued 95 runtime requests and confirmed a cross-user finding; `run_dom_trace` 20 calls,
+`run_dom_audit` 18, `run_client_checks` 12, `run_js_review` 20 findings.
+
+**Both renderers verified carrying both sections on the deployed build** — the thing run 1 could not
+check because the code was not in the binary. Two further defects found in them: the arsenal SUMMARY
+merges errored into "ran and found nothing" (Q-063) while the per-tool table is honest, and
+`ledger_finding_disagreement()` raises a FALSE alarm because findings carry the ToolResult name and the
+ledger the dispatch name (Q-064).
+
+**Best single capability gap:** `run_jwt` never fires on a JWT-authenticated target while the mission's
+own autonomy loop wrote *"next-best actions: weak_secret_forgery"*. The ranking model and the dispatch
+vocabulary do not meet (Q-065).
+
+The lane recorded three corrections to its own numbers, including a false positive in its own
+instrument that had put `http_probe` in the failure bucket, and refused to treat a missing log string
+as evidence because `info` events are not fully persisted. That is the standard.
+
 ## ★★ THE DEPLOYED PLATFORM WAS NOT THE TREE — 59 commits of drift, invisible to the gate built for drift. 2026-08-17
 
 The arsenal lane was sent to answer Erwin's question ("which tools are NOT being used?") by running a

@@ -165,6 +165,83 @@ rebuild** — that is now the gate's most valuable output, not an aside.
 
 </details>
 
+### Q-061 · The tool ledger records a WRAPPER's declaration, not the fact of dispatch · **CRITICAL** · `ready`
+
+**This is the instrument every arsenal-coverage number is computed from, and it measures the wrong
+thing.** Independently verified by the Coordinator: `Tools.execute()` (`agent/tools.py:1227`) resolves
+the method and returns `await method(tool_input)` **without writing a log row**. Only `_run_tool`
+(`agent/agent.py:682`) and `_exec_internal` emit `tool_call`. So the ledger records dispatch performed
+*through two particular wrappers*, and is blind to every other path. **10 of the 12
+`self.tools.execute(` sites in `agent.py` are unlogged.**
+
+`browser_navigate`, `acquire_session` and `http_read` have no other dispatch path at all, so they
+render **"never dispatched" in every deterministic mission** whether they ran or not.
+
+PROVEN rather than inferred, in one mission: it registered two accounts, acquired and **verified** two
+sessions, re-crawled 13 new endpoints and confirmed **35 authz findings** off those sessions — while
+reporting `acquire_session` as never dispatched. The report contradicts itself in the same document.
+
+This is the declaration-vs-fact family for the ninth time, now **inside the measuring instrument**.
+DoD: log the dispatch at the one place it is known — inside `Tools.execute()` — so the ledger records
+the fact rather than a wrapper's account of it. Then re-derive the arsenal classification, because
+every "never dispatched" count in every report predating the fix is an upper bound, not a measurement.
+
+### Q-062 · Two browser worlds; the CDP sidecar served ZERO sessions · **HIGH** · `ready`
+
+MEASURED with a properly closed control. Every browser ENGINE call site uses `pw.chromium.launch()` —
+a chromium local to the agent container. **`connect_over_cdp` appears zero times in the tree**
+(Coordinator-verified). The `apolaki-headless-chrome-1` sidecar served **0 sessions across 12
+consecutive periods** spanning a full mission.
+
+The control is what makes it a finding: the counter has non-zero history, the lane drove the sidecar
+manually from inside the agent container, and the counter went 0, 0, **1**. So the sidecar is healthy,
+reachable and simply not selected — **reachability does not imply consumption**, which retires run 1's
+"the sidecar is reachable so this is not a sidecar problem" as insufficient.
+
+**PRECISION REQUIRED, and the lane's framing needs one correction before anyone acts on it:** the CDP
+path is NOT dead code. `CDP_BROWSER_URL` is consumed by `agent/cdp.py:86` and
+`agent/browser_engine.py:306`, which drive browserless over its HTTP `/function` endpoint rather than
+`connect_over_cdp`. `agent/capability_preflight.py:51` reports the capability from the env var alone.
+So the honest statement is **"wired and reachable but not selected during a deterministic active
+mission"**, not "unused". The decision is a product one: route browser work to the sidecar, or drop
+the sidecar and stop advertising a capability nothing exercises. Do not "fix" it by deleting a path
+that a non-deterministic strategy may use.
+
+Meanwhile the browser world is emphatically NOT idle, and the report should say so:
+`confirm_browser_persona_bola` drove two real contexts, issued 95 runtime requests and confirmed a
+cross-user finding; `run_dom_trace` 20 calls, `run_dom_audit` 18, `run_client_checks` 12,
+`run_js_review` 20 findings.
+
+### Q-063 · The Arsenal SUMMARY merges "errored" into "ran and found nothing" · **MEDIUM** · `ready`
+
+The per-tool table is honest and renders FAILED/SKIPPED correctly; the summary line above it is not.
+An engine that ERRORED is counted as silent, i.e. as a clean result. That is the same
+merge-two-classes defect as the `blocked_by_mode` one just fixed, one level up: a silent failure is
+the single most valuable class in the four-way classification and the summary hides it inside the
+class that means "nothing to see".
+
+### Q-064 · `ledger_finding_disagreement()` raises a FALSE integrity alarm · **MEDIUM** · `ready`
+
+The two records use different vocabularies. Findings carry the **ToolResult** name
+(`browser_persona_bola`, bound at `ToolResult.__post_init__`) while the ledger carries the **dispatch**
+name (`confirm_browser_persona_bola`), so the engine is reported as `produced_but_unlogged` on a run
+where it plainly ran. An integrity check that cries wolf gets ignored, which costs more than the check
+was worth.
+
+**Do NOT fix this by prefix-stripping in the checker** — loosening a check to stop it complaining is
+the move this project forbids, and it would also mask the real `produced_but_unlogged` case the
+function exists to catch. Fix it by **binding the dispatch name at the point it is known**, the same
+discipline as Q-042/Q-046/Q-051: stamp the dispatch name onto the finding when it is stored, and
+compare like with like. Note this interacts with Q-061 — fix that first, since it changes what the
+ledger contains.
+
+### Q-065 · `run_jwt` never fires on a JWT-authenticated target that the platform itself flagged · **MEDIUM** · `ready`
+
+The mission's own autonomy loop wrote *"next-best actions: ... weak_secret_forgery"* while `run_jwt`
+was never dispatched against a target authenticating with JWTs. **The ranking model and the dispatch
+vocabulary do not meet** — the planner can name a technique it has no route to execute. That is the
+effects-model gap in its clearest form and is a better first case than the other 14 in class B3.
+
 ### Q-060 · Two engines cannot test ANY target on a non-standard port · **HIGH** · `ready`
 
 MEASURED live, root-caused, and reproduced deterministically in isolation by the arsenal lane. Both
