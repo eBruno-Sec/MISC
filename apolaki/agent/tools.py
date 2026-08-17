@@ -809,7 +809,7 @@ CLAUDE_TOOLS = [
          "fields": {"type": "array", "items": {"type": "string"}, "description": "Optional form field names"}},
          "required": ["url"]}},
     {"name": "run_jsonp",
-     "description": ("JSONP information-leak validator. Probes common callback params (callback/jsonp/cb/...) with a "
+     "description": ("ACTIVE: JSONP information-leak validator. Probes common callback params (callback/jsonp/cb/...) with a "
                      "UNIQUE marker and confirms ONLY when the response wraps sensitive data in our exact callback as "
                      "EXECUTABLE JavaScript that is usable cross-origin (javascript content-type, or sniffable with no "
                      "X-Content-Type-Options: nosniff). A plain JSON echo or an empty wrapper is NOT confirmed."),
@@ -923,8 +923,9 @@ CLAUDE_TOOLS = [
                      "call this after recon to plan targeted manual testing. Does not contact the target."),
      "input_schema": {"type": "object", "properties": {}, "required": []}},
     {"name": "store_finding",
-     "description": ("Store a confirmed, reproducible vulnerability for the report. Only call with real evidence and "
-                     "exact reproduction steps. Do NOT store theoretical issues."),
+     "description": ("PASSIVE: Store a confirmed, reproducible vulnerability for the report. Only call with real "
+                     "evidence and exact reproduction steps. Do NOT store theoretical issues. PASSIVE because it "
+                     "never contacts the target at all; it writes to the mission record."),
      "input_schema": {"type": "object", "properties": {
          "title": {"type": "string"}, "severity": {"type": "string", "enum": ["critical", "high", "medium", "low", "informational"]},
          "target": {"type": "string"}, "description": {"type": "string"},
@@ -5016,11 +5017,16 @@ class ToolRegistry:
         return ToolResult("ssi", url, True, "%d SSI injection finding(s)" % len(findings), findings)
 
     async def _run_form_xss(self, inp: dict) -> ToolResult:
-        """Reflected XSS through POST FORM fields (general): the GET-query engine misses a value submitted in
-        a POST form that reflects into the response (e.g. a login username echoed into `var username='HERE'`).
-        Parse forms, POST a canary per text field to find the reflection context, and CONFIRM in a real
-        browser by filling + submitting the form (the fresh CSRF token is carried by the page, so protected
-        forms are handled). ACTIVE; skips forms whose action looks state-changing (delete/pay/transfer)."""
+        """ACTIVE: reflected XSS through POST FORM fields (general). The GET-query engine misses a value
+        submitted in a POST form that reflects into the response (e.g. a login username echoed into
+        `var username='HERE'`). Parse forms, POST a canary per text field to find the reflection context,
+        and CONFIRM in a real browser by filling + submitting the form (the fresh CSRF token is carried by
+        the page, so protected forms are handled).
+
+        ACTIVE is the registered tier and it is the honest one even though this engine SUBMITS forms: it
+        skips any form whose action looks state-changing (delete/pay/transfer/...), so what it sends is a
+        canary into a reflecting input, not a write. The tier token opens the docstring (Q-058) because it
+        was previously stated only in a trailing clause, where the tier gate cannot see it."""
         import form_xss as fx
         import httpx
         from urllib.parse import urlparse
@@ -5376,11 +5382,14 @@ class ToolRegistry:
         return ToolResult("encoded_cookie", url, True, "%d encoded-parameter finding(s)" % len(findings), findings)
 
     async def _run_dom_trace(self, inp: dict) -> ToolResult:
-        """Runtime DOM source-to-sink tracer (CHAD Engine B/C): inject a per-request canary into each
-        query parameter and observe in a REAL browser where it lands — script execution (DOM XSS),
-        navigation to an attacker host (open redirect), a link/resource URL (DOM link manipulation), or
-        rendered DOM content (DOM data manipulation). ACTIVE (read-only rendering); one finding per
-        (family, param) confirmed only by the runtime canary."""
+        """ACTIVE (read-only rendering): runtime DOM source-to-sink tracer (CHAD Engine B/C). Inject a
+        per-request canary into each query parameter and observe in a REAL browser where it lands — script
+        execution (DOM XSS), navigation to an attacker host (open redirect), a link/resource URL (DOM link
+        manipulation), or rendered DOM content (DOM data manipulation). One finding per (family, param),
+        confirmed only by the runtime canary.
+
+        The tier token opens the docstring (Q-058) because it was previously stated only in a trailing
+        clause, where the tier gate cannot see it."""
         import dom_trace as dt
         url = inp["url"]
         if not self.scope.validate(url)[0]:
@@ -6713,10 +6722,16 @@ class ToolRegistry:
         return ToolResult("injection_probes", url, True, f"{len(findings)} reflection signal(s)", findings)
 
     async def _run_jsonp(self, inp: dict) -> ToolResult:
-        """JSONP info-leak validator. Probe common callback params with a UNIQUE marker; confirm
+        """ACTIVE: JSONP info-leak validator. Probe common callback params with a UNIQUE marker; confirm
         ONLY when the response wraps a DATA payload in our exact callback as EXECUTABLE JS that a
         cross-origin <script> could run (javascript content-type, or sniffable with no nosniff).
-        A plain JSON echo, an empty wrapper, or a nosniff'd non-JS response is NOT a JSONP leak."""
+        A plain JSON echo, an empty wrapper, or a nosniff'd non-JS response is NOT a JSONP leak.
+
+        ACTIVE, not PASSIVE: it sends up to seven GETs to the target, one per callback parameter name.
+        Read-only, but read-only against the TARGET is what ACTIVE means. Declared here (Q-058) because
+        this engine previously named no tier on either surface, which rule B is deliberately silent
+        about — silence is a documentation gap, and a gap is invisible to a gate that looks for
+        contradictions."""
         import httpx
         import secrets
         url = inp.get("url") or ""
@@ -10100,6 +10115,18 @@ class ToolRegistry:
                         "business_logic", "broken_access")
 
     async def _store_finding(self, inp: dict) -> ToolResult:
+        """PASSIVE: record a finding against the mission. Zero target contact — this engine writes to
+        the mission DB and nothing else, which is why it is registered PASSIVE despite being the only
+        engine here whose whole job is a write.
+
+        Two guards, both about honesty rather than access. An oracle-family finding (access control,
+        business logic) arriving WITHOUT captured evidence and reproduction steps is demoted to a lead
+        rather than stored as confirmed, because those families cannot be confirmed by inspection. And
+        a finding auto-store already recorded is deduped on the shared fingerprint set, so the model's
+        store_finding stays additive instead of doubling the report.
+
+        Declared PASSIVE here (Q-058) because this engine named no tier on either surface, and rule B
+        is deliberately silent on absence: it flags contradictions, and silence is not one."""
         fam = (inp.get("family") or "").lower()
         conf = (inp.get("confidence") or "").lower()
         if fam in self._ORACLE_FAMILIES and conf in ("confirmed", "", "high"):

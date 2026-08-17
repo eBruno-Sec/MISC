@@ -279,3 +279,96 @@ $ ... python -m pytest tests/test_hash_type_pin.py tests/test_bbh.py \
 
 `test_bbh.py` is the only other file in the suite that mentions `hash_crack` or `hashid`
 (`grep -rln "hash_crack\|hashid" agent/tests/*.py` -> those two files).
+
+Committed as `ea7f0cb`.
+
+---
+
+## ITEM 4 -- four engines declared no tier at all
+
+### Verified, and independently enumerated rather than taken on trust
+
+The ticket names four. Rather than check those four, this lane asked the gate for EVERY engine
+registered at a real tier that declares none on either surface. MEASURED, pre-fix:
+
+```
+ALL engines declaring NO tier on EITHER surface: 4
+   run_dom_trace  ACTIVE   | has_spec: False | has_impl: True
+   run_form_xss   ACTIVE   | has_spec: False | has_impl: True
+   run_jsonp      ACTIVE   | has_spec: True  | has_impl: True
+   store_finding  PASSIVE  | has_spec: True  | has_impl: True
+```
+
+Exactly the four named, and no fifth. The ticket is correct and complete.
+
+Two details the enumeration turned up that the ticket does not mention, and that matter to anyone
+fixing this:
+
+* `run_dom_trace` and `run_form_xss` are **not in `CLAUDE_TOOLS` at all** (verified:
+  `'run_dom_trace' in {s['name'] for s in tools.CLAUDE_TOOLS}` -> `False`). They are registered and
+  dispatched but never described to the model, so the docstring is their ONLY surface.
+* `run_dom_trace` and `run_form_xss` did each contain the word `ACTIVE`, but in a TRAILING clause
+  (`"... ACTIVE (read-only rendering); one finding per ..."`), which `declaration_phrase()` never
+  reaches. `store_finding` had no implementation docstring at all.
+
+### Fix
+
+Each engine now opens the declaration of every surface it has with its registered tier as a bare
+token, qualifier after:
+
+| engine | surfaces | now opens |
+|---|---|---|
+| `run_dom_trace` | docstring only | `ACTIVE (read-only rendering):` |
+| `run_form_xss` | docstring only | `ACTIVE:` |
+| `run_jsonp` | spec + docstring | `ACTIVE:` on both |
+| `store_finding` | spec (+ new docstring) | `PASSIVE:` on both |
+
+`_store_finding` gained a docstring it never had. Both `run_form_xss` and `store_finding` carry a
+sentence saying WHY the tier is the honest one, because both look like exceptions and are not:
+`run_form_xss` submits forms but skips any action that looks state-changing, so what it sends is a
+canary into a reflecting input; `store_finding` is a write, but a write to the mission record with
+zero target contact, and the tiers grade target contact.
+
+### Test -- the gap is now a ratchet, not a note
+
+Rule B stays silent on absence, which is the right call for the rule. The absence is checked in the
+test file instead, and generalised past the four:
+
+* `test_q058_every_registered_engine_declares_its_tier_somewhere` -- every engine registered at a
+  real tier must name it as a bare token in the leading declaration of at least one surface. Rule B
+  keeps checking that a declaration is not a LIE; this checks that one EXISTS. A new engine added
+  without a tier now fails the suite. Positive control: asserts >100 engines were read.
+* `test_q058_the_four_recorded_untiered_engines_declare_the_tier_they_run_at` (4 cases) -- the four
+  by name, asserting the declared tier IS the registered one, so the general test cannot be
+  satisfied for these by any tier token that merely happens to be present.
+
+FAILS BEFORE THE FIX. MEASURED with `git show ea7f0cb:apolaki/agent/tools.py` mounted over
+`/app/tools.py`:
+
+```
+5 failed, 16 passed
+FAILED test_q058_every_registered_engine_declares_its_tier_somewhere
+FAILED test_q058_the_four_recorded_untiered_engines_declare_the_tier_they_run_at[run_dom_trace-ACTIVE]
+FAILED test_q058_the_four_recorded_untiered_engines_declare_the_tier_they_run_at[run_form_xss-ACTIVE]
+FAILED test_q058_the_four_recorded_untiered_engines_declare_the_tier_they_run_at[run_jsonp-ACTIVE]
+FAILED test_q058_the_four_recorded_untiered_engines_declare_the_tier_they_run_at[store_finding-PASSIVE]
+```
+
+PASSES AFTER, with the census as its own positive control:
+
+```
+permissions: 111
+flags: 0
+registered at a real tier: 111 | declaring NO tier anywhere: 0 []
+
+$ ... python -m pytest tests/test_description_gate.py -p no:cacheprovider -p no:warnings
+21 passed in 4.26s
+```
+
+Targeted regression over every test file mentioning any of the four (18 files):
+
+```
+176 passed, 1 skipped, 1 xfailed in 70.76s
+```
+
+The 1 skip and 1 xfail are pre-existing suite entries, not introduced here.

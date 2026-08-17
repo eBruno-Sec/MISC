@@ -316,6 +316,48 @@ def test_q058_the_two_recorded_tier_defects_are_fixed_in_the_live_tree(engine, r
     assert doc.startswith(phrase), doc[:80]
 
 
+def test_q058_every_registered_engine_declares_its_tier_somewhere():
+    """Q-058 item 4, generalised from the four named engines to the whole registry.
+
+    Rule B is deliberately SILENT on an engine that declares no tier at all, and that silence is the
+    right call for the rule: conflating a documentation gap with a contradiction is how a gate earns
+    the noise that gets it silenced. But the gap is still a gap. Four engines had it -- `run_dom_trace`,
+    `run_form_xss`, `run_jsonp`, `store_finding` -- and an engine whose tier is written down NOWHERE is
+    exactly as unreadable to the next engineer as one whose tier is written down wrongly.
+
+    So the absence is checked HERE rather than in the rule: every engine registered at a real tier must
+    name that tier as a bare token in the leading declaration of at least one surface it speaks through
+    (its CLAUDE_TOOLS description, or its implementation docstring). Rule B keeps checking that a
+    declaration is not a LIE; this checks that one EXISTS. Together they leave nowhere for a tier to
+    hide, and this one is a ratchet: a new engine added without a tier fails it.
+    """
+    facts = dg.analyse(_tools_source())
+    registered = {e: t for e, t in facts.permissions.items() if t in dg.TIERS}
+    assert len(registered) > 100, len(registered)      # positive control: the registry was read
+    silent = sorted(e for e in registered
+                    if not dg.declared_tiers(facts.descriptions.get(e, ""))
+                    and not dg.declared_tiers(facts.docstrings.get(e, "")))
+    assert silent == [], (
+        "engine(s) registered at a tier they declare nowhere. Add the tier as a BARE token at the "
+        "start of the spec description or the implementation docstring:\n  "
+        + "\n  ".join("%s (registered %s)" % (e, registered[e]) for e in silent))
+
+
+@pytest.mark.parametrize("engine,tier", [
+    ("run_dom_trace", "ACTIVE"), ("run_form_xss", "ACTIVE"),
+    ("run_jsonp", "ACTIVE"), ("store_finding", "PASSIVE"),
+])
+def test_q058_the_four_recorded_untiered_engines_declare_the_tier_they_run_at(engine, tier):
+    """The four by name, so the general test above cannot be satisfied for these by a tier token that
+    is merely PRESENT: the one declared has to be the one they are dispatched at."""
+    facts = dg.analyse(_tools_source())
+    assert facts.permissions[engine] == tier
+    declared = (dg.declared_tiers(facts.descriptions.get(engine, ""))
+                + dg.declared_tiers(facts.docstrings.get(engine, "")))
+    assert declared, "declares no tier on either surface"
+    assert set(declared) == {tier}, declared
+
+
 def test_q058_no_hyphen_softened_tier_survives_anywhere_in_tools_py():
     """A hedge that names a tier only to soften it must not exist in the file at all, in ANY surface.
 
