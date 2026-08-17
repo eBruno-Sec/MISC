@@ -29,6 +29,7 @@ under test is "malformed input must not raise", and malformed input is not copie
 from __future__ import annotations
 
 import asyncio
+import re
 import struct
 import urllib.parse
 
@@ -114,6 +115,40 @@ def test_native_reader_also_recovers_the_device_and_software_tags():
     assert meta.get("EXIF:Software") == "paint.net 4.2"
 
 
+#: Ground truth for the Juice Shop geo-stalking photo, decoded by hand out of the GPS IFD before any
+#: code was written and independently confirmed by exiftool 12.57. 59 deg 25' 16.17" N is
+#: 59 + 25/60 + 16.17/3600 = 59.421158; 24 deg 48' 4.32" E is 24 + 48/60 + 4.32/3600 = 24.801200.
+GEO_TRUTH_LAT, GEO_TRUTH_LON = 59.421158, 24.801200
+
+
+def _decimal_coords(evidence: str):
+    """Pull (lat, lon) in decimal degrees out of EITHER reader's formatting.
+
+    `run_metadata` uses exiftool when it is installed and a native pure-python reader otherwise, and
+    the two spell coordinates differently -- DMS (`59 deg 25' 16.17" N`) versus decimal
+    (`GPSLatitude: 59.4211583333333`). BOTH ARE CORRECT AND BOTH NAME THE SAME POINT.
+
+    This test used to assert the DMS substring, which pinned the native reader's spelling rather than
+    the disclosure. It passed for weeks and then broke the moment `libimage-exiftool-perl` was baked
+    into the image and the engine started preferring exiftool -- a green test going red on a change
+    that improved the product. So the assertion now pins the POINT, to 4 decimal places (~11 m),
+    which is a stronger claim than any substring: it would catch a reader that returned plausible
+    numbers for the wrong location, and a substring match never could.
+    """
+    dms = re.findall(r"(\d+)\s*deg\s*(\d+)'\s*([\d.]+)\"\s*([NSEW])", evidence)
+    if len(dms) >= 2:
+        out = []
+        for d, m, s, hemi in dms[:2]:
+            v = int(d) + int(m) / 60.0 + float(s) / 3600.0
+            out.append(-v if hemi in ("S", "W") else v)
+        return out[0], out[1]
+    lat = re.search(r"GPSLatitude:\s*(-?[\d.]+)", evidence)
+    lon = re.search(r"GPSLongitude:\s*(-?[\d.]+)", evidence)
+    if lat and lon:
+        return float(lat.group(1)), float(lon.group(1))
+    return None, None
+
+
 def test_the_engine_now_reports_the_leak_end_to_end():
     """The whole point: `run_metadata` said 'No sensitive metadata' on this URL."""
     res = _run(_reg()._run_metadata({"url": _url(GEO_PHOTO)}))
@@ -121,8 +156,26 @@ def test_the_engine_now_reports_the_leak_end_to_end():
     f = res.findings[0]
     assert f["family"] == "exposure" and f["confidence"] == "lead"
     assert f["severity"] == "medium", "a GPS disclosure must not be graded low"
-    assert "59 deg 25' 16.17\" N" in f["evidence"]
-    assert "24 deg 48' 4.32\" E" in f["evidence"]
+    lat, lon = _decimal_coords(f["evidence"])
+    assert lat is not None, (
+        "no coordinates in either supported format; evidence was: %r" % f["evidence"])
+    assert abs(lat - GEO_TRUTH_LAT) < 1e-4, "latitude %r is not the known leak %r" % (lat, GEO_TRUTH_LAT)
+    assert abs(lon - GEO_TRUTH_LON) < 1e-4, "longitude %r is not the known leak %r" % (lon, GEO_TRUTH_LON)
+
+
+def test_the_two_readers_agree_on_the_location_they_report():
+    """Whichever reader the image ships with, the reported POINT must be the same.
+
+    The environment decides which path runs, so without this the product can report a different
+    evidence string on two installs and nothing would notice -- which for a deterministic-first tool
+    is a defect in its own right (Q-068). Pins the native reader against the same ground truth the
+    end-to-end test pins the engine against, so the two can never drift apart silently.
+    """
+    meta = upload_tool.extract_metadata(_fetch(GEO_PHOTO))
+    lat, lon = _decimal_coords(
+        "%s %s" % (meta.get("EXIF:GPSLatitude", ""), meta.get("EXIF:GPSLongitude", "")))
+    assert lat is not None, "native reader produced no parseable coordinates"
+    assert abs(lat - GEO_TRUTH_LAT) < 1e-4 and abs(lon - GEO_TRUTH_LON) < 1e-4
 
 
 # ---------------------------------------------------------------------------------------------

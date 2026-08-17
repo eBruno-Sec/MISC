@@ -228,6 +228,58 @@ rebuild** — that is now the gate's most valuable output, not an aside.
 
 </details>
 
+### Q-068 · The same target yields DIFFERENT report evidence depending on the image · **MEDIUM** · `ready`
+
+Found by the Q-059 rebuild, and it is the kind of thing only a rebake could reveal. `run_metadata`
+prefers `exiftool` when installed and falls back to a native pure-python reader. Both are correct and
+both recover the same GPS point — but they **format it differently**, so the evidence string in a
+client-facing finding depends on which image the operator happens to be running:
+
+```
+native reader   GPSLatitude: 59 deg 25' 16.17" N
+exiftool        GPSLatitude: 59.4211583333333
+```
+
+For a **deterministic-first** tool that is a real defect, not a cosmetic one: two installs scanning
+the same target produce different report text, and nothing in the suite noticed until baking
+`libimage-exiftool-perl` flipped the preferred path and turned a green test red — **a test going red
+because the product got better.**
+
+The test was the first casualty and is fixed
+(`test_the_engine_now_reports_the_leak_end_to_end` now pins the POINT to 4 dp rather than one
+reader's spelling, which is a strictly stronger assertion — it would catch a reader returning
+plausible numbers for the wrong location, and a substring match never could; a paired test asserts
+the two readers agree). **But the product half is NOT fixed:** the engine should normalise coordinates
+to one canonical representation before they reach a finding. DoD: one format in the evidence
+regardless of which reader ran, with the existing agreement test extended to assert it.
+
+### Q-067 · A NEGATIVE RESULT is recorded as a tool FAILURE · **MEDIUM** · `ready`
+
+Surfaced by Q-063 on its first real ledger, and **verified against the live mission before filing,
+which changed the ticket completely.** `fetch_openapi` shows `status=failed, calls=10, findings=0` —
+which reads like a broken engine. The recorded error is:
+
+```
+Response is not valid JSON (not an OpenAPI spec)
+```
+
+That is a **negative result**: the engine probed 10 candidate paths on Juice Shop and correctly
+established that none serves an OpenAPI spec. The engine is fine. `main._tool_ledger` marks a row
+`failed` whenever an error string is present with no successful call, and "this is not a spec"
+arrives as an error string.
+
+**This exact defect was already fixed once, for scope blocks** (`936f6bd`: a SCOPE BLOCK is correct
+enforcement, not a tool failure, and a tool that ran on its in-scope targets must not read "failed").
+The same argument covers a negative finding. Fix in the PRODUCER, not the engine: an engine that ran,
+reached its targets and concluded "not present" is `executed` with a note, never `failed`.
+
+Why it matters more now than it did yesterday: Q-063 just made `errored` a first-class reported class
+precisely because a broken engine is an invisible false negative. If negative results land in that
+class, the class fills with noise and stops being read — the fate of every alarm that cries wolf.
+
+Recorded because it nearly went the other way: "failed 10 of 10 dispatches" is a far more exciting
+ticket than the true one, and would have sent someone to fix an engine that works.
+
 ### Q-061 · The tool ledger records a WRAPPER's declaration, not the fact of dispatch · **CRITICAL** · `ready`
 
 **This is the instrument every arsenal-coverage number is computed from, and it measures the wrong

@@ -12,6 +12,9 @@ that retirement.** Updating it is not bookkeeping.
 
 | lane | owner | state |
 |---|---|---|
+| Routing (Q-066/020/065) | Claude | **live** — Architect first: does a technique→engine join already exist inside `build()`? A disproof is a full result |
+| Ledger truth (Q-061) | — | **LANDED** `5c466a2` after recovery. Killed having committed nothing; its handoff claimed 7 items DONE with the evidence never written, corrected in place |
+| Report honesty (Q-063) | — | **LANDED** `4d3b51d` after recovery. Killed having committed nothing and written no handoff at all; reconstructed from the diff |
 | Truthful engines (Q-054/055/055b) | — | **CLOSED.** All three sinks shut, metadata reads binary EXIF, and the bfla engine's "authenticated" row is no longer anonymous |
 | Arsenal gap (Erwin's question) | — | **CLOSED by measurement**, killed by a limit but wrote as it went. Found the deployment is 59 commits stale and two engines cannot test a non-standard port |
 | Description gate (Q-056) | — | **CLOSED.** PARTLY gateable: 2 rules at 0 FP over 111 engines, 3 rejected with numbers. `run_metadata` is not gateable by any static rule and only running it catches it |
@@ -19,7 +22,20 @@ that retirement.** Updating it is not bookkeeping.
 | Sessions / `Identity` (Q-032) | — | **CLOSED.** The anonymous authz row was carrying the mission's session |
 | Tech intelligence (Q-021C) | — | **CLOSED.** One chain end to end; the server/language half is still a version reporter |
 
-Tree at HEAD: **2748 passed / 11 skipped / 9 xfailed / 0 failed** (516s, `--network apolaki_default`).
+Tree at HEAD: **2768 passed / 11 skipped / 9 xfailed / 0 failed** (522s, `--network apolaki_default`,
+pytest's own exit code captured directly). The **+20 accounts exactly**: 8 ledger-dispatch tests, 11
+arsenal-class tests, 1 new metadata test.
+
+**A test went red because the product got better, and that is worth remembering.** Baking `exiftool`
+into the image (Q-059) flipped `run_metadata` from its native reader to exiftool. Both recover the same
+GPS point; they spell it differently (`59 deg 25' 16.17" N` vs `59.4211583333333`). The end-to-end test
+asserted the DMS substring — it was pinning one reader's spelling, not the disclosure — so it failed on
+an improvement. It now pins the POINT to 4 dp, which is strictly stronger: it would catch a reader
+returning plausible numbers for the wrong location, and a substring never could. **The product half is
+NOT fixed** — see Q-068; a deterministic-first tool must not emit different evidence text on two
+installs.
+
+Previous baseline for reference: 2748 passed / 11 skipped / 9 xfailed.
 Measured twice: once on a tree I edited mid-run, then again on a stable tree to clear the torn read,
 with pytest's own exit code captured directly rather than through a pipe. Identical both times.
 
