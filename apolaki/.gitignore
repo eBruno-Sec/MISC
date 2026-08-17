@@ -12,3 +12,6 @@ benchmark_results/
 # password material captured during a scan. The scored comparison artifact beside them is committed;
 # these are not.
 Pentest_Reports/**/blind_*.json
+
+# transient probe dir written by scripts/bake_drift_check.sh (trap-removed; listed in case a run is killed)
+.bakeprobe.*
