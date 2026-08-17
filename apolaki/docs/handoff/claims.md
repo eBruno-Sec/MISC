@@ -153,3 +153,129 @@ $ ... python -m pytest tests/test_description_gate.py tests/test_benchmark_asser
 ..................................................................       [100%]
 66 tests, 0 failed, 0 skipped
 ```
+
+Committed as `6e16197`.
+
+**A process note that belongs in the record, not buried.** The commit message of `6e16197` has a
+malformed subject line: the literal `@`, on its own, above the real subject. The body is intact. The
+cause was PowerShell here-string syntax (`-m @'...'@`) passed to the Bash tool, which does not parse
+it. Worse, the `git commit --amend` intended to fix it landed on the WRONG COMMIT: another lane
+committed `676923a` in the seconds between this lane's commit and its amend, so the amend rewrote
+THEIR message with this lane's. It was detected immediately from `git show --stat` (the stat listed
+`findings_57cc3b49.json` and `provenance2.md`, files this lane never touched) and repaired with
+`git reset --soft 676923a` after verifying `3e9dd8a^{tree} == 676923a^{tree}` and
+`3e9dd8a^ == 676923a^`, i.e. that the amend had changed the message and nothing else. `676923a` is
+restored byte-for-byte at its original hash; no working-tree or index state was touched (`--soft`,
+never `--hard`, with other lanes holding uncommitted changes in the same tree). The malformed subject
+on `6e16197` was left as-is: fixing it needs a rebase, which would rewrite a sibling lane's commit
+hash while that lane is still working. A cosmetic subject line is not worth that.
+
+**Standing correction for every lane in this repo: `git commit --amend` is not safe here.** HEAD is
+shared and moves under you between two commands.
+
+---
+
+## ITEM 3 -- `run_hash_crack` advertised `hash_type` and never read it
+
+### Verified against the code before touching it
+
+MEASURED, on the tree as this lane received it:
+
+```
+$ grep -n "hash_type" agent/tools.py
+964:  "hash": {"type": "string"}, "hash_type": {"type": "string", "description": "optional; auto-identified if omitted"},
+$ grep -c "hash_type" agent/tools.py
+1
+```
+
+Exactly one occurrence in 10,052 lines, on the schema line, while `_run_hash_crack` ran
+`cands = hid.identify(h)` unconditionally. The ticket's detail is correct as written.
+
+**Wrong half: the CODE.** The schema describes the parameter as *"optional; auto-identified if
+omitted"*, which promises that supplying it does something. Dropping the property was the offered
+alternative and it was rejected, because the parameter is not decoration:
+`hashid_tool.identify("0192023a7bbd73250516f069df18b500")` returns **MD5, NTLM, MD4** -- one string,
+three hashcat modes, indistinguishable by inspection. Auto-identification takes the first. An NTLM
+hash cracked at mode 0 does not error; it reports **"Not cracked"**, which is a wrong answer wearing
+a right one's clothes. An operator holding a SAM dump has to be able to say so.
+
+### Fix
+
+`_pick_hash_candidate(cands, want)` (module level, beside the other resolvers) plus six lines in
+`_run_hash_crack`. `hash_type` is a PIN over the ranked auto-identification:
+
+* pass 1 matches EXACTLY against every candidate's name, hashcat mode and John format, across ALL
+  candidates before any loose match is tried. It therefore also accepts a raw hashcat mode number
+  (`"1000"`), which is what a pentester actually holds.
+* pass 2 is a name-prefix match (`"md5crypt"` -> `"md5crypt (Unix)"`), length-guarded so a
+  two-character fragment cannot silently select a family.
+* a type the hash CANNOT be returns `None`, and the engine then returns a FAILED `ToolResult` naming
+  both the request and what was identified. Proceeding under a type the operator did not ask for is
+  the same defect one layer down.
+
+The schema description was extended to state the pin semantics. That is not the forbidden edit: the
+forbidden edit softens a claim so a defect stops firing, and the old text was already true of the new
+code -- this makes it more specific about behaviour that now exists and is tested.
+
+### KNOWN CEILING, recorded rather than hidden
+
+When `identify()` recognises nothing (an unusual shape), ANY `hash_type` now fails with
+`auto-identified: unrecognised` instead of proceeding. Honouring a pin in that case needs a
+name-to-mode table, which lives in `hashid_tool.py` -- a file this lane does not own. **Patch wanted**
+(see the bottom of this file). Before the fix the parameter was ignored in that case too, so nothing
+regressed; the difference is that the tool now says so.
+
+### Tests -- `agent/tests/test_hash_type_pin.py`, 11 new
+
+Includes a premise control (`test_the_ambiguity_this_parameter_resolves_is_real`) asserting that
+`identify` really does return >= 3 candidates ranked MD5-first for a 32-hex digest. Without it, a
+future change to `identify` would make every other test in the file vacuous without failing.
+
+The load-bearing test is `test_the_pin_reaches_the_hashcat_argument_vector`: it fakes
+`shutil.which("hashcat")` (absent from the image: `python -c "import shutil; print(shutil.which('hashcat'), shutil.which('john'))"` -> `None None`),
+records the argv through a patched `_cmd`, and asserts a DIFFERENCE between two observed vectors --
+mode `0` with no `hash_type`, mode `1000` with `hash_type="NTLM"` -- rather than a hardcoded
+expectation. A test that only checked the resolver's return value would pass an implementation that
+resolved the pin correctly and then cracked at mode 0 anyway.
+
+FAILS BEFORE THE FIX. MEASURED by mounting `git show 6e16197:apolaki/agent/tools.py` (the same tree
+minus this item; `grep -c hash_type` on it = **1**) over `/app/tools.py` and running the new file:
+
+```
+9 failed, 2 passed
+FAILED test_pin_selects_a_lower_ranked_candidate_over_the_auto_identified_first
+FAILED test_pin_accepts_a_raw_hashcat_mode_because_that_is_what_an_operator_holds
+FAILED test_pin_accepts_a_john_format_name
+FAILED test_pin_ignores_case_and_punctuation
+FAILED test_an_exact_match_anywhere_beats_a_prefix_match_earlier_in_the_list
+FAILED test_pin_returns_none_when_the_hash_cannot_be_that_type
+FAILED test_a_fragment_too_short_to_identify_anything_selects_nothing
+FAILED test_a_hash_type_the_hash_cannot_be_is_reported_not_ignored
+FAILED test_the_pin_reaches_the_hashcat_argument_vector      # E - 1000 / E + 0
+```
+
+The 2 that pass pre-fix are the two that MUST pass on both sides: the premise control, and
+`test_an_empty_hash_type_still_auto_identifies`.
+
+### Mutation testing -- 3 mutants, each VERIFIED APPLIED, all 3 killed
+
+Each mutant was written to a separate file, read back off disk and asserted to contain the new text
+and not the old, then grepped again INSIDE the container that ran the tests (marker count printed as
+`1` each time). A mutation that silently fails to apply produces a green run that proves nothing.
+
+| mutant | the defect it simulates | killed by |
+|---|---|---|
+| A `cands = [picked] + [...]` -> `cands = list(cands)` | pin resolved, then thrown away (computed-but-unused) | `test_the_pin_reaches_the_hashcat_argument_vector` (`- 1000` / `+ 0`) |
+| B resolver's final `return None` -> `return (cands or [None])[0]` | resolver can never say no; a mismatched type silently becomes the top guess | `test_pin_returns_none_when_the_hash_cannot_be_that_type`, `test_a_hash_type_the_hash_cannot_be_is_reported_not_ignored` |
+| C pass 1 `== wn` -> `.startswith(wn)` | exact matching degrades to prefix matching, so a collision earlier in the list wins | `test_an_exact_match_anywhere_beats_a_prefix_match_earlier_in_the_list`, `test_a_fragment_too_short_to_identify_anything_selects_nothing` |
+
+### Regression
+
+```
+$ ... python -m pytest tests/test_hash_type_pin.py tests/test_bbh.py \
+      tests/test_description_gate.py -p no:cacheprovider -p no:warnings
+271 passed in 108.85s
+```
+
+`test_bbh.py` is the only other file in the suite that mentions `hash_crack` or `hashid`
+(`grep -rln "hash_crack\|hashid" agent/tests/*.py` -> those two files).

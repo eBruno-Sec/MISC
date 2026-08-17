@@ -961,7 +961,12 @@ CLAUDE_TOOLS = [
                      "offline analysis of a hash you already hold — it NEVER contacts a live authentication endpoint "
                      "and NEVER brute-forces credentials over the network."),
      "input_schema": {"type": "object", "properties": {
-         "hash": {"type": "string"}, "hash_type": {"type": "string", "description": "optional; auto-identified if omitted"},
+         "hash": {"type": "string"},
+         "hash_type": {"type": "string", "description": (
+             "optional; auto-identified if omitted. When supplied it PINS the type instead of taking the "
+             "top auto-identified guess (a 32-hex digest is MD5, NTLM and MD4 at once). Accepts the type "
+             "name, a hashcat mode number, or a John format. A type the hash cannot be is REPORTED, not "
+             "silently overridden.")},
          "wordlist": {"type": "string", "description": "catalog id or absolute path; defaults to the common-passwords list"}},
          "required": ["hash"]}},
     {"name": "run_nosqlmap",
@@ -1126,6 +1131,53 @@ def _pick_session_token(storage_values, xhr_auth):
     for v in (storage_values or []):
         if _valid_jwt(str(v)):
             return str(v)
+    return None
+
+
+def _norm_hash_token(s) -> str:
+    """Fold a hash-type name to its comparable core: lowercase, punctuation dropped.
+
+    `SHA-256`, `sha256` and `SHA 256` are the same request; the dashes and spaces in the candidate
+    table are presentation, not identity.
+    """
+    return re.sub(r"[^a-z0-9]", "", str(s or "").lower())
+
+
+def _pick_hash_candidate(cands: list, want: str):
+    """Resolve an explicitly supplied `hash_type` against the auto-identified candidates (Q-058).
+
+    WHY THIS EXISTS. `hashid_tool.identify()` returns a RANKED list, and for a bare 32-hex digest that
+    list is MD5, NTLM and MD4 — three different hashcat modes for one string that is genuinely
+    indistinguishable by inspection. Auto-identification takes the first. An operator who already
+    knows which one it is (dumped from a Windows SAM, say) had no way to say so: `run_hash_crack`
+    advertised `hash_type` as "optional; auto-identified if omitted", which promises that supplying it
+    DOES something, and nothing in this file read it. Cracking an NTLM hash under mode 0 does not
+    error; it finds nothing and reports "not cracked", which is the worst possible failure shape.
+
+    Returns the matching candidate, for the caller to promote to the front so the hashcat mode / John
+    format come from it. Returns None when the supplied type matches nothing that was identified — a
+    disagreement between the operator and the identifier, which is worth reporting rather than
+    silently overriding in either direction.
+
+    MATCHING. Pass 1 is EXACT against every candidate's name, hashcat mode and John format, across all
+    candidates before any loose match is tried, so `hash_type="MD4"` cannot be captured by an earlier
+    candidate whose name merely starts with the same letters. It accepts a raw hashcat mode number
+    (`"1000"`) because that is what a pentester has in hand. Pass 2 is a name-prefix match, for
+    `"md5crypt"` against `"md5crypt (Unix)"`, and is length-guarded so a two-character fragment cannot
+    silently select a family.
+    """
+    wn = _norm_hash_token(want)
+    if not wn:
+        return None
+    for c in (cands or []):
+        for field_value in (c.get("name"), c.get("hashcat"), c.get("john")):
+            if field_value is not None and _norm_hash_token(field_value) == wn:
+                return c
+    if len(wn) < 3:
+        return None
+    for c in (cands or []):
+        if _norm_hash_token(c.get("name")).startswith(wn):
+            return c
     return None
 
 
@@ -1514,6 +1566,23 @@ class ToolRegistry:
         if not h or " " in h or len(h) > 4096:
             return ToolResult("hash_crack", "", False, "No valid single hash supplied", [])
         cands = hid.identify(h)
+        # Q-058: HONOUR `hash_type`. The schema advertises it as "optional; auto-identified if
+        # omitted" — a promise that supplying it does something — and until this line nothing read it,
+        # so the token appeared exactly once in this file, on the schema. It is a PIN over the ranked
+        # auto-identification, not a hint, and it matters precisely where auto-identification is
+        # weakest: `identify` ranks MD5 first for any 32-hex digest, so an NTLM hash cracked at mode 0
+        # returns "Not cracked" rather than "wrong mode", which is a wrong answer wearing a right one.
+        want_type = (inp.get("hash_type") or "").strip()
+        if want_type:
+            picked = _pick_hash_candidate(cands, want_type)
+            if picked is None:
+                # Reported, never silently overridden. Proceeding under a type the operator did not
+                # ask for is the same defect this fix exists to remove, one layer down.
+                return ToolResult("hash_crack", "", False, "", [],
+                                  "hash_type %r does not match the supplied hash (auto-identified: %s). "
+                                  "Omit hash_type to crack it as auto-identified."
+                                  % (want_type, ", ".join(c["name"] for c in cands) or "unrecognised"))
+            cands = [picked] + [c for c in cands if c is not picked]
         # resolve wordlist: catalog id -> temp file, or an absolute path
         wlspec = inp.get("wordlist") or "passwords-common"
         wl_path = None
