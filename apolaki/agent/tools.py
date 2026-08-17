@@ -6575,31 +6575,77 @@ class ToolRegistry:
         return ToolResult("jsonp", url, True, "no executable JSONP wrapper with sensitive data found", [])
 
     async def _run_bfla(self, inp: dict) -> ToolResult:
+        """INTRUSIVE: broken function-level authorization — replay a method sweep as the TOKEN UNDER
+        TEST and again as NOBODY, and flag what the token reached that anonymous could not.
+
+        Q-055b, MEASURED AT THE WIRE (patching `tools._target_client`, below `_http_send`, because
+        this engine builds its own client and every existing authz test patches `_http_send`, which
+        it never calls). With a mission session held on the registry:
+
+            registry session_headers: {'Cookie': 'session=MISSION-IDENTITY'}
+            GET/POST/PUT/PATCH x2 + the nonexistent probe -> 9 requests, ALL identity=ANONYMOUS
+            distinct identities on the wire: {'[]'}
+            findings: 0
+
+        `test_headers = dict(inp.get("headers") or {})` and the raw `c.request` bypassed
+        `_merge_identity` entirely, so the AUTHENTICATED row was anonymous — the exact MIRROR of the
+        Q-032 defect where the anonymous row was authenticated. Worse than a wrong row: it made the
+        oracle VACUOUS. `authz.analyze_methods` skips any method whose anonymous row is also 2xx, so
+        with two byte-identical rows it can never emit a finding on ANY target. No production caller
+        passes headers (`agent.py:977`, `agent.py:3193` both send `{"url": ...}`), and `agent.py:970`
+        gates dispatch on a session existing and then discards it — then records the literal claim
+        "privileged control correctly denied the low-priv session" on the empty result.
+
+        Identity now goes through `_merge_identity`, the one place a request's identity is decided:
+        a named `session=` persona wins, then explicit `headers`, and with neither the row inherits
+        the mission session — which IS the low-privilege identity the caller gated on. The control
+        row is an explicit `Identity()`, so it is anonymous BY CONSTRUCTION rather than by accident.
+        """
         import httpx
         url = inp["url"]
-        test_headers = dict(inp.get("headers") or {})
+        # `_resolve_headers` returns an Identity only when a role ACTUALLY RESOLVED; a role that was
+        # named but never minted falls through as a plain dict and inherits the mission session at
+        # `_merge_identity`. Found by this ticket's own test: naming a role IS expressing an identity
+        # opinion, so an unminted one must degrade to "as nobody" (proves nothing), never to "as the
+        # mission" (silently proves the wrong thing) — the contract `_identity` already documents.
+        # Handled here rather than in `_resolve_headers`, which ~40 other engines share; see
+        # docs/handoff/truthful.md for that (unfixed, wider) gap.
+        _role = inp.get("session")
+        if _role:
+            test_headers = self._merge_identity(
+                Identity({**self._identity(_role), **(inp.get("headers") or {})}))
+        else:
+            test_headers = self._merge_identity(self._resolve_headers(inp))
+        anon_headers = self._merge_identity(Identity())          # "as nobody", never upgraded
         allow_delete = bool(inp.get("allow_delete", False))
         methods = list(authz.SAFE_SWEEP) + (["DELETE"] if allow_delete else [])
         method_results, anon_results = {}, {}
+        # An empty header dict is a REAL input here. If nothing supplied an identity, the two rows
+        # are the same request and the differential proves nothing — that must be SAID, not reported
+        # as a clean sweep. Compared on the identity-bearing headers only; User-Agent is not identity.
+        _ident = {k.lower(): v for k, v in test_headers.items() if k.lower() != "user-agent"}
+        vacuous = not _ident
 
         async def send(c, method, headers):
             body = b"{}" if method in ("POST", "PUT", "PATCH") else None
             h = dict(headers)
             if body:
                 h.setdefault("Content-Type", "application/json")
-            r = await c.request(method, url, headers={"User-Agent": _UA, **h}, content=body)
+            r = await c.request(method, url, headers=h, content=body)
             return {"status": r.status_code, "length": len(r.content)}
 
         async with _target_client(verify=False, follow_redirects=False, timeout=15) as c:
             for m in methods:
                 try:
                     method_results[m] = await send(c, m, test_headers)
-                except Exception:
-                    pass
+                except Exception as _e:
+                    # A dropped row silently weakens the differential: the method vanishes from the
+                    # sweep and the report is indistinguishable from "the token could not reach it".
+                    self._swallow(_e, "bfla.authed.%s" % m, url)
                 try:
-                    anon_results[m] = await send(c, m, {})
-                except Exception:
-                    pass
+                    anon_results[m] = await send(c, m, anon_headers)
+                except Exception as _e:
+                    self._swallow(_e, "bfla.anon.%s" % m, url)
             nonexistent = {}
             p = urlparse(url)
             segs = (p.path or "").rstrip("/").split("/")
@@ -6607,16 +6653,22 @@ class ToolRegistry:
                 segs[-1] = "bbh-nonexistent-" + os.urandom(3).hex()
                 ne_url = urlunparse(p._replace(path="/".join(segs)))
                 try:
-                    rn = await c.get(ne_url, headers={"User-Agent": _UA, **test_headers})
+                    rn = await c.get(ne_url, headers=dict(test_headers))
                     nonexistent = {"status": rn.status_code, "length": len(rn.content)}
-                except Exception:
-                    pass
+                except Exception as _e:
+                    self._swallow(_e, "bfla.nonexistent", ne_url)
 
-        findings = authz.analyze_methods(url, method_results, anon_results)
+        # The side-channel oracle needs no authed/anon differential, so it still runs when the BFLA
+        # comparison is vacuous — reporting less than it measured would be its own false negative.
+        findings = [] if vacuous else authz.analyze_methods(url, method_results, anon_results)
         findings += authz.analyze_side_channel(nonexistent, method_results.get("GET") or {})
         if self.mission_id:
             await self._http(url, "GET", test_headers, capture=True)
-        return ToolResult("bfla", url, True, f"{len(findings)} authorization signal(s)", findings)
+        note = (f"{len(findings)} authorization signal(s)" if not vacuous else
+                f"{len(findings)} authorization signal(s); BFLA method differential NOT RUN — no "
+                f"identity available (no session= role, no headers, no mission session), so the "
+                f"'authorized' and 'anonymous' rows would be the same request")
+        return ToolResult("bfla", url, True, note, findings)
 
     async def _run_race(self, inp: dict) -> ToolResult:
         import httpx
