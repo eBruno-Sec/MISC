@@ -3214,7 +3214,10 @@ class ToolRegistry:
         steps calling the scoped primitives, with safe {var} substitution, response extraction
         into mission variables, a deterministic oracle assertion, and produced capabilities.
         No arbitrary code; only the typed step vocabulary. Confirmed findings still come from
-        the confirm_* steps inside it (truth-first). Bounded, scope-guarded per step."""
+        the confirm_* steps inside it (truth-first) and are FORWARDED on this ToolResult —
+        Q-054: this returned a hardcoded `[]`, so every finding a workflow's steps produced was
+        discarded at this boundary even after `workflow.run` was fixed to carry them. Bounded,
+        scope-guarded per step."""
         import workflow as _wf
         wf = inp.get("workflow") if isinstance(inp.get("workflow"), dict) else None
         if not wf and inp.get("pack"):                 # run a named reusable technique pack
@@ -3226,7 +3229,16 @@ class ToolRegistry:
         if not wf:
             wf = inp
         res = await _wf.run(self, wf)
-        return ToolResult("run_workflow", str(wf.get("id", "")), True, json.dumps(res)[:4000], [])
+        findings = list(res.get("findings") or [])
+        # The findings travel in ToolResult.findings, NOT in `output`: `output` is truncated at
+        # 4000 chars, and full finding dicts (description/impact/reproduction_steps) would push the
+        # step log out of the window — a fix that hid the evidence of itself. The display copy
+        # keeps counts so a reader can still see WHICH step produced what.
+        view = dict(res)
+        view["findings"] = len(findings)
+        view["log"] = [({**e, "findings": len(e["findings"])} if isinstance(e.get("findings"), list) else e)
+                       for e in (res.get("log") or [])]
+        return ToolResult("run_workflow", str(wf.get("id", "")), True, json.dumps(view)[:4000], findings)
 
     async def _list_workflows(self, inp: dict) -> ToolResult:
         """PASSIVE: list the built-in reusable technique packs and the inputs each needs.

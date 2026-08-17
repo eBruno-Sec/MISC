@@ -113,16 +113,39 @@ def _assert_ok(assertion: dict, last_output: str, reg) -> bool:
     return True
 
 
+def _step_findings(res) -> list:
+    """The findings a step's ToolResult carried, faithfully — no coercion, no dropping.
+
+    Q-054. `workflow.run` read `res.output` / `res.success` / `res.error` and NEVER `res.findings`,
+    and the dict it returned had no field a finding could travel in. MEASURED against a live Juice
+    Shop: `enumerate_ids` over /api/Products/{id} emits a family=idor lead on a direct call and
+    NOTHING through `workflow.run`. The same sink swallowed `confirm_idor`'s confirmed CWE-639
+    finding, which is the entire point of the flagship `idor_read` pack.
+
+    `getattr` rather than `res.findings`: every real producer is a `ToolResult`, whose `findings`
+    field is a dataclass default and therefore always present, so this cannot mask a real engine's
+    output. It exists for the duck-typed step stand-ins in tests/test_workflow_headers.py.
+
+    Non-dict entries are forwarded UNCHANGED, matching `ToolResult.__post_init__`: several engines
+    put raw URLs/scalars in `findings`, and dropping or coercing them here would be this ticket's
+    own defect one layer up. Downstream (`agent._auto_store`) already skips them."""
+    return list(getattr(res, "findings", None) or [])
+
+
 async def run(reg, wf: dict) -> dict:
     """Execute a workflow against a ToolRegistry. Returns
-    {ran, log, variables, produced, asserted}. Bounded at 20 steps."""
+    {ran, log, variables, produced, asserted, findings}. Bounded at 20 steps.
+
+    `findings` is the aggregate of every step's findings in step order, and each log entry carries
+    its own step's findings so "which step found it" stays answerable. Both are always present
+    (possibly empty) — a caller must never have to distinguish "no key" from "found nothing"."""
     variables = dict(wf.get("inputs") or {})
     variables.update(reg.state.variables)
-    log, last_out = [], "{}"
+    log, last_out, findings = [], "{}", []
     # prerequisite capabilities
     for req in wf.get("requires") or []:
         if req.startswith("capability:") and not reg.state.has(req.split(":", 1)[1]):
-            return {"ran": False, "error": f"missing prerequisite {req}", "log": log}
+            return {"ran": False, "error": f"missing prerequisite {req}", "log": log, "findings": []}
     for i, step in enumerate((wf.get("steps") or [])[:20]):
         _seed_harvest(variables, reg)   # target-derived fixtures, refreshed each step
         do = step.get("do")
@@ -136,6 +159,10 @@ async def run(reg, wf: dict) -> dict:
         res = await getattr(reg, meth)(inp)
         last_out = res.output or "{}"
         entry = {"step": i, "do": do, "ok": res.success}
+        step_findings = _step_findings(res)
+        if step_findings:
+            entry["findings"] = step_findings
+            findings.extend(step_findings)
         if res.error:
             entry["error"] = res.error
         if step.get("extract"):
@@ -162,4 +189,4 @@ async def run(reg, wf: dict) -> dict:
             produced.append(c)
     return {"ran": True, "asserted": asserted, "log": log,
             "variables": {k: reg.state.variables.get(k) for k in reg.state.variables},
-            "produced": produced}
+            "produced": produced, "findings": findings}
