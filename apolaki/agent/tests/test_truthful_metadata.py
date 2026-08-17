@@ -163,6 +163,46 @@ def test_the_engine_now_reports_the_leak_end_to_end():
     assert abs(lon - GEO_TRUTH_LON) < 1e-4, "longitude %r is not the known leak %r" % (lon, GEO_TRUTH_LON)
 
 
+#: Q-068. The ONE canonical spelling of this leak, pinned as a literal so both readers are asserted
+#: against a FIXED string rather than against each other. Agreement then follows by transitivity and
+#: neither half can drift: a test comparing the two readers directly would still pass if they moved
+#: together, and a test that skips when exiftool is absent would measure nothing on such an image.
+CANON_LAT, CANON_LON = "59.421158", "24.801200"
+CANON_POSITION = CANON_LAT + ", " + CANON_LON
+
+#: The two READER-SPECIFIC spellings that must not survive into a finding. Copied from the measured
+#: output of each reader on this exact file (see docs/handoff/engines.md), not invented.
+NATIVE_SPELLING = "59 deg 25' 16.17\" N"
+EXIFTOOL_SPELLING = "59.4211583333333"
+
+
+def _exiftool_meta(data: bytes):
+    """exiftool's OWN reading of the same bytes, or None when exiftool is not installed.
+
+    Deliberately re-implements the two lines of `_run_metadata` that shell out, so this test measures
+    the reader rather than the engine wrapper around it."""
+    import json
+    import os
+    import shutil
+    import subprocess
+    import tempfile
+    if not shutil.which("exiftool"):
+        return None
+    with tempfile.NamedTemporaryFile(delete=False, suffix=".jpg") as tf:
+        tf.write(data)
+        tmp = tf.name
+    try:
+        out = subprocess.run(["exiftool", "-j", "-n", tmp], capture_output=True,
+                             text=True, timeout=30).stdout
+    finally:
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass
+    arr = json.loads(out or "[]")
+    return arr[0] if arr else {}
+
+
 def test_the_two_readers_agree_on_the_location_they_report():
     """Whichever reader the image ships with, the reported POINT must be the same.
 
@@ -170,12 +210,62 @@ def test_the_two_readers_agree_on_the_location_they_report():
     evidence string on two installs and nothing would notice -- which for a deterministic-first tool
     is a defect in its own right (Q-068). Pins the native reader against the same ground truth the
     end-to-end test pins the engine against, so the two can never drift apart silently.
+
+    Q-068 EXTENSION: agreeing on the point was never enough, because the two readers SPELLED that
+    same point differently (`59 deg 25' 16.17" N` vs `59.4211583333333`) and the spelling is what
+    lands in the evidence. So the canonical form is asserted here too, on the native reader's raw
+    output, as a literal string.
     """
     meta = upload_tool.extract_metadata(_fetch(GEO_PHOTO))
     lat, lon = _decimal_coords(
         "%s %s" % (meta.get("EXIF:GPSLatitude", ""), meta.get("EXIF:GPSLongitude", "")))
     assert lat is not None, "native reader produced no parseable coordinates"
     assert abs(lat - GEO_TRUTH_LAT) < 1e-4 and abs(lon - GEO_TRUTH_LON) < 1e-4
+
+    assert upload_tool.canonical_position(meta) == CANON_POSITION
+    canon = upload_tool.canonical_gps(meta)
+    assert canon["EXIF:GPSLatitude"] == CANON_LAT
+    assert canon["EXIF:GPSLongitude"] == CANON_LON
+    assert canon["EXIF:GPSPosition"] == CANON_POSITION
+    assert canon["EXIF:Model"] == "Pixel 3 XL", "canonicalisation must not disturb non-coordinates"
+
+
+def test_exiftool_reduces_to_the_same_canonical_string_as_the_native_reader():
+    """The other half of the agreement, against the reader the shipped image actually prefers.
+
+    A SKIP here is an ABSENT measurement, never a pass -- but it cannot hide the property, because
+    the native half above asserts the same literal unconditionally."""
+    data = _fetch(GEO_PHOTO)
+    meta = _exiftool_meta(data)
+    if meta is None:
+        pytest.skip("exiftool not installed in this image; the exiftool half is NOT measured here")
+    assert meta.get("GPSLatitude"), "exiftool read no GPSLatitude; re-aim this test"
+    assert upload_tool.canonical_position(meta) == CANON_POSITION
+    canon = upload_tool.canonical_gps(meta)
+    assert canon["GPSLatitude"] == CANON_LAT
+    assert canon["GPSLongitude"] == CANON_LON
+    assert canon["GPSPosition"] == CANON_POSITION
+    assert canon["GPSDOP"] == meta["GPSDOP"], "a non-coordinate GPS tag must pass through untouched"
+
+
+def test_the_engine_reports_ONE_canonical_coordinate_whichever_reader_ran():
+    """Q-068, the product half: the evidence must not depend on which reader the image ships with.
+
+    Both reader-specific spellings are asserted ABSENT unconditionally, not just the one this image
+    happens to produce -- the claim is that no raw spelling survives, and an assertion that only
+    fires in the environment that already passes is not a test of that claim.
+    """
+    res = _run(_reg()._run_metadata({"url": _url(GEO_PHOTO)}))
+    assert len(res.findings) == 1, res.output
+    ev = res.findings[0]["evidence"]
+    assert NATIVE_SPELLING not in ev, "the native reader's DMS spelling reached the finding: %r" % ev
+    assert EXIFTOOL_SPELLING not in ev, "exiftool's raw float reached the finding: %r" % ev
+    # The one line whose KEY as well as whose value is the same on both paths. Pinned separately from
+    # the per-source rows because on a file that carries lat and lon but no GPSPosition tag it is the
+    # only place the pair appears at all.
+    assert ("GPSPositionCanonical (WGS84 decimal degrees): " + CANON_POSITION) in ev, ev
+    assert "%s: %s" % ("EXIF:GPSLatitude", CANON_LAT) in ev or "GPSLatitude: " + CANON_LAT in ev, ev
+    assert "GPSLongitude: " + CANON_LON in ev, ev
 
 
 # ---------------------------------------------------------------------------------------------
@@ -306,6 +396,102 @@ def test_the_deleted_ascii_branch_can_no_longer_fire():
                           + b"my GPS notes" + b"\xff\xd9")
     assert b"GPS" in jpeg_with_the_word
     assert upload_tool.extract_metadata(jpeg_with_the_word) == {}
+
+
+# ---------------------------------------------------------------------------------------------
+# Q-068 CANONICAL COORDINATES — lab-independent, so these ALWAYS measure, including on a machine
+# where juice-shop is down and every test above skips. The spellings below are not invented: each
+# one was observed coming out of a real reader (see docs/handoff/engines.md for the measurement).
+# ---------------------------------------------------------------------------------------------
+#: The same point, in every spelling the two readers actually produce. THE property under test is
+#: that these all collapse to ONE string -- which is the whole ticket, expressed without a lab.
+SAME_POINT_SPELLINGS = [
+    ("exiftool -n, floats", {"GPSLatitude": 59.4211583333333, "GPSLongitude": 24.8012}),
+    ("exiftool -n, its pair tag", {"GPSPosition": "59.4211583333333 24.8012"}),
+    ("native reader, DMS", {"EXIF:GPSLatitude": "59 deg 25' 16.17\" N",
+                            "EXIF:GPSLongitude": "24 deg 48' 4.32\" E"}),
+    ("native reader, its pair tag", {"EXIF:GPSPosition": "59.421158, 24.8012"}),
+    ("exiftool without -n, DMS strings", {"GPSLatitude": "59 deg 25' 16.17\" N",
+                                          "GPSLongitude": "24 deg 48' 4.32\" E"}),
+    ("decimal strings with a hemisphere", {"GPSLatitude": "59.421158 N", "GPSLongitude": "24.8012 E"}),
+    ("XMP degrees + decimal minutes", {"GPSLatitude": "59,25.2695N", "GPSLongitude": "24,48.072E"}),
+]
+
+
+@pytest.mark.parametrize("label,meta", SAME_POINT_SPELLINGS, ids=[s[0] for s in SAME_POINT_SPELLINGS])
+def test_every_spelling_of_the_same_point_reduces_to_ONE_string(label, meta):
+    """Q-068 in one assertion: the report's location must not depend on which reader produced it."""
+    assert upload_tool.canonical_position(meta) == CANON_POSITION, label
+
+
+def test_the_southern_and_western_hemispheres_are_not_lost_by_canonicalising():
+    """The canonical form carries the hemisphere in the SIGN, so dropping the letter must not drop
+    the fact. A canonicaliser that reported Tallinn's coordinates for a point in Chile would be a
+    worse defect than the formatting one this ticket is about."""
+    assert upload_tool.canonical_position(
+        {"GPSLatitude": "59 deg 25' 16.17\" S", "GPSLongitude": "24 deg 48' 4.32\" W"}) == \
+        "-59.421158, -24.801200"
+    assert upload_tool.canonical_position({"GPSLatitude": -59.4211583333333,
+                                           "GPSLongitude": -24.8012}) == "-59.421158, -24.801200"
+    assert upload_tool.canonical_position({"GPSPosition": "-59.421158 -24.8012"}) == \
+        "-59.421158, -24.801200"
+
+
+def test_a_value_that_is_not_a_coordinate_is_left_EXACTLY_as_it_was():
+    """Refusing beats inventing. An unrecognised spelling must look unrecognised in the report rather
+    than become a plausible number -- the failure mode that would make this fix worse than the bug."""
+    for raw in ("unknown", "", "n/a", "2 2 0 0", "59 deg 25' 16.17\" 3.5\" N", None, True, [59.4]):
+        out = upload_tool.canonical_gps({"GPSLatitude": raw})
+        assert out["GPSLatitude"] == raw, raw
+        assert upload_tool.canonical_position({"GPSLatitude": raw, "GPSLongitude": 24.8}) == "", raw
+
+
+def test_out_of_range_values_are_refused_per_AXIS_not_globally():
+    """95 is a legal LONGITUDE and an impossible LATITUDE. A single 0-180 bound would accept it as a
+    latitude, which is how a canonicaliser launders a garbage value into a confident one."""
+    assert upload_tool.canonical_gps({"GPSLongitude": 95.5})["GPSLongitude"] == "95.500000"
+    assert upload_tool.canonical_gps({"GPSLatitude": 95.5})["GPSLatitude"] == 95.5
+    assert upload_tool.canonical_gps({"GPSLatitude": 200.0})["GPSLatitude"] == 200.0
+    assert upload_tool.canonical_gps({"GPSLongitude": 200.0})["GPSLongitude"] == 200.0
+
+
+def test_non_coordinate_gps_tags_are_not_reformatted_as_if_they_were_coordinates():
+    """`GPSDOP`, `GPSAltitude`, `GPSTimeStamp` and the `...Ref` tags are all numbers or number-like
+    strings sitting under a key starting `GPS`. A key match loose enough to catch them would rewrite
+    a dilution-of-precision figure into a latitude."""
+    meta = {"GPSDOP": 60.421, "GPSAltitude": 71.4, "GPSAltitudeRef": 0, "GPSVersionID": "2 2 0 0",
+            "GPSTimeStamp": "14:12:15", "GPSDateStamp": "2019:10:22", "GPSLatitudeRef": "N",
+            "EXIF:Model": "Pixel 3 XL"}
+    assert upload_tool.canonical_gps(meta) == meta
+
+
+def test_canonical_position_is_deterministic_when_two_SOURCES_disagree():
+    """A file can carry an XMP latitude and a binary-EXIF latitude at once (Q-055 kept both on
+    purpose). Which one is reported must not depend on dict ordering, so it is resolved by sorted
+    key -- asserted from BOTH insertion orders, because a test written in one order would pass
+    against insertion-order code by luck."""
+    a = {"EXIF:GPSLatitude": 59.4211583333333, "EXIF:GPSLongitude": 24.8012,
+         "GPSLatitude": "1,2.5N", "GPSLongitude": "1,2.5E"}
+    b = {"GPSLatitude": "1,2.5N", "GPSLongitude": "1,2.5E",
+         "EXIF:GPSLatitude": 59.4211583333333, "EXIF:GPSLongitude": 24.8012}
+    assert upload_tool.canonical_position(a) == upload_tool.canonical_position(b) == CANON_POSITION
+
+
+def test_canonicalising_never_raises_and_always_returns_a_dict():
+    """Same argument as the parser-robustness block above: this runs inside `run_metadata`, where a
+    raised error is caught upstream and becomes an invisible false negative for the whole engine."""
+    for meta in (None, {}, {"GPSLatitude": object()}, {"GPSPosition": "a,b,c,d"},
+                 {"EXIF:GPSPosition": ""}, {"GPSLatitude": float("nan")}):
+        assert isinstance(upload_tool.canonical_gps(meta), dict)
+        assert isinstance(upload_tool.canonical_position(meta), str)
+
+
+def test_the_canonicaliser_does_not_touch_a_file_with_no_gps_at_all():
+    """Negative control for the whole feature: the clean-photo path must be byte-identical before
+    and after, or every negative control in this file is measuring the canonicaliser instead."""
+    meta = {"EXIF:Make": "Google", "EXIF:Model": "Pixel 3 XL", "PDF:Author": "someone"}
+    assert upload_tool.canonical_gps(meta) == meta
+    assert upload_tool.canonical_position(meta) == ""
 
 
 def test_xmp_and_binary_exif_are_namespaced_so_neither_hides_the_other():

@@ -883,6 +883,16 @@ def _coverage(session_id: str) -> dict:
                              if str((f or {}).get("confidence") or "confirmed").lower() != "lead"])}
 
 
+#: Q-067. The typed signal an engine emits to say "I reached the target and the thing is NOT THERE",
+#: as distinct from "I broke". It is a PREFIX by contract and the producer matches it as one.
+#: Engines emit it on the `error` channel because that is the channel a non-success ToolResult
+#: already travels on; the alternative — inventing a fourth ToolResult field — would have to be
+#: threaded through every engine and every transport to be worth anything.
+#: Pinned by `tests/test_ledger_negative_result.py` so a rename here cannot silently desync from the
+#: engine-side literal in `agent/tools.py`.
+NEGATIVE_RESULT_TOKEN = "NOT PRESENT:"
+
+
 def _tool_ledger(session_id: str) -> dict:
     """Per-tool execution ledger (executed / skipped / failed + why) plus ZAP status,
     auth posture, strategy and AI-call count — for the report Methodology section.
@@ -893,10 +903,12 @@ def _tool_ledger(session_id: str) -> dict:
     agg = {}
     for l in db.get_logs(session_id, limit=4000):
         t = l.get("tool")
-        if not t or l.get("type") not in ("tool_call", "tool_result", "tool_error", "scope_block"):
+        if not t or l.get("type") not in ("tool_call", "tool_result", "tool_error",
+                                          "scope_block", "tool_negative"):
             continue
         a = agg.setdefault(t, {"calls": 0, "findings": 0, "note": "", "error": "",
-                               "ok": 0, "scope_blocks": 0, "scope_note": ""})
+                               "ok": 0, "scope_blocks": 0, "scope_note": "",
+                               "negatives": 0, "negative_note": ""})
         typ = l.get("type")
         if typ == "tool_call":
             a["calls"] += 1
@@ -926,11 +938,31 @@ def _tool_ledger(session_id: str) -> dict:
             # ran fine on its in-scope targets but skipped one off-scope host (e.g. a
             # third-party CDN a page loads, or a discovered subdomain on a non-pinned port)
             # is never mislabeled "failed" — that mislabel is itself a reporting-integrity bug.
-            if typ == "scope_block" or "SCOPE BLOCK" in str(l.get("error") or ""):
+            _err = str(l.get("error") or "")
+            if typ == "scope_block" or "SCOPE BLOCK" in _err:
                 a["scope_blocks"] += 1
-                a["scope_note"] = str(l.get("error") or "")[:140]
+                a["scope_note"] = _err[:140]
+            elif typ == "tool_negative" or _err.startswith(NEGATIVE_RESULT_TOKEN):
+                # Q-067. An engine that REACHED its target and concluded "the thing is not here"
+                # arrives on the same path as a crash, so a correct verdict was being reported as a
+                # broken engine. Same fix shape as 936f6bd (a SCOPE BLOCK is correct enforcement,
+                # not a failure): split on a TYPED token the engine emits and track the class apart.
+                #
+                # The token is a PREFIX, deliberately stricter than the `"SCOPE BLOCK" in err`
+                # test above: an engine that merely quotes the phrase inside a crash message has
+                # not made a verdict, and prefix-matching is what stops this decaying into
+                # substring matching. Either signal is accepted -- a typed ROW or a typed STRING --
+                # so a half-applied engine patch cannot silently restore the pre-fix behaviour.
+                #
+                # NOT a phrase list over the error prose. The verdict and the fault are
+                # byte-identical in every ToolResult field except the English of `error`, so a
+                # producer-side classifier would have to read language: the Q-056 rule-C shape,
+                # measured at 5 false positives in 6 and rejected.
+                a["negatives"] += 1
+                a["negative_note"] = _err[len(NEGATIVE_RESULT_TOKEN):].strip()[:140] \
+                    if _err.startswith(NEGATIVE_RESULT_TOKEN) else _err[:140]
             else:
-                a["error"] = str(l.get("error") or "")[:140]
+                a["error"] = _err[:140]
     # Was SQLi confirmed by a native tool? Used to reword sqlmap's "No SQLi confirmed"
     # note so it reads as corroboration, not a contradiction next to a confirmed SQLi.
     _sqli_confirmed = any(
@@ -944,15 +976,31 @@ def _tool_ledger(session_id: str) -> dict:
         # some targets but skipped others as out-of-scope is "executed" (with a skipped
         # count), not "failed" — and a tool ALL of whose targets were out of scope simply
         # did not run in-scope, so it is "skipped", not "failed".
-        if a["error"] and not a["ok"]:
+        # Q-067: `negatives` joins `ok` as evidence the engine RAN. A tool that reached its targets
+        # and concluded "not present" is executed, not failed -- but a row that ALSO carries real
+        # faults must still say so, because burying five transport errors inside a verdict would be
+        # a strictly worse bug than the one this fixes. Measured on mission 57cc3b49: what looked
+        # like ten negative results was five verdicts plus five [SSL: WRONG_VERSION_NUMBER] faults
+        # that never reached the target at all.
+        if a["error"] and not a["ok"] and not a["negatives"]:
             status, note = "failed", a["error"]
         elif any(k in low for k in ("not configured", "skipped", "skip cleanly", "disabled")):
             status, note = "skipped", a["note"]
-        elif not a["ok"] and a["scope_blocks"]:
+        elif not a["ok"] and not a["negatives"] and a["scope_blocks"]:
             status, note = "skipped", (a["scope_note"] or "every target was out of scope — nothing tested")
         else:
             status, note = "executed", a["note"]
             extra = []
+            if a["negatives"] and not a["note"]:
+                # The operator gets the verdict itself; the token is machinery, not prose.
+                note = a["negative_note"]
+            elif a["negatives"]:
+                # A call that FOUND something leads the note, and the negative is still accounted
+                # for rather than dropped. Summarised generically here rather than pasting the
+                # engine's verdict text, because the finding is the headline and a second
+                # engine-worded sentence competes with it for the reader's attention.
+                extra.append("%d path%s concluded not present" % (
+                    a["negatives"], "" if a["negatives"] == 1 else "s"))
             if a["error"]:                      # a real error on one call, others still ran
                 extra.append("1+ call errored")
             if a["scope_blocks"]:

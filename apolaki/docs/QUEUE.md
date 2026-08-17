@@ -283,6 +283,17 @@ rebuild** — that is now the gate's most valuable output, not an aside.
 
 </details>
 
+### Q-069 · The ledger keeps only the LAST error per tool, so an engine failing ten ways reports one · **MEDIUM** · `ready`
+
+Found while measuring Q-067. `main._tool_ledger` stores `a["error"] = <latest>` with no count and no
+histogram, so `fetch_openapi`'s row showed a single message while the log held **5 SSL faults + 5
+verdicts**. The mixed-outcome row now says "1+ call errored", which is honest but coarse.
+
+Worth doing because the whole Q-063/Q-067 line of work is about a reader being able to tell "never
+tested" from "tested, found nothing" — and "failed 10 ways" from "failed once" is the next rung of the
+same ladder. DoD: an error COUNT at minimum, ideally a small histogram of distinct messages, without
+inflating the note into a wall of text.
+
 ### Q-068 · The same target yields DIFFERENT report evidence depending on the image · **MEDIUM** · `ready`
 
 Found by the Q-059 rebuild, and it is the kind of thing only a rebake could reveal. `run_metadata`
@@ -308,7 +319,43 @@ the two readers agree). **But the product half is NOT fixed:** the engine should
 to one canonical representation before they reach a finding. DoD: one format in the evidence
 regardless of which reader ran, with the existing agreement test extended to assert it.
 
-### Q-067 · A NEGATIVE RESULT is recorded as a tool FAILURE · **MEDIUM** · `ready`
+### Q-067 · A NEGATIVE RESULT is recorded as a tool FAILURE · **CLOSED** `006c5b0` + producer/engine fix
+
+**MY TICKET WAS WRONG IN THE DIRECTION THAT CAUSES HARM, and the lane measured it before writing a
+line of code.** I wrote that `fetch_openapi` "probed 10 candidate paths and correctly found no spec".
+The DB says otherwise:
+
+```
+fetch_openapi rows: 20      Counter({'tool_call': 10, 'tool_error': 10})
+error histogram:
+   5  [SSL: WRONG_VERSION_NUMBER] wrong version number (_ssl.c:1010)
+   5  Response is not valid JSON (not an OpenAPI spec)
+```
+
+**Five of the ten dispatches spoke TLS at a plaintext port and never reached the target at all.**
+They are genuine transport faults. The blanket "mark this row executed" my ticket implied would have
+**buried five real faults** — precisely the invisible-false-negative class Q-063 built the `errored`
+class to expose. The ticket was aimed at making an alarm quieter and would have made it lie.
+
+The row showed only one of the ten because `_tool_ledger` keeps the LAST error string per tool and no
+error count. **That is a second, smaller defect and it is still open** — an engine failing ten
+different ways reports one of them.
+
+**Why a TYPED TOKEN and not a rule over the error text.** Measured by driving the real engine against
+the real lab: the verdict and the fault are **byte-identical in every `ToolResult` field except the
+English of `error`** (both `success=False`, `output=''`, `findings=[]`), and the persisted row carries
+only `{type, tool, error, ts}`. No producer-only classifier can separate them without reading
+language — the Q-056 rule-C shape, measured at 5 false positives in 6 and rejected.
+
+**The concept already existed; this was one mispacked site.** A response that IS valid JSON but not a
+spec already returns `success=True` / `"0 endpoints imported"`. The not-JSON case was the same answer
+sent down the error channel.
+
+Fixed in both halves: `tools._fetch_openapi` emits `NOT PRESENT: ...`, and `main._tool_ledger` gains
+a `negatives` counter beside `ok`/`scope_blocks`/`error`, matching the token as a **prefix** (stricter
+than the `"SCOPE BLOCK" in err` test it is modelled on) or a typed `tool_negative` row. Ten tests,
+including the mandatory negative control that a genuinely broken engine **still reads `failed`**, and
+an anti-regex guard that fails if anyone later "fixes" this with a phrase list.
 
 Surfaced by Q-063 on its first real ledger, and **verified against the live mission before filing,
 which changed the ticket completely.** `fetch_openapi` shows `status=failed, calls=10, findings=0` —

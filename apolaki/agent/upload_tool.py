@@ -399,3 +399,158 @@ def extract_metadata(data: bytes) -> dict:
     # the old code suppressed its EXIF branch whenever XMP had already produced a GPSLatitude.
     out.update(read_exif(data))
     return out
+
+
+# ── ONE canonical coordinate spelling (Q-068) ────────────────────────────────────
+# THE DEFECT THIS FIXES. `run_metadata` prefers `exiftool` when it is installed and falls back to
+# `extract_metadata` above. Both are correct and both recover the SAME point from the Juice Shop
+# geo-stalking photo — they SPELL it differently. MEASURED on the same 107952 bytes inside the
+# shipped image on 2026-08-17:
+#     exiftool -j -n   GPSLatitude = 59.4211583333333        GPSPosition = '59.4211583333333 24.8012'
+#     native           EXIF:GPSLatitude = "59 deg 25' 16.17\" N"   EXIF:GPSPosition = '59.421158, 24.8012'
+# `_run_metadata` renders its evidence as "\n".join(f"{k}: {v}"), so BOTH spellings reach a
+# client-facing finding and which one an operator gets depends on whether `libimage-exiftool-perl`
+# was baked into their image. For a deterministic-first tool two installs must not report the same
+# target differently, and nothing in the suite noticed until the bake flipped the preferred path.
+#
+# THE CANONICAL FORM: SIGNED DECIMAL DEGREES to exactly six decimal places, hemisphere carried in
+# the sign, latitude first, ", " between the pair -> "59.421158, 24.801200". Decimal rather than DMS
+# because both readers reach it losslessly from the same EXIF rationals
+# (59 + 25/60 + 16.17/3600 = 59.42115833... and exiftool's 59.4211583333333 both give 59.421158),
+# whereas going the other way would mean re-deriving seconds from a rounded decimal. Six decimals is
+# ~0.11 m, finer than the source rationals carry, so nothing real is rounded away.
+#
+# SCOPE, stated so it is not quietly widened later: this normalises the coordinate VALUES, not the
+# key namespace. `EXIF:` names the SOURCE a value came from, which is real information, and
+# flattening it would re-open the Q-055 namespacing that stops XMP and binary EXIF hiding each
+# other. exiftool also surfaces GPSDOP/GPSAltitude/GPSTimeStamp/ProfileCreator that the native reader
+# genuinely cannot read, so byte-identical evidence between the two readers is impossible; the
+# property that IS achievable, and is what the tests pin, is that the LOCATION is one string.
+#
+# A value that does not parse as a coordinate is LEFT EXACTLY AS IT WAS. Refusing beats inventing:
+# an unrecognised spelling should look unrecognised in the report, not become a plausible number.
+_CANON_FMT = "%.6f"
+_CANON_LAT_KEYS = ("GPSLatitude", "GPSDestLatitude")
+_CANON_LON_KEYS = ("GPSLongitude", "GPSDestLongitude")
+_CANON_PAIR_KEYS = ("GPSPosition", "GPSCoordinates", "GPSDestPosition")
+
+#: A trailing hemisphere letter. Anchored at the end so it cannot match the `N` inside a word — the
+#: native reader's own "(no hemisphere ref)" label is the case that proves the anchor is needed.
+_HEMI_RE = _re.compile(r"([NSEW])\s*$", _re.IGNORECASE)
+_NUM_RE = _re.compile(r"-?\d+(?:\.\d+)?")
+
+
+def _coord_value(raw):
+    """One coordinate, in ANY spelling either reader emits -> signed decimal degrees, or None.
+
+    Accepts: a number (exiftool `-n`); `59 deg 25' 16.17" N` (native reader, and exiftool without
+    `-n`); a bare decimal string with or without a hemisphere letter; and the XMP `59,25.2695N`
+    degrees-and-decimal-minutes form. Anything else returns None and the caller leaves the value
+    alone."""
+    if isinstance(raw, bool):
+        return None                                  # True is not 1 degree
+    if isinstance(raw, (int, float)):
+        return float(raw)
+    if not isinstance(raw, str) or not raw.strip():
+        return None
+    s = raw.strip()
+    hemi = ""
+    m = _HEMI_RE.search(s)
+    if m:
+        hemi = m.group(1).upper()
+        s = s[:m.start()]
+    nums = _NUM_RE.findall(s)
+    if not 1 <= len(nums) <= 3:
+        return None                                  # not a coordinate; report nothing rather than nonsense
+    try:
+        parts = [float(n) for n in nums]
+    except ValueError:
+        return None
+    negative = parts[0] < 0 or hemi in ("S", "W")
+    value = abs(parts[0])
+    if len(parts) >= 2:
+        if not 0 <= parts[1] < 60:
+            return None
+        value += parts[1] / 60.0
+    if len(parts) == 3:
+        if not 0 <= parts[2] < 60:
+            return None
+        value += parts[2] / 3600.0
+    if value > 180:
+        return None
+    return -value if negative else value
+
+
+def _coord_pair(raw):
+    """A `GPSPosition`-style pair -> (lat, lon) in decimal degrees, or None.
+
+    Split on a comma when that yields exactly two halves (`59.421158, 24.8012`), otherwise on
+    whitespace (exiftool `-n` writes `59.4211583333333 24.8012`, and the XMP form is comma-bearing
+    within each half so only the whitespace split can separate it)."""
+    if not isinstance(raw, str):
+        return None
+    for parts in ([p for p in raw.split(",")], raw.split()):
+        if len(parts) != 2:
+            continue
+        lat, lon = _coord_value(parts[0]), _coord_value(parts[1])
+        if lat is not None and lon is not None and abs(lat) <= 90:
+            return lat, lon
+    return None
+
+
+def _axis_keys(key: str) -> str:
+    """"lat" | "lon" | "pair" | "" for a metadata key, ignoring any source namespace prefix."""
+    base = key.rsplit(":", 1)[-1]
+    if base in _CANON_LAT_KEYS:
+        return "lat"
+    if base in _CANON_LON_KEYS:
+        return "lon"
+    if base in _CANON_PAIR_KEYS:
+        return "pair"
+    return ""
+
+
+def canonical_gps(meta: dict) -> dict:
+    """A COPY of `meta` with every GPS coordinate value rewritten to the one canonical spelling.
+
+    Keys, ordering and every non-coordinate value are untouched — including `GPSDOP`, `GPSAltitude`
+    and the `...Ref` tags, which are not coordinates and must not be reformatted as if they were."""
+    out = dict(meta or {})
+    for key, raw in list(out.items()):
+        axis = _axis_keys(key)
+        if axis in ("lat", "lon"):
+            value = _coord_value(raw)
+            if value is not None and abs(value) <= (90.0 if axis == "lat" else 180.0):
+                out[key] = _CANON_FMT % value
+        elif axis == "pair":
+            pair = _coord_pair(raw)
+            if pair:
+                out[key] = "%s, %s" % (_CANON_FMT % pair[0], _CANON_FMT % pair[1])
+    return out
+
+
+def canonical_position(meta: dict) -> str:
+    """The ONE source-independent location statement for a metadata dict, or "".
+
+    Keys are visited in SORTED order rather than insertion order so that a file carrying both an XMP
+    and a binary-EXIF latitude resolves the same way every run — determinism is the whole point of
+    this function, and inheriting dict ordering would have left it to whichever reader ran."""
+    meta = meta or {}
+    lat = lon = None
+    for key in sorted(meta):
+        axis = _axis_keys(key)
+        value = _coord_value(meta[key]) if axis in ("lat", "lon") else None
+        if axis == "lat" and lat is None and value is not None and abs(value) <= 90:
+            lat = value
+        elif axis == "lon" and lon is None and value is not None and abs(value) <= 180:
+            lon = value
+    if lat is None or lon is None:
+        for key in sorted(meta):
+            if _axis_keys(key) == "pair":
+                pair = _coord_pair(meta[key])
+                if pair:
+                    lat, lon = pair
+                    break
+    if lat is None or lon is None:
+        return ""
+    return "%s, %s" % (_CANON_FMT % lat, _CANON_FMT % lon)

@@ -1477,12 +1477,23 @@ class ToolRegistry:
                 meta = {}
         if not meta:
             meta = upload_tool.extract_metadata(data)  # native XMP/PDF + binary EXIF fallback (Q-055)
+        # Q-068 — NORMALISE BEFORE THE FINDING, NOT INSIDE EITHER READER. The two readers spell the
+        # same point differently (`59 deg 25' 16.17" N` vs `59.4211583333333`), and exiftool's output
+        # never passes through `extract_metadata`, so this is the one boundary both paths share. Two
+        # installs must not emit different evidence text for the same target.
+        meta = upload_tool.canonical_gps(meta or {})
         interesting = {k: v for k, v in (meta or {}).items()
                        if any(h in k.lower() for h in ("gps", "location", "author", "creator", "artist",
                                                        "owner", "software", "make", "model", "email", "coord"))}
         if not interesting:
             return ToolResult("metadata", url, True, f"No sensitive metadata ({tool_used})", [])
         ev = "\n".join(f"{k}: {v}" for k, v in list(interesting.items())[:25])
+        position = upload_tool.canonical_position(meta)
+        if position:
+            # One source-independent location line, first, under a key that is the same on both
+            # paths. The per-source rows keep their `EXIF:`/bare namespace because that names WHICH
+            # reader saw the value, which is real information rather than formatting noise.
+            ev = f"GPSPositionCanonical (WGS84 decimal degrees): {position}\n{ev}"
         sev = "medium" if any("gps" in k.lower() or "location" in k.lower() or "coord" in k.lower()
                               for k in interesting) else "low"
         lead = {"title": "Sensitive metadata in served file", "severity": sev, "family": "exposure",
@@ -4033,7 +4044,23 @@ class ToolRegistry:
         try:
             spec = json.loads(r["body"])
         except Exception:
-            return ToolResult("fetch_openapi", url, False, "", [], "Response is not valid JSON (not an OpenAPI spec)")
+            # Q-067. This is a VERDICT, not a fault: the engine reached the target and established
+            # that no spec is served here. It used to travel on the bare error channel, where
+            # `main._tool_ledger` could not tell it from a crash, so `fetch_openapi` was reported
+            # `failed` — and once Q-063 made `errored` a first-class class in the Arsenal-coverage
+            # summary, a working engine started filing under "this was never actually tested".
+            #
+            # The concept already existed one branch below: a response that IS valid JSON but not a
+            # spec returns success=True / "0 endpoints imported". This case was the same answer
+            # mispacked. `NEGATIVE_RESULT_TOKEN` types it so the producer splits on a token rather
+            # than on English — the Q-056 rule-C shape, measured at 5 false positives in 6.
+            #
+            # Deliberately NOT applied to `r["error"]` above: a transport fault is a real failure and
+            # must keep reading `failed`. On mission 57cc3b49 what looked like ten negative results
+            # was five verdicts plus five [SSL: WRONG_VERSION_NUMBER] faults that never reached the
+            # target, and burying those would be strictly worse than the bug this fixes.
+            return ToolResult("fetch_openapi", url, False, "", [],
+                              "NOT PRESENT: response is not JSON (no OpenAPI spec at this path)")
         base = urlparse(r["final_url"] or url)
         base_url = f"{base.scheme}://{base.netloc}"
         # KEEP THE SPEC (Q-031). Everything below reduces it to a list of URL strings, which throws
