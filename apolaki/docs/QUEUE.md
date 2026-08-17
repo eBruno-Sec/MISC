@@ -87,7 +87,37 @@ engines with **0 false positives**. Rules C/D/E were designed, measured and **re
 requires knowing the GPS IFD is tag `0x8825` rather than the string `"GPS"`, which is file-format
 knowledge held nowhere in this repo. Only running it catches it — see Q-055. Ledger: `docs/LEDGERS.md`.
 
-### Q-059 · The DEPLOYED platform is 59 commits behind the tree, and the bake gate cannot see it · **CRITICAL** · `ready`
+### Q-059 · The DEPLOYED platform is 59 commits behind the tree, and the bake gate cannot see it · **CLOSED** `d862690` (gate) `e6fb18a` (rescue) + rebuilt and verified 2026-08-17
+
+**RESOLVED AND VERIFIED, not merely rebuilt.** Sequence mattered: the container-only modules were
+rescued FIRST (a rebuild would have destroyed them), the mission DB was confirmed to live on the named
+volume `bbh_data` at `/app/data/bbh.db` so recreating the container could not lose 151 missions of
+history, and `/missions` was checked for a live run before building.
+
+Measured in the running container AFTER `docker compose build agent && docker compose up -d agent`:
+
+```
+Q-051 reporting surface   arsenal_gap / technique_coverage / _technique_md /
+                          ledger_finding_disagreement / _arsenal_md   -> ALL True   (were ALL False)
+Q-057 deleted adapters    run_ferox / run_dirsearch / run_gobuster
+                          registered=False dispatchable=False                       (were both True)
+newly baked              description_gate, ws_tool, mass_assign_tool  -> import OK
+Q-055 second cause       exiftool on PATH: True                                     (was False)
+denominators             TOOL_PERMISSIONS 111, CLAUDE_TOOLS 76        (were 112/77 — now match the tree)
+bake_drift_check.sh      exit 0 — "running container matches the baked image, and the image matches
+                         the source tree (179 modules, 88 techniques)"
+```
+
+The gate went from firing on both edges to clean on all three, which is the proof that the fix landed
+rather than the assertion that it did. `exiftool` becoming available also closes the half of Q-055
+that no code change could reach — the truthful lane added the Dockerfile line and it needed this bake.
+
+**The measurement that motivated all of this is now REPEATABLE for the first time:** the coverage
+sections can finally render in a real mission, so the arsenal-gap question is answerable rather than
+blocked. Anything measured against the deployment before 2026-08-17 02:40 describes the STALE
+platform and must be re-measured, including the arsenal lane's own live-mission ledger extraction.
+
+<details><summary>original ticket, kept for the diagnosis</summary>
 
 MEASURED by the arsenal lane against the live deployment, and this is the single most consequential
 finding of the cycle: **none of the Q-051 arsenal-reporting code exists in the running binary.**
@@ -132,6 +162,8 @@ that lived ONLY in the running container and in no commit: `acceptance.py`, `mea
 them. They are rescued into `scripts/measure/` with a README. **Re-run the gate and check the
 "modules DELETED from the tree but still live in the image" and container-only lines before every
 rebuild** — that is now the gate's most valuable output, not an aside.
+
+</details>
 
 ### Q-060 · Two engines cannot test ANY target on a non-standard port · **HIGH** · `ready`
 

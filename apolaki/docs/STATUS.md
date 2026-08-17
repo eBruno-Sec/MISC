@@ -38,14 +38,15 @@ retirement.
   engines including the entire SQLi surface; defaulting to `full` would enable state-changing writes
   and lab-calibrated traversal semantics against production targets. The evidence points at loosening
   `planner._ALLOWED`. **Nobody should ship a third proposal without deciding what `active` means.**
-- **THE DEPLOYED PLATFORM IS NOT THE TREE (Q-059). Read this before quoting any live-mission result.**
-  The running `apolaki-agent-1` is **59 commits** behind `agent/`. None of the Q-051 arsenal-reporting
-  functions exist in the running binary, and the three content-discovery adapters deleted in `466bae8`
-  are **still registered and dispatchable** there. Any report produced by the current stack has no
-  Arsenal-coverage and no Technique-coverage section — not because the arsenal is idle, but because
-  the renderer was never baked. `scripts/bake_drift_check.sh` cannot catch this: it compares the
-  running container against the baked image and would print `bake OK` in exactly this state. The
-  unchecked edge is image-vs-tree.
+- **The deployment WAS 59 commits behind the tree — FIXED and verified 2026-08-17 02:40 (Q-059).**
+  `bake_drift_check.sh` now checks image-vs-tree and reads `exit 0` on all three edges. In the
+  running container: the five Q-051 reporting functions are present (all were absent), the three
+  adapters deleted in `466bae8` are gone (both were still dispatchable), `description_gate` /
+  `ws_tool` / `mass_assign_tool` import, `exiftool` is on PATH (closing the half of Q-055 no code
+  change could reach), and the denominators are 111/76 matching the tree rather than 112/77.
+  **STILL LOAD-BEARING FOR READERS: anything measured against the deployment BEFORE that timestamp
+  describes the stale platform and must be re-measured** — including the arsenal lane's own
+  live-mission ledger extraction from mission `6ddc56f6`.
 - **Counting xfails: the lab network moves the number, so quote it with the network state.** 9 strict
   markers, 9 xfailed. The prior baseline read 10, and the difference is NOT a lost pin: two
   `test_island_soundness.py` xfails were retired when Q-054/Q-055 landed (−2), while one
