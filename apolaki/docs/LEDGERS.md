@@ -339,6 +339,56 @@ defend.
 
 ---
 
+## ★★★ THE FIFTH INSTANCE OF ONE SHAPE — and my own ticket had the mechanism wrong. 2026-08-17
+
+**The shape: a producer and a consumer name the same thing differently and never meet.** Five
+instances now, all measured, all in this codebase:
+
+1. `mode` vs `strategy` in the tool ledger — the documented fallback could never fire (FIXED).
+2. ToolResult name vs dispatch name — a FALSE integrity alarm (Q-064, open).
+3. technique id vs engine name — the planner can rank what it cannot route (Q-066).
+4. `blocked_by_mode` merged into "available but not selected" (FIXED).
+5. **`session_headers` vs `auth_headers`** — and this one cost a whole capability.
+
+**Instance 5, because it is the sharpest.** `planner.py:641` gates `run_jwt` on
+`state["auth_headers"]`. `agent.py:3305` built that state with 13 keys and `auth_headers` was not
+among them. The name exists only as an API REQUEST field (`main.py:59`), which `main.py:554`
+immediately renames to `session_headers`. So the JWT-detection blob was permanently `{}` plus recon
+cookies: **only a cookie-borne JWT could ever schedule `run_jwt`; a Bearer token never could** — the
+normal carrier, and the shape of every SPA that keeps its token in localStorage, which is Juice
+Shop's own. Measured by driving the real `next_batch`, not a re-implementation: 34 tools with the
+key, 33 without, difference exactly `{run_jwt}`. Fixed by binding from the registry; the lane's
+pinned defect test was INVERTED rather than deleted, with a negative control proving a Basic-auth
+header still schedules nothing.
+
+**MY TICKET HAD THE MECHANISM WRONG, and the lane's first phase was disproving it.** I claimed
+`EFFECTS` spoke a capability vocabulary and `PRECONDITIONS` spoke technique ids. **They are the same
+vocabulary**: 13/13 and 42/42 keys are technique ids, and 0 of 42 `PRECONDITIONS` keys are engine
+names either. I had measured the two rows against *different reference sets*, so the contrast was an
+artifact of my probe. Third instrument error of this sweep, after the tuple-valued ASVS `engine`
+field and the wrong technique field name. The substance survived — no technique field holds an engine
+name, by exact-value match over all 25 fields on all 88 records, with a positive control finding
+29/33 `asvs_model` rows that do — but the fix would have been aimed at the wrong tables.
+
+**The join is DERIVED, not typed.** `routes()` builds technique -> engine from `ALWAYS_ON` reason
+prose and `technique["wstg"] -> wstg_catalog.FULL`. **75 of 88 routed, 0 phantom.** Two sources were
+measured and REJECTED: `wstg_catalog.PARTIAL` (it means "does not confirm" — it would have routed
+coupon-forgery to `run_hash_id`) and `asvs_model` vuln_class (disagreed on 22 of 33). A hardcoded
+`{"jwt_forge": "run_jwt"}` table would have been a third vocabulary that rots like the two it joins;
+two rules and no per-technique list is why this generalises.
+
+**Q-020 is now failable.** All 13 unrouted techniques are `auto` + `oracle` + `transferable`, so the
+no-island guard certified every one as reached while nothing dispatched them. `/orchestration` now
+serves `no_islands: True` beside `unroutable: 13` **on one payload** — the contradiction is visible
+rather than arguable. The phantom guard reads source prose by SHAPE, not `routes()` output, because
+filtering candidates by the registry and then asserting registry membership is the
+guard-that-cannot-fail trap; mutation-verified by showing that trap makes the Q-011 phantom vanish.
+
+The lane also **discarded one of its own suite runs** rather than reporting it (started before its
+last two commits against a live mount — a torn read), and **retracted its own first routing figure**
+(it had matched `_run_service_pack` without stripping the underscore, inflating "indirectly routed"
+by 14). Both self-corrections are the standard.
+
 ## ★★★ ERWIN'S QUESTION, ANSWERED WITH A NUMBER — and the instrument was wrong. 2026-08-17
 
 Mission `57cc3b49` (juice-shop:3000, `mode=active`, run to completion on a deployment verified clean

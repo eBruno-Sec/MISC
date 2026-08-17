@@ -3305,6 +3305,17 @@ class BBHAgent:
                 state = {"mode": self.mode, "roots": g_roots, "done": done,
                          "recon": g_recon, "urls": g_urls,
                          "bases": self.scope.base_map(),
+                         # Q-065, second cause. `planner.py:641` gates run_jwt on
+                         # `state["auth_headers"]` and this dict never carried that key, so the JWT
+                         # blob was always `{}` plus recon cookies: only a COOKIE-borne JWT could
+                         # ever schedule run_jwt, and a Bearer token -- the normal carrier, and what
+                         # every SPA holding its token in localStorage uses -- never could.
+                         # `auth_headers` is the API REQUEST field name (main.py:59); main.py:554
+                         # immediately renames it to `session_headers`, which is what the registry
+                         # holds (tools.py:1155). Producer and consumer named the same thing
+                         # differently and never met -- the fifth instance of that shape here.
+                         # Bound from the registry, the one place the mission's identity lives.
+                         "auth_headers": getattr(self.tools, "session_headers", {}) or {},
                          # ZAP runs only when the user enabled it for this scan (and
                          # a daemon is configured); the planner's INTRUSIVE gate keeps
                          # it to Full mode. Policy rides along to the run_zap step.

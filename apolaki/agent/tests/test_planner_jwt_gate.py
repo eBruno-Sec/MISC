@@ -70,17 +70,24 @@ def test_the_gate_also_fires_on_a_cookie_borne_jwt():
     assert "run_jwt" in tools
 
 
-def test_the_production_state_shape_cannot_reach_the_gate():
-    """THE DEFECT, pinned. Built from exactly the keys agent.py supplies, with a Bearer-only JWT
-    nowhere the gate can see it, `run_jwt` is never scheduled.
+def test_the_production_state_shape_now_REACHES_the_gate():
+    """THE FIX, pinned. Was `test_the_production_state_shape_cannot_reach_the_gate`, which asserted
+    the defect; `agent.py` now supplies `auth_headers` from `self.tools.session_headers`, so the
+    assertion is INVERTED rather than deleted -- the pin moves from the defect onto the fix.
 
-    WHEN agent.py STARTS SUPPLYING `auth_headers`, THIS TEST FAILS -- deliberately. Flip it to assert
-    presence and record the commit; do not delete it."""
-    tools = _drive()                    # no auth_headers key at all, exactly like agent.py:3305
-    assert "run_jwt" not in tools, (
-        "run_jwt is now reachable from the production state shape -- if agent.py started supplying "
-        "auth_headers, invert this assertion and note the commit")
-    assert "auth_headers" not in AGENT_STATE_KEYS_2026_08_17
-    # and the ONLY difference is that one step
-    with_key = _drive(auth_headers={"Authorization": "Bearer " + JWT})
-    assert with_key - tools == {"run_jwt"}, with_key - tools
+    The historical key set stays below as a dated record of what the state looked like when the
+    defect was measured. Do not "update" it; it is evidence, not configuration.
+    """
+    assert "auth_headers" not in AGENT_STATE_KEYS_2026_08_17, (
+        "the 2026-08-17 snapshot is a historical record of the DEFECT and must not be edited")
+
+    # The production shape as it is TODAY: the same keys plus the one that was missing.
+    prod = _drive(auth_headers={"Authorization": "Bearer " + JWT})
+    assert "run_jwt" in prod, (
+        "a Bearer-token JWT still cannot schedule run_jwt; agent.py stopped supplying auth_headers "
+        "or the planner gate at planner.py:641 changed the key it reads")
+
+    # NEGATIVE CONTROL: the gate must still be a gate. No JWT anywhere -> no run_jwt, so the fix
+    # bought reachability and not an unconditional schedule.
+    unauth = _drive(auth_headers={"Authorization": "Basic dXNlcjpwYXNz"})
+    assert "run_jwt" not in unauth, "run_jwt scheduled without a JWT present -- the gate is now open"

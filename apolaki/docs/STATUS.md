@@ -12,7 +12,7 @@ that retirement.** Updating it is not bookkeeping.
 
 | lane | owner | state |
 |---|---|---|
-| Routing (Q-066/020/065) | Claude | **live** — Architect first: does a technique→engine join already exist inside `build()`? A disproof is a full result |
+| Routing (Q-066/020/065) | — | **CLOSED, 7 commits.** Disproved my ticket's mechanism, then built the join anyway: 75/88 techniques routed, 0 phantom. Found and fixed a fifth vocabulary mismatch that made `run_jwt` unreachable on any Bearer-token target |
 | Ledger truth (Q-061) | — | **LANDED** `5c466a2` after recovery. Killed having committed nothing; its handoff claimed 7 items DONE with the evidence never written, corrected in place |
 | Report honesty (Q-063) | — | **LANDED** `4d3b51d` after recovery. Killed having committed nothing and written no handoff at all; reconstructed from the diff |
 | Truthful engines (Q-054/055/055b) | — | **CLOSED.** All three sinks shut, metadata reads binary EXIF, and the bfla engine's "authenticated" row is no longer anonymous |
@@ -22,9 +22,12 @@ that retirement.** Updating it is not bookkeeping.
 | Sessions / `Identity` (Q-032) | — | **CLOSED.** The anonymous authz row was carrying the mission's session |
 | Tech intelligence (Q-021C) | — | **CLOSED.** One chain end to end; the server/language half is still a version reporter |
 
-Tree at HEAD: **2768 passed / 11 skipped / 9 xfailed / 0 failed** (522s, `--network apolaki_default`,
-pytest's own exit code captured directly). The **+20 accounts exactly**: 8 ledger-dispatch tests, 11
-arsenal-class tests, 1 new metadata test.
+Tree at HEAD: **2799 passed / 11 skipped / 9 xfailed / 0 failed** (531s, `--network apolaki_default`,
+pytest's own exit code captured directly). The **+31 over 2768 accounts exactly**: `test_engine_routing`
+18, `test_effect_search_routing` 10, `test_planner_jwt_gate` 3. The `auth_headers` fix added no test —
+it INVERTED the lane's pinned defect test rather than deleting it, and added a negative control inside it.
+
+Previous step: **2768** (+20 over 2748 — 8 ledger-dispatch, 11 arsenal-class, 1 metadata).
 
 **A test went red because the product got better, and that is worth remembering.** Baking `exiftool`
 into the image (Q-059) flipped `run_metadata` from its native reader to exiftool. Both recover the same

@@ -25,7 +25,62 @@ three probes were wrong and produced false results I nearly recorded.**
 
 **NEW, and it upgrades two tickets into one root cause — see Q-066.**
 
-### Q-066 · Two vocabularies for the same thing, and nothing joins them · **HIGH** · `ready`
+### Q-066 · Two vocabularies for the same thing, and nothing joins them · **CLOSED** `5583ff2` `cea1e2e` `0f735bc` `2ea0c35` `9c9f290` `7a73f7b` `955f08f`
+
+**CONFIRMED IN SUBSTANCE, BUT I HAD THE MECHANISM WRONG, and the wrong mechanism pointed the fix at
+the wrong pair of tables.** Recorded prominently because the ticket was mine and a lane spent its
+first phase disproving it, which is exactly what it was asked to do.
+
+**My error:** I wrote that `EFFECTS` speaks a capability vocabulary while `PRECONDITIONS` speaks
+technique ids. They are the SAME vocabulary — **13 of 13 `EFFECTS` keys and 42 of 42 `PRECONDITIONS`
+keys are technique ids**, and 0 of 42 `PRECONDITIONS` keys are engine names either. My two rows were
+measured against *different reference sets*, so the contrast was an artifact of the probe.
+`jwt_forge` and `jwt_key_confusion` are not a separate vocabulary; they sit in `PRECONDITIONS` too.
+That is my third instrument error in this sweep, after the tuple-valued ASVS `engine` field and the
+wrong technique field name.
+
+**The real gap, measured properly:** no technique record field holds an engine name — an exact-value
+match over all 25 field names on all 88 records — and `descriptor()`/`build()` add none, which is the
+part my public-surface probe could not see. Positive control: the identical probe found **29 of 33**
+`asvs_model` rows carrying `["engine"]`, so it was capable of finding one. Independently corroborated
+by `report.py:1831`, which already tells operators the report cannot link techniques to tools.
+
+**The join, DERIVED not typed:** `engine_descriptor.routes()` builds technique id -> engine from two
+tables that already existed — `ALWAYS_ON` reason prose (already mined by `verify_always_on()`) and
+`technique["wstg"] -> wstg_catalog.FULL[wstg]`. **75 of 88 routed, 0 phantom.** Two candidate sources
+were measured and **rejected**: `wstg_catalog.PARTIAL` (it means "does not confirm", and would have
+routed coupon-forgery to `run_hash_id`) and `asvs_model` vuln_class (disagreed with the kept sources
+on 22 of 33). Two rules, no per-technique list, so it generalises. The 13 that stay unrouted genuinely
+have no engine.
+
+The phantom guard reads source prose **by shape** rather than `routes()` output — filtering candidates
+by the registry and then asserting registry membership is the guard-that-cannot-fail trap, and the
+lane mutation-verified that applying that trap makes the Q-011 `run_mass_assignment` phantom vanish
+and the audit report `ok`.
+
+### Q-020 · Technique records declare no executor · **CLOSED — now FAILABLE**
+
+All 13 unrouted techniques are `auto` + `oracle` + `transferable`, so the no-island guard certified
+every one of them as reached while nothing dispatches them. `/orchestration` now serves
+`no_islands: True` beside `unroutable: 13` **on one payload**, which is what makes the contradiction
+visible instead of arguable.
+
+### Q-065 · `run_jwt` never fires on a JWT-authenticated target · **CLOSED** — both causes
+
+Cause 1 was the missing route (Q-066). **Cause 2 was a second vocabulary mismatch and is the fifth
+instance of that shape in this codebase.** `planner.py:641` gates `run_jwt` on
+`state["auth_headers"]`; `agent.py:3305` built that state with 13 keys and `auth_headers` was not one.
+`auth_headers` is the API REQUEST field (`main.py:59`) and `main.py:554` immediately renames it to
+`session_headers`, which is what the registry holds (`tools.py:1155`).
+
+**So the JWT blob was always `{}` plus recon cookies: only a COOKIE-borne JWT could ever schedule
+`run_jwt`, and a Bearer token — the normal carrier, and what every SPA holding its token in
+localStorage uses, which is Juice Shop's own shape — never could.** The lane measured it by driving
+the real `next_batch`: 34 tools with the key, 33 without, difference exactly `{run_jwt}`.
+
+Fixed in `agent.py` by binding `auth_headers` from `self.tools.session_headers`. The lane's pinned
+defect test is **inverted, not deleted**, and a negative control asserts a Basic-auth header still
+schedules no `run_jwt` — the fix buys reachability, not an unconditional dispatch.
 
 MEASURED via `agent/engine_descriptor.py`'s public surface:
 
