@@ -1223,8 +1223,81 @@ class ToolRegistry:
             "name": t["name"], "description": t["description"], "parameters": t["input_schema"]}}
             for t in CLAUDE_TOOLS]
 
+    # ── the dispatch ledger (Q-061) ──────────────────────────────
+    #
+    # These two write the rows `main._tool_ledger` aggregates, and they live HERE because this is
+    # the one place a dispatch is known. They were previously written by two WRAPPERS -- the
+    # `tool_call` event `agent._run_tool` yields (persisted by `main._drive_mission`) and
+    # `agent._exec_internal`'s direct `db.add_log` -- so ten of the twelve `self.tools.execute(`
+    # call sites in agent.py logged nothing at all, and `acquire_session`, `browser_navigate` and
+    # `http_read`, which have NO other dispatch path, reported "never dispatched" in every mission
+    # ever run. MEASURED on mission 57cc3b49: it registered two accounts, acquired and VERIFIED two
+    # sessions, re-crawled 13 new endpoints and confirmed 35 authz findings off those sessions --
+    # while the ledger said `acquire_session` never ran. The report contradicted itself in one
+    # document, and the ledger is the instrument every arsenal/coverage number is computed from.
+    #
+    # Same discipline as Q-042/Q-046/Q-051: bind the value where it is known. The wrappers now
+    # stand down (agent._run_tool tags its post-dispatch events `logged_at_dispatch` so
+    # main._drive_mission does not persist them; agent._exec_internal no longer logs) so that this
+    # is the SINGLE producer and no dispatch is counted twice.
+    #
+    # Logging must never break a scan, hence the guards; a missing session_id is a library-style
+    # call with no mission to log against, not an error.
+    def _ledger_dispatch(self, session_id: str, tool_name: str, tool_input: dict) -> None:
+        if not session_id:
+            return
+        try:
+            perm = TOOL_PERMISSIONS.get(tool_name, PermissionLevel.ACTIVE)
+            db.add_log(session_id, "tool_call",
+                       {"tool": tool_name, "input": tool_input,
+                        "permission": getattr(perm, "value", str(perm))})
+        except Exception:
+            pass
+
+    def _ledger_outcome(self, session_id: str, tool_name: str, res) -> None:
+        """The other half. A `tool_call` with no outcome row reads as a call that never returned,
+        and `_tool_ledger` marks a tool with calls but no `ok` as failed -- so a half-applied fix
+        would turn every newly-visible engine into a fabricated failure."""
+        if not session_id or res is None:
+            return
+        try:
+            err = str(getattr(res, "error", "") or "")
+            if err:
+                # A SCOPE BLOCK is correct enforcement, not a failure. `_tool_ledger` splits on
+                # exactly this, and `_run_tool` classified it the same way before this moved here.
+                db.add_log(session_id, "scope_block" if "SCOPE BLOCK" in err else "tool_error",
+                           {"tool": tool_name, "error": err[:200]})
+            else:
+                # `count` is REAL findings, not len(findings). Some tools (run_sqlmap on a
+                # no-confirmation pass) return a severity-less data carrier
+                # {"vulnerable": False, log_tail...} purely to preserve the tool log; counting it
+                # produced the "9 findings / No SQLi confirmed" contradiction the integrity check
+                # now guards against. `_run_tool` filtered these before writing the row and this
+                # keeps that filter byte-for-byte, so the number in the ledger does not move.
+                _f = getattr(res, "findings", None) or []
+                _real = sum(1 for f in _f
+                            if not (isinstance(f, dict) and f.get("vulnerable") is False))
+                db.add_log(session_id, "tool_result",
+                           {"tool": tool_name, "count": _real,
+                            "output": str(getattr(res, "output", ""))[:300]})
+        except Exception:
+            pass
+
     # ── dispatch with scope enforcement ──────────────────────────
     async def execute(self, tool_name: str, tool_input: dict, session_id: str) -> ToolResult:
+        """Dispatch a tool, and RECORD that the dispatch happened (Q-061).
+
+        The recording brackets the whole of `_dispatch_engine`, including its early returns, so a
+        scope-blocked or unknown tool leaves the same trace it did when `_run_tool` was the
+        producer. `store_finding` is logged too: it returned before the scope check and `_run_tool`
+        logged it, so skipping it here would make a count DROP -- as wrong as one that doubles.
+        """
+        self._ledger_dispatch(session_id, tool_name, tool_input)
+        res = await self._dispatch_engine(tool_name, tool_input, session_id)
+        self._ledger_outcome(session_id, tool_name, res)
+        return res
+
+    async def _dispatch_engine(self, tool_name: str, tool_input: dict, session_id: str) -> ToolResult:
         if tool_name == "store_finding":
             return await self._store_finding(tool_input)
         if tool_name == "generate_playbook":

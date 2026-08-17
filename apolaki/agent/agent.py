@@ -102,6 +102,14 @@ _AUTO_STORE_TOOLS = {
     # investigative + exploitation tools (their confirmed findings must persist too)
     "run_dir_harvest", "confirm_idor", "run_metadata", "run_sourcemap", "test_numeric_abuse",
     "run_cloud_probe",   # public-bucket listing is confirmed-by-oracle; auto-store it (#13, was an island)
+    # Q-054, the THIRD sink. workflow.run and tools._run_workflow now both FORWARD their steps'
+    # findings (measured: a confirmed CWE-639 survives the live idor_read pack end to end). Without
+    # this line a deterministic mission drops them again at dispatch and the run looks CLEAN -- the
+    # false-clean shape, not a missing nicety, because run_workflow executes real attacks.
+    # Routing needs no other change: _is_confirmed keys off f["confidence"] BEFORE the tool-name
+    # fallback, so a forwarded confirm_idor finding goes to /findings and a forwarded enumerate_ids
+    # lead goes to Leads.
+    "run_workflow",
 }
 # Confirmatory tools that emit no per-finding confidence grade — their results are
 # confirmed by construction (a template/active-scan/fingerprint match). Everything
@@ -588,12 +596,20 @@ class BBHAgent:
                 yield {"_content": json.dumps({"success": False, "error": msg})}
                 return
 
-        yield {"type": "tool_call", "tool": tool_name, "input": tool_input, "permission": perm.value}
+        # `logged_at_dispatch` (Q-061): from here on the events describe a dispatch that
+        # `ToolRegistry.execute` records itself, at the one place the dispatch is known. They are
+        # still yielded -- the live UI feed is built from them -- but `main._drive_mission` does NOT
+        # persist a tagged event, or every tool that goes through this wrapper would be counted
+        # twice in the per-tool ledger. The gate refusals ABOVE carry no tag: `execute` is never
+        # reached for those, so this wrapper is their only possible witness.
+        yield {"type": "tool_call", "tool": tool_name, "input": tool_input, "permission": perm.value,
+               "logged_at_dispatch": True}
         result = await self.tools.execute(tool_name, tool_input, session_id)
 
         if result.error:
             etype = "scope_block" if "SCOPE BLOCK" in result.error else "tool_error"
-            yield {"type": etype, "tool": tool_name, "error": result.error}
+            yield {"type": etype, "tool": tool_name, "error": result.error,
+                   "logged_at_dispatch": True}
         else:
             # Count real results only: some tools (e.g. run_sqlmap on a no-confirmation
             # pass) return a severity-less data-carrier {"vulnerable": False, log_tail...}
@@ -603,7 +619,7 @@ class BBHAgent:
             _real = sum(1 for f in result.findings
                         if not (isinstance(f, dict) and f.get("vulnerable") is False))
             yield {"type": "tool_result", "tool": tool_name, "output": result.output,
-                   "count": _real}
+                   "count": _real, "logged_at_dispatch": True}
 
         if tool_name == "store_finding" and not result.error:
             # A model-authored finding (agentic). Dedup by fingerprint against what
@@ -660,36 +676,18 @@ class BBHAgent:
             if not authorized:
                 return _tm.ToolResult(tool_name, "", True,
                                       json.dumps({"ran": False, "blocked": "intrusive tool not authorized (HITL)"}), [])
-        # LOG IT. `_run_tool` yields a {"type": "tool_call"} event that main.py persists, and the report's
-        # per-tool ledger is built from exactly those rows. `_exec_internal` yielded nothing, so all TWELVE
-        # internally-dispatched engines were invisible in the report's "tools executed" section —
-        # including confirm_browser_persona_bola, both BOLA oracles, run_authz_matrix,
-        # run_transport_posture and run_header_trust. A client reading the Methodology would conclude the
-        # crown-jewel engines never ran. Verified live: header-trust executed against 6 targets on mission
-        # 5ebd704d and appeared nowhere in the ledger.
+        # LOGGING MOVED TO THE DISPATCH ITSELF (Q-061). This method used to write its own tool_call /
+        # tool_result / tool_error rows, because at the time `_run_tool` was the only producer and all
+        # TWELVE internally-dispatched engines were invisible in the report's "tools executed" section
+        # (verified live: header-trust executed against 6 targets on mission 5ebd704d and appeared
+        # nowhere in the ledger). That fixed one wrapper and left the other ten `tools.execute` call
+        # sites unlogged, which is how a mission that acquired and VERIFIED two persona sessions still
+        # reported `acquire_session` as never dispatched.
         #
-        # This is not a generator, so it writes to the log directly rather than yielding. Logging must
-        # never break a scan, hence the guards.
-        try:
-            db.add_log(session_id, "tool_call", {"tool": tool_name, "input": tool_input,
-                                                 "permission": getattr(perm, "value", str(perm)),
-                                                 "via": "internal"})
-        except Exception:
-            pass
-        res = await self.tools.execute(tool_name, tool_input, session_id)
-        try:
-            if res is not None and not getattr(res, "success", True):
-                db.add_log(session_id, "tool_error",
-                           {"tool": tool_name, "error": str(getattr(res, "error", ""))[:200]})
-            else:
-                # `output`, not `summary` — ToolResult is (tool, target, success, output, findings, error)
-                # and `_tool_ledger` reads exactly the `count`/`output` keys written here.
-                db.add_log(session_id, "tool_result",
-                           {"tool": tool_name, "count": len(getattr(res, "findings", None) or []),
-                            "output": str(getattr(res, "output", ""))[:300]})
-        except Exception:
-            pass
-        return res
+        # `ToolRegistry.execute` now records every dispatch, so writing here as well would double-count
+        # exactly the engines this comment was added to make visible. The gates above stay: a call this
+        # method REFUSES never reaches execute and correctly leaves no row, because it made no dispatch.
+        return await self.tools.execute(tool_name, tool_input, session_id)
 
     def _is_confirmed(self, tool: str, f: dict) -> bool:
         """A finding is report-worthy CONFIRMED only when the probe says so. The

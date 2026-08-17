@@ -81,17 +81,6 @@ def test_the_stubbed_step_really_does_emit_a_finding():
     assert res.findings[0]["family"] == "idor"
 
 
-@pytest.mark.xfail(strict=True, reason=(
-    "MEASURED. workflow.run (workflow.py:136) reads res.output / res.success / res.error and NEVER "
-    "res.findings, and the dict it returns -- {ran, asserted, log, variables, produced} -- has no "
-    "field a finding could travel in. Driven live against Juice Shop, an enumerate_ids lead over "
-    "/api/Products/{id} exists on a direct call and is GONE through workflow.run. The same sink "
-    "swallows confirm_idor's CONFIRMED CWE-639 finding, which is what the flagship idor_read pack "
-    "(packs.py:14) is built on, and _run_workflow's own docstring claims the opposite ('confirmed "
-    "findings still come from the confirm_* steps inside it'). Fixing this needs three edits in "
-    "three files -- workflow.py must carry them, tools.py:3202 must return them, and agent.py:95 "
-    "must add run_workflow to _AUTO_STORE_TOOLS or a deterministic mission drops them again -- so "
-    "it is not a patch this diagnosis-only lane may apply. STRICT: the day it lands this XPASSes."))
 def test_workflow_carries_its_steps_findings_out():
     """A workflow that runs an engine which found something must say so.
 
@@ -110,31 +99,33 @@ def test_workflow_carries_its_steps_findings_out():
 def test_run_workflow_tool_result_carries_them_too():
     """The other half of the same fix, at the boundary agent._run_tool actually reads.
 
-    NOT an xfail: it asserts the CURRENT contract so that a partial fix is visible. `workflow.run`
-    could start returning findings and this would still be [] until tools.py:3202 stops hardcoding
-    the empty list -- the 'verify BOTH halves of a fix' rule. If someone fixes tools.py:3202 this
-    test fails and must be updated in the same commit as the xfail above.
+    This test existed to make a PARTIAL fix visible: `workflow.run` could start returning findings
+    and this would still be [] while tools.py hardcoded the empty list -- the 'verify BOTH halves of
+    a fix' rule, which this codebase has broken before. Both halves landed under Q-054, so the pin is
+    now inverted: it holds the FIX in place instead of the defect. If _run_workflow ever stops
+    forwarding, this goes red rather than the mission quietly reporting clean.
     """
     reg = _reg_with_stubbed_step([REAL_ENUMERATE_IDS_LEAD])
     res = asyncio.run(reg._run_workflow({"workflow": _one_step_workflow()}))
     assert res.success is True
-    assert res.findings == [], (
-        "tools.py:3202 no longer hardcodes []; retire the xfail on "
-        "test_workflow_carries_its_steps_findings_out in the same commit")
+    assert len(res.findings) == 1, "tools._run_workflow stopped forwarding workflow.run's findings"
+    assert res.findings[0]["family"] == "idor"
+    assert res.findings[0]["engine"] == "enumerate_ids"   # provenance names the inner producer
 
 
 def test_wiring_run_workflow_without_auto_store_would_still_drop_everything():
-    """The SECOND sink, and the reason the fix is three edits and not one.
+    """The THIRD sink, and the reason the fix was three edits and not one.
 
-    agent.py:627 auto-stores a dispatched tool's findings only when the tool name is in
-    _AUTO_STORE_TOOLS. confirm_idor is in that set; run_workflow is not. So a wiring change that
-    gives run_workflow a dispatch site, on its own, produces exactly nothing in a deterministic
-    mission -- and would look like an engine that ran clean.
+    agent.py auto-stores a dispatched tool's findings only when the tool name is in
+    _AUTO_STORE_TOOLS. All three sinks are now closed under Q-054, so this pin is inverted: it holds
+    the wiring in place rather than recording its absence. Removing run_workflow from that set would
+    make a deterministic mission drop every finding the workflow produced and report the target
+    clean, which is why this asserts membership rather than merely documenting it.
     """
     assert "confirm_idor" in agent_mod._AUTO_STORE_TOOLS
-    assert "run_workflow" not in agent_mod._AUTO_STORE_TOOLS, (
-        "run_workflow gained auto-store; confirm workflow.run and tools.py:3202 forward findings, "
-        "then update this test")
+    assert "run_workflow" in agent_mod._AUTO_STORE_TOOLS, (
+        "run_workflow lost auto-store; a deterministic mission will silently drop the findings "
+        "workflow.run and tools._run_workflow now forward, and the run will look clean")
 
 
 def test_island_lead_families_are_quarantined_from_the_asvs_model():
@@ -246,16 +237,6 @@ def test_the_geo_photo_really_does_carry_gps_metadata():
         "and the xfail below would pass for the wrong reason")
 
 
-@pytest.mark.xfail(strict=True, reason=(
-    "MEASURED. run_metadata advertises 'EXIF GPS' extraction and reports 'No sensitive metadata' on "
-    "the one file in the local labs proven to leak it -- this lane decoded 59d25'16.17\"N "
-    "24d48'4.32\"E straight out of its GPS IFD. Two independent causes compose: exiftool is NOT "
-    "installed in the shipped apolaki-agent image (measured with `command -v`), so the engine always "
-    "takes the native fallback; and upload_tool.extract_metadata's only JPEG branch "
-    "(upload_tool.py:214) matches the ASCII substring b'GPS', which real binary EXIF never contains "
-    "(measured: b'GPS' in data == False on the file that HAS GPS). The fix is a Dockerfile line plus "
-    "a binary EXIF IFD reader in upload_tool.py -- neither file belongs to this lane. STRICT: the "
-    "day either lands this XPASSes."))
 def test_native_metadata_reader_sees_binary_exif_gps():
     """The native fallback is only a fallback if it can read the format it is a fallback for."""
     import upload_tool

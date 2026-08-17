@@ -999,6 +999,19 @@ def _tool_ledger(session_id: str) -> dict:
         zap = {"passive": "executed_passive", "safe_active": "executed_safe_active",
                "thorough_active": "executed_thorough_active"}.get(pol, "executed")
     return {"tools": tools, "zap_status": zap,
+            # The mission's PERMISSION TIER, and it is load-bearing for the report's
+            # Arsenal-coverage section. `report.arsenal_gap()` reads "mode" to work out which
+            # engines were structurally barred from running (INTRUSIVE ones at mode=active), and
+            # falls back to "strategy" only when that names a real mode -- which it never can,
+            # because the vocabularies are disjoint: strategy is manual|deterministic|low_ai|agentic
+            # while a mode is passive|active|full. This producer never emitted "mode", so
+            # `blocked_by_mode` was permanently 0 and ~40 tier-blocked engines were reported to the
+            # reader as "Available but not selected" -- i.e. the planner declined them -- when they
+            # could not have run at all. Those two classes have opposite fixes (raise the mode vs
+            # fix the planner), and merging them is the exact failure the section exists to prevent.
+            # MEASURED on a real ledger from mission 6ddc56f6: blocked_by_mode 0 as produced,
+            # 40 with this key added, 0 again at mode=full (correct -- full permits every tier).
+            "mode": (m or {}).get("mode") or "",
             "authenticated": bool(ctx.get("authenticated")),
             "strategy": ex.get("strategy") or ctx.get("strategy") or "",
             "ai_calls": ex.get("ai_calls", 0)}
@@ -2648,6 +2661,27 @@ def _missing_zap_invocation(session_id: str) -> dict | None:
     }
 
 
+def _persist_event(session_id: str, event: dict) -> None:
+    """The mission event feed's persistence rule (Q-061), named so it is one rule with one home.
+
+    An event tagged `logged_at_dispatch` describes a dispatch that `ToolRegistry.execute` already
+    recorded at the point the dispatch happened -- the one place it is known. It is still delivered
+    to the live feed by the caller, but persisting it HERE as well would write a second
+    tool_call/tool_result row for every tool that goes through `agent._run_tool` and silently
+    double every `calls` number in every report. The ledger has exactly one producer.
+
+    Everything else is persisted unchanged, which specifically includes the `scope_block` a gate
+    refusal yields BEFORE dispatch: `execute` is never reached for those, so this is their only
+    witness, and losing them would turn a blocked engine into one nobody asked for.
+
+    Extracted from `_drive_mission` rather than left inline so a test can exercise the REAL rule
+    instead of a copy of it that can drift.
+    """
+    if event.get("logged_at_dispatch"):
+        return
+    db.add_log(session_id, event.get("type", "info"), event)
+
+
 async def _drive_mission(session_id: str) -> None:
     """Run the agent to completion in a BACKGROUND task, independent of any SSE
     connection. Events are persisted (DB logs) and buffered on the session so
@@ -2660,7 +2694,7 @@ async def _drive_mission(session_id: str) -> None:
     stop_event = sess["stop_event"]
     try:
         async for event in sess["agent"].run(sess["objective"], session_id):
-            db.add_log(session_id, event.get("type", "info"), event)
+            _persist_event(session_id, event)
             etype = event.get("type")
             if etype == "phase":
                 db.update_mission(session_id, phase=event.get("phase", ""))
