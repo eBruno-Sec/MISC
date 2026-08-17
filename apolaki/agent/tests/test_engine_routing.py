@@ -197,6 +197,36 @@ def test_descriptor_still_carries_the_old_contract():
     assert ed.validate()["ok"]
 
 
+def test_the_routing_layer_is_not_itself_an_island():
+    """Apolaki's own doctrine: a declare-only module is an island. A join nothing reads would be the
+    very defect this ticket is about, one level up. This asserts the PRODUCTION caller carries it --
+    `main.orchestration_audit()` splats technique_planner's dict, so routing reaches the
+    /orchestration endpoint without main.py being touched."""
+    import asyncio
+    import main as mainmod
+    r = asyncio.run(mainmod.orchestration_audit())
+    assert "error" not in r, r
+    assert r["routing"]["registry_readable"] is True
+    assert r["routing"]["routed"] == 75
+    assert r["routing"]["phantom"] == []
+    assert r["unroutable"] == UNROUTED_2026_08_17
+    # the honest contrast, on one payload: declared clean, factually 13 short
+    assert r["no_islands"] is True
+    assert len(r["unroutable"]) == 13
+
+
+def test_routing_failure_cannot_break_the_no_island_answer(monkeypatch):
+    """Additive means additive. If the registry cannot be read, the audit must still answer the
+    island question and must report the failure LOUDLY, not as a clean sheet."""
+    import technique_planner as tp
+    monkeypatch.setattr(ed, "routing_audit", lambda **kw: (_ for _ in ()).throw(RuntimeError("boom")))
+    a = tp.orchestration_audit(list(T.TECHNIQUES.values()))
+    assert a["islands"] == []
+    assert a["unroutable"] is None, "an unreadable registry must not read as 'nothing unroutable'"
+    assert a["routing"]["registry_readable"] is False
+    assert "boom" in a["routing"]["error"]
+
+
 def test_the_mapping_is_derived_and_not_a_typed_table():
     """The trap Q-066 names explicitly: a hand-written {"jwt_forge": "run_jwt"} dict would be a THIRD
     vocabulary and would rot like the two it joins. Assert no such literal exists in the module."""

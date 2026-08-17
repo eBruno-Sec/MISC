@@ -28,7 +28,16 @@ def orchestration_audit(full_techniques) -> dict:
     Every auto-fired, oracle-confirmed, transferable technique must be REACHABLE — either evidence-gated in
     _PRECONDITIONS (the planner + graph reason about it) or declared ALWAYS_ON (reached by the sweep / passive recon
     / persona artery / autonomy path / a tool-level gate, with a stated reason). Anything in NEITHER is an island.
-    Pure: caller supplies full technique records. Returns {gated, always_on, islands}; islands MUST be empty."""
+    Caller supplies full technique records.
+
+    Q-020/Q-066. `islands` answers "is this technique DECLARED reachable", which is a declaration, and this
+    codebase has shipped a guard that checks a declaration instead of a fact eight times. `unroutable`
+    answers the harder question: of the techniques this audit just certified as reached, which ones does
+    no engine actually execute? MEASURED at the time of writing: 13, every one of them inside `gated` or
+    `always_on` — reported as reached while nothing could dispatch them.
+
+    Returns {gated, always_on, islands, unroutable, routing}; `islands` MUST be empty, `unroutable` is
+    reported honestly rather than asserted, because those 13 are real."""
     gated, always_on, islands = [], [], []
     for t in full_techniques or []:
         if not (t.get("execution", "auto") == "auto" and t.get("oracle") and t.get("transferable")):
@@ -40,7 +49,26 @@ def orchestration_audit(full_techniques) -> dict:
             always_on.append(tid)
         else:
             islands.append(tid)
-    return {"gated": sorted(gated), "always_on": sorted(always_on), "islands": sorted(islands)}
+    out = {"gated": sorted(gated), "always_on": sorted(always_on), "islands": sorted(islands)}
+    # Routing is additive and must never be able to break the no-island answer above: if the engine
+    # registry cannot be read, say so rather than silently reporting every technique as unroutable.
+    try:
+        import engine_descriptor as _ed
+        recs = {t.get("id"): t for t in (full_techniques or []) if t.get("id")}
+        audit = _ed.routing_audit(techniques=recs)
+        reached = set(out["gated"]) | set(out["always_on"])
+        out["unroutable"] = sorted(reached & set(audit["unrouted"]))
+        out["routing"] = {
+            "routed": audit["routed"], "total": audit["total"],
+            "phantom": audit["phantom"], "registry_readable": audit["registry_readable"],
+            "effect_producers_unrouted": audit["effect_producers_unrouted"],
+            "note": ("A technique here is DECLARED reached; `unroutable` lists the ones no engine "
+                     "executes. Reachability is a declaration, routing is a fact."),
+        }
+    except Exception as e:                      # fail LOUD, never silently clean
+        out["unroutable"] = None
+        out["routing"] = {"error": str(e), "registry_readable": False}
+    return out
 
 
 def derive_observations(surface=None, harvest=None, findings=None, leads=None, code_intel=None,
