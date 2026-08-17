@@ -11,15 +11,18 @@ that was for each item. No claim was softened to make a flag stop firing.
 
 ## STATUS
 
-| item | what it was | state | commit |
-|---|---|---|---|
-| 1 | `_confirm_create_object_idor` docstring opened `ACTIVE:`, registered `INTRUSIVE` | see below | see below |
-| 2 | `_run_external_surface` docstring opened `PASSIVE/ACTIVE-light`, registered `ACTIVE` | see below | see below |
-| 3 | `run_hash_crack` advertises `hash_type`, never reads it | see below | see below |
-| 4 | 4 engines declare no tier at all | see below | see below |
+Written after the evidence below, never before it. Each row's "wrong half" is the half that was
+actually changed, and each commit is one green slice.
 
-Rows are filled in only under the section that carries the command and its real output. Nothing is
-marked done above the evidence.
+| item | ticket detail verified? | wrong half | commit |
+|---|---|---|---|
+| 1 | YES, as written | the docstring (2 of 3 surfaces already said INTRUSIVE) | `6e16197` |
+| 2 | YES, as written, plus a false "only outbound call" sentence in the same docstring | the docstring | `6e16197` |
+| 3 | YES -- `hash_type` occurred exactly once in 10,052 lines | **the code**; honoured, not dropped | `ea7f0cb` |
+| 4 | YES, and independently re-enumerated: exactly those four, no fifth | the docstrings/specs (silence) | `2b6e3ec` |
+
+Gate: **111 permissions read, 0 flags** (was 111 / 2). Untiered engines: **0 of 111** (was 4).
+Full suite on the final state: **2881 passed, 11 skipped, 9 xfailed, 0 failed.**
 
 ---
 
@@ -372,3 +375,78 @@ Targeted regression over every test file mentioning any of the four (18 files):
 ```
 
 The 1 skip and 1 xfail are pre-existing suite entries, not introduced here.
+
+Committed as `2b6e3ec`.
+
+---
+
+## FULL SUITE, on the final state of all three slices
+
+```
+$ MSYS_NO_PATHCONV=1 docker run --rm --network apolaki_default \
+    -v "C:/.../apolaki/agent:/app" -w /app apolaki-agent \
+    python -m pytest tests/ -p no:cacheprovider -p no:warnings
+2881 passed, 11 skipped, 9 xfailed in 565.02s (0:09:25)
+```
+
+**0 failed. Skips and xfails are 11 and 9, exactly the numbers the ticket gives for the baseline, so
+nothing this lane did converted a failure into a skip.**
+
+The pass count moved from the ticket's stated baseline of 2835 to 2881, +46. This lane accounts for
+**+18 of that**, MEASURED with `--collect-only` rather than asserted:
+
+```
+pre-lane (b3bef1c, the parent of this lane's first commit):
+  tests/test_description_gate.py: 14
+now:
+  tests/test_description_gate.py: 21        (+7)
+  tests/test_hash_type_pin.py:    11        (+11, new file)
+```
+
+The +7 is net: slice 1 removed 2 parametrized cases from the emptied `KNOWN_OPEN` ratchet and added 1
+loop test, 2 live-tree tier cases and 1 whole-file hedge check; slice 3 added 1 general test and 4
+parametrized cases.
+
+The remaining **+28 is NOT this lane's** and is not claimed as measured. Five commits from other
+lanes landed in this tree between the ticket's baseline and this run (`b3bef1c`, `676923a`,
+`5dc11ed`, and the two before them). Attributing the exact split would need a full-tree checkout per
+commit; what IS measured is this lane's own +18 and that the suite is green.
+
+---
+
+## PATCHES WANTED -- files this lane does not own
+
+**`agent/hashid_tool.py` -- a name-to-mode table, so a `hash_type` pin survives an unrecognised hash.**
+`_pick_hash_candidate` resolves the supplied type against what `identify()` returned, so when
+`identify()` returns `[]` the pin cannot be honoured and `run_hash_crack` now says so explicitly
+(`hash_type 'X' does not match the supplied hash (auto-identified: unrecognised)`). The honest fix is
+a lookup in `hashid_tool` mapping a type NAME to its `(hashcat mode, john format)` pair independently
+of the hash's shape, e.g.:
+
+```python
+def resolve(name: str) -> dict | None:
+    """The (name, hashcat, john) row for a type named EXPLICITLY, without inferring it from a hash.
+    identify() infers from shape and returns nothing for shapes it does not know; an operator who
+    already knows the type is a different question and deserves a different function."""
+```
+
+`tools._pick_hash_candidate` would then fall back to `hid.resolve(want)` before returning `None`.
+Behaviour today is strictly better than before the fix (the parameter was ignored entirely), so this
+is an improvement, not a regression to repair.
+
+No other lane-owned file needed a patch: items 1, 2 and 4 were entirely inside `agent/tools.py`.
+
+---
+
+## WHAT THIS LANE DID NOT SETTLE
+
+* Whether `run_dom_trace` and `run_form_xss` SHOULD be in `CLAUDE_TOOLS`. They are registered in
+  `TOOL_PERMISSIONS` and dispatched, but never described to the model. That may be deliberate
+  (deterministic-only engines) or may be an omission; deciding is not a claims question and nothing
+  in the tree says which. **Recorded, not fixed.**
+* Whether any tier REGISTRATION is wrong. Every fix here corrected a description or the code behind
+  it; no `TOOL_PERMISSIONS` entry was touched, and the tests assert that none moved. If an engine is
+  registered at the wrong tier, this lane's work makes that easier to see and does not address it.
+* `run_hash_crack` end-to-end. Neither hashcat nor John is in the agent image
+  (`shutil.which` -> `None None`), so no test in this lane cracks a real hash. What is proven is the
+  ARGUMENT VECTOR handed to hashcat, which is the half `hash_type` controls.
