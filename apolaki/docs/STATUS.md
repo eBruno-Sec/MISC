@@ -58,14 +58,25 @@ retirement.
   in flight). Until those land, a clean metadata result and a workflow run producing no findings are
   both UNRELIABLE and must not be quoted as evidence of a clean target.
 
-## Two hypotheses tested and FALSIFIED — both were mine
+## Three hypotheses tested and FALSIFIED — all three were mine
 
 | hypothesis | verdict | evidence |
 |---|---|---|
 | cmdi is limited by payload repertoire (blind/time/OOB) | **FALSE** | +0 across 251 cases. Blind and OOB use the *same shell separators* as the output payloads, so they need the same shell reach. Shell reach was the axis, never blind-vs-echo |
 | cmdi/xss are limited by carrier delivery | **FALSE** | +0 across 120 paired xss cases — and the carrier **ran** on ~30% of them (header names found on 18 of 60 sampled pages). Delivery arrived and proved nothing |
+| the fail-open permission default is reachable | **FALSE** | `agent/agent.py:551` and `:644` both do `TOOL_PERMISSIONS.get(tool_name, PermissionLevel.ACTIVE)` — a fail-open default of the same family that has bitten this project four times. Measured: **advertised-but-unregistered = 0**; every one of the 76 `CLAUDE_TOOLS` names is registered among the 111 permissions. Nothing lands on the default from the model-facing surface. Worth re-checking whenever an engine is added, but it is not a live hole |
 
-Recorded so no future lane spends a night on either. A measured "no" changed the plan twice.
+Recorded so no future lane spends a night on any of them. A measured "no" changed the plan twice.
+
+**Measured in the same pass, and NOT yet a verdict: 35 of the 111 registered engines are absent from
+`CLAUDE_TOOLS`** — registered and dispatchable, but the model is never told they exist. Among them are
+two browser-driver engines, `confirm_browser_persona_bola` and `run_dom_trace`, which is precisely the
+half of the arsenal Erwin asked about. **This is NOT a claim that those 35 are unreachable.** Apolaki
+is deterministic-first: the planner selects from the effects model and the engine descriptor, not from
+`CLAUDE_TOOLS`, so "not advertised to the LLM" and "never runs" are different claims and conflating
+them would be the island error pointed backwards. It is handed to the arsenal lane as a classification
+axis — an idle engine that is planner-reachable-only is an effects-model gap, while an idle engine that
+IS advertised may be an LLM-selection gap. Same symptom, different fix.
 
 ## Tier-3 adversarial corpus — now has an address (B-001, Codex)
 
