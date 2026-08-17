@@ -19,10 +19,14 @@ that retirement.** Updating it is not bookkeeping.
 | Sessions / `Identity` (Q-032) | — | **CLOSED.** The anonymous authz row was carrying the mission's session |
 | Tech intelligence (Q-021C) | — | **CLOSED.** One chain end to end; the server/language half is still a version reporter |
 
-Tree at HEAD: **2672 passed / 13 skipped / 10 xfailed / 0 failed** — measured by the description-gate
-lane on an isolated `git archive` snapshot of `ece2dbd` plus its own two files, so the delta is
-**+14 and nothing else**: exactly that lane's new tests, with skips and xfails unmoved. It edited no
-product module, so there was no other way for the count to move. Every xfail is a STRICT marker
+Tree at HEAD: **2748 passed / 11 skipped / 9 xfailed / 0 failed** (516s, `--network apolaki_default`).
+Measured twice: once on a tree I edited mid-run, then again on a stable tree to clear the torn read,
+with pytest's own exit code captured directly rather than through a pipe. Identical both times.
+
+The **+76 over the 2672 baseline accounts exactly**, which is the point of writing it down: 73 new
+tests (`test_truthful_metadata` and `test_truthful_bfla_identity` both collect more than their `def`
+counts — parametrized), plus 2 strict xfails retired when the defects they pinned were fixed, plus 1
+test that had been SKIPPED off-network and now runs. Every xfail is a STRICT marker
 pinning a named live defect — removing one without fixing what it pins is forbidden, and when the
 defect *is* fixed the marker XPASSes and turns the suite red on purpose, forcing a deliberate
 retirement.
@@ -42,6 +46,13 @@ retirement.
   the renderer was never baked. `scripts/bake_drift_check.sh` cannot catch this: it compares the
   running container against the baked image and would print `bake OK` in exactly this state. The
   unchecked edge is image-vs-tree.
+- **Counting xfails: the lab network moves the number, so quote it with the network state.** 9 strict
+  markers, 9 xfailed. The prior baseline read 10, and the difference is NOT a lost pin: two
+  `test_island_soundness.py` xfails were retired when Q-054/Q-055 landed (−2), while one
+  network-dependent test that had been SKIPPED off-network now runs and xfails (+1). Skips moved
+  13 → 11 in the same direction, which is the corroboration. Note also that `grep -c 'xfail(strict=True'`
+  over-counts: `test_sweep_class_coverage.py` contains that exact string inside a comment, so it
+  reports 3 markers where 2 exist.
 - **A red test is a hypothesis about the code, not a fact about it (2026-08-17).** A full suite read
   `1 failed / 2741 passed` and I nearly attributed it to the slice I had just written. The failing
   test drives the live lab by compose DNS name; my throwaway container was on the default bridge, so
