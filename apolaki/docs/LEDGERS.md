@@ -339,6 +339,55 @@ defend.
 
 ---
 
+## ★ Q-056 — "says X, does Y" is PARTLY gateable, and the rejections are the result. 2026-08-16
+
+Two narrow rules ship; **three were designed, measured, and rejected with their numbers recorded**.
+That ratio is the finding. This codebase has now hit the declaration-vs-fact family eight times and
+each was fixed individually; the question was whether the CLASS could be gated. **Partly** — and
+knowing exactly which part is worth more than a gate that pretends to cover all of it.
+
+**Rule A — a description claims a capability the code's own flags disable.** 0 false positives across
+all 111 registered engines. All 11 negating flags in the tree (`--no-sandbox` ×4, `--disable-gpu` ×3,
+`--disable-dev-shm-usage` ×3, `-no-interactsh`) correctly silent. It catches `run_ferox`
+("Recursive content discovery" + `--no-recursion`) via a fixture **recovered verbatim from `466bae8^`**
+— the engine was deleted mid-run, so the only surviving evidence is the regression fixture.
+
+**Rule B — an implementation docstring names a permission tier that is not the registered one.**
+2 flags, both real. The load-bearing detail: an earlier leading-token-only version produced 2 false
+positives, which is why the rule is *"names the registered tier"* rather than *"leads with it"*. And
+`ACTIVE-light` deliberately does not count as declaring ACTIVE — mutating `(?![-\w])` back to `\b`
+makes the live instance stop firing, so that boundary is load-bearing and now has a mutant.
+
+**A NEW instance the gate found by itself: `confirm_create_object_idor`.** Its spec and
+`TOOL_PERMISSIONS` both say INTRUSIVE; only the implementation docstring says `ACTIVE:` — on an engine
+that **creates and deletes objects on a live target**. Stated precisely, because the precision matters:
+**the enforcement is CORRECT** (`_run_tool` reads `TOOL_PERMISSIONS`, which says INTRUSIVE), so this is
+not a present exposure. It is a docstring that would mislead the next author deciding where to
+dispatch it — the risk is a future mis-wiring, not a current one.
+
+**What is NOT gateable, with the reason:**
+- **`run_metadata`.** The obvious rule — a capability token in the description must appear in the
+  implementation — was measured and **does not fire**: `EXIF` and `GPS` are both present
+  (`out["EXIF:GPS"]`). Knowing the claim is false requires knowing the GPS IFD is numeric tag
+  **`0x8825`**, not the string `"GPS"`. That is file-format domain knowledge existing nowhere in the
+  repo. **Only running the engine catches it** — which is exactly what the islands audit did.
+- **Rule C** (claims findings / can never produce one): 6 flags, 5 false. Narrowed to 1 flag / 0 false
+  and still rejected, because it rests on distinguishing "produces findings" from "produces **no**
+  findings" in English — and `run_external_surface` says *"produces CANDIDATES, not findings"* in this
+  very tree.
+- **Rule E** (a schema property the code never reads): 7 flagged, **6 false** — indirect consumption
+  via `dict(inp)` forwarding and `_role_headers(inp, ...)` helpers. Its one true positive is handed on
+  as a review finding: **`run_hash_crack` advertises `hash_type` and never reads it.**
+
+**The shape every surviving rule shares: both halves machine-readable, in the same file.** General
+description-vs-behaviour checking is not gateable, and a gate that claimed to do it would be the
+noisy kind that gets silenced — which is worse than none.
+
+No description was edited to make a check pass. The gate is a ratchet, so a fix forces the ledger to
+update rather than silently shrinking an allowlist.
+
+---
+
 ## ★ Q-021C — DETECTION NOW DRIVES TESTING, for one library, end to end. 2026-08-16
 
 The chain that was missing since Q-021B built the facts:

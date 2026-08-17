@@ -55,7 +55,44 @@ image, AND the native fallback's only JPEG branch matches the ASCII string `b"GP
 EXIF never contains (`b"GPS" in data == False` on the file that HAS GPS). Fixing the Dockerfile alone
 leaves a fallback that cannot work; fixing the fallback alone leaves the better reader missing.
 
-### Q-056 · FOUR engines describe capability their code does not have · **HIGH** · `IN FLIGHT`
+### Q-056 · FOUR engines describe capability their code does not have · **CLOSED** `5958de1`,`717900c`,`5bad1d3` — PARTLY gateable; 2 rules ship, 3 rejected with numbers
+
+Answered exactly as the DoD allowed: a gate where one is sound, an explicit "review discipline"
+where it is not. `agent/description_gate.py` + 14 tests. Rule A (a `--no-X` flag contradicting the
+claim) and rule B (a docstring naming a tier other than the registered one) run over all 111
+engines with **0 false positives**. Rules C/D/E were designed, measured and **rejected** — E flagged
+7 engines of which **6 were false**, because parameters are consumed indirectly via `dict(inp)` and
+`_role_headers(inp, ...)`. `run_metadata` is **not gateable at all**: knowing its claim is false
+requires knowing the GPS IFD is tag `0x8825` rather than the string `"GPS"`, which is file-format
+knowledge held nowhere in this repo. Only running it catches it — see Q-055. Ledger: `docs/LEDGERS.md`.
+
+### Q-058 · Four defects the description gate surfaced, in `tools.py` · **MEDIUM** · `ready`
+
+Blocked only on lane ownership of `tools.py`; all four are mechanical and none is a description edit
+(rewording the claim to fit the code is the same defect wearing a different hat).
+
+1. **`_confirm_create_object_idor` docstring says `ACTIVE:`, registered `INTRUSIVE`.** Found by the
+   gate itself, not by the audit that motivated it. **The enforcement is CORRECT** — `_run_tool`
+   reads `TOOL_PERMISSIONS`, which says INTRUSIVE — so this is not a present exposure; it is a
+   docstring that would mislead whoever next decides where to dispatch an engine that creates and
+   deletes objects on a live target. Fix the docstring, not the registration.
+2. **`_run_external_surface` docstring opens `PASSIVE/ACTIVE-light`, registered `ACTIVE`.** It
+   fetches the target's favicon over HTTP; ACTIVE is right. Keep the nuance in prose AFTER the tier
+   token, never inside it.
+3. **`run_hash_crack` advertises `hash_type` and never reads it.** Verified independently by the
+   Coordinator: `hash_type` occurs exactly once in all of `agent/tools.py` — the schema line — while
+   `cands = hid.identify(h)` auto-identifies unconditionally. The schema tells the model the
+   parameter is "optional; auto-identified if omitted", which implies supplying it does something.
+   Either honour it or drop the property. **Not gated** (rule E is 86% false and unshipped).
+4. **Four engines declare no tier at all** — `run_dom_trace`, `run_form_xss`, `run_jsonp`,
+   `store_finding`. Rule B is deliberately silent on absence, because conflating a documentation gap
+   with a contradiction is how a gate earns the noise that gets it silenced.
+
+Patches 1 and 2 each require dropping that engine from `KNOWN_OPEN` in
+`agent/tests/test_description_gate.py` — the ratchet fails when a recorded contradiction STOPS
+firing, so a fix cannot silently shrink the allowlist.
+
+<details><summary>original ticket text</summary>
 
 The cross-cutting result of the islands audit, and worth more than any single verdict: `run_ferox`
 advertises recursion while passing `--no-recursion`; `run_metadata` advertises EXIF it cannot read;
@@ -64,6 +101,8 @@ and registered ACTIVE. **A reachability gate cannot catch any of these — every
 registered and implemented.** The gap is between what an engine SAYS and what it DOES, and only
 running it closes that. DoD: a check that compares each engine's advertised behaviour against its
 measured behaviour, or an explicit decision that this is a review discipline rather than a gate.
+
+</details>
 
 ### Q-057 · DELETE the three content-discovery adapters · **CLOSED** `466bae8` — specs, methods, permissions and `_bin_discovery` all removed; test_bbh asserts their absence
 
