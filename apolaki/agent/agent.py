@@ -2342,19 +2342,50 @@ class BBHAgent:
             self._auth_artery = {"ran": True, "note": "artery ran; evidence capture degraded"}
         return events
 
+    def _scope_origins(self) -> list:
+        """The in-scope origins to audit, CARRYING the scheme and port the operator authorised.
+
+        Q-060. Three drivers used to rebuild an origin out of `scope.to_dict()["in_scope"]`:
+
+            u = s if "://" in s else "https://" + s.split("/")[0]
+
+        `in_scope` holds BARE HOSTS — `scope._split_scope_entry` strips the scheme and port before
+        the entry is stored, parking them in `ScopeEntry.base`. So re-adding a default scheme
+        INVENTS a port nobody authorised (`http://juice-shop:3000` -> `juice-shop` ->
+        `https://juice-shop`, i.e. :443), and `validate()` then correctly refuses the origin the
+        driver itself built. MEASURED live: `run_transport_posture` 1 call, 0 results, 1 scope
+        block — 100% dead — while `run_header_trust` survived only on the discovered URLs, which
+        carry their own port. Every Apolaki lab runs on a non-standard port, so the whole fleet was
+        unauditable for `tls_posture` / `cookie_scope_posture` / `http_security_headers` /
+        `http_methods_audit`.
+
+        The refusal was right and the INPUT to it was wrong, so the fix is here and not in scope:
+        `ScopeEngine.base_urls()` returns the operator's own `scheme://host:port` and only falls
+        back to a default for a host they wrote bare. It is already the source of truth for
+        `_primary_base`, the API sweep and the model's TARGET BASE URLS block; these drivers were
+        the ones deriving their own.
+
+        Wildcards contribute nothing: `*.example.com` is not a hostname, and the old
+        reconstruction spent a real dispatch on `https://*.example.com` — which `_matches` accepts
+        (`'*.example.com'.endswith('.example.com')`) and DNS can never resolve.
+        """
+        from urllib.parse import urlsplit as _us
+        origins, seen = [], set()
+        for b in (self.scope.base_urls() or []):
+            p = _us(str(b))
+            if not (p.scheme and p.netloc):
+                continue
+            o = "%s://%s" % (p.scheme, p.netloc)
+            if o not in seen:
+                seen.add(o)
+                origins.append(o)
+        return origins
+
     async def _do_transport_posture(self, session_id: str):
         """#103: run the transport + web posture family on each in-scope origin. Read-only (TLS
         handshakes, GET/OPTIONS/TRACE). Best-effort — any failure degrades to a no-op, never a
         broken scan."""
-        from urllib.parse import urlsplit as _us
-        origins, seen = [], set()
-        for e in (self.scope.to_dict().get("in_scope") or []):
-            s = str(e)
-            u = s if "://" in s else "https://" + s.split("/")[0]
-            o = "%s://%s" % (_us(u).scheme, _us(u).netloc)
-            if o and o not in seen:
-                seen.add(o)
-                origins.append(o)
+        origins = self._scope_origins()
         total = 0
         for o in origins[:3]:
             try:
@@ -2385,16 +2416,15 @@ class BBHAgent:
         it. Its ALWAYS_ON reason claimed it ran "on every in-scope origin". That claim is now true.
 
         Read-only: safe GETs replaying a denied request behind an override header. Best-effort — any
-        failure degrades to a no-op rather than a broken scan, matching `_do_transport_posture`."""
-        from urllib.parse import urlsplit as _us
-        targets, seen = [], set()
-        for e in (self.scope.to_dict().get("in_scope") or []):
-            s = str(e)
-            u = s if "://" in s else "http://" + s.split("/")[0]
-            o = "%s://%s" % (_us(u).scheme, _us(u).netloc)
-            if o and o not in seen:
-                seen.add(o)
-                targets.append(o)
+        failure degrades to a no-op rather than a broken scan, matching `_do_transport_posture`.
+
+        Q-060: the origin pass reads `_scope_origins()` — the operator's own scheme+port — rather
+        than rebuilding `http://` + a bare scope host, which discarded the pinned port and had this
+        pass refused on every non-standard-port target. Only the origin half was affected; the
+        discovered-URL half below always carried its port, which is why this engine measured
+        6 calls / 5 results / 1 scope block instead of dying outright."""
+        targets = self._scope_origins()
+        seen = set(targets)
         # Sensitive routes the scan actually discovered are the high-value targets: a header that flips
         # their denial into a grant IS the finding. No separate denied-path tracker is invented here —
         # `_run_header_trust` establishes its own baseline per URL and recognises a denial itself, so
@@ -3407,11 +3437,13 @@ class BBHAgent:
             return 0
         import browser_engine as _be
         from urllib.parse import urljoin
-        seeds = []
-        for e in (self.scope.to_dict().get("in_scope") or []):
-            s = str(e)
-            seeds.append(s if "://" in s else "https://" + s.split("/")[0])
-        seeds = list(dict.fromkeys(seeds))[:2]
+        # Q-060, third instance of the same shape — found by auditing agent.py for it rather than
+        # by the ticket, which named only the two posture drivers. This seeded the frontier from
+        # bare scope hosts + a default scheme, and the very next loop drops any seed that fails
+        # `self.scope.validate(u)[0]` — so on every non-standard-port target the JS-rendered
+        # harvest started with an empty frontier and returned 0, which is indistinguishable from an
+        # app that has no client-rendered surface.
+        seeds = self._scope_origins()[:2]
         from urllib.parse import urlparse as _up, parse_qs as _pq
         seen, frontier, before = set(), list(seeds), set(self.tools.urls or [])
         sig_seen = set()                           # (path, sorted-param-names) already surfaced ONCE
