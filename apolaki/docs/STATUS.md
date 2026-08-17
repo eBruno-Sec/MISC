@@ -13,12 +13,16 @@ that retirement.** Updating it is not bookkeeping.
 | lane | owner | state |
 |---|---|---|
 | Truthful engines (Q-054/055/055b) | Claude | **live** — the workflow finding sink, metadata's GPS false negative, the bfla mirror |
-| Description gate (Q-056) | Claude | **live** — can "says X, does Y" be gated at all, or is it a review discipline |
+| Arsenal gap (Erwin's question) | Claude | **live** — run a real mission and READ the coverage sections; classify every idle engine into never-planned / skipped / ran-clean / errored |
+| Description gate (Q-056) | — | **CLOSED.** PARTLY gateable: 2 rules at 0 FP over 111 engines, 3 rejected with numbers. `run_metadata` is not gateable by any static rule and only running it catches it |
 | Islands soundness (Q-050b) | — | **CLOSED.** 7 verdicts; 3 engines deleted outright |
 | Sessions / `Identity` (Q-032) | — | **CLOSED.** The anonymous authz row was carrying the mission's session |
 | Tech intelligence (Q-021C) | — | **CLOSED.** One chain end to end; the server/language half is still a version reporter |
 
-Tree at HEAD: **2658 passed / 13 skipped / 10 xfailed / 0 failed.** Every xfail is a STRICT marker
+Tree at HEAD: **2672 passed / 13 skipped / 10 xfailed / 0 failed** — measured by the description-gate
+lane on an isolated `git archive` snapshot of `ece2dbd` plus its own two files, so the delta is
+**+14 and nothing else**: exactly that lane's new tests, with skips and xfails unmoved. It edited no
+product module, so there was no other way for the count to move. Every xfail is a STRICT marker
 pinning a named live defect — removing one without fixing what it pins is forbidden, and when the
 defect *is* fixed the marker XPASSes and turns the suite red on purpose, forcing a deliberate
 retirement.
@@ -30,6 +34,18 @@ retirement.
   engines including the entire SQLi surface; defaulting to `full` would enable state-changing writes
   and lab-calibrated traversal semantics against production targets. The evidence points at loosening
   `planner._ALLOWED`. **Nobody should ship a third proposal without deciding what `active` means.**
+- **`confirm_create_object_idor` declares `ACTIVE:` while registered `INTRUSIVE` (Q-058).** State this
+  precisely or it reads as a safety hole, which it is not: `_run_tool` enforces against
+  `TOOL_PERMISSIONS`, which correctly says INTRUSIVE. **The enforcement is right and the docstring is
+  wrong.** The risk is the next engineer mis-wiring an engine that creates and deletes objects on a
+  live target, not a present exposure.
+- **`run_hash_crack` advertises a `hash_type` parameter it never reads (Q-058).** Verified: the token
+  occurs exactly once in all of `agent/tools.py`, on the schema line. The schema tells the model it is
+  "optional; auto-identified if omitted", implying that supplying it does something. It does not.
+- **A gate reporting zero is not a clean result until a positive control says it looked at something.**
+  I ran the new description gate against the live tree, got 0 flags, and it was my own API misuse (a
+  class object where a string was wanted) parsing nothing. With a positive control showing 111 engines
+  parsed, the real answer was 2. Any zero quoted anywhere in this project needs its positive control.
 - **`00438`** — the ninth of the nine budget-starved sqli cases — is still unprobed at cap 700.
 - **Per-URL cost is SUBLINEAR in target count and nobody knows why.** The 400→700 raise predicted
   +57% elapsed from a linear model and measured +22%. Any future budget change priced on the linear

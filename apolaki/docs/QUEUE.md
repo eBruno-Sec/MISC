@@ -15,6 +15,11 @@ declaration-vs-fact defect the code keeps producing, and it is the one artifact 
   `_bin_discovery`). `466bae8`
 - **Q-021C** — one technology-intelligence chain closed end to end (version selects the probe set).
   `2480c75` and the techintel lane's own commits
+- **Q-056** — PARTLY gateable, which is the honest answer the DoD allowed for. 2 rules ship at 0 FP
+  over 111 engines, 3 rejected with their numbers. `5958de1` `717900c` `5bad1d3`. Coordinator
+  re-ran the gate against the LIVE tree (not the lane's pinned snapshot) with a positive control
+  showing 111 engines parsed: the lane's 2 flags reproduce exactly, so the gate is not an island and
+  the two lanes have not collided.
 - **Q-032** — `Identity`: a persona request can no longer carry the mission's session. `4982d3b`
 - **Q-050(a)/(b)** — measured and DIAGNOSED in full; seven soundness verdicts landed. The *wiring* is
   deliberately not done and is not a loose end: three engines were deleted, and the rest each need an
@@ -23,7 +28,9 @@ declaration-vs-fact defect the code keeps producing, and it is the one artifact 
 **OPEN, and honestly ranked:**
 - **Q-054** `run_workflow` finding sink, two sinks deep — IN FLIGHT (truthful lane)
 - **Q-055** `run_metadata` false negative on proven GPS + the bfla mirror — IN FLIGHT (truthful lane)
-- **Q-056** four engines describe what they do not do — IN FLIGHT (descriptions lane)
+- **Q-058** four defects the description gate surfaced, all in `tools.py` — `ready`, blocked only on
+  the truthful lane releasing that file. Two are docstrings declaring the wrong permission tier; one
+  is an advertised parameter (`hash_type`) the code never reads.
 - **Q-052** tier semantics — BOTH proposals measured and REJECTED (narrowing `active` costs 49.5% of
   the sweep; defaulting to `full` would enable state-changing writes and lab-mode traversal semantics
   against production). Evidence points at loosening `planner._ALLOWED`, which needs a decision, not a
