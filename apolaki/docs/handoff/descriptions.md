@@ -212,6 +212,38 @@ coordinates (59°25'16.17"N 24°48'4.32"E) the islands lane decoded by hand, as 
 engine reports them. That is a behaviour test for Q-055, not a description gate, and it is the honest
 answer: **this instance was only ever going to be caught by running the engine.**
 
+### Rule E — "the input_schema declares a parameter the code never reads". REJECTED: 6 of 7 false.
+
+The most promising remaining candidate, because both halves are fully machine-readable and sit in the
+same dict: the spec tells the model it may pass `X`, and the implementation never mentions `"X"`.
+
+**MEASURED, `ece2dbd`, 72 spec'd engines carrying an `input_schema`: 7 engines flagged, 25 properties.**
+
+```
+confirm_idor        owner_session attacker_session owner_headers attacker_headers session headers
+enumerate_ids       url_template start end headers session
+http_read           headers session
+http_request        headers session
+run_hash_crack      hash_type
+store_finding       title severity description impact cvss_score cvss_vector cwe
+test_numeric_abuse  session headers
+```
+
+Adjudicated by reading the code: **6 of the 7 are false.** They consume the parameter *indirectly* —
+`_store_finding` forwards the whole dict (`db.add_finding(self.mission_id, dict(inp))`), and the
+session/headers families are resolved through helpers (`self._identity(...)`,
+`self._role_headers(inp, "owner")`) that take `inp` rather than a named key. Catching those honestly
+needs interprocedural analysis across modules, which is the same failure mode as rule C: the rule has
+to *interpret* rather than *compare*.
+
+The one true positive is real but minor: **`run_hash_crack` declares `hash_type` ("optional;
+auto-identified if omitted") and never reads it** — `cands = hid.identify(h)` always auto-identifies,
+so supplying the parameter does nothing. Recorded here as a finding for the `tools.py` lane rather
+than gated.
+
+An ~86% engine-level false-positive rate is exactly the noise profile that gets a gate silenced.
+**Not shipped.**
+
 ### General description-vs-behaviour checking. NOT GATEABLE.
 
 ~90 natural-language descriptions do not yield a clean binary signal against ~9,900 lines of
@@ -236,6 +268,16 @@ Neither is a description edit. Both correct the half that is wrong:
 
 Each removes its engine from `KNOWN_OPEN` in `agent/tests/test_description_gate.py`; the
 parametrized test will fail until that set is updated, by design.
+
+3. **`run_hash_crack`'s `hash_type` parameter** (found by the rejected rule E, above). The schema
+   advertises it as *"optional; auto-identified if omitted"* and `_run_hash_crack` never reads it —
+   `cands = hid.identify(h)` runs unconditionally. Either honour the supplied type or drop the
+   property; do not reword the description to hide it. **Not gated** — the rule that found it is 86%
+   false and is not shipped, so this one is a review finding.
+
+4. **The 4 engines that declare no tier at all** — `run_dom_trace`, `run_form_xss`, `run_jsonp`,
+   `store_finding`. Rule B is silent on them by design. Adding the tier token to each closes the gap
+   the rule cannot see; until then it is recorded, not hidden.
 
 ---
 
