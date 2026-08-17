@@ -2789,3 +2789,25 @@ that identified it.** Closing this ticket by flipping `enable_zap` is explicitly
 **Expected benefit.** Either a whole DAST capability the platform ships and has never run, or —
 equally valuable — a measured decision to remove the claim. Both beat the current state, where the
 product describes a capability that has executed zero times in 151 missions.
+
+---
+
+## LANE OWNERSHIP — cycle 9, 2026-08-17. Declared BEFORE spawning, three lanes, disjoint by file.
+
+Erwin: *"Auto start finish the queue. Automate this shit. I shouldn't have to keep telling you."*
+Everything `ready` is now assigned. The autocontinue watchdog was also rewritten so this does not
+depend on anyone asking: a clean tree with ready tickets is no longer a reason to stop, and it now
+spawns lanes instead of grinding the queue serially.
+
+| lane | owns (WRITE) | tickets |
+|---|---|---|
+| engines | `agent/tools.py`, `agent/upload_tool.py`, `agent/tests/test_description_gate.py`, `agent/tests/test_truthful_metadata.py`, `docs/handoff/engines.md` | Q-068 (canonical coordinates), Q-058 (two tier docstrings, `hash_type`, four untiered engines) |
+| provenance | `agent/agent.py`, `agent/report.py`, `docs/handoff/provenance.md` | Q-060 (origin rebuilt from a port-stripped scope entry), Q-064 (false integrity alarm, fix by binding the dispatch name) |
+| ledger-status | `agent/main.py`, `docs/handoff/ledger_status.md` | Q-067 (a negative result recorded as a failure) |
+
+Coordinator keeps `docs/QUEUE.md`, `docs/STATUS.md`, `docs/LEDGERS.md` and does not work inside a lane.
+
+**Remaining after these land:** Q-052 (a PRODUCT decision for Erwin, not an engineering one — both
+proposals measured and rejected), plus the UNSWEPT tail recorded in the 2026-08-17 sweep block, which
+is marked UNKNOWN rather than open because its markers predate several closes and I have not verified
+their claims against code.
