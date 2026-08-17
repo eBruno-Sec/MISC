@@ -305,9 +305,16 @@ OBJECTIVES = (
      # logic are run_workflow (executes a declarative logic-abuse pack) and test_numeric_abuse, which is the
      # engine that actually emits family "business_logic" (tools.py:3062). Still attempt_only: business-logic
      # integrity is inconclusive by nature, so this can reach "attempted" and never "verified".
-     # Q-048: dropped run_workflow. It returns ToolResult(..., []) by design -- its own docstring says
-     # confirmed findings come from the confirm_* steps INSIDE the pack, so the engine itself emits no
-     # family and could never contradict this objective. test_numeric_abuse really does emit
+     # Q-048: dropped run_workflow. The DECISION stands; its original reason does not, and leaving a
+     # false reason in place is how the next reader inherits a wrong model.
+     # WAS: "it returns ToolResult(..., []) by design". That stopped being true under Q-054 --
+     # workflow.run and tools._run_workflow now both forward their steps' findings, measured end to
+     # end on a live target. The reason it still does not belong here is different and narrower: what
+     # run_workflow forwards carries the INNER engine's family (a confirm_idor step yields "idor",
+     # an enumerate_ids step yields an idor lead), so it can never be the engine that establishes
+     # "business_logic" for this objective -- it is a carrier, not a producer. It is also still not
+     # wired to any planner dispatch site; being in _AUTO_STORE_TOOLS makes its findings PERSIST when
+     # dispatched, which is not the same as being reachable. test_numeric_abuse really does emit
      # "business_logic" (tools.py:3062).
      "engine": "test_numeric_abuse", "violated_by": ("business_logic",), "verifiable": True,
      "attempt_only": True},
