@@ -288,5 +288,22 @@ parametrized test will fail until that set is updated, by design.
   during this lane (`466bae8` → `c6963f0` → `ece2dbd`) and `tools.py` was dirty throughout.
 * `_run_workflow` demonstrates why: this lane read the **working tree** copy first and recorded the
   pre-fix `[]`, then found the committed copy already fixed. Rule 8c, caught by the discrepancy.
-* Full suite, isolated snapshot of `ece2dbd` + this lane's two files: recorded at the bottom of this
-  file when it lands.
+* **Full suite, isolated snapshot of `ece2dbd` + this lane's two files: `2672 passed, 13 skipped,
+  10 xfailed, 0 failed` in 571s.** Baseline was `2658 passed, 13 skipped, 10 xfailed`; the delta is
+  **+14 and nothing else** — exactly this lane's 14 new tests, with skips and xfails unmoved. No
+  existing product module was edited, so there was no other way for the count to move, and it did
+  not.
+
+---
+
+## WHAT THIS LANE DID NOT SETTLE
+
+* Whether rule A generalises beyond negating **CLI flags**. It only sees a contradiction expressed as
+  a literal argv string. An engine that disables a claimed capability through a keyword argument, a
+  config constant or an early `return` is invisible to it. The one instance it was built from was a
+  CLI flag; there is no second instance in this tree to generalise from, and inventing one to widen
+  the rule against would be the invented-fixture failure again.
+* Whether the tier convention holds outside `ToolRegistry`. `analyse()` takes a `registry_class`
+  argument so another module's engines can be audited the same way, but only `agent/tools.py` was
+  measured. Any number quoted for a second module has to be measured before it is quoted.
+* `run_hash_crack`'s `hash_type` (rule E's one true positive) is **reported, not gated**.
