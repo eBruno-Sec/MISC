@@ -284,10 +284,171 @@ def verify_always_on(app_dir: str = None) -> dict:
             "ok": not unwired}
 
 
-def descriptor(tech: dict, preconditions: dict, always_on: dict) -> dict:
-    """One engine's full contract. Pure."""
+# ── ROUTING: technique id -> dispatchable engine name (Q-066) ──────────────────────────────────
+#
+# The gap this closes, measured rather than assumed: `PRECONDITIONS`, `EFFECTS` and the whole technique
+# registry are keyed by TECHNIQUE ID (42 of 42, 13 of 13, 88 of 88), while `tools.TOOL_PERMISSIONS` is
+# keyed by ENGINE NAME. **0 of 88 technique ids are engine names, and no field on any technique record
+# holds one** (exact-value match over all 25 field names). So the planner could rank `jwt_forge` and have
+# no route to `run_jwt`. That is the fourth appearance of one defect shape here: two vocabularies for the
+# same thing that never meet.
+#
+# THE MAPPING IS DERIVED, NEVER TYPED. A hand-written {"jwt_forge": "run_jwt"} dict would be a THIRD
+# vocabulary and would rot exactly like the two it joins. Both sources below already exist, are already
+# maintained for another purpose, and have already been corrected twice for this very class of error
+# (Q-011 fixed `wstg_catalog.FULL["WSTG-INPV-20"]`, which had a technique id where an engine belonged):
+#
+#   always_on_reason — ALWAYS_ON's prose already names the engine that reaches the technique, and
+#                      verify_always_on() already proves that name is referenced from code that runs.
+#   wstg_full        — a technique record carries `wstg`; `wstg_catalog.FULL[wstg]` is the catalog's
+#                      assertion that a DETERMINISTIC CONFIRMING ENGINE exists for that test, named.
+#
+# Two sources were measured and DELIBERATELY REJECTED, because a wrong route is worse than no route:
+#
+#   wstg_catalog.PARTIAL — by the catalog's own definition, "a related tool touches it but does not
+#                      confirm the specific scenario". That is the negation of an executor. It would add
+#                      13 techniques and it gets them wrong in kind: `weak_secret_forgery` (forge a
+#                      coupon whose secret is salt-less) would route to `run_hash_id`, which identifies
+#                      hash primitives and forges nothing.
+#   asvs_model       — joining technique `vuln_class` to a row's `violated_by` family is a name
+#                      coincidence, not a binding. Measured: it disagreed with the two sources above on
+#                      22 of the 33 techniques it covered, e.g. routing `idor_bola_read` to `run_bfla`
+#                      (function-level) alongside the correct `confirm_idor` (object-level).
+
+
+def _tokens(text: str) -> set:
+    """Normalised identifier tokens in a prose string.
+
+    The normalisation is verify_always_on()'s, and for its reason: a tool is REGISTERED under a bare
+    string (`"run_service_pack"`) and IMPLEMENTED as a private method (`_run_service_pack`), so the two
+    spellings are one engine. Omitting the `lstrip("_")` made my own first probe report 14 wired ICS
+    engines as unroutable — an instrument error, not a finding. Pure."""
+    import re
+    return {t.split(".")[-1].lstrip("_")
+            for t in re.findall(r"[a-z_][a-z0-9_]*(?:\.[a-z_][a-z0-9_]*)?", text or "")}
+
+
+def _engines_named(text: str, registry) -> set:
+    """Registered engine names a prose string NAMES. Pure."""
+    return {t for t in _tokens(text) if t in registry}
+
+
+# A token shaped like an engine reference. Apolaki's dispatch names are overwhelmingly `run_*`/`confirm_*`,
+# and this is deliberately a SEPARATE test from registry membership: filtering candidates by the registry
+# and then asserting every candidate is in the registry is a guard that cannot fail, which is the exact
+# trap this codebase has fallen into eight times. `run_mass_assignment` (Q-011) was engine-SHAPED and
+# unregistered — a route to nothing — and only a shape-based check can see it.
+_ENGINE_SHAPED = r"^(?:run|confirm)_[a-z0-9_]+$"
+
+
+def _engine_shaped(text: str) -> set:
+    """Tokens that LOOK like a dispatch name, registered or not. Pure."""
+    import re
+    return {t for t in _tokens(text) if re.match(_ENGINE_SHAPED, t)}
+
+
+def engine_registry() -> set:
+    """The dispatchable engine names — `tools.TOOL_PERMISSIONS` keys, the registry the executor uses.
+
+    Imported lazily: `tools` is the heavy module that imports every engine, and importing it at module
+    scope would invert this module's dependency direction the way T7 exists to prevent. Returns an empty
+    set if it cannot be read, which makes routing_audit() fail CLOSED (everything unroutable, loudly)
+    rather than reporting a clean sheet from an instrument that loaded nothing."""
+    try:
+        import tools
+        return set(tools.TOOL_PERMISSIONS)
+    except Exception:
+        return set()
+
+
+def routes(registry=None, techniques=None) -> dict:
+    """{technique_id: {engine_name: [source, ...]}} — the join, derived from the two sources above.
+
+    Only engine names that are ACTUALLY IN THE REGISTRY are emitted, so a route is by construction
+    dispatchable; `routing_audit()` re-checks that separately rather than trusting this. Pure given the
+    registry and technique table."""
+    reg = engine_registry() if registry is None else set(registry)
+    if techniques is None:
+        import techniques as T
+        techniques = T.TECHNIQUES
+    if not reg:
+        return {}
+    out = {}
+    for tid, reason in ALWAYS_ON.items():
+        for e in _engines_named(reason, reg):
+            out.setdefault(tid, {}).setdefault(e, []).append("always_on_reason")
+    try:
+        import wstg_catalog as W
+        full = W.FULL
+    except Exception:
+        full = {}
+    for tid, rec in sorted(techniques.items()):
+        wid = rec.get("wstg")
+        if wid and full.get(wid):
+            for e in _engines_named(full[wid], reg):
+                out.setdefault(tid, {}).setdefault(e, []).append("wstg_full")
+    return {t: {e: sorted(set(s)) for e, s in sorted(v.items())} for t, v in sorted(out.items())}
+
+
+def routing_audit(registry=None, techniques=None) -> dict:
+    """Can every technique the platform can RANK actually be DISPATCHED?
+
+    `phantom` is the load-bearing invariant and MUST stay empty: a derived engine name that is not in
+    the registry is a route to nothing, which is the `run_mass_assignment` defect (Q-011) reappearing
+    from a different direction.
+
+    `unrouted` is reported, not asserted here — 13 techniques genuinely have no engine today, and
+    pretending otherwise would be the declaration-checking guard this codebase has shipped eight times.
+    The test pins the exact set so the list can only be shrunk deliberately.
+
+    `effect_producers_unrouted` is the Q-065 half: a technique that DECLARES an effect but has no
+    executor lets the forward search return a plan whose step cannot be run. Pure."""
+    reg = engine_registry() if registry is None else set(registry)
+    if techniques is None:
+        import techniques as T
+        techniques = T.TECHNIQUES
+    r = routes(reg, techniques)
+    # Phantoms are found by SHAPE, over the same source prose routes() reads — never by re-filtering
+    # routes()' own output, which is registry-filtered and so could never disagree.
+    phantom = set()
+    for tid, reason in ALWAYS_ON.items():
+        phantom |= {"%s (always_on_reason) -> %s" % (tid, e)
+                    for e in _engine_shaped(reason) - reg}
+    try:
+        import wstg_catalog as W
+        full = W.FULL
+    except Exception:
+        full = {}
+    for tid, rec in sorted(techniques.items()):
+        wid = rec.get("wstg")
+        if wid and full.get(wid):
+            phantom |= {"%s (wstg_full:%s) -> %s" % (tid, wid, e)
+                        for e in _engine_shaped(full[wid]) - reg}
+    phantom = sorted(phantom)
+    unrouted = sorted(t for t in techniques if t not in r)
+    return {
+        "registry_size": len(reg),
+        "registry_readable": bool(reg),
+        "total": len(techniques),
+        "routed": len(r),
+        "unrouted": unrouted,
+        "phantom": phantom,
+        "effect_producers_unrouted": sorted(t for t in EFFECTS if t not in r),
+        "ok": bool(reg) and not phantom,
+    }
+
+
+def descriptor(tech: dict, preconditions: dict, always_on: dict, routing: dict = None) -> dict:
+    """One engine's full contract, now including HOW IT IS DISPATCHED. Pure.
+
+    `engines` is the Q-066 join: the descriptor's public surface previously carried preconditions and
+    effects but nothing an executor could act on, so a consumer holding a ranked technique had to guess
+    the tool name. `routing` is passed in by build() so the derivation runs once for the whole registry
+    rather than once per technique; None means "resolve it here" for a standalone call."""
     tid = tech.get("id", "")
     eff = EFFECTS.get(tid, {})
+    routing = routes() if routing is None else routing
+    eng = routing.get(tid, {})
     return {
         "id": tid,
         "permission": tech.get("permission"),
@@ -300,6 +461,10 @@ def descriptor(tech: dict, preconditions: dict, always_on: dict) -> dict:
         "invalidates": list(eff.get("invalidates", [])),
         "auto": tech.get("execution", "auto") == "auto",
         "transferable": bool(tech.get("transferable")),
+        # the join: dispatchable engine names, and which already-existing table each was derived from
+        "engines": sorted(eng),
+        "routed_by": {e: list(s) for e, s in sorted(eng.items())},
+        "routable": bool(eng),
     }
 
 
@@ -310,7 +475,8 @@ def build() -> dict:
     so a descriptor cannot drift from live behaviour. Before T7 this read the planner's copies, which made
     it a read-only view; the dependency now runs the other way."""
     import techniques as T
-    return {t["id"]: descriptor(t, PRECONDITIONS, ALWAYS_ON)
+    routing = routes()
+    return {t["id"]: descriptor(t, PRECONDITIONS, ALWAYS_ON, routing)
             for t in T.TECHNIQUES.values() if t.get("id")}
 
 
