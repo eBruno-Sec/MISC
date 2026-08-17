@@ -1617,24 +1617,65 @@ def arsenal_gap(ledger: dict) -> dict:
     whole store. A pentester's report says what was not tested; that is the difference between a
     result and an advertisement, and it is the number a reader needs to size the finding list.
 
-    Returns {"dispatched", "silent", "not_dispatched", "blocked_by_mode", "error"}:
+    Returns {"dispatched", "silent", "errored", "skipped", "not_dispatched", "blocked_by_mode",
+             "error"}:
       dispatched     engines the ledger says ran
-      silent         ran and produced nothing -- a real result, not a gap
+      silent         ran, RETURNED, and produced nothing -- a real result, not a gap
+      errored        ran and FAILED (ledger status `failed`) -- tested nothing, and the reader
+                     cannot see that from the finding list. See Q-063 below.
+      skipped        dispatched and then tested nothing anyway (ledger status `skipped`):
+                     unconfigured, or every target refused by scope
       not_dispatched defined, permission-registered, never called this mission
       blocked_by_mode the subset that COULD NOT have run at this permission tier, which is a
                      different statement from "was not selected" and must not be merged with it
+
+    Q-063 -- `silent` USED TO SWALLOW `errored` AND `skipped`. The predicate was
+    `calls > 0 and findings == 0`, which is equally true of an engine that ran clean, an engine that
+    failed on every call, and an engine that skipped without testing anything. In the four-way
+    classification of outcomes, "ran and errored" is the MOST valuable class -- a broken engine is an
+    invisible false negative -- and "ran and found nothing" is the class that means "nothing to see
+    here". The summary reported the first as the second.
+    MEASURED on mission 57cc3b49 (`agent/tests/tool_ledger_57cc3b49.json`, a verbatim producer
+    ledger): silent 33 -> 30, errored 0 -> 1 (`fetch_openapi`, failed on 10 of 10 dispatches),
+    skipped 0 -> 2 (`run_github_recon` unconfigured, `run_transport_posture` scope-refused). A
+    RE-PARTITION, not a re-count: the classes still sum to the 111-engine registry denominator.
+    Same merge-two-classes defect as the `blocked_by_mode`/"available but not selected" one below --
+    two classes with OPPOSITE fixes reported as one number.
+
+    The classification comes from `main._tool_ledger`'s own `status` field, which the producer has
+    always emitted and this consumer never read; nothing here is inferred from note text. A row with
+    NO `status` (an archived ledger from before the field existed) keeps the old behaviour, because a
+    missing status is not evidence of failure and retro-labelling silence as error would be the same
+    defect pointed the other way.
 
     The registry is imported lazily and a failure is RECORDED rather than swallowed: an empty gap
     list produced by a broken import would read as "every engine ran", which is exactly the silent
     failure this function exists to expose.
     """
-    out = {"dispatched": [], "silent": [], "not_dispatched": [], "blocked_by_mode": [], "error": ""}
+    out = {"dispatched": [], "silent": [], "errored": [], "skipped": [],
+           "not_dispatched": [], "blocked_by_mode": [], "error": ""}
     rows = (ledger or {}).get("tools") or []
     ran = {str(t.get("tool") or "") for t in rows if t.get("tool")}
     out["dispatched"] = sorted(x for x in ran if x)
-    out["silent"] = sorted(str(t.get("tool")) for t in rows
-                           if t.get("tool") and int(t.get("calls") or 0) > 0
-                           and not int(t.get("findings") or 0))
+    # One row lands in exactly ONE class, so the counts reconcile with `dispatched` and a reader can
+    # add up the summary without the 46-row table. Precedence: a failure outranks everything (an
+    # engine that errored produced no result to be clean about), then a skip, then findings, then
+    # a returning call with nothing to show.
+    silent, errored, skipped = set(), set(), set()
+    for t in rows:
+        name = str(t.get("tool") or "")
+        if not name:
+            continue
+        status = str(t.get("status") or "").lower()
+        if status == "failed":
+            errored.add(name)
+        elif status == "skipped":
+            skipped.add(name)
+        elif int(t.get("findings") or 0):
+            continue                                  # productive -- ran and produced
+        elif int(t.get("calls") or 0) > 0:
+            silent.add(name)
+    out["silent"], out["errored"], out["skipped"] = sorted(silent), sorted(errored), sorted(skipped)
     try:
         import tools as _t
         registered = {n for n in _t.TOOL_PERMISSIONS}
@@ -1711,7 +1752,21 @@ def _arsenal_md(ledger: dict, findings: list = None) -> list:
              "- **Dispatched:** %d engine(s)" % len(gap["dispatched"]),
              "- **Ran and found nothing:** %d — %s" % (
                  len(gap["silent"]), ", ".join("`%s`" % s for s in gap["silent"][:12]) or "none"),
-             "- **Never dispatched this mission:** %d" % len(gap["not_dispatched"])]
+             # Q-063: printed ALWAYS, including at zero. "0 engines errored" is a statement the
+             # ledger's own status field entitles this report to make, and it is the one a reader
+             # most needs before trusting a short finding list. Omitting the line at zero would make
+             # its absence ambiguous between "nothing broke" and "nobody checked".
+             "- **Ran and ERRORED:** %d — %s" % (
+                 len(gap["errored"]), ", ".join("`%s`" % s for s in gap["errored"][:12]) or "none"),
+             "- **Dispatched but tested nothing:** %d — %s" % (
+                 len(gap["skipped"]), ", ".join("`%s`" % s for s in gap["skipped"][:12]) or "none")]
+    if gap["errored"] or gap["skipped"]:
+        lines += ["", "  An engine that ERRORED tested nothing, so its silence is a broken "
+                      "instrument rather than a clean result — counting it as coverage turns an "
+                      "invisible false negative into reassurance. \"Tested nothing\" is a third "
+                      "case again: dispatched, then skipped because it was unconfigured or because "
+                      "every target it was given was refused by scope.", ""]
+    lines += ["- **Never dispatched this mission:** %d" % len(gap["not_dispatched"])]
     if gap["blocked_by_mode"]:
         lines += ["- **Of those, unable to run at this permission tier:** %d — %s" % (
             len(gap["blocked_by_mode"]),
@@ -2918,9 +2973,23 @@ def generate_html_report(program: str, findings: list, scope: dict,
                 "dispatched is a gap.</p>"
                 f"<p class='sub'><b>Dispatched:</b> {len(_gap['dispatched'])} · "
                 f"<b>Ran and found nothing:</b> {len(_gap['silent'])} · "
+                # Q-063: the errored and tested-nothing counts reach the CLIENT-FACING renderer too.
+                # A markdown-only fix is a half fix -- these sections were once wired into markdown
+                # and absent from HTML, which is the format the reader actually receives.
+                f"<b>Ran and errored:</b> {len(_gap['errored'])} · "
+                f"<b>Dispatched but tested nothing:</b> {len(_gap['skipped'])} · "
                 f"<b>Never dispatched:</b> {len(_gap['not_dispatched'])}"
                 + (f" · <b>Blocked by permission tier:</b> {len(_gap['blocked_by_mode'])}"
                    if _gap["blocked_by_mode"] else "") + "</p>")
+            if _gap["errored"] or _gap["skipped"]:
+                method_html += (
+                    "<p class='sub'>"
+                    + (f"<b style='color:#ff3d6b'>Errored:</b> {e(', '.join(_gap['errored']))} &mdash; "
+                       "these engines FAILED rather than found nothing, so nothing they were "
+                       "dispatched to test was actually tested. " if _gap["errored"] else "")
+                    + (f"<b style='color:#c98a2b'>Tested nothing:</b> {e(', '.join(_gap['skipped']))}"
+                       " &mdash; dispatched, then skipped (unconfigured, or every target refused by "
+                       "scope)." if _gap["skipped"] else "") + "</p>")
             if _dis["produced_but_unlogged"]:
                 method_html += (
                     "<div class='biz' style='border-left-color:#c0392b'><p><b style='color:#c0392b'>"
