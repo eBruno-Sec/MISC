@@ -26,8 +26,22 @@ declaration-vs-fact defect the code keeps producing, and it is the one artifact 
   oracle-soundness argument the audit says cannot be made from static reading.
 
 **OPEN, and honestly ranked:**
-- **Q-054** `run_workflow` finding sink, two sinks deep — IN FLIGHT (truthful lane)
-- **Q-055** `run_metadata` false negative on proven GPS + the bfla mirror — IN FLIGHT (truthful lane)
+- **Q-059** the DEPLOYED platform is 59 commits behind the tree and `bake_drift_check.sh` structurally
+  cannot see it (it checks container-vs-image, never image-vs-tree). **CRITICAL — read it before
+  quoting any live-mission result**, because the running binary lacks the Q-051 reporting code
+  entirely and still carries the three adapters Q-057 deleted.
+- **Q-060** `_do_transport_posture` / `_do_header_trust` invent a default port from a scope entry that
+  has already dropped it, so they cannot audit ANY target on a non-standard port — i.e. the whole
+  local lab fleet.
+- **Q-054** `run_workflow` finding sink — **CLOSED**, all three sinks. `4bb5d2b` plus the
+  `_AUTO_STORE_TOOLS` wiring and the island pins inverted.
+- **Q-055 / Q-055b** `run_metadata` GPS false negative **CLOSED** `07710fc`; the bfla mirror **CLOSED**
+  `37a3edc` — its "authenticated" row was anonymous, which made the oracle VACUOUS on every target.
+- **The ledger `mode` key — CLOSED.** `main._tool_ledger()` never emitted `mode`, so
+  `report.arsenal_gap()` classified **zero** engines as tier-blocked and ~40 structurally-barred
+  engines were reported to the reader as "available but not selected". Reader half had landed; the
+  producer half never did. Fixed with a 5-test negative control, all 5 verified failing against a
+  mutant.
 - **Q-058** four defects the description gate surfaced, all in `tools.py` — `ready`, blocked only on
   the truthful lane releasing that file. Two are docstrings declaring the wrong permission tier; one
   is an advertised parameter (`hash_type`) the code never reads.
@@ -72,6 +86,83 @@ engines with **0 false positives**. Rules C/D/E were designed, measured and **re
 `_role_headers(inp, ...)`. `run_metadata` is **not gateable at all**: knowing its claim is false
 requires knowing the GPS IFD is tag `0x8825` rather than the string `"GPS"`, which is file-format
 knowledge held nowhere in this repo. Only running it catches it — see Q-055. Ledger: `docs/LEDGERS.md`.
+
+### Q-059 · The DEPLOYED platform is 59 commits behind the tree, and the bake gate cannot see it · **CRITICAL** · `ready`
+
+MEASURED by the arsenal lane against the live deployment, and this is the single most consequential
+finding of the cycle: **none of the Q-051 arsenal-reporting code exists in the running binary.**
+
+```
+docker exec apolaki-agent-1 python -c "import report; ..."
+arsenal_gap / technique_coverage / _technique_md / ledger_finding_disagreement / _arsenal_md  -> all False
+```
+
+All five exist in the tree. `docker-compose.yml` bind-mounts only `./ui:/app/ui:ro`; the Python engine
+code is BAKED, so a source commit does not reach a running mission until the image is rebuilt.
+**59 commits touched `agent/` since `apolaki-agent-1` started.** File-level, sha256 first 12:
+`planner.py` SAME, `tools.py` DRIFT, `report.py` DRIFT. Note the asymmetry — the permission model is
+current while the engine registry and the renderer are stale, so a conclusion drawn from one of those
+files does not transfer to the others.
+
+Consequences already confirmed: the three content-discovery adapters deleted in `466bae8` (Q-057) are
+**still registered and still dispatchable in the running deployment** (container `TOOL_PERMISSIONS`
+112 vs tree 111), and `run_mass_assign` / `run_ws_hijack` cannot fire in any current mission.
+
+**WHY THE EXISTING GATE MISSED IT, which is the actual ticket.** `scripts/bake_drift_check.sh`
+compares the RUNNING CONTAINER against a fresh container from the BAKED IMAGE. Both of those can be
+identical while the image itself is months behind `HEAD` — and in that state the gate prints
+`bake OK`. It was built for a real incident (code `docker cp`-ed into a container and never baked) and
+it closes that direction only. **The missing edge is IMAGE vs SOURCE TREE.** DoD: extend the gate with
+a third comparison, tree `HEAD` vs baked image, so "deployed" is a measured claim. A gate that checks
+two of the three edges is the declaration-vs-fact pattern in a shell script.
+
+DO NOT fix this by rebuilding mid-cycle: `docker compose build` SIGKILLs a running mission and three
+have died that way. Check `curl -s http://localhost:8000/missions` first.
+
+**GATE EXTENDED — `d862690`.** `bake_drift_check.sh` now checks all three edges and reports both
+classes before exiting, since they have different fixes. Verified by firing on the state it used to
+pass: edge 1, 17 modules differing; edge 2, **39 modules differing between tree and image** plus five
+never baked at all (`bench_contract.py`, `bench_juliet.py`, `description_gate.py`,
+`mass_assign_tool.py`, `ws_tool.py`). The description gate shipped hours earlier has never existed in
+a mission.
+
+**BEFORE ANYONE REBUILDS — already handled, `e6fb18a`, but read it.** The same edge found four modules
+that lived ONLY in the running container and in no commit: `acceptance.py`, `measure_browser.py`,
+`measure_cost.py`, `mission_breakdown.py`. The rebuild this ticket prescribes would have destroyed
+them. They are rescued into `scripts/measure/` with a README. **Re-run the gate and check the
+"modules DELETED from the tree but still live in the image" and container-only lines before every
+rebuild** — that is now the gate's most valuable output, not an aside.
+
+### Q-060 · Two engines cannot test ANY target on a non-standard port · **HIGH** · `ready`
+
+MEASURED live, root-caused, and reproduced deterministically in isolation by the arsenal lane. Both
+engines were DISPATCHED, so this is not a planner gap:
+
+| engine | calls | results | scope_blocks | findings |
+|---|---|---|---|---|
+| `run_transport_posture` | 1 | **0** | 1 | 0 |
+| `run_header_trust` | 6 | 5 | 1 | 0 |
+
+`run_transport_posture` is **100% dead on this target**; `run_header_trust` is only partially affected
+(it still tested 5 discovered URLs, which carry their port) and must not be reported as dead.
+
+Not a per-engine constant — `_run_transport_posture` derives the port correctly itself. The defect is
+in the two CALLERS, `agent/agent.py:2355` and `agent/agent.py:2395`:
+
+```
+u = s if "://" in s else "https://" + s.split("/")[0]   # _do_transport_posture
+u = s if "://" in s else "http://"  + s.split("/")[0]   # _do_header_trust
+```
+
+Both rebuild an origin from `scope.to_dict()["in_scope"]`, which has ALREADY dropped scheme and port,
+so the caller re-adds a default scheme and thereby **invents a port the operator never authorised**;
+the scope engine then correctly refuses it. Reproduced: `['http://juice-shop:3000']` normalises to
+`['juice-shop']`, becomes `https://juice-shop`, and `validate()` returns False.
+
+**Every Apolaki local lab runs on a non-standard port**, so `_do_transport_posture` has been incapable
+of auditing the pinned origin across the entire lab fleet. Capabilities lost with it, per
+`agent/engine_descriptor.py:135-139`: `tls_posture`, `cookie_scope_posture`, `http_security_headers`,
+`http_methods_audit`. Fix at the caller by carrying the scheme+port through, not by widening scope.
 
 ### Q-058 · Four defects the description gate surfaced, in `tools.py` · **MEDIUM** · `ready`
 

@@ -12,8 +12,8 @@ that retirement.** Updating it is not bookkeeping.
 
 | lane | owner | state |
 |---|---|---|
-| Truthful engines (Q-054/055/055b) | Claude | **live** — the workflow finding sink, metadata's GPS false negative, the bfla mirror |
-| Arsenal gap (Erwin's question) | Claude | **live** — run a real mission and READ the coverage sections; classify every idle engine into never-planned / skipped / ran-clean / errored |
+| Truthful engines (Q-054/055/055b) | — | **CLOSED.** All three sinks shut, metadata reads binary EXIF, and the bfla engine's "authenticated" row is no longer anonymous |
+| Arsenal gap (Erwin's question) | — | **CLOSED by measurement**, killed by a limit but wrote as it went. Found the deployment is 59 commits stale and two engines cannot test a non-standard port |
 | Description gate (Q-056) | — | **CLOSED.** PARTLY gateable: 2 rules at 0 FP over 111 engines, 3 rejected with numbers. `run_metadata` is not gateable by any static rule and only running it catches it |
 | Islands soundness (Q-050b) | — | **CLOSED.** 7 verdicts; 3 engines deleted outright |
 | Sessions / `Identity` (Q-032) | — | **CLOSED.** The anonymous authz row was carrying the mission's session |
@@ -34,6 +34,19 @@ retirement.
   engines including the entire SQLi surface; defaulting to `full` would enable state-changing writes
   and lab-calibrated traversal semantics against production targets. The evidence points at loosening
   `planner._ALLOWED`. **Nobody should ship a third proposal without deciding what `active` means.**
+- **THE DEPLOYED PLATFORM IS NOT THE TREE (Q-059). Read this before quoting any live-mission result.**
+  The running `apolaki-agent-1` is **59 commits** behind `agent/`. None of the Q-051 arsenal-reporting
+  functions exist in the running binary, and the three content-discovery adapters deleted in `466bae8`
+  are **still registered and dispatchable** there. Any report produced by the current stack has no
+  Arsenal-coverage and no Technique-coverage section — not because the arsenal is idle, but because
+  the renderer was never baked. `scripts/bake_drift_check.sh` cannot catch this: it compares the
+  running container against the baked image and would print `bake OK` in exactly this state. The
+  unchecked edge is image-vs-tree.
+- **A red test is a hypothesis about the code, not a fact about it (2026-08-17).** A full suite read
+  `1 failed / 2741 passed` and I nearly attributed it to the slice I had just written. The failing
+  test drives the live lab by compose DNS name; my throwaway container was on the default bridge, so
+  `juice-shop` did not resolve. On `--network apolaki_default` it passes 39/39. **Every suite run
+  needs `--network apolaki_default`.**
 - **`confirm_create_object_idor` declares `ACTIVE:` while registered `INTRUSIVE` (Q-058).** State this
   precisely or it reads as a safety hole, which it is not: `_run_tool` enforces against
   `TOOL_PERMISSIONS`, which correctly says INTRUSIVE. **The enforcement is right and the docstring is

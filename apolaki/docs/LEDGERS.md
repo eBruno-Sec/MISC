@@ -339,6 +339,57 @@ defend.
 
 ---
 
+## ★★ THE DEPLOYED PLATFORM WAS NOT THE TREE — 59 commits of drift, invisible to the gate built for drift. 2026-08-17
+
+The arsenal lane was sent to answer Erwin's question ("which tools are NOT being used?") by running a
+real mission and reading the Q-051 coverage sections. It found the sections could not render **at
+all**, because none of the five Q-051 functions exist in the running binary. All five are in the tree.
+
+That reframes the question. The sections were not empty because the arsenal was idle; they were empty
+because **the renderer had never been baked into the image that serves missions**. `docker-compose.yml`
+bind-mounts only `./ui`, so engine code reaches a mission only through a rebuild — and 59 commits had
+touched `agent/` since the container started. Same drift means the three content-discovery adapters
+deleted in `466bae8` are **still registered and dispatchable in the deployment** (container
+`TOOL_PERMISSIONS` 112 vs tree 111), while `run_mass_assign` and `run_ws_hijack` cannot fire at all.
+
+**The part worth keeping.** `scripts/bake_drift_check.sh` exists precisely to catch drift, was built
+after a real incident, and **would print `bake OK` in this exact state** — it compares the RUNNING
+CONTAINER against the BAKED IMAGE, and those two agreed perfectly. The unchecked edge is IMAGE vs
+SOURCE TREE. A gate covering two of three edges is the declaration-vs-fact pattern written in shell:
+it reports on the relationship it can see and stays silent about the one that mattered. Filed as
+Q-059. The lane did not rebuild, correctly — a build SIGKILLs a running mission.
+
+Second confirmed defect, root-caused and reproduced in isolation (Q-060): `_do_transport_posture` and
+`_do_header_trust` rebuild an origin from `scope.to_dict()["in_scope"]`, which has already dropped the
+scheme and port, so they re-add a default scheme and **invent a port the operator never authorised**;
+the scope engine then correctly refuses it. Every Apolaki lab runs on a non-standard port, so
+`transport_posture` has been dead across the entire fleet. Blast radius stated exactly rather than
+dramatically: `run_transport_posture` 1 call / 0 results (fully dead), `run_header_trust` 6 calls / 5
+results (partially affected, must not be called dead).
+
+Third, and it was mine: **`main._tool_ledger()` never emitted `mode`**, so `arsenal_gap()` classified
+**zero** engines as tier-blocked and ~40 structurally-barred engines — `run_sqli`, `run_sqlmap`,
+`run_ssrf`, `run_cmdi`, `run_xxe`, `run_zap` — were reported to the reader as *"available but not
+selected"*, i.e. the planner declined them, when the permission tier had barred them outright. Those
+two classes have opposite fixes. The reader half (mode-then-strategy) had landed; the producer half
+never did, and the documented `strategy` fallback could never fire because the vocabularies are
+disjoint (`manual|deterministic|low_ai|agentic` vs `passive|active|full`). Fixed with a 5-test
+negative control, every one verified failing against a mutant built with sed after a Python-based
+mutation silently no-opped — the count check caught it, which is why that check exists.
+
+**The gate's first act was to prevent data loss.** Its new edge reported four modules living in
+`apolaki-agent-1` and in no commit anywhere: `acceptance.py`, `measure_browser.py`, `measure_cost.py`,
+`mission_breakdown.py`, `docker cp`-ed in by the throughput lane. The prescribed fix for Q-059 is
+`docker compose build agent && docker compose up -d agent`, and that would have **destroyed them
+permanently**. Checked before rebuilding, verified free of secrets and machine-specific paths, and
+committed to `scripts/measure/` — deliberately not `agent/`, since four never-imported modules in the
+engine namespace would give the dead-code and island gates real work for nothing. The standing rule
+about never relying on state inside a running container arrived as a bill rather than a principle.
+
+**42 of 112 engines are INTRUSIVE and cannot be selected at `mode=active` at all.** That is the
+mechanical reason an unauthenticated active scan yields leads rather than confirmations: by design,
+not defect. It also gives Q-052 its first empirical footing.
+
 ## ★ Q-056 — "says X, does Y" is PARTLY gateable, and the rejections are the result. 2026-08-16
 
 Two narrow rules ship; **three were designed, measured, and rejected with their numbers recorded**.
