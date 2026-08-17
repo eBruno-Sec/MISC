@@ -20,6 +20,7 @@ PROVENANCE OF EVERY FIXTURE
                               positives rule B has to NOT produce.
 """
 import pathlib
+import re
 
 import pytest
 
@@ -235,15 +236,23 @@ def test_rule_b_catches_the_dangerous_direction():
 # ratchet, not an allowlist that can absorb anything: a contradiction on any engine NOT named here
 # fails the suite. Entries leave this set only when the description or the registration is corrected
 # — never by editing the description to fit the code, which is the same defect wearing a hat.
-KNOWN_OPEN = {
-    # Q-056. Docstring declares PASSIVE; TOOL_PERMISSIONS registers ACTIVE. The engine fetches the
-    # target's favicon, so ACTIVE is the correct registration and the docstring is the wrong half.
-    "run_external_surface",
-    # Q-056 (found BY this gate, not by the audit that motivated it). Spec description and
-    # TOOL_PERMISSIONS both say INTRUSIVE; the implementation docstring opens ACTIVE. The engine
-    # creates and deletes objects on a live target.
-    "confirm_create_object_idor",
-}
+KNOWN_OPEN = set()
+# EMPTY as of Q-058, and empty is the strongest state this set can be in, not an absence of checking:
+# `test_no_new_description_contradiction_in_tools_py` now demands ZERO contradictions in the live tree,
+# `test_the_gate_actually_reads_the_live_tree` is the positive control proving the audit read 111
+# registered engines to get that zero, and `test_q058_...` below pins the two specific docstrings.
+#
+# What used to be here, and why each left (fixes in the SAME commit that emptied the set):
+#   * `run_external_surface`     — Q-056 found it, Q-058 fixed it. The docstring declared PASSIVE while
+#     TOOL_PERMISSIONS registered ACTIVE. The engine GETs `/favicon.ico` from the in-scope target, so
+#     ACTIVE was the correct registration and the docstring was the wrong half. Now opens `ACTIVE:`
+#     with the "mostly passive" nuance in prose AFTER the token.
+#   * `confirm_create_object_idor` — Q-056 found it (the gate itself did, not the audit that motivated
+#     the gate), Q-058 fixed it. Spec description and TOOL_PERMISSIONS both said INTRUSIVE; only the
+#     implementation docstring opened ACTIVE. The engine POSTs an object to a live target and DELETEs
+#     it in Full mode. Now opens `INTRUSIVE (bounded, self-cleaning):`.
+#
+# Neither fix touched a registration or softened a claim: the docstring was the wrong half in both.
 
 
 def _tools_source():
@@ -272,11 +281,49 @@ def test_the_gate_actually_reads_the_live_tree():
         sorted(n for n in facts.descriptions if not facts.literals.get(n))
 
 
-@pytest.mark.parametrize("engine", sorted(KNOWN_OPEN))
-def test_known_open_contradictions_are_still_the_ones_recorded(engine):
+def test_known_open_contradictions_are_still_the_ones_recorded():
     """If a KNOWN_OPEN entry stops firing, the defect was fixed and the ledger owes an update. This
-    is what stops the set above from decaying into a permanent excuse."""
+    is what stops the set above from decaying into a permanent excuse.
+
+    Deliberately NOT parametrized over KNOWN_OPEN (Q-058). `parametrize` on an empty set does not run
+    zero assertions, it emits one SKIPPED test with reason "got empty parameter set" — and a skip that
+    looks like a pass is the exact failure this file exists to refuse. As a single test it runs, and
+    keeps running, whatever the size of the set."""
     live = {v.engine for v in dg.audit(_tools_source())}
-    if engine not in live:
-        pytest.fail(f"{engine} no longer contradicts itself — remove it from KNOWN_OPEN and record "
-                    f"the fix in docs/handoff/descriptions.md")
+    stale = sorted(KNOWN_OPEN - live)
+    assert not stale, (
+        f"{', '.join(stale)} no longer contradicts itself — remove it from KNOWN_OPEN and record "
+        f"the fix in docs/handoff/descriptions.md")
+
+
+@pytest.mark.parametrize("engine,registered,phrase", [
+    ("run_external_surface", "ACTIVE", "ACTIVE:"),
+    ("confirm_create_object_idor", "INTRUSIVE", "INTRUSIVE (bounded, self-cleaning):"),
+])
+def test_q058_the_two_recorded_tier_defects_are_fixed_in_the_live_tree(engine, registered, phrase):
+    """Q-058 items 1 and 2, asserted on the LIVE tree rather than on a pinned fixture.
+
+    Three assertions, in the order that matters. The REGISTRATION must be unchanged: both engines
+    were fixed by correcting the docstring, and a fix that quietly re-registered the engine at a
+    softer tier would pass a gate that only compared the two. The docstring must declare EXACTLY the
+    registered tier as a bare token. And the softened phrasings must be gone by name, so that
+    reintroducing `ACTIVE-light` fails here even if some future change to rule B stopped catching it.
+    """
+    facts = dg.analyse(_tools_source())
+    assert facts.permissions[engine] == registered, "registration moved; the docstring was the wrong half"
+    doc = facts.docstrings[engine]
+    assert dg.declared_tiers(doc) == [registered], dg.declaration_phrase(doc)
+    assert doc.startswith(phrase), doc[:80]
+
+
+def test_q058_no_hyphen_softened_tier_survives_anywhere_in_tools_py():
+    """A hedge that names a tier only to soften it must not exist in the file at all, in ANY surface.
+
+    Rule B only inspects the leading declaration phrase, so `ACTIVE-light` further down a docstring
+    would be invisible to it while still being read by the next engineer. This is a whole-file grep
+    for the hedge shape, which is cheap and needs no AST. It is deliberately narrower than "no hyphen
+    after a tier ever" so it cannot start flagging prose like `PASSIVE-only`."""
+    source = _tools_source()
+    assert len(source) > 100_000, len(source)          # positive control: the file was actually read
+    hedged = sorted(set(re.findall(r"\b(?:PASSIVE|ACTIVE|INTRUSIVE)-\w+", source)))
+    assert hedged == [], hedged

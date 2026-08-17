@@ -2308,11 +2308,17 @@ class ToolRegistry:
     }
 
     async def _confirm_create_object_idor(self, inp: dict) -> ToolResult:
-        """ACTIVE: CREATE-OBJECT IDOR (CHAD C). Create a uniquely-owned object as the OWNER persona,
-        then try to READ (and, in Full mode only, DELETE) it as the ATTACKER persona. Because WE
-        created the object with a private marker, ownership is DEFINITIVE — a cross-persona hit is a
-        CONFIRMED access-control break (no similarity guessing). Bounded, scope-gated, and cleans up
-        the object it created. Roles are referenced by name; the session token is resolved server-side."""
+        """INTRUSIVE (bounded, self-cleaning): CREATE-OBJECT IDOR (CHAD C). Create a uniquely-owned
+        object as the OWNER persona, then try to READ (and, in Full mode only, DELETE) it as the
+        ATTACKER persona. Because WE created the object with a private marker, ownership is
+        DEFINITIVE — a cross-persona hit is a CONFIRMED access-control break (no similarity
+        guessing). Bounded, scope-gated, and cleans up the object it created. Roles are referenced
+        by name; the session token is resolved server-side.
+
+        The tier is INTRUSIVE, not ACTIVE, and the qualifier belongs AFTER the token: this engine
+        POSTs a new object to a live target and (in Full mode) issues a DELETE. `TOOL_PERMISSIONS`
+        and the spec description have always said INTRUSIVE and the dispatcher has always enforced
+        it; this docstring said ACTIVE and was the one half that was wrong (Q-058)."""
         import create_object_idor as _co
         base = (inp.get("base_url") or "").strip().rstrip("/")
         owner, attacker = inp.get("owner"), inp.get("attacker")
@@ -2583,16 +2589,23 @@ class ToolRegistry:
                                       "lead_findings": leads}), confirmed)
 
     async def _run_external_surface(self, inp: dict) -> ToolResult:
-        """PASSIVE/ACTIVE-light external attack-surface expansion (#114): ASN + BGP prefix, favicon pivot
-        hash, permuted subdomain candidates, and a certificate-transparency harvest.
+        """ACTIVE: external attack-surface expansion (#114): ASN + BGP prefix, favicon pivot hash,
+        permuted subdomain candidates, and a certificate-transparency harvest.
+
+        The tier is ACTIVE and the qualifier belongs AFTER the token, never inside it (Q-058). Most of
+        the work here is passive (permutation is pure computation; ASN and CT read third parties), but
+        step 2 sends a GET for `/favicon.ico` to the IN-SCOPE target itself, and one request to the
+        target is what ACTIVE means. This docstring used to open with a hyphen-softened compound tier,
+        which reads SOFTER than the tier this engine is registered and dispatched under.
 
         Everything here produces CANDIDATES, not findings. A permuted name is a guess, a CT entry proves
         only that a certificate was issued, and neither means the host exists, is live, or is yours — so
         results are seeded as unverified graph candidates and NEVER promoted without a live check.
 
-        The CT fetch is the only outbound call and it is gated by the intel-source allowlist (ct_logs /
-        CT_LOGS_ENABLED); with the gate off, the query is returned as a string for the operator instead of
-        being executed."""
+        Two calls leave this process: the favicon GET above, and the CT fetch, which is additionally
+        gated by the intel-source allowlist (ct_logs / CT_LOGS_ENABLED); with that gate off, the query
+        is returned as a string for the operator instead of being executed. The ASN lookup delegates to
+        `dns_recon.ip_intel`, which resolves and may query its own sources."""
         import intel_sources as _isrc
         import recon_expand as _rx
         from urllib.parse import urlsplit
