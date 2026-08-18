@@ -1292,3 +1292,149 @@ budget change against this item: raising the cap cannot fix a case the cap alrea
 2. Delete the run-specific claim from `agent/agent.py:219`. A source comment asserting the state of
    one benchmark run rots the moment the next run lands, and this one is now measurably wrong in the
    word that matters.
+
+### Q-030 / Q-035 / Q-036 - they are NOT in `docs/QUEUE.md`. They live in `docs/QUEUE_ARCH.md`.
+
+First, a queue-hygiene fact that matters more than any of the three: `docs/QUEUE.md` mentions
+`Q-030/035/036` in four places (lines 115, 171, 690, 1042) and **contains none of their bodies**. The
+tickets are in `docs/QUEUE_ARCH.md`, a separate document. A reader working the queue cannot reach
+them from the queue.
+
+### Q-030 - the canonical execution cycle - QUEUE.md's marker is WRONG. Substantially BUILT; two D-items remain.
+
+`docs/QUEUE.md:1042` says **"Q-030 is designed, not built"**. `docs/LEDGERS.md:2106` says
+**"Q-030 is complete as wiring. It is not yet a capability win."** Both are in the Coordinator's own
+documents and they contradict each other. MEASURED against the code, the ledger is closer.
+
+`QUEUE_ARCH.md` gives the build order as D3/D5/D6/D13, then D1+D15+D14, then D2+D4, then U1
+("Q-030 is complete at this point").
+
+**U1 - DONE.** `agent.py:3290` "The ranked actions the graph recommends, as executable steps,
+bounded and deduped"; `agent.py:3422` "execute the ranked actions through this same executor";
+`agent.py:3255` dispatches `chase_capability`. Matches the ledger's measured before/after at
+`92e678b` (`ranked_dispatched 0 -> 4`).
+
+**D5 - DONE.** `_seed_and_project_graph` now passes the capability a confirmed finding unlocks
+(`agent.py:3028`, "D5: the capability a confirmed finding unlocks"), and its docstring records the
+old measurement (`finding.enables: [[], []]`, `next_best_actions(): []`).
+
+**D13 - DONE.** The same function now links: `g.link(hid, eid, "serves", source="recon")`. Its
+docstring still describes the defect ("to call `g.link` nowhere at all"), as history.
+
+**D3 - DONE, and solved BETTER than the ticket specified.** `QUEUE_ARCH.md` calls D3 "one line for an
+immediate coverage gain". MEASURED: that one line would have been INERT, and the code says so in
+place. `planner.py:140-158`:
+
+```
+D3, and the reason the obvious fix does not work. ... the tempting patch is to pass `params=` into
+the step and let the engine iterate it. MEASURED: that patch is inert. `_run_sqli`, `_run_nosqli`,
+`_run_cmdi` and `_run_xss` all build their probe target with `xss_tool.set_param(url, p, v)`, which
+REPLACES an existing parameter and silently returns the url unchanged when the parameter is absent
+-- so probing a known-but-absent parameter sends the baseline URL, the baseline and the probe fail
+identically, and the endpoint is reported clean.
+```
+
+That is the "probe with observed values" failure mode exactly. The shipped fix carries the parameters
+on the URL (`merge_observed_params`), which fixes every engine at once including the five that never
+read `inp["params"]`. WIRED, not an island: called at `planner.py:292`, with
+`agent/tests/test_planner_param_delivery.py`.
+
+**D14 - STILL LIVE.** MEASURED, `agent/agent.py:3436-3448`: the batch execution loop is
+
+```python
+for step in batch:
+    if self.stop_event.is_set(): ... return
+    done.add(step["key"])
+    if self._reject_hostless_step(step): continue
+    steps += 1                      # <- incremented here
+    ...                             # <- MAX_STEPS is NOT re-checked in this loop
+```
+
+The only budget check is the OUTER `while steps < MAX_STEPS` (`agent.py:3364`). So the budget
+overshoots by up to `len(batch)-1`, exactly as filed.
+
+**D15 - NOT DONE.** MEASURED: `fact_signature` does not exist anywhere. Convergence is still
+`self._surface_size()` (`agent.py:3923`), used as the criterion at `agent.py:3361` and `:3471`:
+
+```python
+if cyc < cycles and self._surface_size() <= before:   # stop early once a cycle stops finding surface
+```
+
+Worth noting in fairness to the code: this IS a fixpoint criterion, not the "hardcoded pass count"
+`QUEUE_ARCH` forbids - so D1's worst form is gone. It is simply measured by four flat counters that
+cannot see personas, sessions, capabilities, params, objects, services or components. **D15 is the
+substantive remainder of Q-030.**
+
+**Verdict: Q-030 is NEEDS A DECISION, and the decision is a re-scope.** It should be re-marked from
+"designed, not built" to "built except D14 and D15", the QUEUE/LEDGERS contradiction resolved, and
+the two remaining D-items promoted into `QUEUE.md` as small independent tickets. D2/D4 were not
+individually verified by this lane and are the honest UNVERIFIED residue.
+
+### Q-035 - the model A/B experiment - OPEN, correctly held, and it is NOT a defect.
+
+MEASURED: the only occurrences of the experiment anywhere in `docs/` are the ticket text itself
+(`QUEUE_ARCH.md:75, 82`) and the queue's one-line index row (`QUEUE.md:1042`). No `tokens-to-green`
+figure, no per-model run, no result table exists in the repository.
+
+**Verdict: OPEN and UNSTARTED, which is the correct state.** This is not a defect ticket and it
+should not be ranked against defect tickets. The ticket's own discipline is the valuable part
+("There is no measured evidence in this repository, so no recommendation has been given, twice") and
+it should be preserved verbatim. It is a self-contained experiment that costs runs, not code.
+
+### Q-036 - fold the 15 architecture defects into the canonical queue - OPEN, but its premise has DECAYED. Do not fold it as written.
+
+MEASURED, the folding has not happened:
+
+```
+grep -c "D1\b|D2\b|D3\b|D5\b|D6\b|D13\b"  docs/QUEUE.md   ->  0
+grep -n  "architecture.md"                docs/QUEUE.md   ->  no hits
+```
+
+The 15 defects are still only in `docs/handoff/architecture.md:991-1005`, each with `file:line` and a
+named fix.
+
+**The premise has decayed, and this is the finding.** Q-036's whole argument is "they live in a
+handoff file, which means they are evidence, not work". MEASURED above, **at least four of the
+fifteen (D3, D5, D13, and U1's dependency) have since been FIXED in product code**, and D3 was fixed
+by rejecting the fix the architecture doc proposed. Folding the list as written would create tickets
+for closed work and would re-propose a patch the codebase has already measured as inert - the exact
+queue rot Q-009 was deleted for.
+
+**Verdict: OPEN, but REWRITE before working.** The step is no longer "fold 15 defects"; it is
+"re-verify the 15 against current code, fold the survivors". On this lane's measurements the survivor
+list starts with **D14 and D15** and D2/D4/D6/D7-D12 are unverified. Recommend re-scoping Q-036 to
+that re-verification, and recording that D3's proposed fix is refuted in place at `planner.py:140`.
+
+### B-011+ - not a ticket. A ROADMAP ROW, and the UNSUPPORTED label is now CONFIRMED rather than "likely".
+
+`B-011+` is not a defect and has no ticket body. It is a row in a matrix programme
+(`docs/BENCHMARK_MATRIX.md:190-234`) listing roughly thirty prospective future benchmark targets
+(B-011 Juliet C/C++, B-012 SARD subsets, B-013 other OWASP Benchmark ports, B-020..B-027 language
+ecosystems, B-040..B-075 AD/K8s/cloud/OT/mobile). `QUEUE.md:1043` carries it as a single index row
+and calls it a "matrix programme", which is accurate.
+
+MEASURED, the one factual claim attached to it. `BENCHMARK_MATRIX.md:191` says B-011 is
+**"likely `UNSUPPORTED`: Apolaki has no C/C++ analysis"**. That hedge can be removed - it is now a
+measured fact:
+
+```
+codereview.review_source()  (the single LANGUAGE DISPATCH entry point, codereview.py:1282)
+   looks_like_java  -> review_java
+   looks_like_python -> review_python
+   looks_like_js    -> review_js
+   otherwise        -> return []          <- a .c/.cpp/.cc file returns NO findings, silently
+
+bench_juliet.py:62   language="Java"
+bench_juliet.py:64   archive_name="2017-10-01-juliet-test-suite-for-java-v1-3.zip"
+bench_juliet.py:109  if info.is_dir() or not info.filename.endswith(".java"): continue
+```
+
+Three analyzers, none of them C or C++, and the Juliet harness is hardcoded to the Java suite at the
+archive level. A C/C++ corpus would score **0 TP / 0 FP** and the `return []` default means it would
+do so without erroring - the "tell a real zero from a silent one" shape again, at benchmark scale.
+
+**Verdict: DELETE `B-011+` from the queue's ticket list.** It is a roadmap, it already has a home in
+`BENCHMARK_MATRIX.md`, and carrying it beside defect tickets makes the open count meaningless. Keep
+the single index row that points at the matrix; drop the hedge on B-011 and record `UNSUPPORTED` as
+measured, with the note that any future C/C++ run must assert a non-zero analyzer rather than
+accepting `[]`.
