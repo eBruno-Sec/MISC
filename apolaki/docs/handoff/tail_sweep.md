@@ -248,3 +248,193 @@ mission exists between 2026-08-12 and 2026-08-17, so those were lane test harnes
 **Verdict: Q-023 should be REWRITTEN, not worked.** There is no wiring defect to fix. The honest
 remaining item is a coverage gap - no mission has been run with `enable_zap=True` under the
 current planner - and it is closed by running one, not by editing code.
+
+### Q-003 - postMessage as a DOM-XSS source (WSTG-CLNT-11) - OPEN, unchanged, nothing built
+
+MEASURED:
+
+```
+grep -rn "postMessage|MessageEvent|onmessage" --include=*.py agent/     ->  0 hits
+grep -rn "postMessage" --include=*.py --include=*.js --include=*.html . ->  0 hits (whole repo)
+```
+
+POSITIVE CONTROL that the grep was looking at the right file: the same search over `dom_tool.py`
+for its existing sources returns `dom_tool.py:7  "(location.hash / a query param)"` - the two
+sources the ticket says are the only ones. They still are.
+
+Live registry probe: techniques mapped to `WSTG-CLNT-11` = `['jsonp_info_leak']`; no record
+mentions postMessage anywhere in `id`, `summary` or `detect`.
+POSITIVE CONTROL: techniques mapped to `WSTG-SESS-06` = `['session_lifecycle']`, so the same query
+does resolve a mapping when one exists.
+
+Live `wstg_catalog.coverage()`: `WSTG-CLNT-11 -> none (not yet implemented)`.
+
+**Verdict: OPEN exactly as written.** The ticket analysis is still accurate; nothing has moved. It
+remains the cheapest of the capability tickets - a new SOURCE for a working confirmation engine,
+not a new engine.
+
+### Q-004 - unrestricted resource consumption (CWE-770/799) - OPEN, with one partial the ticket did not know about
+
+MEASURED, live registry: the only technique of 88 carrying CWE-770/799/400 is
+**`graphql_batching_enabled` (CWE-770, vuln_class `misconfiguration`)** - `graphql_tool.py:254`
+reports "Rate-limit bypass and brute-force amplification via batched operations".
+POSITIVE CONTROL: techniques whose cwe contains 89 = `['sqli_auth_bypass', 'sqli_union_extract',
+'sqli_structural']`, so the filter does resolve real records.
+
+Live `wstg_catalog.coverage()`:
+
+```
+WSTG-BUSL-05 -> PARTIAL: run_race covers single-use/limit races
+WSTG-BUSL-07 -> none (not yet implemented)
+```
+
+The ticket premise ("a whole OWASP API Top 10 slot with no engine") is **slightly overstated and
+otherwise correct**: there is no amplification-multiplier engine, no `429`/`Retry-After`/
+`X-RateLimit-*` observation engine, and no pagination-bound test. `race_tool.py` does have
+`summarize`, `best_round`, `verify_delta`, `analyze_race` - the synchronized-parallel primitive and
+status accounting the ticket credits it with - but nothing calls them for a limit question.
+
+**Verdict: OPEN.** Amend the ticket to record the adjacent partial (`graphql_batching_enabled`,
+batching amplification only) so the next lane does not rediscover it.
+
+### Q-005 - server-side prototype pollution (CWE-1321) - OPEN, root cause still exactly true
+
+MEASURED: every CWE-1321 site in the codebase is CLIENT-side.
+
+```
+dom_tool.py:226          prototype_pollution / CWE-1321 (browser gadget canary)
+dom_tool.py:346          dom_xss / CWE-1321 (gadget -> dom-xss)
+candidate_pipeline.py:60 "browser prototype-pollution canary (__proto__ write observed at runtime)"
+codereview.py:83-86      comment says "client-side prototype pollution"; the rule is a source regex
+asvs_model.py:227-229    engine ("run_dom_audit","run_js_review"), violated_by ("prototype_pollution",)
+dependency_intel.py:933  family prototype_pollution from a DEPENDENCY advisory, not a live probe
+```
+
+Live registry: the single `prototype_pollution` technique (`techniques.py:772`) has
+`validated_on=["ginandjuice"]` and `maps_to={"ginandjuice": ["Client-side prototype pollution
+(DOM, query)"]}` - it names itself client-side in its own evidence map. No engine sends
+`{"__proto__":{...}}` in a body and re-reads a subsequent response.
+
+**Verdict: OPEN, unchanged.** One thing the next lane needs: the ticket already decided the hard
+part - ship gated as `execution: "operator"`, because the blast radius is cross-user and persists
+until restart. That decision collides with a measured fact recorded under Q-020: **all 88
+techniques carry `execution: "auto"`; the field has exactly one value in the whole registry.** A
+`operator` record would be the first ever, and that gate has never been exercised. Worth knowing
+before the effort estimate is trusted.
+
+### Q-006 - HTTP request smuggling / desync (CWE-444) - DECISION ALREADY MADE AND ENFORCED. Tier 1/2 unbuilt.
+
+MEASURED - the refusal is not a marker, it is live code inside a tested structure:
+
+```
+wstg_catalog.py EXCLUDED["WSTG-INPV-15"] =
+  "request SMUGGLING desync can affect OTHER users (no-collateral) - refused;
+   CRLF/splitting via header_injection is covered"
+
+live coverage():  WSTG-INPV-15 -> EXCLUDED
+                  tally {'full': 60, 'partial': 25, 'none': 24, 'excluded': 5}, full_pct 55.0
+```
+
+The exclusion is counted deliberately (`tally['excluded']`), not lost in `none`.
+
+MEASURED - Tier 1 and Tier 2 do not exist: no technique of 88 carries CWE-444 or "smuggl" in its id
+or summary (`hits: []`). The only CWE-444 in the codebase is `cache_tool.py:67`, which self-labels
+"CWE-444-adjacent: cache-key" - a different bug.
+
+**Verdict: this is not a ready ticket, it is a STANDING DECISION plus an unstarted option.** Tier 3
+is refused permanently and correctly, and the refusal is enforced where the coverage report can see
+it. Tier 1 (hop-count / header-mutation differential) and Tier 2 (CL.TE timing differential) were
+never begun.
+
+**Recommend DELETE Q-006 and leave the refusal where it already lives.** If Tier 1/2 are ever
+wanted they are a new ticket with a different premise. As written, most of the ticket re-decides
+something the code already decided, and it carries the highest effort estimate of the six for a
+detection-only capability.
+
+### Q-007 - `weak_password_reset` phantom capability - OPEN, CONFIRMED, now UNBLOCKED
+
+The 2026-08-10 pass recorded "MEASURED - true" and recommended STRIP-not-build, blocked on Q-001.
+Q-001 has now shipped. **Nothing else has moved.** Re-measured live:
+
+```
+any engine name containing reset/password/passwd across
+  CLAUDE_TOOLS | TOOL_PERMISSIONS | _run_* methods        ->  []
+POSITIVE CONTROL, same probe, names containing "sqli"     ->  ['run_auth_sqli','run_form_nosqli',
+                                                              'run_nosqli','run_path_sqli',
+                                                              'run_sqli','run_sqli_structural']
+
+engine_descriptor.PRECONDITIONS["weak_password_reset"] ->  ['has_login']            (still there)
+engine_descriptor.EFFECTS["weak_password_reset"]       ->  {'establishes': ['authenticated'],
+                                                           'invalidates': ['authenticated']}
+EFFECTS entries total                                  ->  13
+EFFECTS entries with a NON-EMPTY invalidates           ->  1   (that one)
+```
+
+**The consequence, measured rather than argued** - `engine_descriptor.conflicts()` returns:
+
+```
+[('weak_password_reset', 'authenticated', 'cache_deception'),
+ ('weak_password_reset', 'authenticated', 'jwt_forge'),
+ ('weak_password_reset', 'authenticated', 'jwt_key_confusion'),
+ ('weak_password_reset', 'authenticated', 'session_fixation'),
+ ('weak_password_reset', 'authenticated', 'session_lifecycle'),
+ ('weak_password_reset', 'authenticated', 'weak_2fa_bypass')]
+```
+
+**6 of 6 conflict rows are produced by the one engine that does not exist.** The entire negative-
+effects half of the planner model is generated by a phantom. Row 5 is the sharpest version of it:
+the phantom is declared to invalidate the precondition of `session_lifecycle`, the engine that
+actually does destroy sessions.
+
+And `session_lifecycle` itself declares no effects at all:
+
+```
+engine_descriptor.PRECONDITIONS["session_lifecycle"] -> ['has_login', 'authenticated']
+engine_descriptor.EFFECTS["session_lifecycle"]       -> ABSENT
+```
+
+So the re-homing recommended on 08-10 has not been done, and its dependency is now satisfied.
+
+**One correction to that recommendation, MEASURED.** It said "set `solver_only=True` (the field
+exists)". It does not:
+
+```
+"solver_only" in TECHNIQUES["weak_password_reset"]   ->  False
+records anywhere carrying a solver_only key (of 88)  ->  []
+```
+
+The 25 field names on a technique record are: backfill_claim, cleanup, cwe, detect,
+evidence_requirements, execution, exploit, fixture_source, id, maps_to, mitre, needs_fixture,
+negative_control, oracle, owasp, pack, permission, refs, replayable, safety, summary, transferable,
+validated_on, vuln_class, wstg. What the record DOES carry is `backfill_claim: ['juiceshop']`,
+`validated_on: []` and `execution: 'auto'` - the registry already marks the lab claim as a backfill
+and the validation list as empty, so the honest signal exists under a different name.
+
+**Verdict: OPEN, high value, and the smallest change on this list.** Three edits, no new engine:
+drop `weak_password_reset` from `PRECONDITIONS` and `EFFECTS`; add
+`"session_lifecycle": {"establishes": [], "invalidates": ["authenticated"]}` to `EFFECTS`; keep the
+phantom out of `conflicts()`. The negative-effects model then rests on a technique with a real,
+dispatched executor.
+
+WARNING for whoever takes it: a test pinning `conflicts()` to a non-empty list passes before AND
+after, so it certifies nothing. The guard has to assert that every id appearing in `conflicts()`
+resolves to a dispatchable engine - otherwise the declaration-vs-fact trap applies to the fix
+itself.
+
+### Q-009 - "audit findings pending verification" - DELETE. It is a CONTAINER, fully re-homed.
+
+Q-009 lists six sub-claims. All six were settled by the 2026-08-10 pass and each now has its own
+ticket:
+
+| Q-009 sub-claim | now | state |
+|---|---|---|
+| retest scope guard fails open | Q-018 | DISPROVED as a live defect |
+| `PUT /findings` bypasses `findings_gate` | Q-013 | CLOSED `3addb1c` + `42e1544` |
+| operator lead-confirmation immediately demoted | Q-014 | CLOSED `a1cdb8d` |
+| `get_logs` oldest-first | Q-017 | see below |
+| `risk_signals` unfiltered twin | Q-015 | see below |
+| `_read_controls` returns `[]` on failure | Q-016 | see below |
+
+**Verdict: DELETE Q-009.** It holds no content of its own. Leaving it is exactly the queue rot the
+header warns about: a reader who trusts it re-verifies six things that are already tracked, two of
+which are closed.
