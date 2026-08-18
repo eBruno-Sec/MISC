@@ -20,7 +20,9 @@ destroys a condition a later step needs.
 **Negative effects are the reason this is not just a graph walk.** §4.4's Sussman anomaly is the standing
 counterexample: achieving two goals independently and concatenating the plans does not work when the second
 plan deletes what the first established. `plan()` applies `invalidates` when it expands a state, so a path
-through `weak_password_reset` genuinely loses `authenticated` rather than silently keeping it.
+through `race_condition` genuinely loses `authenticated` rather than silently keeping it — MEASURED in
+Q-074 on the shipped `_run_race`, which raced a credential-rotation form with the mission's own session
+and took the scan's `GET /api/me` from (200, True) to (401, False).
 
 **Additive by construction.** Nothing here is called by the existing precondition path; `plan_techniques`
 is untouched. This adds an answer Apolaki could not previously give, and cannot change an answer it already
@@ -60,7 +62,9 @@ def successor(descriptors, observations, technique_id) -> frozenset:
     """The state after running `technique_id`. Adds `establishes`, then removes `invalidates`.
 
     Removal comes SECOND and deliberately: a technique that both establishes and invalidates the same
-    observation (`weak_password_reset` rotates the credential it just used) must end without it. Getting
+    observation (a credential rotation that logs you in and then evicts the session) must end without
+    it. No SHIPPED entry has that shape today — `race_condition` establishes nothing — so the ordering
+    is pinned over a synthetic descriptor in `tests/test_effect_search.py` instead. Getting
     this order wrong is precisely the deleted-condition bug §4.4 warns about, and it would be invisible —
     the planner would simply produce plans that fail in the field. Pure."""
     d = descriptors.get(technique_id)
@@ -190,13 +194,32 @@ def breaks(descriptors, observations, technique_id) -> list:
     """Engine ids that STOP being applicable because this one ran. The §4.4 warning, per action: if this is
     non-empty, run those engines first or accept losing them.
 
-    Excludes the technique itself. An engine that deletes its own precondition — `weak_password_reset`
-    consumes the login it just used — always appears in its own `before - after`, which is arithmetically
-    true and useless for ordering: "run rotate before rotate" is not advice. Reporting it would bury the
-    real conflicts in self-references. Pure."""
+    Excludes the technique itself. An engine that deletes its own precondition — a rotation that consumes
+    the login it just used — always appears in its own `before - after`, which is arithmetically true and
+    useless for ordering: "run rotate before rotate" is not advice. Reporting it would bury the real
+    conflicts in self-references. Pure."""
     before = set(applicable(descriptors, observations))
     after = set(applicable(descriptors, successor(descriptors, observations, technique_id)))
     return sorted((before - after) - {technique_id})
+
+
+def _always_on_with_effects(descriptors) -> list:
+    """Engine ids that declare an effect and are reached by an ALWAYS-ON path rather than by a
+    precondition. Q-074.
+
+    `applicable()` answers the PRECONDITION filter's question, so it returns only engines with a
+    non-empty `requires` list — correct for that question, and it means an always-on engine can never
+    appear in it no matter what it establishes or destroys. `_plan_core` has always taken the other
+    view: an action with no requirements is available in every state, which is what always-on MEANS.
+    The two disagreed, and `frontier()` inherited the filter's view.
+
+    MEASURED before the fix: `frontier(build(), {"has_login","authenticated","serves_js"})`
+    ["consequences"] listed 5 engines and silently omitted `browser_persona_bola` and
+    `graphql_introspection` — 2 of the 11 entries that HAD effects — so the omission predates the
+    negative half and is not an artifact of it. It would also have hidden the only `invalidates` in
+    the model, which is exactly the consequence an operator most needs to see before firing. Pure."""
+    return sorted(d["id"] for d in descriptors.values()
+                  if not d["requires"] and (d["establishes"] or d["invalidates"]))
 
 
 def frontier(descriptors, observations) -> dict:
@@ -208,13 +231,21 @@ def frontier(descriptors, observations) -> dict:
     now = applicable(descriptors, obs)
     goals = sorted({g for d in descriptors.values() for g in d["establishes"]} - set(obs))
     _, unroutable_now = _routing(descriptors, now)
+    # `applicable_now` is UNCHANGED — it is the precondition filter's answer and widening it would
+    # change what "gated" means. The always-on engines are added to `consequences` and listed
+    # separately, so a consumer can tell a gated consequence from an assumed one exactly as `plan()`
+    # already distinguishes them with `assumes`.
+    always_on = _always_on_with_effects(descriptors)
+    consequential = list(now) + [t for t in always_on if t not in now]
     return {
         "observations": sorted(obs),
         "applicable_now": now,
         # Applicable but not dispatchable. The decision surface must show this or a consumer reads
         # "runnable now" and finds nothing to run — the Q-065 symptom, one layer up.
         "unroutable_now": unroutable_now,
+        "always_on_with_effects": always_on,
         "reachable_goals": {g: plan(descriptors, obs, g) for g in goals},
         "consequences": {t: {"unlocks": unlocks(descriptors, obs, t), "breaks": breaks(descriptors, obs, t)}
-                         for t in now if descriptors[t]["establishes"] or descriptors[t]["invalidates"]},
+                         for t in consequential
+                         if descriptors[t]["establishes"] or descriptors[t]["invalidates"]},
     }

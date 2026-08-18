@@ -709,9 +709,38 @@ async def approve(session_id: str, approval_id: str, approved: bool = True):
     return {"ok": True, "resolution": "approved" if approved else "denied"}
 
 
+# ── Q-017: which findings accessor, and why ──────────────────────
+# `db.get_findings` (RAW) and `db.get_findings_gated` (proof gate applied) were split across this
+# file 13 to 7 with the rule living nowhere, so the side a call site sat on was maintained by
+# guesswork. It drifted: `GET /benchmark/{fixture}` scored RAW rows and published a
+# `confirmed_coverage_pct` of 100.0 on three stored missions where the gate had already demoted
+# every one of those confirmations (honest value 0.0).
+#
+# MEASURED over the whole corpus (1057 findings / 113 missions) before writing this rule:
+#   * the gate is LENGTH-PRESERVING — 1057 rows in, 1057 out, zero missions differ. It rewrites in
+#     place and never drops a row, so gating a reader can only ANNOTATE a finding, never hide one.
+#   * it rewrites exactly four fields: confidence, proof_gap, tags, success_oracle (107 rows across
+#     63 missions; 64 of them confirmed -> lead).
+#
+# THE RULE — gate when the gate can change your answer; read raw when the gate would corrupt your
+# write. Every raw call site below carries a `raw:` reason naming which clause it claims.
+#
+#   GATED is REQUIRED when whole rows reach a human, a model, a report or a SCORE — i.e. anything
+#     downstream reads confidence / proof_gap / tags / success_oracle.
+#   RAW is REQUIRED (not merely tolerated) on any path that WRITES rows back (`db.update_finding`,
+#     `db.add_finding`) or exports for round-trip restore: the gate rewrites in place, so a gated
+#     read on a write path PERSISTS a presentation-time demotion into storage.
+#   RAW is CORRECT where the read is a count, a dedupe key, or a field the gate does not touch —
+#     but that is a claim about the CONSUMER and it has to be measured, not assumed.
+#
+# `tests/test_findings_gate_split.py` enforces both halves: the readers stay gated, the write and
+# round-trip paths stay raw, and a NEW raw call site with no declared reason fails the census.
 @app.get("/status/{session_id}")
 async def get_status(session_id: str):
     m = _require_mission(session_id)
+    # raw: count only. The gate is length-preserving, so gated returns the identical integer
+    # (measured 0/63 on the missions where the gate changes a row) at the cost of a demote pass
+    # on every poll of this endpoint.
     return {"status": m["status"], "phase": m["phase"],
             "findings_count": len(db.get_findings(session_id))}
 
@@ -732,7 +761,10 @@ async def mission_detail(session_id: str):
                     "strategy": m["context"].get("strategy", "agentic"),
                     "ai_summary": m["context"].get("ai_summary", "")},
         "scope": m["scope"],
-        "findings": db.get_findings(session_id),
+        # Q-017: whole rows to the UI's mission detail — a reader. Gated, so a demoted row arrives
+        # labelled `lead` with its `proof_gap` instead of masquerading as a confirmation. Nothing is
+        # dropped: the gate is non-destructive, so this response carries the same row count as before.
+        "findings": db.get_findings_gated(session_id),
         "notes": db.get_notes(session_id),
         "logs": db.get_logs(session_id, limit=500),
         "playbook": m["context"].get("playbook", []),
@@ -754,6 +786,9 @@ async def delete_mission(session_id: str):
 # ── reports (markdown / html / csv / json / poc) ─────────────────
 def _report_bundle(session_id: str):
     m = _require_mission(session_id)
+    # raw: gated on the very next lines, by hand. This is `db.get_findings_gated`'s body spelled out
+    # so the `enforce_families` default and the APOLAKI_ENFORCE_PROOF override stay visible at the
+    # report boundary. Q-017 census: this site is GATED IN FACT — do not read the raw call alone.
     findings = db.get_findings(session_id)
     # truth-first proof gate (CHAD #5): a confirmed access-control finding without ownership/authz
     # proof is demoted to a lead before it can reach ANY report format. Default enforces the
@@ -1035,6 +1070,9 @@ def _tool_ledger(session_id: str) -> dict:
                     a["error_kinds"][_err] = a["error_kinds"].get(_err, 0) + 1
     # Was SQLi confirmed by a native tool? Used to reword sqlmap's "No SQLi confirmed"
     # note so it reads as corroboration, not a contradiction next to a confirmed SQLi.
+    # raw: the predicate reads `family` and `cwe`, neither of which the gate rewrites. MEASURED
+    # 0/63 — and 0/63 again with a `confidence == "confirmed"` clause added, because `sqli` is not
+    # in proof_schema._DEFAULT_ENFORCE, so no SQLi row in the corpus has ever been demoted.
     _sqli_confirmed = any(
         str(f.get("family") or "").lower() == "sqli" or "cwe-89" in str(f.get("cwe") or "").lower()
         for f in db.get_findings(session_id))
@@ -1596,6 +1634,9 @@ async def asvs_coverage(session: str = None):
     try:
         findings, ran = [], set()
         if session:
+            # raw: `asvs_model.assess` maps findings to objectives by family/cwe and never reads
+            # `confidence`. MEASURED 0/63, with the positive control that demoting EVERY row still
+            # changes nothing in `assess` — the zero is a property of the consumer, not of the probe.
             findings = db.get_findings(session) or []
             for l in db.get_logs(session, limit=4000):
                 if l.get("type") == "tool_call" and l.get("tool"):
@@ -1886,7 +1927,15 @@ async def benchmark_fixture(fixture: str, session: str = ""):
             return {"error": "unknown fixture %r" % fixture, "fixtures": sorted(benchmark.MANIFESTS)}
         return {"fixture": fixture, "manifest": man}
     m = _require_mission(session)
-    findings = db.get_findings(session)
+    # Q-017: a SCORE is a reader. `benchmark._is_confirmed` reads `confidence`, so scoring RAW rows
+    # counted confirmations the proof gate had already refused. MEASURED across the stored corpus:
+    # 251 (mission, fixture) pairs scored differently, and three missions published
+    # `confirmed_coverage_pct: 100.0` on the `clientauthz` fixture whose honest value is 0.0.
+    # Safe by construction and by measurement — `evaluate` builds `discovered` from every row
+    # regardless of confidence, so class coverage, the discovered set and the false negatives were
+    # identical in all 251 pairs (0 changed) and only the confirmed rate moves. It can only ever
+    # move DOWN: the gate demotes, it never promotes (0 cases of gated > raw).
+    findings = db.get_findings_gated(session)
     leads = (m.get("context") or {}).get("leads", [])
     return benchmark.evaluate(fixture, findings, leads)
 
@@ -1976,6 +2025,11 @@ async def blind_benchmark_run(session_id: str, answer_key_url: str = ""):
     import blind_benchmark as bb
     import httpx
     m = _require_mission(session_id)
+    # raw: SEALING, which is what the accessor's own docstring reserves raw for. The seal must be
+    # the scanner's own unmodified output, and the recall match is by (path, family, proof) — none
+    # of which the gate rewrites. MEASURED 0/63 on the (target, family) match keys. Note also that
+    # `candidates` merges leads and findings into ONE pool below, so a demotion moves a row between
+    # two buckets that this consumer has already unioned.
     findings = db.get_findings(session_id) or []
     ctx = m.get("context") or {}
     leads = ctx.get("leads") or []
@@ -2055,6 +2109,9 @@ async def technique_plan(session_id: str):
     import codeintel
     m = _require_mission(session_id)
     ctx = m.get("context") or {}
+    # raw: findings enter as OBSERVATIONS (family/cwe/target), and `TP.derive_observations` never
+    # reads `confidence`. MEASURED 0/63, positive control: demoting every row leaves the observation
+    # set byte-identical. A demotion must not un-observe an attack surface we already touched.
     findings = db.get_findings(session_id)
     leads = ctx.get("leads", [])
     harvest = ctx.get("intel") or {}
@@ -2161,6 +2218,8 @@ async def attack_graph_view(session_id: str):
     import attack_graph
     m = _require_mission(session_id)
     ctx = m.get("context") or {}
+    # raw: same observation layer as `technique_plan`. MEASURED 0/63 on `attack_graph.build` too,
+    # with the same all-rows-demoted positive control.
     findings = db.get_findings(session_id)
     leads = ctx.get("leads", [])
     harvest = ctx.get("intel") or {}
@@ -3370,6 +3429,8 @@ async def cloud_posture_ingest(provider: str, session_id: str, account: str = "l
                             "findings_deduped": 0, "findings_failed": 0, "context_persisted": False},
                 "manifest": p["manifest"]}
     # context OK -> now write findings, deduped by (provider, account_id, title, target) (CHAD #1).
+    # raw: a DEDUPE key set over (title, target, provenance, cloud_account_id) — the accessor's own
+    # docstring names dedupe as raw work, and the gate rewrites none of those four fields.
     existing = {(x.get("title"), x.get("target")) for x in (db.get_findings(session_id) or [])
                 if str(x.get("provenance", "")).startswith(prov) and x.get("cloud_account_id") == account_id}
     attempted, stored, deduped, failed = len(findings), 0, 0, 0
@@ -3581,8 +3642,11 @@ async def access_check(session_id: str, req: AccessCheckRequest):
 # ── findings CRUD ────────────────────────────────────────────────
 @app.get("/findings/{session_id}")
 async def get_findings(session_id: str):
+    """Q-017: the findings API hands whole rows to whoever asks — a human, the UI, a model. Gated,
+    so a confirmed-but-unproven row arrives as a `lead` carrying its `proof_gap`. The gate is
+    non-destructive, so the row set is unchanged; only the verdict on each row is honest."""
     _require_mission(session_id)
-    return {"findings": db.get_findings(session_id)}
+    return {"findings": db.get_findings_gated(session_id)}
 
 
 # ── Q-013 second pass: an HTTP body may not AUTHOR proof ─────────
@@ -3712,6 +3776,10 @@ async def capture_finding_poc(session_id: str, fid: str):
     import asyncio
     import browser_engine
     _require_mission(session_id)
+    # raw: REQUIRED here, not merely allowed. This is a read-modify-write — the row is copied,
+    # given `poc_screenshot`, and handed straight to `db.update_finding` below. A gated read would
+    # write the gate's presentation-time `lead` + `proof_gap` back into storage, so attaching a
+    # screenshot would silently demote the finding it was meant to strengthen.
     finding = next((f for f in db.get_findings(session_id) if str(f.get("id")) == fid), None)
     if not finding:
         raise HTTPException(404, "finding not found")
@@ -3941,6 +4009,12 @@ async def parse_scope(file: Optional[UploadFile] = File(None), text: Optional[st
 # ── backup / restore ─────────────────────────────────────────────
 @app.get("/backup/{session_id}")
 async def backup(session_id: str):
+    """Q-017: this export is RAW on purpose and must stay that way. `POST /restore` feeds these rows
+    straight back through `db.add_finding`, so a backup is a round-trip of STORED state, not a
+    presentation of it. Gating here would bake the gate's `lead` + `proof_gap` into the restored
+    mission permanently, and a backup/restore cycle would quietly demote findings. The presentation
+    surfaces (`/missions/{sid}`, `/findings/{sid}`, the report, SARIF, the PoC bundle) are the ones
+    that gate; this one preserves fidelity."""
     m = _require_mission(session_id)
     data = {
         "bbh_backup_version": 1,

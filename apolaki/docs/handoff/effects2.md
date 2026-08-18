@@ -221,19 +221,189 @@ this file is where that is written down.
 
 ## 4. WHAT THE PLANNER ACTUALLY DOES DIFFERENTLY
 
-in progress - measured in section 7 once the entry is in.
+The ticket asks for this explicitly, and for the entry to be called decoration if the answer is
+nothing. Measured by running every consumer of the model twice - shipped table, and the same table
+with the `race_condition` row deleted, which is byte-for-byte the pre-Q-074 tree.
+
+MEASURED, probe `q074_planner_delta.py`, observations `{has_login, authenticated, serves_js}`:
+
+| consumer | before | after |
+|---|---|---|
+| `conflicts()` | `[]` | 6 rows, all `race_condition -> authenticated -> {cache_deception, jwt_forge, jwt_key_confusion, session_fixation, session_lifecycle, weak_2fa_bypass}` |
+| `breaks(d, obs, "race_condition")` | `[]` | the same 6 technique ids |
+| `frontier()["consequences"]` | 7 keys | 8 keys (`race_condition` added) |
+| `frontier()["always_on_with_effects"]` | 2 | 3 |
+| `frontier()["applicable_now"]` | - | **UNCHANGED** |
+| `plan(->authenticated)`, `plan(->credentials_exposed)` | - | **UNCHANGED** |
+| `chains()` | 46 | **UNCHANGED** (46) |
+
+**`plan()` is unchanged and that is not a defect - it is arithmetic, and it is stated rather than
+hidden.** `_plan_core` records a candidate only when the goal appears in a successor state, and
+`race_condition` establishes nothing, so it can never shorten a plan. It can only add expansions. A
+negative-only action changes the ordering ADVICE (`breaks`, `conflicts`), not the reachability
+answer. `tests/test_effects_negative_half.py::test_the_plan_search_is_deliberately_UNCHANGED_by_the_negative_effect`
+pins that, so nobody later "fixes" it into looking like a win.
+
+**The production surface that changes**: `main.py:1306` (`/orchestration/audit`) serves
+`effects.conflicts` and `effects.conflict_count`, which go 0 -> 6. `main.py:1391`
+(`/orchestration/reachability`) serves `frontier`, whose `consequences` now carries the cost.
+
+### 4a. The gap that would have made the entry decoration, and it PREDATES this ticket
+
+`frontier()["consequences"]` was keyed off `applicable_now`, and `applicable()` returns only engines
+with a NON-EMPTY precondition list - correct for the precondition filter's question, and it means an
+always-on engine can never appear there whatever it establishes or destroys. `_plan_core` has always
+taken the other view (`if a["requires"] and not all(...)` - an action with no requirements is
+available in every state), so the two disagreed and `frontier` inherited the filter's view.
+
+MEASURED before the fix, from the failing assertion's own output:
+
+```
+frontier(build(), {"has_login","authenticated","serves_js"})["consequences"] =
+  ['exposed_files_harvest', 'jwt_forge', 'jwt_key_confusion', 'sqli_auth_bypass', 'target_intel_harvest']
+```
+
+`browser_persona_bola` and `graphql_introspection` are missing - **2 of the 11 entries that HAD
+effects, dropped silently, before any of this ticket's work**. So the gap is not an artifact of the
+negative half; the negative half is just the first thing important enough to notice it. Fixed in
+`effect_search.frontier` by adding always-on engines that DECLARE an effect, listing them separately
+under `always_on_with_effects` so a consumer can tell a gated consequence from an assumed one, and
+leaving `applicable_now` untouched.
 
 ---
 
-## 5. ANTI-IDLE: the audit of the remaining EFFECTS entries, with counts
+## 5. ANTI-IDLE: the POSITIVE half has the same defect, and it is 34 of 46 rows
 
-in progress.
+The ticket's audit instruction is "engines whose real state changes are unrecorded". Turning it
+around on `establishes` gives the more serious result, so it is reported with counts and with its
+uncertainty marked.
+
+An `establishes` row claims the observation HOLDS for the rest of the engagement. That is true only
+if the engine writes the fact the OBSERVATION DERIVATION reads. The derivation for `authenticated` is
+short and singular, which is why this one can be settled rather than estimated:
+
+* `agent.py:1394` passes `authenticated=bool(self.tools._sessions)` into
+  `technique_planner.derive_observations`;
+* `asset_graph.to_observations()` (line 356) needs a `capability` node keyed `session_acquired`,
+  which MEASURED is written in exactly one place in the tree - `personas.py:197`.
+
+MEASURED by enumerating EVERY method on `ToolRegistry` and matching `self._sessions[` /
+`self.session_headers =` over its source:
+
+```
+Who writes `_sessions` / `session_headers` anywhere in ToolRegistry:
+    __init__
+    _acquire_session
+    _browser_navigate
+```
+
+None of the six engines that declare `establishes: ["authenticated"]` is in that list
+(`run_auth_sqli`, `run_default_creds`, `run_jwt` x2, `run_saml`,
+`confirm_browser_persona_bola`).
+
+Confirmed LIVE rather than left as a static claim, probe `q074_authbypass_live.py`, driving the
+engine against Juice Shop, whose `/rest/user/login` is genuinely bypassable:
+
+```
+declared effect: {'establishes': ['authenticated'], 'invalidates': [], 'engine': ['run_auth_sqli']}
+
+BEFORE  _sessions={}  session_headers={}
+BEFORE  authenticated derivable: False
+
+run_auth_sqli success=True findings=1
+   FINDING: SQL injection (auth-bypass) in 'email' | confidence: confirmed
+   output: auth-bypass SQLi CONFIRMED on the login body
+
+AFTER   _sessions={}  session_headers={}
+AFTER   state.capabilities: []
+AFTER   graph.to_observations(): []
+AFTER   authenticated derivable: False
+
+POSITIVE CONTROL -- the ONE writer the enumeration found, driven by hand:
+  after writing tools._sessions['probe_role']: authenticated derivable: True
+```
+
+The engine produced a **confirmed** finding and the observation it declares still did not hold. The
+positive control flips it on the same instrument, so "still False" is a measurement.
+
+**The count.** MEASURED on the shipped registry:
+
+```
+chain rows by observation: {'authenticated': 34, 'has_api': 7, 'credentials_exposed': 3,
+                            'has_object_id': 2}   total 46
+producers of authenticated: browser_persona_bola, default_credentials, jwt_forge,
+                            jwt_key_confusion, saml_signature_bypass, sqli_auth_bypass
+```
+
+**34 of the 46 chain rows `/orchestration/audit` publishes depend on `authenticated`, and no engine
+that declares it writes anything the observation derivation reads.** 6 of the 12 `EFFECTS` entries
+are affected. This is Q-074's defect on the other half of the table: not a phantom ENGINE, a phantom
+EFFECT - the engine is real, runs, and confirms, and the state transition it declares does not happen.
+
+**Marked UNVERIFIED, deliberately.** The same sweep over `credentials_exposed` (3 rows), `has_api`
+(7) and `has_object_id` (2) used a REGEX over each engine body, and that instrument is too weak to
+support a verdict: those observations derive from the harvest/intel store, which `_http` populates
+for every scoped fetch, so an engine can write the fact without naming it. I am not reporting a
+number for the remaining 12 rows. `authenticated` is settled because its derivation is two named
+call sites and the writer set was enumerated exhaustively over the class rather than sampled.
+
+**Not filed by me** - `docs/QUEUE.md` is not mine to write, and a grep of it for `session_acquired`
+and `establishes` returns nothing, so this is not a known ticket. It is a bigger defect than Q-074
+and it should get a number.
 
 ---
 
 ## 6. PATCHES FOR FILES I DO NOT OWN
 
-in progress.
+### 6a. The logout quarantine has a second door (`agent.py`, `tools.py`)
+
+Section 3a. `_SESSION_KILL_RE` guards `_add_urls` and nothing else, and `recon["forms"]` reaches
+`run_race` with the mission session attached. Measured: the scan logs itself out. Two one-line
+additions, in the two places a POST form action is appended:
+
+```python
+# agent/agent.py, _harvest_rendered_forms, at the top of the `if method == "POST":` branch
+            if method == "POST":
+                from tools import _SESSION_KILL_RE            # same rule as _add_urls, one door
+                _p = urlparse(action)
+                if _SESSION_KILL_RE.search((_p.path or "") + ("?" + _p.query if _p.query else "")):
+                    self.tools.session_kill_urls.append(action) \
+                        if action not in self.tools.session_kill_urls else None
+                    continue
+```
+
+```python
+# agent/tools.py:3955, the http_probe form-capture path, same guard before the append
+                        _p = urlparse(act)
+                        if _SESSION_KILL_RE.search((_p.path or "") + ("?" + _p.query if _p.query else "")):
+                            if act not in self.session_kill_urls and self.scope.validate(act)[0]:
+                                self.session_kill_urls.append(act)
+                            continue
+```
+
+This does NOT remove the `invalidates` entry and must not be read as doing so: section 3b measured
+the same session loss on `/account/change-password`, which the regex does not match and could not
+match without disabling the engine on exactly the actions a race test exists to attack.
+
+A regression test for it belongs beside `test_the_engines_own_client_never_carries_the_mission_session`
+in `tests/test_session_lifecycle.py`; the probe in
+`<scratchpad>/probe/q074_race_logout.py` is already in the right shape to become one.
+
+### 6b. `race_condition` carries the wrong WSTG id (`techniques.py`, which I DO own - NOT taken)
+
+MEASURED: `techniques.py:1136` maps `race_condition` to `WSTG-BUSL-09`, whose catalog title is
+"Upload of Malicious Files" and whose `wstg_catalog.FULL` engine is `run_upload_test`. The technique
+is CWE-362. `wstg_catalog.PARTIAL` already says `WSTG-BUSL-05` is "run_race covers single-use/limit
+races", so BUSL-05 (or BUSL-04) is the right id.
+
+The visible consequence: `routes()["race_condition"]` is `{run_race: [always_on_reason],
+run_upload_test: [wstg_full]}` - a false route claiming the upload engine runs races.
+
+**NOT taken in this commit, on purpose.** It does not block Q-074 (`effects_audit`'s
+`differs_from_derived_route` fires only when the declared and derived sets share NOTHING, and
+`run_race` is in both, so the ratchet does not move), and moving a technique between WSTG ids changes
+`/coverage/wstg` accounting, which is another lane's ledger. It is a clean, small fix for whoever
+owns that ledger.
 
 ---
 
@@ -244,7 +414,68 @@ in progress.
 | S0 apparatus + baseline re-measured | DONE | section 1 (incl. a stale count corrected) |
 | S1 `session_lifecycle` driven; state unchanged | DONE | section 2 |
 | S2 the real invalidation found and measured twice | DONE | section 3 |
-| S3 negative control: guard still fails on a phantom WITH a real row present | in progress | - |
-| S4 the entry, the tests, the full suite | in progress | - |
-| S5 planner difference measured | in progress | - |
-| S6 anti-idle audit with counts | in progress | - |
+| S3 negative controls written and run BEFORE the change | DONE | section 8 |
+| S4 the entry + the frontier fix + re-pointed tests | DONE | section 9 |
+| S5 planner difference measured | DONE | section 4 |
+| S6 anti-idle audit with counts | DONE | section 5 |
+| S7 full suite | in progress | - |
+
+---
+
+## 8. THE NEGATIVE CONTROLS, RUN FIRST
+
+The instruction was literal: prove the guard FAILS on a deliberately unrouted engine before trusting
+it to pass. `agent/tests/test_effects_negative_half.py` was written and run against the tree with
+`EFFECTS` still carrying no negative effect at all. MEASURED, that run:
+
+```
+PASSED  test_the_guard_fails_on_a_negative_effect_declared_on_a_deliberately_unrouted_engine
+PASSED  test_the_routing_audit_flags_a_phantom_negative_effect_independently
+PASSED  test_the_conflict_walk_reports_an_undispatchable_producer
+PASSED  test_the_plan_search_is_deliberately_UNCHANGED_by_the_negative_effect
+FAILED  test_the_guard_still_fails_on_a_phantom_negative_effect_with_a_real_one_present
+FAILED  test_race_condition_is_the_only_declared_negative_effect
+FAILED  test_the_negative_effect_names_an_engine_that_is_registered_and_implemented
+FAILED  test_conflicts_are_exactly_the_techniques_that_require_authentication
+FAILED  test_every_conflict_row_names_a_dispatchable_engine
+FAILED  test_breaks_now_reports_the_real_cost_of_running_a_race
+FAILED  test_successor_actually_removes_the_observation
+FAILED  test_the_frontier_reports_the_cost_of_an_always_on_engine
+```
+
+Four controls green before the change - the guards were already catching a phantom negative effect,
+including one armed from the tree's own `routing_audit()["unrouted"]` list rather than from an
+invented name - and eight shipped-tree assertions red, so none of them can pass vacuously. All 12
+green after.
+
+The control that answers the ticket's specific worry -
+`test_the_guard_still_fails_on_a_phantom_negative_effect_with_a_real_one_present` - re-arms
+`weak_password_reset` alongside the real row and asserts `effects_audit` still names it in BOTH
+`unregistered` and `unimplemented` **while verifying `race_condition -> run_race` in the same pass**.
+A real row did not make the guard lenient.
+
+---
+
+## 9. WHAT CHANGED IN THE PRODUCT
+
+`agent/engine_descriptor.py`
+* `EFFECTS["race_condition"] = {"establishes": [], "invalidates": ["authenticated"],
+  "engine": ["run_race"]}` - the first and only negative effect the table has ever carried that
+  belongs to an engine which exists. `establishes` is empty on purpose: a race proves a limit can be
+  bypassed, which is a finding, not an observation this 17-term vocabulary can express.
+* The comment block records both measurements and the asymmetry argument in 3c.
+* The `session_lifecycle` PRECONDITIONS note said "it is the one engine that ends a session". That
+  is now MEASURED FALSE and is corrected to "the only engine that ends a session ON PURPOSE", with
+  the pointer to `run_race`, which ends the mission's own as a side effect and has no carve-out.
+
+`agent/effect_search.py`
+* `_always_on_with_effects()` + `frontier()` now reports consequences for always-on engines that
+  declare an effect, and lists them separately under `always_on_with_effects`. `applicable_now` is
+  untouched. Section 4a.
+* Three docstrings that used `weak_password_reset` as their worked example now use the measured one.
+
+Tests re-pointed (all in this lane's own files): `test_effects_engine_fact.py` (the `cf == []` pin,
+now a non-vacuity assertion on both halves plus a producer pin), `test_engine_descriptor.py` (the
+empty-conflict pin, its negative control - which now proves the walk enumerates the TABLE rather than
+the one entry - and the `/orchestration/audit` payload pin), `test_effect_search.py` (the
+"no shipped engine has a cost" pin and the frontier coherence pin).

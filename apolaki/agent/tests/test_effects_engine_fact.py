@@ -156,12 +156,20 @@ def test_the_two_phantoms_are_gone_from_the_effects_model_and_only_from_it():
 
 def test_every_row_the_planner_can_emit_names_a_dispatchable_engine():
     """The invariant the whole ticket reduces to: an engine in a chain or a conflict must be one the
-    executor can actually run. NON-VACUITY is asserted on both halves separately, because `conflicts()`
-    is legitimately empty today and would otherwise make this pass for free."""
+    executor can actually run. NON-VACUITY is asserted on both halves SEPARATELY, because for one
+    cycle `conflicts()` was legitimately empty and the conflict half of this loop ran zero times.
+
+    Q-074 filled it from a measurement -- `run_race`, raced against a credential-rotation form with
+    the mission's own session, took the scan's `GET /api/me` from (200, True) to (401, False), while
+    `session_lifecycle` (the engine the ticket named) was driven against the shipped lab and changed
+    no engagement state at all. The reasoning and the raw probe output live in
+    docs/handoff/effects2.md and in tests/test_effects_negative_half.py."""
     d = ed.build()
     ch, cf = ed.chains(d), ed.conflicts(d)
     assert len(ch) > 40, "the chain walk found nothing; this test is not looking at anything"
+    assert cf, "the conflict walk found nothing; the second half of this loop is not looking"
     for pid, obs, cid in ch + cf:
         assert d[pid]["engines"], "%s produces %s for %s with no engine" % (pid, obs, cid)
         assert all(e in TL.TOOL_PERMISSIONS for e in d[pid]["engines"]), pid
-    assert cf == [], "a negative effect shipped; add it to this file's reasoning before pinning it"
+    assert {p for p, _o, _c in cf} == {"race_condition"}, \
+        "a second negative effect shipped; it needs a measurement before it is pinned here"

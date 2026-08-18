@@ -231,21 +231,23 @@ def test_shipped_registry_chains_js_recon_to_credential_use():
     assert "exposed_credentials" in es.unlocks(d, {"serves_js"}, r["plan"][0])
 
 
-def test_shipped_registry_reports_no_cost_because_no_shipped_engine_has_one():
-    """Q-007. This asserted the cost of `weak_password_reset` -- an engine MEASURED to have no executor
-    anywhere, and the only entry in EFFECTS that ever declared an `invalidates`. It is removed, so the
-    shipped answer is now "nothing breaks", which is true: every action that would destroy an
-    engagement-level observation is one the non-destructive doctrine forbids.
-
-    The assertion is kept as a PAIR so it cannot pass vacuously: nothing breaks on the shipped table,
-    AND `breaks()` still reports a cost the moment a negative effect is actually declared."""
+def test_shipped_registry_reports_the_cost_of_exactly_one_engine():
+    """Q-007 then Q-074. This asserted the cost of `weak_password_reset`, an engine MEASURED to have no
+    executor anywhere; Q-007 removed it and the shipped answer became "nothing breaks" everywhere.
+    Q-074 measured the engine that really does destroy `authenticated` -- `run_race`, raced against a
+    credential-rotation form with the mission's own session, taking the scan's `GET /api/me` from
+    (200, True) to (401, False) -- so `breaks()` finally gives a true non-empty answer on the shipped
+    tree. Kept as a PAIR so neither half can pass vacuously: exactly one engine costs anything, and
+    every other one costs nothing."""
     d = ed.build()
-    for tid in ed.EFFECTS:
-        assert es.breaks(d, {"has_login", "authenticated"}, tid) == [], tid
+    obs = {"has_login", "authenticated"}
+    costly = sorted(tid for tid in ed.EFFECTS if es.breaks(d, obs, tid))
+    assert costly == ["race_condition"], costly
+    cost = es.breaks(d, obs, "race_condition")
+    assert "jwt_forge" in cost and "weak_2fa_bypass" in cost, cost
     d["fake_rotator"] = dict(d["sqli_auth_bypass"], id="fake_rotator",
                              establishes=[], invalidates=["authenticated"])
-    cost = es.breaks(d, {"has_login", "authenticated"}, "fake_rotator")
-    assert "jwt_forge" in cost and "weak_2fa_bypass" in cost, cost
+    assert es.breaks(d, obs, "fake_rotator") == cost, "the walk is keyed to one entry, not the table"
 
 
 def test_frontier_is_coherent_on_the_shipped_registry():
@@ -253,7 +255,18 @@ def test_frontier_is_coherent_on_the_shipped_registry():
     f = es.frontier(d, {"has_login", "serves_js"})
     assert "sqli_auth_bypass" in f["applicable_now"]
     assert f["reachable_goals"]["authenticated"]["reachable"] is True
-    assert set(f["consequences"]) <= set(f["applicable_now"])
+    # Q-074 widened `consequences` by exactly the always-on engines that DECLARE an effect. It was
+    # keyed off `applicable_now`, and `applicable()` returns only engines with a non-empty precondition
+    # list -- so an always-on engine could never appear there whatever it establishes or destroys.
+    # MEASURED before the fix: that silently dropped `browser_persona_bola` and `graphql_introspection`,
+    # 2 of the 11 entries that had effects, and it would have hidden the only `invalidates` in the
+    # model. `_plan_core` already treated an always-on action as available in every state.
+    assert set(f["consequences"]) <= set(f["applicable_now"]) | set(f["always_on_with_effects"])
+    assert set(f["always_on_with_effects"]) & set(f["consequences"]), "the widening did nothing"
+    for t in f["always_on_with_effects"]:
+        assert d[t]["always_on"] and (d[t]["establishes"] or d[t]["invalidates"]), t
+    # `applicable_now` itself is untouched: it is the precondition filter's answer.
+    assert not (set(f["always_on_with_effects"]) & set(f["applicable_now"]))
     for t, c in f["consequences"].items():
         assert isinstance(c["unlocks"], list) and isinstance(c["breaks"], list)
 

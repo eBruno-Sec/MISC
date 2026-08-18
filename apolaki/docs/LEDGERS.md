@@ -339,6 +339,53 @@ defend.
 
 ---
 
+## ★★★ THE PLATFORM KILLS ITS OWN SESSION AND DOES NOT KNOW. 2026-08-18
+
+Q-074 asked a lane to give `session_lifecycle` the effects it obviously has. **The ticket named the
+wrong engine**, and finding that out took driving the engine instead of reading it.
+
+`session_lifecycle` was driven over real HTTP against the shipped `sessionlife` lab, with a real
+mission session held by a DIFFERENT account. Every engagement-state field is identical before and
+after, and the mission credential still reaches the authenticated marker. **Positive control on the
+same instrument: (200, True) -> (401, False).** So the instrument works and the answer is real —
+`session_lifecycle` gets no `invalidates`, and run 1's code-read conclusion is confirmed by
+measurement rather than by agreement.
+
+**The engine that actually destroys `authenticated` is `race_condition`.** `_SESSION_KILL_RE` has
+exactly one use site (`_add_urls`), and `recon["forms"]` is a SECOND, unfiltered door into the probe
+surface that `planner.py` turns into `run_race` steps carrying the mission session. Measured end to
+end: mission `/api/me` goes **(200, True) -> (401, False) while `session_headers` still holds the
+dead cookie**.
+
+**Nothing in the platform's own state records the loss.** Every authenticated probe after that point
+silently tests as anonymous, so the mission keeps working and keeps reporting — a self-inflicted
+false-negative source that looks exactly like a clean target. Re-measured on a form the session-kill
+regex does NOT match and could not match without disabling the engine (a credential-rotation form),
+so the effect is not an artifact of that regex.
+
+That is the real invalidation the effects model was missing the whole time it carried a fictional one
+about an engine that cannot run.
+
+## ★★ Q-017: THE GATE CANNOT HIDE A FINDING, AND SEVEN CONSUMERS PROVE IT. 2026-08-18
+
+The ticket said 13 raw `get_findings` sites against 7 gated. Scoped **measure-then-decide** rather
+than convert, and the measurement retired most of it.
+
+The proof gate is **LENGTH-PRESERVING**: 1057 findings in, 1057 out, zero missions differ. It
+rewrites exactly four fields — `confidence`, `proof_gap`, `tags`, `success_oracle` — on 107 rows
+across 63 missions, 64 of them confirmed -> lead. **So a caller that only counts rows is
+gate-invariant by construction, and gating a READER can never hide a finding, only annotate one.**
+
+Then each raw site's REAL downstream consumer was driven twice, raw and gated, across the 63 missions
+where the gate changes something: **seven consumers at 0/63 delta, one at 251 (mission, fixture)
+pairs.** The zeros carry positive controls — different missions produce different output, so the
+apparatus is live, and demoting EVERY row still changes nothing in `asvs_model.assess` or
+`TP.derive_observations`, which are structurally blind to confidence. **Those zeros are facts about
+the consumers, not about the instrument.**
+
+Converting all thirteen because seven looked different would have been thirteen changes with no
+measurement behind them.
+
 ## ★★★ THE QUEUE WAS LYING IN FOUR PLACES, AND SO WAS THE SOURCE. 2026-08-17/18
 
 Two lanes were sent to FIX tickets. Both began by DISPROVING them, which is what they were told to
