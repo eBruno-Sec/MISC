@@ -18,6 +18,8 @@ clearly-labelled empty result -- nothing is faked, and the rest of the platform 
 from __future__ import annotations
 
 import asyncio
+import contextlib
+import contextvars
 from datetime import timezone
 import email.utils
 import json
@@ -31,6 +33,63 @@ from urllib.parse import urlparse
 RATE_POLICY_DEFAULT_MAX_SECONDS = 30.0
 RATE_POLICY_HARD_MAX_SECONDS = 300.0
 _RETRY_STATUSES = frozenset({429, 503})
+
+# Q-043 GAP-1. The cap in `observe()` bounds ONE HEADER; it never bounded the WAIT. The origin
+# deadline is extend-only and shared, so a sibling worker meeting a fresh 429 pushes the deadline
+# out from under a caller that is already parked on it. MEASURED: eight such extensions, each one
+# individually clamped to the 30s cap, held a single caller for 270.0s. That is the self-inflicted
+# denial of service the cap exists to prevent, arriving through the door the cap does not cover.
+#
+# So a GATE CROSSING is bounded too, by the same number: one crossing waits at most `_max_wait()`
+# seconds in total, however many times the deadline moves. Past that the request GOES OUT rather
+# than the mission stopping -- politeness that parks a scan indefinitely is worse than one request
+# sent inside a cooldown, and the deadline survives, so the NEXT crossing waits again. Progress is
+# therefore guaranteed while the target is still being honoured on every request.
+#
+# The iteration cap is the separate belt-and-braces for GAP-3: `wait_*` re-reads the deadline after
+# each sleep, so a sleeper that does not advance the clock spins forever. Unreachable with the real
+# `time.sleep`, but it ate this lane's own first measurement run, and the house rules REQUIRE tests
+# to inject a fake sleep -- which is exactly the shape that trips it.
+_WAIT_ITERATION_CAP = 64
+
+# Per-dispatch wait accounting. A ContextVar rather than a global counter because engines run
+# concurrently: a global delta between dispatch and outcome would bill one tool for another tool's
+# cooldown. An asyncio task inherits the context at creation and `asyncio.to_thread` copies it, so
+# both the async transport and the sync browser path land in the right box. A bare threading.Thread
+# does not inherit it; those waits fall back to the process-wide counters in `stats()`.
+_wait_scope = contextvars.ContextVar("apolaki_rate_wait_scope", default=None)
+
+
+def _new_wait_box():
+    return {"waits": 0, "seconds": 0.0, "truncated": 0, "origins": []}
+
+
+@contextlib.contextmanager
+def rate_wait_scope():
+    """Bracket a dispatch so target-cooldown waits inside it are attributable to THAT dispatch.
+
+    Yields the accounting box; read it after the block. Always yields a box, so a caller never has
+    to branch on None -- a dispatch that never waited yields zeros, which is the honest answer and
+    not the same as "we did not look"."""
+    box = _new_wait_box()
+    token = _wait_scope.set(box)
+    try:
+        yield box
+    finally:
+        _wait_scope.reset(token)
+
+
+def describe_wait(box):
+    """One bounded ledger token for a dispatch's cooldown time, or '' when it never waited.
+
+    Deliberately empty at zero: an engine that met no rate limiting must log byte-for-byte what it
+    logged before this existed, so the ledger's existing notes and every test over them are
+    untouched unless a backoff REALLY happened."""
+    if not box or not box.get("waits"):
+        return ""
+    return "[backoff %.1fs x%d%s]" % (
+        float(box.get("seconds") or 0.0), int(box["waits"]),
+        ", truncated at cap" if box.get("truncated") else "")
 
 
 def _origin(url):
@@ -88,6 +147,8 @@ class TargetRatePolicy:
         self._sync_sleep = sync_sleep or time.sleep
         self._deadlines = {}
         self._lock = threading.Lock()
+        self._stats = {"observations": 0, "capped": 0, "waits": 0,
+                       "seconds": 0.0, "truncated": 0}
 
     def _max_wait(self):
         value = self._explicit_max_wait
@@ -122,10 +183,13 @@ class TargetRatePolicy:
         origin = _origin(url)
         if delay is None or not origin:
             return None
+        capped = delay > self._max_wait()
         delay = min(delay, self._max_wait())
         deadline = self._clock() + delay
         with self._lock:
             self._deadlines[origin] = max(deadline, self._deadlines.get(origin, 0.0))
+            self._stats["observations"] += 1
+            self._stats["capped"] += 1 if capped else 0
         return delay
 
     def remaining(self, url):
@@ -140,23 +204,71 @@ class TargetRatePolicy:
                 self._deadlines.pop(origin, None)
         return remaining
 
+    def _next_wait(self, url, waited, iterations):
+        """One bounded step of a gate crossing.
+
+        Returns ``(seconds_to_sleep, truncation)``. ``seconds_to_sleep`` is None when the crossing
+        is over; ``truncation`` is non-empty ONLY when it ended on a bound instead of on an expired
+        cooldown, so the two endings are never confused by the caller that reports them."""
+        cap = self._max_wait()
+        if waited >= cap:
+            return None, "cap"
+        if iterations >= _WAIT_ITERATION_CAP:
+            return None, "iterations"
+        remaining = self.remaining(url)
+        if remaining <= 0:
+            return None, ""
+        return min(remaining, cap - waited), ""
+
+    def _record_wait(self, url, waited, truncation):
+        """Make the wait OBSERVABLE. A silent sleep and a slow engine are the same picture."""
+        if waited <= 0 and not truncation:
+            return
+        with self._lock:
+            self._stats["waits"] += 1
+            self._stats["seconds"] += waited
+            self._stats["truncated"] += 1 if truncation else 0
+        box = _wait_scope.get()
+        if box is None:
+            return
+        box["waits"] += 1
+        box["seconds"] += waited
+        box["truncated"] += 1 if truncation else 0
+        origin = _origin(url)
+        if origin and origin not in box["origins"]:
+            box["origins"].append(origin)
+
     async def wait_async(self, url):
-        waited = 0.0
+        waited, iterations = 0.0, 0
         while True:
-            remaining = self.remaining(url)
-            if remaining <= 0:
+            step, truncation = self._next_wait(url, waited, iterations)
+            if step is None:
+                self._record_wait(url, waited, truncation)
                 return waited
-            await self._async_sleep(remaining)
-            waited += remaining
+            await self._async_sleep(step)
+            waited += step
+            iterations += 1
 
     def wait_sync(self, url):
-        waited = 0.0
+        waited, iterations = 0.0, 0
         while True:
-            remaining = self.remaining(url)
-            if remaining <= 0:
+            step, truncation = self._next_wait(url, waited, iterations)
+            if step is None:
+                self._record_wait(url, waited, truncation)
                 return waited
-            self._sync_sleep(remaining)
-            waited += remaining
+            self._sync_sleep(step)
+            waited += step
+            iterations += 1
+
+    def stats(self):
+        """Process-wide cooldown accounting. The per-dispatch view is `rate_wait_scope`."""
+        with self._lock:
+            return dict(self._stats)
+
+    def reset_stats(self):
+        with self._lock:
+            self._stats = {"observations": 0, "capped": 0, "waits": 0,
+                           "seconds": 0.0, "truncated": 0}
 
 
 target_rate_policy = TargetRatePolicy()
