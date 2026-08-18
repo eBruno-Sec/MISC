@@ -328,7 +328,30 @@ rebuild** — that is now the gate's most valuable output, not an aside.
 
 
 
-### Q-075 · The dead-code gate's failure message names the WRONG functions · **MEDIUM** · `ready`
+### Q-076 · `test_proof_gate_reach` has 3 slack and names ZERO of its findings · **HIGH** · `ready`
+
+Found by the Q-075 anti-idle audit, and it is the worst instance of the count-instead-of-delta shape
+still live.
+
+MEASURED: **11 raw `db.get_findings()` sites against a ceiling of 14 — slack 3** — and the failure
+message names **none** of them, while `_raw_call_count()` has every `file:line` in hand and throws it
+away.
+
+**The damage is not hypothetical and the file records it in its own comment:** SARIF sat raw while
+its sibling export was gated, and the count stayed under the ceiling, so the gate said nothing. With
+3 slack, one site can be resolved and a new one introduced **at constant count** and this gate is
+structurally incapable of noticing.
+
+DoD: record the baseline SET, not just the ceiling, and print the true set difference — the same fix
+Q-075 applied to the dead-code ratchet, and the same shape `liveness.py::evaluate()` has had all
+along (`regressions = base - confirmed`, named). **Negative control:** resolve one site and add
+another in the same run, and confirm the message names both while the count is unchanged.
+
+Also from that audit: `test_mutation_gate.py` is MILD (46 uncovered vs ceiling 46; it prints all 46
+names, so the delta is present but must be eyeball-diffed, and it already keeps a partial recorded
+set of 8). `test_description_gate.py` and `test_island_soundness.py` are CLEAN.
+
+### Q-075 · The dead-code gate names the WRONG functions · **CLOSED** `4c50007` `dce91a3`
 
 The ratchet fired correctly and then misdirected the reader, which is the part worth fixing.
 

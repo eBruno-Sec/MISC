@@ -339,6 +339,46 @@ defend.
 
 ---
 
+## ★★★ A GATE THAT PRINTS A SLICE INSTEAD OF A DELTA, AND THE FIX THAT NEARLY SILENCED ANOTHER. 2026-08-18
+
+`test_deadcode_gate.py` built its "New entries" from `q["unused"][-5:]` — **the alphabetical tail of a
+sorted list, not a set difference.** The five names it reported are positions 31-35 of that list and
+are *the same five on a clean tree and a dirty one*: **a message that does not change when the finding
+changes.** The five real entries sort into the middle, where a tail slice can never reach them. The
+method ratchet had the identical `[-5:]`.
+
+**A COUNT CANNOT BE DIFFED**, and that is why the fix is a design change rather than a formatting one:
+`QUALIFIED_BASELINE` is a number, so the gate had nothing to subtract. Recording
+`QUALIFIED_BASELINE_SET` (35) and `METHOD_BASELINE_SET` (13) is what makes a true delta possible, and
+asserting `len(SET) <= BASELINE` is what makes the alarm's message **provably non-empty**. Thresholds
+untouched: 37/14, allowlist unchanged.
+
+**THE PART WORTH THE MOST: recording that set nearly silenced the method ratchet.** `scan_methods()`
+joins every `.py` into one corpus **including its own source**, and counts `.name` on any receiver as a
+call. The recorded strings are shaped `"vault.py::Vault.purge"`, so `.purge` matched **inside the
+literal**. All 13 recorded methods read as called, the count went **13 -> 0, and the whole file stayed
+green**: `0 <= 14` passes, `methods_examined` counts definitions so it held at 396, and every other
+method test asserts things are ABSENT — which an empty list satisfies perfectly.
+
+**Coordinator-verified by mutation**: deleting the self-exclusion from `scan_methods` alone (leaving
+`scan()` intact) reproduces `count 0, ok True`. `scan()` already excluded itself for exactly this
+reason and says so in its docstring **one function above** the one that had the bug.
+
+**It was caught by a control, not by a test** — every test in that file would have passed. The missing
+positive control now exists (`test_the_method_scan_can_still_find_something`), and the new negative
+control was verified to FAIL against the pre-fix gate extracted from HEAD.
+
+Negative control done properly: a deliberate island appended to `security.py` — a live, widely-imported
+module, not a toy directory — produced `newly_dead: ['security.apolaki_deliberate_island']`, one name,
+the right one, and the test asserts by name that the five innocents cannot appear.
+
+**The audit that followed is the useful generalisation.** `liveness.py::evaluate()` has had the right
+shape all along — baseline SET, `regressions = base - confirmed`, named. **Q-075 was not an invention;
+it was bringing one gate back in line with another this project already had.** The worst outstanding
+instance is `test_proof_gate_reach` (Q-076): 11 raw sites against a ceiling of 14, **slack 3**, naming
+none of them while holding every `file:line` — and its own comment records the damage already done,
+SARIF sitting raw while its sibling was gated and the count never moving.
+
 ## ★★★ THE PLATFORM KILLS ITS OWN SESSION AND DOES NOT KNOW. 2026-08-18
 
 Q-074 asked a lane to give `session_lifecycle` the effects it obviously has. **The ticket named the
