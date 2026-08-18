@@ -328,6 +328,34 @@ rebuild** — that is now the gate's most valuable output, not an aside.
 
 
 
+### Q-075 · The dead-code gate's failure message names the WRONG functions · **MEDIUM** · `ready`
+
+The ratchet fired correctly and then misdirected the reader, which is the part worth fixing.
+
+MEASURED. It reported `qualified dead-code count rose to 40 (baseline 37)` and listed as
+"New entries": `technique_store.stats`, `techniques.techniques_for_lab`, `waf_bypass_tool.pad`,
+`web_security.is_url_in_scope`, `xxe_tool.looks_like_xml`. **None of those is the delta.** The actual
+newly-dead set, obtained by running `deadcode_gate.scan_qualified()` on the worktree and on a clean
+`git archive HEAD` snapshot and diffing the `unused` lists, is five entirely different names:
+
+```
+worktree  count 40  baseline 37  ok False
+HEAD      count 35  baseline 37  ok True
+newly dead: dom_tool.wm_family, wm_finding, wm_lead_finding, wm_payloads, wm_reportable
+```
+
+The message appears to print a slice of the sorted list rather than the set difference against the
+previous state. **Cost: four probes chasing five files this cycle never touched**, plus a wrong
+hypothesis that a reference had been removed somewhere.
+
+Why it matters beyond tidiness: this gate exists to catch islands, and it CAUGHT ONE correctly. A
+gate whose alarm is right but whose message points elsewhere trains its readers to distrust it, and a
+distrusted gate gets silenced -- the same fate this project has already reasoned about for the
+`errored` class and for `ledger_finding_disagreement`.
+
+DoD: the failure message prints the true set difference. Negative control: introduce a deliberate
+island and confirm the message names THAT function and no other.
+
 ### Q-074 · The negative-effects model is now EMPTY, which is honest but not informative · **MEDIUM** · `ready`
 
 Successor to Q-007, and stated plainly so nobody reads that close as "the planner now knows about
