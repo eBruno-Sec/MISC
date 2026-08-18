@@ -105,22 +105,30 @@ def test_the_concrete_case_jwt_forge_routes_to_run_jwt():
     d = ed.build()
     assert d["jwt_forge"]["engines"] == ["run_jwt"]
     assert d["jwt_key_confusion"]["engines"] == ["run_jwt"]
-    assert d["jwt_forge"]["routed_by"]["run_jwt"] == ["wstg_full"]
+    # Q-007 added `effect_engine` as a third source. jwt_forge is now carried by BOTH, which is the
+    # point of keeping the sources separate: they agree here, and where they disagree the audit says so.
+    assert d["jwt_forge"]["routed_by"]["run_jwt"] == ["effect_engine", "wstg_full"]
     assert d["jwt_forge"]["routable"] is True
     # and the name is one the executor really dispatches
     assert "run_jwt" in TL.TOOL_PERMISSIONS
     assert any(s["name"] == "run_jwt" for s in TL.CLAUDE_TOOLS)
 
 
-def test_both_derivation_sources_carry_real_weight():
-    """Neither source is decorative: drop either and coverage drops."""
+def test_all_three_derivation_sources_carry_real_weight():
+    """No source is decorative: drop any one and coverage drops.
+
+    `effect_engine` (Q-007) is the third, and it is the only source that reaches `default_credentials`
+    and `saml_signature_bypass` -- two engines that are registered, implemented and dispatched, and that
+    both derived sources miss (WSTG-ATHN-02 is in wstg_catalog.PARTIAL, not FULL; saml has no wstg id)."""
     r = ed.routes()
     srcs = {s for v in r.values() for ss in v.values() for s in ss}
-    assert srcs == {"always_on_reason", "wstg_full"}, srcs
+    assert srcs == {"always_on_reason", "wstg_full", "effect_engine"}, srcs
     only_ao = {t for t, v in r.items() if all(ss == ["always_on_reason"] for ss in v.values())}
     only_wstg = {t for t, v in r.items() if all(ss == ["wstg_full"] for ss in v.values())}
+    only_eff = {t for t, v in r.items() if all(ss == ["effect_engine"] for ss in v.values())}
     assert len(only_ao) >= 5, only_ao
     assert len(only_wstg) >= 20, only_wstg
+    assert only_eff == {"default_credentials", "saml_signature_bypass"}, only_eff
 
 
 def test_every_derived_engine_name_is_dispatchable():
@@ -147,9 +155,14 @@ def test_no_phantom_engine_on_the_shipped_tree():
 #
 # SHRINK THIS LIST, NEVER GROW IT. It is pinned as an exact set, not a count, so both directions are
 # deliberate: adding an unroutable technique fails, and fixing one also fails until the fix is recorded.
+#
+# SHRUNK 2026-08-17 by Q-007, from 13 to 11. `default_credentials` and `saml_signature_bypass` left the
+# list because the `effect_engine` source now carries the route their real engines always had
+# (`run_default_creds`, `run_saml` -- registered, implemented, dispatched). Nothing was built and no
+# engine was renamed; the derivation stopped being blind to two of them.
 UNROUTED_2026_08_17 = [
-    "business_logic_abuse", "crlf_injection", "default_credentials", "encoded_data_decode",
-    "exposed_credentials", "saml_signature_bypass", "security_misconfig_errors", "soft_deleted_login",
+    "business_logic_abuse", "crlf_injection", "encoded_data_decode",
+    "exposed_credentials", "security_misconfig_errors", "soft_deleted_login",
     "vulnerable_component", "waf_bypass", "weak_2fa_bypass", "weak_password_reset",
     "weak_secret_forgery",
 ]
@@ -172,13 +185,18 @@ def test_every_unrouted_technique_passes_the_no_island_guard_anyway():
         "the no-island guard no longer covers these; re-measure before editing the pin")
 
 
-def test_effect_producers_without_an_executor_are_named():
-    """Q-065's shape, measured. A technique that DECLARES an effect but has no engine lets the forward
-    search hand back a plan whose step cannot be dispatched."""
+def test_no_effect_producer_is_without_an_executor():
+    """Q-065's shape, CLOSED by Q-007. A technique that DECLARES an effect but has no engine lets the
+    forward search hand back a plan whose step cannot be dispatched. Four such producers were pinned
+    here on 2026-08-17; two had real engines the derivation could not see (now routed via
+    `effect_engine`) and two -- `weak_password_reset`, `soft_deleted_login` -- had no engine anywhere and
+    were removed from EFFECTS.
+
+    NON-VACUITY: an empty EFFECTS table would satisfy the first assertion for free."""
     a = ed.routing_audit()
-    assert a["effect_producers_unrouted"] == [
-        "default_credentials", "saml_signature_bypass", "soft_deleted_login", "weak_password_reset"]
-    assert all(t in ed.EFFECTS for t in a["effect_producers_unrouted"])
+    assert a["effect_producers_unrouted"] == [], a["effect_producers_unrouted"]
+    assert len(ed.EFFECTS) >= 11, "the table emptied; this assertion would pass for free"
+    assert all(t in ed.routes() for t in ed.EFFECTS)
 
 
 # ── SHAPE / PURITY ──────────────────────────────────────────────────────────────────────────────
@@ -207,12 +225,12 @@ def test_the_routing_layer_is_not_itself_an_island():
     r = asyncio.run(mainmod.orchestration_audit())
     assert "error" not in r, r
     assert r["routing"]["registry_readable"] is True
-    assert r["routing"]["routed"] == 75
+    assert r["routing"]["routed"] == 77
     assert r["routing"]["phantom"] == []
     assert r["unroutable"] == UNROUTED_2026_08_17
-    # the honest contrast, on one payload: declared clean, factually 13 short
+    # the honest contrast, on one payload: declared clean, factually 11 short
     assert r["no_islands"] is True
-    assert len(r["unroutable"]) == 13
+    assert len(r["unroutable"]) == 11
 
 
 def test_routing_failure_cannot_break_the_no_island_answer(monkeypatch):

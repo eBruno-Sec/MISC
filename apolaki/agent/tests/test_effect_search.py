@@ -231,9 +231,20 @@ def test_shipped_registry_chains_js_recon_to_credential_use():
     assert "exposed_credentials" in es.unlocks(d, {"serves_js"}, r["plan"][0])
 
 
-def test_shipped_registry_reports_the_password_reset_cost():
+def test_shipped_registry_reports_no_cost_because_no_shipped_engine_has_one():
+    """Q-007. This asserted the cost of `weak_password_reset` -- an engine MEASURED to have no executor
+    anywhere, and the only entry in EFFECTS that ever declared an `invalidates`. It is removed, so the
+    shipped answer is now "nothing breaks", which is true: every action that would destroy an
+    engagement-level observation is one the non-destructive doctrine forbids.
+
+    The assertion is kept as a PAIR so it cannot pass vacuously: nothing breaks on the shipped table,
+    AND `breaks()` still reports a cost the moment a negative effect is actually declared."""
     d = ed.build()
-    cost = es.breaks(d, {"has_login", "authenticated"}, "weak_password_reset")
+    for tid in ed.EFFECTS:
+        assert es.breaks(d, {"has_login", "authenticated"}, tid) == [], tid
+    d["fake_rotator"] = dict(d["sqli_auth_bypass"], id="fake_rotator",
+                             establishes=[], invalidates=["authenticated"])
+    cost = es.breaks(d, {"has_login", "authenticated"}, "fake_rotator")
     assert "jwt_forge" in cost and "weak_2fa_bypass" in cost, cost
 
 

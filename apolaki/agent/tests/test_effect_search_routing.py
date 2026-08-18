@@ -114,25 +114,36 @@ def test_a_real_shipped_plan_is_dispatchable_end_to_end():
     assert r["dispatchable"] is True, r
 
 
-def test_the_shipped_registry_still_contains_undispatchable_producers_and_says_so():
-    """Honest limit, pinned. Four EFFECTS producers have no engine, so any plan routed through one is
-    reachable-but-not-dispatchable. This asserts the platform REPORTS that, not that it is fixed."""
+def test_every_shipped_producer_is_dispatchable_and_the_flag_still_fires():
+    """Q-007. This pinned FOUR undispatchable EFFECTS producers as an honest limit. Measured, they were
+    two different defects wearing the same label: `default_credentials` and `saml_signature_bypass` have
+    real engines (`run_default_creds`, `run_saml` -- registered, implemented, dispatched) that the
+    derivation could not see, and `weak_password_reset` / `soft_deleted_login` had no engine anywhere.
+    The first pair is now routed via the `effect_engine` source; the second pair is out of EFFECTS.
+
+    The limit being gone must NOT take the reporting with it, so the second half forces a plan through a
+    synthetic producer with no engine and requires the flag to fire."""
     d = ed.build()
     bad = sorted(t for t in ed.EFFECTS if not d[t]["engines"])
-    assert bad == ["default_credentials", "saml_signature_bypass", "soft_deleted_login",
-                   "weak_password_reset"], bad
-    # and a plan forced through one of them is flagged
-    reg = {k: v for k, v in d.items() if k in ("soft_deleted_login",)}
+    assert bad == [], bad
+    assert len(ed.EFFECTS) >= 11, "the table emptied; the assertion above would pass for free"
+
+    # the mechanism, on a producer that really has no engine
+    d["ghost_producer"] = dict(d["sqli_auth_bypass"], id="ghost_producer", engines=[], routable=False)
+    reg = {k: v for k, v in d.items() if k in ("ghost_producer",)}
     r = es.plan(reg, {"has_login"}, "authenticated")
     assert r["reachable"] is True
-    assert r["unroutable"] == ["soft_deleted_login"]
+    assert r["unroutable"] == ["ghost_producer"]
     assert r["dispatchable"] is False
 
 
-def test_frontier_on_the_shipped_registry_names_its_undispatchable_actions():
+def test_frontier_still_names_undispatchable_actions_where_they_exist():
     d = ed.build()
     f = es.frontier(d, {"has_login", "authenticated"})
     assert f["applicable_now"], "nothing applicable — the fixture is wrong, not the code"
     assert set(f["unroutable_now"]) <= set(f["applicable_now"])
-    # the four known-unrouted producers are gated on these observations; at least one must surface
-    assert f["unroutable_now"], "no unroutable action surfaced where four are known to exist"
+    # Q-007: no EFFECTS producer is unroutable any more, but techniques without effects still are --
+    # `weak_password_reset` and `soft_deleted_login` keep their preconditions and remain executor-less,
+    # which is exactly what the frontier exists to show an operator.
+    assert "weak_password_reset" in f["unroutable_now"], f["unroutable_now"]
+    assert not (set(f["unroutable_now"]) & set(ed.EFFECTS)), f["unroutable_now"]
