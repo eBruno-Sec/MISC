@@ -125,6 +125,62 @@ difference can never surface them however the list sorts.
 
     tests/test_deadcode_gate.py  27 passed
 
+## ANTI-IDLE: the same defect in the project's other ratchets
+
+Looking for the Q-075 shape specifically -- an alarm that reports a COUNT, or a slice of a full
+population, rather than the specific thing that changed. Note that `bad[:5]` under an `assert bad ==
+[]` is NOT this defect: those lists are the delta by construction, and truncating one is only
+truncation. The defect needs a ratchet, where the flagged population is mostly pre-existing debt.
+
+Five gates examined. Counts measured in the container, not read off comments.
+
+**`test_proof_gate_reach.py` -- WORST, worth its own ticket.**
+
+    REAL _raw_call_count() = 11   ceiling _KNOWN_UNGATED = 14   slack 3
+
+The failure message names ZERO call sites. It reports a number and gives instructions. Yet
+`_raw_call_count()` walks the AST with `fname` and the node in hand -- it has every `file:line` and
+throws them all away to return an int. The eleven are recoverable in one pass:
+
+    agent.py:3889, main.py:745, 792, 1078, 1640, 2033, 2115, 2223, 3434, 3783, 4023
+
+Three points of slack means three new ungated readers can be wired today with nothing going red. And
+this is not hypothetical -- the file's own comment records it happening: "SARIF sat raw while its
+sibling poc_bundle_export was gated, and the count stayed under 15 so nothing failed." A recorded SET
+would have shown one resolved and one new AT CONSTANT COUNT, which is precisely the leak a count
+ceiling cannot express. Same fix as Q-075: record the site set, diff it, name the delta.
+
+**`test_mutation_gate.py` -- MILD, real but lower value.**
+
+    uncovered 46   ceiling _KNOWN_UNMUTATED_CONFIRMED_PRODUCERS = 46   slack 0
+
+Prints `sorted(uncovered)` -- all 46 names. Better than Q-075 (the delta IS in the list; it was not in
+the dead-code gate's) and better than the proof gate (some names beat none), but the reader still
+eyeball-diffs 46 entries to find the one that moved. Slack 0 means any rise is a genuine addition. It
+already carries a partial recorded set (`named_uncovered`, 8 entries) used as a vacuity control, so
+the pattern is half-present and completing it would be cheap.
+
+**`liveness.py` `evaluate()` -- CLEAN, and it is the model this project already had.**
+
+Its baseline is a SET of technique names. It computes `regressions = base - confirmed` and
+`gained = confirmed - base`, and the statement names the regressed techniques outright. In other
+words the correct shape was sitting in the repo the whole time; the dead-code gate diverged from it by
+recording a count. Worth saying plainly, because it reframes Q-075: the fix is not an invention, it is
+bringing one gate back in line with another.
+
+**`test_description_gate.py` -- CLEAN.** `KNOWN_OPEN` is a recorded SET (currently empty, which the
+comment correctly calls the strongest state rather than an absence of checking). The tier ratchet
+prints `silent`, which is the exact delta by construction, and it carries a positive control
+(`len(registered) > 100`) proving the registry was actually read.
+
+**`test_island_soundness.py` -- CLEAN.** No count ratchet; assertions are membership and behavioural,
+each naming its own subject.
+
+One cross-cutting note, not a ratchet defect but found while reading: `scan_qualified()`'s own-module
+rule counts ANY mention in the module, including prose. `deadcode_gate.scan`, `scan_qualified` and
+`scan_methods` are never flagged despite having no production caller, because their own docstrings and
+comments name them. Harmless here, under-reports in general.
+
 ## Status
 
 - [x] Root cause measured and reproduced on a clean snapshot (both trees)
