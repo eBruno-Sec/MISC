@@ -1205,3 +1205,90 @@ renderer over an existing model, not a modelling job.
 ("the rendered badge is computed from the stored state, never hardcoded") is implementable today
 without waiting on C/D/E. A facts-only inventory at `DETECTED_TECHNOLOGY` / `VERSION_SUSPECTED` is
 shippable against Q-021B alone.
+
+### The ninth baseline case `00438` - the word "unprobed" is UNVERIFIED, and the real situation is worse than the item says.
+
+The item is carried in three places, one of them PRODUCT SOURCE:
+
+```
+agent/agent.py:219   "# ... -- 00438, the ninth case, is still unprobed."
+docs/LEDGERS.md:1001 "`00438` -- the ninth ..."
+docs/QUEUE.md:982    "Left open, named: `00438` (the ninth case, highest index) is still unprobed"
+```
+
+**FACT 1 - 00438 is not a capability gap. It has been PROBED and CONFIRMED.** MEASURED against the
+mission store, mission `ebd96f45` ("owaspbench-q019", 2026-08-11):
+
+```
+tool_calls naming BenchmarkTest00438: 8
+  run_sqli / run_sqli_structural / run_xpath / run_ldap / run_ssi / run_css_injection /
+  run_waf_bypass / run_injection_probes     -- 1 each, all at 01:37:17, all against
+  https://owaspbench:8443/benchmark/sqli-00/BenchmarkTest00438.html?BenchmarkTest00438
+
+stored finding: 00438  sqli  CONFIRMED
+   https://owaspbench:8443/benchmark/sqli-00/BenchmarkTest00438
+```
+
+All NINE named cases got byte-identical treatment in that mission - 8 calls each, the same 8 engines -
+and **all nine produced a confirmed `sqli` finding.**
+
+NEGATIVE CONTROL, the paired earlier baseline `90cee81c` ("owaspbench-clean", 2026-08-10): **0 calls
+for every one of the nine.** So the instrument discriminates - it is not matching every mission - and
+the 08-11 run really is the one that reached them.
+
+**FACT 2 - the selection model says 00438 IS selected at the shipped cap.** MEASURED by running the
+pinned test's own fixture and `agent.sweep_targets` at the live default:
+
+```
+SWEEP_TARGET_CAP shipped default = 700
+
+cap 400  kept 400  alpha slots 38   lost-indices reached {38: F, 45: F, 51: F, 58: F}
+cap 600  kept 600  alpha slots 58   lost-indices reached {38: T, 45: T, 51: T, 58: F}
+cap 605  kept 605  alpha slots 59   lost-indices reached {38: T, 45: T, 51: T, 58: T}
+cap 700  kept 700  alpha slots 70   lost-indices reached {38: T, 45: T, 51: T, 58: T}
+cap 800  kept 800  alpha slots 83   lost-indices reached {38: T, 45: T, 51: T, 58: T}
+```
+
+Index 58 is 00438. At the shipped cap of 700 the model selects it with 12 slots to spare.
+
+**FACT 3 - the sealed wp3 artifact does not contain the word the claim needs.** MEASURED,
+`docs/benchmarks/wp3_raised_cap_claims.json` (seal `951dc0a0`):
+
+```
+occurrences of BenchmarkTest00335/00337/00339/00341/00342/00428/00429/00433 : 13 each
+occurrences of BenchmarkTest00438                                          :  0
+```
+
+So "8 of the nine recovered" reproduces exactly from the seal. **But the seal's top-level keys are**
+
+```
+by_family, claim_rows, claims, coverage, distinct_cases_claimed, effort, elapsed_s,
+findings_total, leads_total, mode, phases, seal_sha256, target
+```
+
+**There is no probed-cases list.** The artifact records CLAIMS. "00438 produced no claim" is
+observed; **"00438 was not probed" is an INFERENCE from the absence of a claim, and the artifact
+cannot distinguish the two.** That is precisely the distinction Q-063 exists to enforce elsewhere in
+this codebase ("ran and found nothing" is not "never ran"), and it was collapsed here.
+
+**FACT 4 - wp3 cannot be re-verified from the mission store.** The newest owaspbench mission in the
+DB is `ebd96f45` (2026-08-11). The wp3 run is not there, so the sealed JSON is the only record and
+the probe question cannot be settled retrospectively at all.
+
+**Verdict: REWRITE the item; the current phrasing is UNVERIFIED and it under-states the problem.**
+Honest statement: *"`00438` was probed by 8 engines and confirmed as `sqli` in `ebd96f45`, the
+selection model selects it at the shipped cap of 700, and it nevertheless produced no claim in wp3.
+Whether it was probed in wp3 is unknown because the seal records claims, not probes."*
+
+That is not a budget item. A case the engine demonstrably confirms, which the budget model says is
+in-budget, disappeared between two runs - so the remaining hypotheses are a live-surface/model
+divergence (the wp3 precondition doc already names "the live surface differing from the modelled
+one" as a risk) or a non-deterministic loss of the kind Q-070 describes. **Do not price the next
+budget change against this item: raising the cap cannot fix a case the cap already covers.**
+
+**Two concrete follow-ups, both cheap:**
+1. Add a probed-cases list to the benchmark seal so "not probed" and "probed, no claim" stop being
+   indistinguishable. Without it every future run inherits this ambiguity.
+2. Delete the run-specific claim from `agent/agent.py:219`. A source comment asserting the state of
+   one benchmark run rots the moment the next run lands, and this one is now measurably wrong in the
+   word that matters.
