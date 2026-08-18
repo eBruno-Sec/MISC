@@ -3144,3 +3144,32 @@ earlier this week.
 **Q-052 remains Erwin's**, and is the only queue item nobody should close on his behalf: 40 of 111
 engines are structurally unselectable at `active`, both proposals were measured and rejected, and
 what `active` should MEAN to an operator is a product decision rather than an engineering trade.
+
+---
+
+## LANE OWNERSHIP — cycle 12, 2026-08-18. Three lanes, disjoint by file.
+
+| lane | owns (WRITE) | tickets |
+|---|---|---|
+| controls | `agent/report.py`, `docs/handoff/controls.md` | Q-071 - `control_status` reports "no control recorded" on the only 3 findings that have one |
+| bimodal | `agent/sqli_tool.py`, `agent/nosqli_tool.py`, `agent/tests/test_boolean_oracle_stability.py`, `agent/tests/test_sqli_boolean_noise_floor.py`, `docs/handoff/bimodal.md` | Q-070 - one repeat cannot establish stability on a bimodal page; 18 of 120 triples still confirm on clean responses |
+| scope-guard | `agent/main.py`, `docs/handoff/scope_guard.md` | Q-018 - the retest scope guard FAILS OPEN; Q-017 - 13 raw vs 7 gated `get_findings` sites |
+
+Each brief carries the two-sided DoD, because all three tickets can be "fixed" by breaking the other
+direction: Q-071 by reporting RECORDED for everything, Q-070 by refusing to confirm anything, Q-018
+by refusing every retest. **A fix that trades one error class for the other is not a fix**, and this
+project has already paid for that once.
+
+Q-018 first within its lane: a scope guard that fails OPEN removes the check keeping a retest inside
+the target the operator authorised, which is the boundary between authorised testing and touching
+something nobody asked for. The `scope.load_manual` raise is CORRECT; the caller mishandles it, so
+the fix belongs in the caller and the lane is told not to loosen `scope.py`.
+
+**Still open after these, and honestly ranked:** Q-074 (the effects model is now empty rather than
+wrong - populate `session_lifecycle`'s real invalidations), Q-021D/E/F, Q-003/004/005 (genuine new
+capability), the re-scoped Q-023/Q-030/Q-036, Q-035 (an experiment, not a defect), and **Q-044**,
+still held because it touches seven files and would collide with two live lanes.
+
+**Q-052 is unchanged and remains Erwin's.** 40 of 111 engines are structurally unselectable at
+`active`; both proposals were measured and rejected; what `active` should MEAN to an operator is not
+an engineering trade.
