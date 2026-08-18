@@ -417,28 +417,39 @@ spare** — so raising the cap could never have been the fix for a case the cap 
 `00438`. But that seal's keys carry **claims only, with no probed-cases list**, so "unprobed" was an
 inference from "no claim". **Absence of a claim is not evidence of absence of a probe** — the same
 mistake as reading a zero from an apparatus that was never looking.
-### Q-070 · One repeat cannot establish stability on a BIMODAL page · **HIGH** · `ready`
+### Q-070 · One repeat cannot establish stability on a BIMODAL page · **CLOSED** end to end `cd5ac90`
 
-Pinned by a STRICT xfail in `agent/tests/test_boolean_oracle_stability.py`, carrying the measurement.
+Two halves. The second was carried by the Coordinator because the lane could not edit `tools.py`
+under its ownership and said so rather than reaching.
 
-Q-040's stability gate closed the single-sample case and is sound: an endpoint that does not
-reproduce no longer confirms. **18 of the 120 ordered triples still confirm on responses containing
-no injection at all**, and the cause is diagnosed rather than guessed. `NOISE_A`/`NOISE_B` are the
-two states of ONE clean endpoint, so a single `baseline_repeat` lands in the SAME state as the
-baseline roughly half the time; the page then looks stable to the gate, and the TRUE/FALSE
-divergence is indistinguishable from the injection it is supposed to prove.
+**The confirmation criterion was the real fix, not the sample count.** The 18 residual false
+confirmations were exactly ONE shape: the OPERATOR response byte-identical to the baseline with only
+the CONTROL diverging, which is not a broadening at all. When a body is not a bare JSON array,
+`_row_fragment` returns the WHOLE body and `frag in op` degenerates into "operator equals baseline" -
+something a bimodal page satisfies for free about half the time. The containment oracle's
+precondition is now ENFORCED rather than merely documented.
 
-**Closing it needs a stronger control** - more than one repeat, or requiring the TRUE/FALSE pair to
-fall outside the OBSERVED noise envelope rather than merely differ.
+**Shipped at N=3, not the 4 the handoff proposed, on the handoff's own table:** N=3 reaches
+**0.000 FP/attempt** with **5 of 5** live true positives still confirming, and N=4 buys nothing
+measurable. The extra request is not free - the POST carrier samples INSIDE the field loop, so the
+cost is per FIELD and does not amortise, on the lane that carries every boolean-blind confirmation on
+this benchmark. **Ship the number the measurement supports, not the rounder one.**
 
-**Why it was filed instead of rushed at the end of a cycle:** every candidate fix carries a
-FALSE-NEGATIVE risk pointing the other way. An over-strict envelope blinds the oracle on a genuinely
-stable target, and this project has already paid for a fix that traded one error class for the other.
-The DoD therefore has two halves, not one: the 18 go to zero AND a real injection on a stable target
-still confirms, both measured.
+Seven tests went red on the patch and only two kinds existed:
+- **Two SPELLING pins** (`assert "baseline_repeat" in keywords`) - red on a change that STRENGTHENED
+  the property they guard. Re-aimed at the property, so a carrier supplying NOTHING still fails.
+- **Five REQUEST-COUNT pins** - correctly red, re-aimed to the new contract and deliberately kept
+  EXACT rather than made flexible: extra reference requests are the price of this fix, and a silent
+  drift upward is a cost nobody would notice.
 
-Note this is a CONFIRMATION oracle, so a false positive here is the most expensive class in the
-platform: everything it reports is supposed to be proven.
+A strict xfail asserting BOTH halves XPASSed and was retired in the same commit - the signal it was
+written to send. **The nosqli carrier still supplies no reference, so its gate stays inert and stays
+pinned**, rather than being retired alongside the sqli half it does not share.
+
+Process note worth keeping: the targeted run passed 273 and the full suite still found 7, because
+`test_sqli_stability.py` pinned the same carrier contract from a second file that nothing in the
+selection would have revealed.
+
 ### Q-069 · The ledger keeps only the LAST error per tool · **CLOSED** `b3bef1c` `5dc11ed`
 
 Measured across **all 153 missions**, and the worst case is far worse than the one that prompted the
