@@ -165,13 +165,119 @@ describing the fix. The two controls pass against BOTH -- they must, because the
 
 No test sleeps for real; the clock and both sleepers are injected.
 
-## 4. Status
+## 4. FIX 2 -- the wait is visible in the tool ledger
+
+`agent/tools.py`, `agent/tests/test_backoff_ledger.py`. **`agent/main.py` was NOT edited.**
+
+`ToolRegistry.execute()` opens a `rate_wait_scope()` around exactly the span the ledger rows already
+bracket, so the cooldown a dispatch paid for is the cooldown its row reports. A ContextVar, not a
+global counter read either side of the dispatch: engines run concurrently and a global delta bills
+one engine for another's wait. A test pins that (`..._not_billed_for_each_others_cooldowns`).
+
+`_ledger_outcome` then does two things:
+
+1. **PREPENDS** `[backoff 4.0s x1]` (or `[backoff 30.0s x2, truncated at cap]`) to the `output` the
+   ledger already aggregates into its note. Prepended because `_tool_ledger` cuts the note at 140
+   characters and a suffix on a real engine's output is a report nobody can read -- a test pins it
+   against a 400-character output. This is why no `main.py` change is needed to see it today.
+2. Writes a typed `tool_backoff` row -- `{tool, seconds, waits, truncated, origins}` -- which
+   `_tool_ledger` ignores (it filters on known types), so it is inert today and durable in the event
+   log from now. The producer patch that consumes it is in section 6.
+
+**Zero backoff changes nothing.** `describe_wait()` returns `""` when nothing waited, so a mission
+that met no rate limiting logs byte-for-byte what it logged before. That is the compatibility
+guarantee and it has its own test; it is also why this did not move any existing ledger assertion.
+
+**The Q-067 hazard, and the control for it.** `_tool_ledger` splits a verdict from a fault by
+PREFIX (`err.startswith(NEGATIVE_RESULT_TOKEN)`). Prepending to a verdict would report a correct
+"not present" as a broken engine -- re-breaking precisely what Q-067 landed to fix. So the error
+path is decorated ONLY for a plain fault; a Q-067 verdict and a scope block are left byte-identical,
+each with its own test, and `test_a_plain_fault_IS_decorated` is the positive control that stops
+those two passing because the feature does nothing at all.
+
+    docker run ... python -m pytest tests/test_backoff_ledger.py -q
+    9 passed
+
+The end-to-end assertions run the REAL `main._tool_ledger` over a real sqlite mission, so "visible in
+the ledger" is measured at the rendered row, not at the log call.
+
+---
+
+## 5. ANTI-IDLE -- the mirror-defect audit, with counts
+
+The brief asked for other server-directed controls that are READ but not ACTED on. Measured against
+the real transport, with a positive control first so the zeros are meaningful:
+
+    docker run ... python -u /measure/probe_audit.py
+
+| control the server sent | gap before the next request | acted on? |
+|---|---|---|
+| `429` + `Retry-After: 2` (POSITIVE CONTROL) | **2.006 s** | yes |
+| `429` with NO `Retry-After` | **0.003 s** | **no** |
+| `429` + `RateLimit-Remaining: 0` / `RateLimit-Reset: 2` | **0.003 s** | **no** |
+| `Retry-After: 2` on a `307` redirect | **0.006 s** | **no** |
+
+**Three unacted controls, and one bypass class:**
+
+1. **A bare `429`/`503` produces ZERO backoff.** `Retry-After` is OPTIONAL in RFC 9110 -- the status
+   is itself the instruction to slow down. `observe()` returns `None` with no header, so the most
+   common real-world rate limit is honoured not at all. This is the largest of the four and the same
+   false-negative shape as the original ticket.
+2. **`RateLimit-*` / `X-RateLimit-*` are never read.** Occurrences in `agent/` (excluding tests):
+   **0**. GitHub, most API gateways and every RFC-9239-style limiter use these.
+3. **`Retry-After` on a `3xx` is ignored.** `_RETRY_STATUSES = frozenset({429, 503})`; RFC 9110
+   permits the header on a 3xx and Apolaki parses it only for those two statuses.
+4. **7 target-traffic modules bypass the shared policy entirely**: `auth.py`, `authz.py`,
+   `register.py`, `replay.py`, `bwapp_solvers.py`, `codeintel.py`, `mutillidae_solvers.py` -- each
+   builds a raw `httpx` client and never references `browser_engine`. Counted by grep; all seven are
+   outside this lane's write scope. `proxy.py` (`wait_sync` + `observe`) and `juiceshop_solvers.py`
+   (via `browser_engine.drive`) are correctly covered, and `zap_client.py` / `cdp.py` talk to the
+   ZAP daemon and browserless -- control plane, not target -- so they are correctly exempt.
+
+**Deliberately NOT fixed here, and why.** Each of items 1-3 changes when Apolaki slows down against
+every target, which moves scan timing platform-wide and would land unmeasured inside a ticket about
+a different defect. The brief scoped this item to "audit and report with counts". Recommendation, in
+priority order: item 1 with a small fixed default (2-5 s) so a bare `429` is not free; item 2 reading
+`RateLimit-Reset` through the SAME cap; item 3 by widening `_RETRY_STATUSES` to any 3xx carrying the
+header. Item 4 is a lane of its own -- seven modules, one owner each.
+
+---
+
+## 6. PATCH WANTED -- `agent/main.py`, not editable by this lane
+
+The `tool_backoff` rows are already being written. To surface them as a first-class ledger column
+rather than a note prefix, `main._tool_ledger` needs three small changes. Consistent with Q-067/Q-069:
+a backoff is neither "ran and concluded" nor "broke", so it must NOT touch the status heuristic.
+
+1. Line ~959, admit the type:
+
+        if not t or l.get("type") not in ("tool_call", "tool_result", "tool_error",
+                                          "scope_block", "tool_negative", "tool_backoff"):
+
+2. Line ~964, two more accumulator keys: `"backoff_s": 0.0, "backoff_waits": 0`.
+
+3. In the type ladder, before the `else:` that handles faults:
+
+        elif typ == "tool_backoff":
+            a["backoff_s"] += float(l.get("seconds") or 0.0)
+            a["backoff_waits"] += int(l.get("waits") or 0)
+
+   and in the row dict, `"backoff_s": round(a["backoff_s"], 1)`. A `tool_backoff` row must not
+   increment `calls`, `ok`, `errors` or `negatives` -- it is not an outcome, it is time spent inside
+   one. `test_the_typed_row_does_not_disturb_the_rendered_ledger` already pins that from this side.
+
+Until it lands, the note prefix carries the information and nothing is lost.
+
+---
+
+## 7. Status
 
 | item | state |
 |---|---|
 | 1. measurement of current behaviour | **MEASURED** -- section 1 |
 | 2. both header forms | **MEASURED already working** (`c02208d`, not this lane) |
 | 3. a cap, stated and explained | **MEASURED fixed** -- 30 s, now bounding the wait and not only the header; mutant parked 270 s, fix holds at 30 s |
-| 4. the wait is visible in the ledger | **in progress** -- policy-side accounting landed and tested; not yet reaching the ledger |
-| 5. negative controls | **MEASURED already working** (`c02208d`), plus two new ones on the accounting |
-| anti-idle: mirror-defect audit | in progress |
+| 4. the wait is visible in the ledger | **MEASURED fixed** -- section 4, asserted at the rendered row via the real `main._tool_ledger` |
+| 5. negative controls | **MEASURED** -- `c02208d`'s three still hold, plus five new ones (no-wait compatibility, Q-067 verdict, scope block, no-header, cross-dispatch billing) |
+| anti-idle: mirror-defect audit | **MEASURED** -- section 5, 3 unacted controls + 7 bypassing modules |
+| full suite | in progress |

@@ -31,6 +31,13 @@ import xss_tool as xt
 from scope import ScopeEngine, PermissionLevel
 
 
+# Mirrors `main.NEGATIVE_RESULT_TOKEN`. Not imported: `main` imports `tools`, so reaching back the
+# other way is a cycle. The literal is already spelled out at the one producer in this file
+# (`fetch_openapi`); naming it here means the Q-043 backoff decoration can RECOGNISE a Q-067 verdict
+# and leave it alone, rather than prepending to it and re-breaking the prefix match Q-067 turns on.
+NEGATIVE_RESULT_TOKEN = "NOT PRESENT:"
+
+
 def _target_client(*args, _rate_policy=True, **kwargs):
     """Create a target HTTP client with the shared per-origin safety policy."""
     import httpx
@@ -1307,18 +1314,45 @@ class ToolRegistry:
         except Exception:
             pass
 
-    def _ledger_outcome(self, session_id: str, tool_name: str, res) -> None:
+    def _ledger_outcome(self, session_id: str, tool_name: str, res, rate_wait=None) -> None:
         """The other half. A `tool_call` with no outcome row reads as a call that never returned,
         and `_tool_ledger` marks a tool with calls but no `ok` as failed -- so a half-applied fix
-        would turn every newly-visible engine into a fabricated failure."""
+        would turn every newly-visible engine into a fabricated failure.
+
+        Q-043. `rate_wait` is this dispatch's target-cooldown accounting. A silent sleep looks
+        exactly like a slow engine, and every second spent parked on a `Retry-After` is a second in
+        which the engine recorded nothing -- so an unreported backoff is a false negative wearing a
+        clean result. It rides in on the row the ledger already aggregates, so the wait is visible
+        today with no change to the consumer, and it is ALSO written as a typed `tool_backoff` row
+        for the producer-side patch carried in `docs/handoff/backoff.md`.
+        """
         if not session_id or res is None:
             return
         try:
             err = str(getattr(res, "error", "") or "")
+            backoff = _browser_engine.describe_wait(rate_wait)
+            if backoff:
+                # Typed and machine-readable, beside the prose. `_tool_ledger` ignores unknown
+                # event types, so this is inert until the producer patch lands -- and durable in
+                # the event log from now, which means the first mission that hits a real cooldown
+                # is already replayable when it does.
+                db.add_log(session_id, "tool_backoff",
+                           {"tool": tool_name, "seconds": round(float(rate_wait["seconds"]), 3),
+                            "waits": rate_wait["waits"], "truncated": rate_wait["truncated"],
+                            "origins": rate_wait["origins"][:8]})
             if err:
                 # A SCOPE BLOCK is correct enforcement, not a failure. `_tool_ledger` splits on
                 # exactly this, and `_run_tool` classified it the same way before this moved here.
-                db.add_log(session_id, "scope_block" if "SCOPE BLOCK" in err else "tool_error",
+                _scope = "SCOPE BLOCK" in err
+                _negative = err.startswith(NEGATIVE_RESULT_TOKEN)
+                # Decorate ONLY a plain fault. `_tool_ledger` classifies a verdict by PREFIX
+                # (`startswith(NEGATIVE_RESULT_TOKEN)`), so prepending anything to a Q-067 verdict
+                # would re-break the exact thing Q-067 fixed and report a correct "not present" as
+                # a broken engine. The scope-block test is a substring and would survive, but it is
+                # excluded on the same principle: a classification token is not a comment field.
+                if backoff and not _scope and not _negative:
+                    err = backoff + " " + err
+                db.add_log(session_id, "scope_block" if _scope else "tool_error",
                            {"tool": tool_name, "error": err[:200]})
             else:
                 # `count` is REAL findings, not len(findings). Some tools (run_sqlmap on a
@@ -1330,9 +1364,15 @@ class ToolRegistry:
                 _f = getattr(res, "findings", None) or []
                 _real = sum(1 for f in _f
                             if not (isinstance(f, dict) and f.get("vulnerable") is False))
+                # PREPENDED, not appended: `_tool_ledger` cuts the note at 140 characters, and a
+                # suffix on a long engine output is a report of the backoff that nobody can read.
+                # Empty string when nothing waited, so a mission that met no rate limiting logs
+                # byte-for-byte what it logged before this existed.
+                _out = str(getattr(res, "output", ""))
+                if backoff:
+                    _out = backoff + " " + _out
                 db.add_log(session_id, "tool_result",
-                           {"tool": tool_name, "count": _real,
-                            "output": str(getattr(res, "output", ""))[:300]})
+                           {"tool": tool_name, "count": _real, "output": _out[:300]})
         except Exception:
             pass
 
@@ -1346,8 +1386,12 @@ class ToolRegistry:
         logged it, so skipping it here would make a count DROP -- as wrong as one that doubles.
         """
         self._ledger_dispatch(session_id, tool_name, tool_input)
-        res = await self._dispatch_engine(tool_name, tool_input, session_id)
-        self._ledger_outcome(session_id, tool_name, res)
+        # Q-043. The scope brackets the SAME span as the ledger rows, so the cooldown a dispatch
+        # actually paid for is the cooldown its row reports. A process-wide counter read either
+        # side of this would bill one engine for a concurrent engine's wait.
+        with _browser_engine.rate_wait_scope() as rate_wait:
+            res = await self._dispatch_engine(tool_name, tool_input, session_id)
+        self._ledger_outcome(session_id, tool_name, res, rate_wait=rate_wait)
         return res
 
     async def _dispatch_engine(self, tool_name: str, tool_input: dict, session_id: str) -> ToolResult:
