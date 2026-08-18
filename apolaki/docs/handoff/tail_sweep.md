@@ -1062,3 +1062,146 @@ Q-021E"), so it is not a defect - it is the precise statement of what Q-021E sti
 **Verdict: CLOSE Q-021B.** Record the two residuals as one small follow-up ("connect the codeintel
 and browser_engine producers to make_tech_fact") rather than keeping a HIGH ticket open, and correct
 oracle 1 in the same edit so the next reader does not record a FAIL against working code.
+
+### Q-021D - connect governed feeds to components - OPEN, every claim reproduces, and the promotion gap is now proven with a positive control.
+
+MEASURED live (worktree tree at `/tmp/wt2`):
+
+```
+intel_registry.stats()      {'total': 0, 'by_state': {}}
+intel_registry.production()  0 records
+by_state(candidate)=0  (validating)=0  (validated)=0  (fixture_backed)=0  (reviewed)=0  (production)=0
+intel_sources.SOURCES        18 sources,  enabled=True: 0
+intel_sources.enabled_sources()  ->  []
+```
+
+POSITIVE CONTROL that the store is reachable and the emptiness is structural, not a dead import:
+
+```
+intel_registry.ingest([{"source":"nvd","id":"CVE-0000-0000","kind":"advisory"}])
+   -> stats() {'total': 1, 'by_state': {'candidate': 1}}
+   -> production() STILL 0
+```
+
+So a record CAN enter, it lands at `candidate`, and nothing in product code can move it up.
+MEASURED, `advance()` callers: `grep -rn "advance(" --include=*.py agent/` returns hits in
+**`agent/tests/test_intel_registry.py` ONLY** (lines 27-49). No endpoint, no engine, no artery.
+`_STORE` is still a module-level dict (`intel_registry.py:13`) cleared by `reset()` at `:20`, so it
+does not survive a restart either.
+
+MEASURED, gap 1: there is still no product-to-advisory resolver. `advisories_for` does not exist
+anywhere; no CPE and no OSV.
+
+INSTRUMENT NOTE: my first grep for `purl` returned `agent/proxy.py:112,124-126,285-288` and
+`tools.py:7058`. Those are **local variables named `purl` holding a PROXY URL** (`purl =
+proxy_url(url)`), not Package URLs. Reported here because it is exactly the false-positive shape that
+would have produced "PURL support exists". Checked before it was written down.
+
+**Verdict: OPEN, unchanged, and correctly filed.** The ticket's own warning is the important part and
+it is now confirmed by measurement rather than by reading: `production()` is structurally always
+empty, so **any ticket that only adds a consumer wired to `production()` is a null change that will
+pass a green test**. Keep that sentence at the top when this is worked.
+
+### Q-021E - technology drives safe orchestration - OPEN, but SMALLER than filed: Q-021B already built the producer half.
+
+MEASURED, the ticket's central catch reproduces exactly:
+
+```
+"has_versions" in engine_descriptor.OBSERVATIONS   -> True
+PRECONDITIONS entries                              -> 42
+techniques gated by has_versions                   -> []          <- gates ZERO
+POSITIVE CONTROL "reflects_input" gates            -> 3 techniques
+```
+
+Sharper than the ticket had it: of **17 declared OBSERVATIONS, exactly 2 gate nothing** -
+`has_versions` and `sql_error_seen`. So this is a two-item orphan list, not a general rot.
+
+**THE MATERIAL UPDATE: the graph now EMITS the observation.** Q-021B landed after this ticket was
+written, and the producer half of Q-021E is done. MEASURED end to end, fingerprint -> fact -> graph
+-> observations:
+
+```
+Server: nginx/1.18.0  ->  build_from_engagement(...).to_observations()  ->  ['has_versions']
+NEGATIVE CONTROL, Server: nginx (NO version)      ->  has_versions NOT emitted
+```
+
+`asset_graph.py:342-349` implements exactly the distinction the ticket needed ("`has_versions` must
+mean a version is actually KNOWN"). **What remains is only the consumer**: a `PRECONDITIONS` entry
+and an engine. The observation is now produced, correctly, and lands in a vocabulary where nothing
+reads it - which is a cleaner statement of the gap than the ticket's.
+
+MEASURED, the "also in scope" half reproduces verbatim:
+
+```
+cp.canonical_family(sca_lead)                 -> 'vulnerable_component'
+'vulnerable_component' in cp._ROUTES          -> False    (_ROUTES has 12 entries)
+'vulnerable_component' in cp.PRIMARY_HANDLED  -> False
+cp.normalize(sca_lead)['validator']           -> None
+cp.normalize(sca_lead)['oracle']              -> 'no validator implemented yet'
+```
+
+And the corpus figure the ticket quotes is confirmed from the DB: **56 stored confirmed
+`vulnerable_component` findings** (family census, run 2), every one of which takes the `UNSUPPORTED`
+terminal path.
+
+MEASURED, nothing of the engine exists: `run_tech_probe`, `probe_plan` and `_technology_probe` return
+no hits (the one `probe_plan` match, `param_discovery.py:85`, is an unrelated local dict and was
+checked before being dismissed). `hasattr(ToolRegistry, "_run_tech_probe")` -> **False**.
+
+POSITIVE CONTROL that the pattern the ticket says to copy really is there:
+
+```
+hasattr(ToolRegistry, "_run_cloud_probe")  -> True   (tools.py:2978)
+hasattr(cloud_intel, "analyze")            -> True
+```
+
+**One stale reference to fix while editing.** The ticket names the agent-side analogue as
+`agent._cloud_exposure_probe` at `agent.py:1588-1610`. MEASURED: the only cloud method on `BBHAgent`
+is **`_probe_cloud_storage`**; `_cloud_exposure_probe` does not exist. An implementer copying the
+triplet would hunt for a method that is not there.
+
+**Verdict: OPEN, and it should be RE-SCOPED DOWN.** The producer, the graph projection and the
+observation now exist and are proven. The remaining work is the `PRECONDITIONS` consumer, the
+`probe_plan`/`_run_tech_probe` triplet and the `_ROUTES` entry. Its dependency on Q-021B is
+discharged; its dependencies on Q-021C/D are not.
+
+### Q-021F - expose the technology lifecycle honestly - OPEN, unchanged, and correctly ranked LOW.
+
+MEASURED: technology still reaches a report **only** through the delta section.
+
+```
+grep -n "New Technology|technology" agent/report.py
+   report.py:1586   ("tech", "New Technology")     <- markdown delta
+   report.py:3091   ("tech", "New Technology")     <- html delta
+   (no other hit in the whole file)
+```
+
+The ticket cited `report.py:1422,2585`; the line numbers moved, the fact did not. There is no
+technology inventory, no version-confidence column, no advisory-match column and no proof-status
+column on any surface.
+
+MEASURED, the other three surfaces the ticket names: `grep -ln technology agent/sarif_io.py
+agent/poc_bundle.py agent/main.py` matches **`main.py` only**, and every hit there is
+`_warm_start_technology` (`main.py:214-285`). The mission JSON exposes a warm-start **count**
+(`"technology": seeded_tech`), never the inventory. `sarif_io.py` and `poc_bundle.py`: zero hits.
+`ui/index.html`: 2 hits, both HELP TEXT describing the graph and the re-scan diff card, not a view.
+
+MEASURED, no shared projection exists to render: `grep -rn "def technology_|def tech_rows|def
+tech_inventory|technology_view"` -> no hits.
+
+**The vocabulary the ticket asks the badge to be computed from DOES already exist**, which lowers the
+cost: `dependency_intel.py:60-61`
+
+```
+TECH_PROOF_LADDER = (DETECTED_TECHNOLOGY, VERSION_SUSPECTED, ADVISORY_MATCHED,
+                     APPLICABILITY_CONFIRMED, SAFELY_PROBED, ORACLE_CONFIRMED)
+```
+
+and Q-021B already stamps `proof_state` on every fact (measured above: `version_suspected`). So F is a
+renderer over an existing model, not a modelling job.
+
+**Verdict: OPEN, unchanged, LOW is right.** One amendment worth making now: record that
+`proof_state` and `TECH_PROOF_LADDER` already exist and are populated, so the ticket's contract
+("the rendered badge is computed from the stored state, never hardcoded") is implementable today
+without waiting on C/D/E. A facts-only inventory at `DETECTED_TECHNOLOGY` / `VERSION_SUSPECTED` is
+shippable against Q-021B alone.
