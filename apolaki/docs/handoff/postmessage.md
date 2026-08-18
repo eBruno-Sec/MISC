@@ -64,6 +64,204 @@ carried into the tests as a real, copied negative fixture.
 ## 4. Status
 
 - [x] Ground measured; ticket confirmed open
-- [ ] Slice 1: pure detection + origin grading in `dom_tool.py` + tests
+- [x] Slice 1: pure detection + origin grading in `dom_tool.py` + tests (run 1, UNCOMMITTED at handoff)
 - [ ] Slice 2: browser confirmation phase in `tools.py`
 - [ ] Slice 3: live measurement + honest ceilings
+
+---
+
+# RUN 2 -- wiring the island
+
+## 5. What run 2 inherited, MEASURED before touching anything
+
+Run 1's five helpers were on disk and untested against the ratchet's own instrument. First act was
+to run it, because the brief's claim had to be checked, not assumed:
+
+    $ docker run --rm -v ".../agent:/app" -w /app apolaki-agent python -c \
+        "import deadcode_gate as dg; r=dg.scan_qualified(); print(r['count'], r['baseline'], r['ok']); \
+         print([n for n in r['unused'] if 'wm_' in n])"
+    40 37 False
+    ['dom_tool.wm_family', 'dom_tool.wm_finding', 'dom_tool.wm_lead_finding',
+     'dom_tool.wm_payloads', 'dom_tool.wm_reportable']
+
+CONFIRMED: five newly-dead qualified functions, ratchet red at 40 against a baseline of 37.
+
+**THE RATCHET UNDER-COUNTS THE ISLAND, and I nearly believed its list was the whole of it.**
+`find_message_listeners` and `wm_scan_hint` are ALSO uncalled by production, and neither appears in
+the failure list. `scan_qualified` treats *any* mention inside the defining module as a use, and its
+regex does not exclude comments -- both names appear in the explanatory comment block at
+`dom_tool.py:429-430`. So the true island was **seven** functions, not five. A comment describing
+what a function is for makes that function look wired. Wiring all seven, not just the five the gate
+could see, is what "green because the code is REACHABLE" has to mean.
+
+## 6. New engine vs. extending `run_dom_audit` -- decided on REACHABILITY, measured
+
+Run 2's brief asks for "a real engine that dispatches these helpers, registered in
+`TOOL_PERMISSIONS`, dispatchable, and reachable". Two candidate shapes, and the deciding evidence is
+what actually dispatches an engine in this codebase:
+
+    $ grep -rn "run_dom_audit" agent/ --include=*.py | grep -v tests/ | grep -v "^agent/tools.py"
+    agent/agent.py:916    r = await self.tools.execute("run_dom_audit", {"url": page}, session_id)
+    agent/agent.py:3776   async for ev in self._run_tool("run_dom_audit", {"url": u}, session_id):
+    agent/planner.py:448  e_steps.append(_step("run_dom_audit", {"url": u}, f"run_dom_audit:{u}"))
+    agent/candidate_pipeline.py:60-63   dom_xss / csti / prototype_pollution / eval_sink -> run_dom_audit
+    agent/asvs_model.py:196,229 ; agent/wstg_catalog.py:84 ; agent/engine_descriptor.py:117-118
+
+`run_dom_audit` is fired **deterministically** from the agent sweep and the planner. A brand-new
+name in `TOOL_PERMISSIONS` + `CLAUDE_TOOLS` is only *model-selectable*; making it deterministic
+requires editing `agent.py`/`planner.py`, which this lane is forbidden to touch. **Registering a new
+engine I cannot dispatch is the exact shape of the 32 engines that never executed** -- it would move
+the island up one level rather than removing it. So the capability is added as a PHASE of
+`run_dom_audit`, which is also what Q-003's own text asks for ("adding a **source** to a working
+confirmation engine, not a new engine"), and what run 1 planned in section 2 above.
+
+## 7. What was built
+
+`run_dom_audit` gains a third SOURCE beside `location.hash` and query params, as three methods in
+`agent/tools.py`:
+
+| piece | what it does |
+|---|---|
+| `_wm_audit(browser, url)` | DETECT + GRADE + decide. Fetches the page and its same-origin app scripts, applies `wm_scan_hint` as a cheap text gate, runs `find_message_listeners` + `wm_reportable`, then either confirms or emits `wm_lead_finding`. Never raises. |
+| `_wm_confirm(browser, url, rec)` | CONFIRM. Frames the target from a real foreign origin, posts `wm_payloads` one at a time, grades the runtime with `wm_family`, runs the mismatched-`targetOrigin` negative control, and returns `wm_finding` or `None`. |
+| `_wm_harness_server()` | the attacker page, served by a REAL loopback listener on an ephemeral port. |
+
+All seven helpers are now CALLED from `tools.py` or from something `tools.py` calls. The tier is
+declared `ACTIVE` as a bare token on BOTH surfaces (docstring and `CLAUDE_TOOLS` description).
+
+## 8. FOUR DEFECTS THE LIVE RUN FOUND, none of which any unit test could have
+
+The first live run reported `lead` for **every** case, including `eval(e.data)` with no origin check
+at all -- a page that is trivially exploitable -- and `swallowed` was EMPTY. A green test file and a
+composed engine, producing a confident wrong answer.
+
+**(a) Silent returns made an apparatus failure look like a safe target.** `_wm_confirm` returned
+`None` on goto failure, on `evaluate` failure and on nothing-fired, all identically and all without
+recording anything. Fixed: every exit records through `_swallow`, and `_post` now returns the
+DELIVERY STATUS beside the family, because `''` means two different things -- "the handler was driven
+and did not fire" (a real negative) and "the message was never delivered" (an apparatus failure
+wearing a negative's clothes).
+
+**(b) `rate_limited_goto` silently defeated the route interception.** MEASURED:
+
+    "where": "dom_audit.web_message.harness",
+    "error": "Page.goto: net::ERR_NAME_NOT_RESOLVED at http://bbh-evil.example/wm-harness"
+
+`browser_engine._guard_playwright_page` installs a PAGE-level `route("**/*")` whose gate calls
+`route.continue_()` unconditionally. Playwright resolves the most recently registered route first and
+page routes ahead of context routes, so a context-level `fulfill` registered BEFORE it never ran.
+
+**(c) THE ONE THAT MATTERED: a route-intercepted origin is classified PUBLIC, and Chromium's Local
+Network Access then blocks it from reaching any loopback or private target.** MEASURED:
+
+    reqfailed: http://127.0.0.1:8099/eval net::ERR_BLOCKED_BY_LOCAL_NETWORK_ACCESS_CHECKS
+    frames: ['http://bbh-evil.example/wm-harness', 'chrome-error://chromewebdata/']
+
+My first fix was to move the harness host into the target's own address space (`127.0.0.2`). **It was
+blocked identically** -- and that failure is what proved the mechanism: the classification comes from
+the CONNECTION, and a fulfilled request never opens one, so no hostname can fix it. The harness had
+to become a real listener. With `_wm_harness_server` the same probe gives
+`frames: [harness, http://127.0.0.1:8099/eval]`, no failed requests, and the sink fires.
+
+**A HYPOTHESIS I HELD AND FALSIFIED, recorded because acting on it would have been a rewrite for
+nothing.** I predicted Chromium suppresses `alert()` from a cross-origin iframe (the Chrome 92
+change) and was ready to switch the whole oracle to `window.open`. Tested instead:
+
+    H0 positive control (top-level alert): ['bbhwm8842-TOP']
+    H5 iframe alert: posted -> dialogs: ['bbhwm8842-IFRAME']
+    H6 iframe request oracle: ['http://127.0.0.1:8098/bbhwm8842-IMG']
+    H7 window.open -> opened new pages: 1 ; dialogs: ['bbhwm8842-POPUP']
+
+The alert DOES fire from a cross-origin iframe in this build. The only real blocker was (c). H0 is
+the positive control that makes H5 mean anything at all.
+
+**(d) The evidence sentence was FALSE on a TRUE finding.** `wm_finding` hardcoded "from the foreign
+origin https://bbh-evil.example/" while the post actually came from the loopback harness. The origin
+is now a parameter. Evidence naming the wrong actor is not cosmetic -- it is the part a human re-runs
+to check the claim.
+
+## 9. LIVE MEASUREMENT -- the real engine, real Chromium, real labs
+
+`_run_dom_audit` driven against handler shapes copied from PortSwigger/MDN and served over HTTP, plus
+the running Juice Shop lab, from a throwaway container on `apolaki_default`.
+
+| target | handler | result | why that is the right answer |
+|---|---|---|---|
+| `/eval` | `eval(e.data)`, no origin check | **CONFIRMED** `dom_xss` CWE-79 | `alert("bbhwm8842")` EXECUTED |
+| `/innerhtml` | `innerHTML = e.data`, no check | **CONFIRMED** `dom_xss` CWE-79 | executed via `<img onerror>` |
+| `/jsonparse` | `JSON.parse` + `switch(d.type)` | **CONFIRMED** `dom_xss` CWE-79 | payload `{'type':'load-channel','url':'javascript:alert(...)'}` -- the gate literal was READ OFF THE TARGET, not guessed |
+| `/strict` | MDN equality check, **same eval sink** | **LEAD, not confirmed** | PAIRED SECURE CONTROL: identical source and sink, only the origin check differs |
+| `/inert` | no `message` listener | nothing | true negative |
+| Juice Shop (live `main.js`) | `this.ws.onmessage` | **0 findings, 0 browser spend** | real-world false-positive control |
+
+The `/strict` row matters most, and its ledger entry proves it was DRIVEN rather than skipped:
+
+    "where": "dom_audit.web_message.silent", "target": "http://127.0.0.1:8099/strict",
+    "error": "no payload fired [js=posted; json:data=html=posted; object:data=html=posted;
+              json:data=js-url=posted; object:data=js-url=posted]"
+
+All five payloads were delivered and none fired. That is a MEASURED negative, not a gap.
+
+Confirmed evidence, verbatim:
+
+    Framed http://127.0.0.1:8099/eval from the foreign origin http://127.0.0.1:34543 and called
+    postMessage('alert("bbhwm8842")', "*"); alert("bbhwm8842") EXECUTED in the page.
+    NEGATIVE CONTROL: the identical message posted with targetOrigin="http://127.0.0.1:34543"
+    (an origin the target does not have) was refused delivery by the browser and nothing fired.
+
+## 10. Ratchet, measured with the real instrument
+
+    $ docker run --rm -v ".../agent:/app" -w /app apolaki-agent python -c \
+        "import deadcode_gate as dg; r=dg.scan_qualified(); print(r['count'], r['baseline'], r['ok']); \
+         print([n for n in r['unused'] if 'wm_' in n])"
+    35 37 True
+    []
+
+Green because the functions are USED, at a count BELOW the baseline. `QUALIFIED_BASELINE` was not
+touched. `scan_methods`: 0 flagged against a baseline of 14, `ok True`.
+
+`agent/tests/test_web_message_source.py` is 46 tests. The engine-half tests assert reachability with
+an AST reader that ignores comments and docstrings -- strictly stronger than the ratchet, which
+counted two of these helpers as used because a COMMENT named them.
+
+## 11. HONEST CEILINGS -- what this does NOT do
+
+1. **Framing only.** If the target sends `X-Frame-Options: DENY` or a restrictive `frame-ancestors`,
+   the handler is not reachable this way; the fact is recorded to the swallowed ledger and the
+   finding degrades to a lead. `window.open` MEASURED working (H7) but is deliberately NOT
+   implemented -- it would ship unverified against a real XFO target, and unverified code is worse
+   than absent code. This is the obvious next slice.
+2. **Static discovery.** Listeners are found by reading the page and its same-origin scripts. A
+   handler registered only after a runtime event, or in a lazily-loaded chunk, is not seen. CDP
+   listener enumeration (`getEventListeners(window)`) would close this.
+3. **Bounded.** 2 records per page, 5 payloads per record, one iframe load each.
+4. **Cross-site cookies.** The target loads in a cross-site iframe, so `SameSite=Lax` session cookies
+   are not sent. A handler that only registers post-login may be missed. This mirrors real attacker
+   conditions rather than working around them.
+5. `origin_check` is a STATIC PREDICTION. The runtime overrules it in both directions.
+
+## 12. NOT MINE, AND CURRENTLY RED: `test_engine_descriptor.py::test_the_verifier_catches_an_unwired_reason`
+
+Found while establishing my own baseline, in files this lane must not touch. Reported rather than
+fixed, with the attribution measured rather than assumed.
+
+The Q-075 lane added `QUALIFIED_BASELINE_SET` to `agent/deadcode_gate.py`, a frozenset of dead-code
+names recorded as strings. It contains `"bie.resolve_locator"`. `engine_descriptor.verify_always_on`
+counts a bare-name match in any non-prose `.py` file as a REFERENCE, so that string literal now makes
+`resolve_locator` look wired, and the negative control asserting it is NOT wired fails:
+
+    assert r["ok"] is False
+    E   assert True is False
+
+Attribution, measured three ways:
+
+* `git archive HEAD` + only my three files -> the test PASSES.
+* the live tree (which includes the other lane's uncommitted `deadcode_gate.py`) -> FAILS.
+* the offending literal is at `agent/deadcode_gate.py:164`, in an uncommitted hunk I did not write.
+
+**That lane already found this exact defect shape one level down** -- their own docstring records that
+recording `METHOD_BASELINE_SET` in `deadcode_gate.py` made `scan_methods` read its own record and
+report 0 uncalled methods instead of 13, so they excluded the file from its own scan. The same fix is
+needed for the CROSS-MODULE reader: either `deadcode_gate.py` joins `engine_descriptor._PROSE_FILES`,
+or the recorded sets stop being readable as identifiers. **A record of what a checker found must
+never be readable BY a checker** -- including a different one.

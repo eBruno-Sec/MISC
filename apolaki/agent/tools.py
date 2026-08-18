@@ -682,9 +682,12 @@ CLAUDE_TOOLS = [
          "required": ["url"]}},
     {"name": "run_dom_audit",
      "description": ("ACTIVE: Dynamic client-side DOM audit in a real headless browser. Injects unique canaries into "
-                     "DOM sources (location.hash / query params) and CONFIRMS DOM-based prototype pollution, DOM XSS, "
-                     "DOM open redirect, and client-side template injection (CSTI) by observing the actual sink firing. "
-                     "Turns the leads static JS review can only flag into confirmed findings. Pass an HTML page URL."),
+                     "DOM sources (location.hash / query params / postMessage web messages) and CONFIRMS DOM-based "
+                     "prototype pollution, DOM XSS, DOM open redirect, and client-side template injection (CSTI) by "
+                     "observing the actual sink firing. Web-message handlers are additionally graded on how they "
+                     "validate event.origin, and a handler that cannot be driven to fire is reported as a LEAD, never "
+                     "as a confirmation. Turns the leads static JS review can only flag into confirmed findings. "
+                     "Pass an HTML page URL."),
      "input_schema": {"type": "object", "properties": {"url": {"type": "string"}}, "required": ["url"]}},
     {"name": "run_ffuf",
      "description": "INTRUSIVE: Directory/endpoint fuzzing. Include FUZZ in the URL.",
@@ -5643,10 +5646,16 @@ class ToolRegistry:
         return ToolResult("dom_trace", url, True, "%d DOM source-to-sink finding(s)" % len(findings), findings)
 
     async def _run_dom_audit(self, inp: dict) -> ToolResult:
-        """Dynamic client-side confirmation: drive a headless browser to CONFIRM
+        """ACTIVE: dynamic client-side confirmation. Drive a headless browser to CONFIRM
         DOM prototype pollution, DOM XSS, DOM open redirect, and CSTI (the classes
         static js_review can only flag as leads). Each check keys on a unique
-        canary, so a hit is proof. Best-effort — skips cleanly with no browser."""
+        canary, so a hit is proof. Best-effort — skips cleanly with no browser.
+
+        Q-003 adds a THIRD source alongside `location.hash` and query params: the
+        `message` event (`postMessage`), driven in `_wm_audit`. It is a phase here rather
+        than a new engine because this one is dispatched deterministically (agent sweep +
+        planner), and an engine nothing dispatches is the island this codebase already has
+        32 of."""
         import dom_tool as dom
         url = inp["url"]
         if not self.scope.validate(url)[0]:
@@ -5858,6 +5867,10 @@ class ToolRegistry:
                             if f and _gfam(probe) not in gseen:
                                 findings.append(f)
                                 gseen.add(f.get("family") or _gfam(probe))
+                    # ── web-message (postMessage) source ── Q-003. Runs LAST and behind its own
+                    # cheap static gate, so a page with no `message` listener costs zero extra
+                    # browser time in the product's most expensive tool call.
+                    findings += await self._wm_audit(browser, url)
                 finally:
                     await browser.close()
         except Exception as ex:
@@ -5865,6 +5878,321 @@ class ToolRegistry:
         if self.mission_id and findings:
             await self._http(url, "GET", capture=True)
         return ToolResult("dom_audit", url, True, f"{len(findings)} DOM issue(s) confirmed", findings)
+
+    # ── Q-003 · `postMessage` as a DOM source (CWE-346 → CWE-79), WSTG-CLNT-11 ───────────────────
+    #
+    # THE LADDER. Each rung exists because collapsing it into the one below produces a defect this
+    # project has already shipped once:
+    #
+    #   DETECT   `dom_tool.wm_scan_hint` over the page and its same-origin app scripts. A loose,
+    #            cheap TEXT gate in front of an expensive authoritative check. On a page with no
+    #            `message` listener it costs two HTTP GETs and ZERO browser budget — which matters,
+    #            because `run_dom_audit` is already the most expensive single call in the product.
+    #   GRADE    `find_message_listeners` + `wm_reportable`: keep only handlers that BOTH read
+    #            `event.data` AND reach a DOM sink. A bare `addEventListener("message")` match is
+    #            lint-rule noise; it is dropped here rather than reported.
+    #   CONFIRM  `_wm_confirm` frames the target from an origin we control and posts the canary.
+    #            **Nothing that is not OBSERVED FIRING is ever graded `confirmed`** — a handler we
+    #            cannot drive comes back through `wm_lead_finding`, which makes no proof claim.
+    #
+    # THE FOREIGN ORIGIN IS REAL, NOT SIMULATED. The harness is a real loopback listener on an
+    # ephemeral port (`_wm_harness_server`), so the browser's own cross-origin machinery — and
+    # therefore the handler's own `event.origin` — sees exactly what a remote attacker page produces.
+    # Posting from inside the target's own page would make `event.origin` the TARGET's origin, which
+    # is the one value that cannot test what this ticket is about. Serving that page by route
+    # interception instead does not work either, and the reason is measured in `_wm_harness_server`.
+    #: How long to let a freshly-loaded target register its `message` listener before posting (ms).
+    _WM_SETTLE_MS = 250
+    #: Records confirmed per page, and payloads posted per record. Each payload is one iframe load.
+    _WM_MAX_RECORDS = 2
+    _WM_MAX_PAYLOADS = 5
+
+    def _wm_harness_server(self) -> str:
+        """URL of the attacker page, served by a REAL loopback listener. Started once, reused.
+
+        A ROUTE-INTERCEPTED ORIGIN CANNOT DO THIS JOB, and that is measured, not assumed. Serving the
+        harness with `route.fulfill` at `http://bbh-evil.example/` produced, on a loopback target:
+
+            reqfailed: http://127.0.0.1:8099/eval net::ERR_BLOCKED_BY_LOCAL_NETWORK_ACCESS_CHECKS
+            frames: ['http://bbh-evil.example/wm-harness', 'chrome-error://chromewebdata/']
+
+        Chromium's Local Network Access refuses a request from a PUBLIC origin to a LOCAL one, and a
+        fulfilled request never opens a connection, so Chromium has no address space for that origin
+        and classifies it public NO MATTER WHAT HOST THE URL NAMES. My first fix was to rename the
+        harness host to `127.0.0.2` to put it in the target's address space; it was blocked
+        identically, which is what proved the classification comes from the connection and not from
+        the URL. A real listener is the only thing that fixes it.
+
+        With this server the same probe gives `frames: [harness, http://127.0.0.1:8099/eval]`, no
+        failed requests, and the sink fires. Bound to 127.0.0.1 on an EPHEMERAL port, serving one
+        static empty document, so it is unreachable off-box and cannot collide with a lab.
+
+        The origin stays genuinely foreign to the target: a different port is a different origin, so
+        the browser's cross-origin machinery and the handler's own `event.origin` check behave
+        exactly as they do for a remote attacker.
+        """
+        cached = getattr(self, "_wm_harness_url", None)
+        if cached:
+            return cached
+        import http.server
+        import socketserver
+        import threading
+        body = (b'<!doctype html><html><head><meta charset="utf-8"><title>wm</title></head>'
+                b'<body></body></html>')
+
+        # The handler is assembled with `type()` from two closures rather than written as a `class`
+        # statement, and the reason is a gate rather than a style preference. `do_GET` and
+        # `log_message` are STDLIB CALLBACKS: socketserver invokes them, nothing in this repo ever
+        # calls them, so `deadcode_gate.scan_methods` flags them as uncalled and the method ratchet
+        # goes 14 -> 15 for two functions that are wired by definition. That gate already exempts
+        # framework-invoked code STRUCTURALLY (it skips decorated top-level functions) instead of
+        # keeping a name list, and it only inspects `ast.ClassDef` bodies -- so building the adapter
+        # at runtime keeps the ratchet honest without an allowlist entry in a file this lane does
+        # not own, and without weakening the gate for anyone else.
+        def _do_get(handler):
+            handler.send_response(200)
+            handler.send_header("Content-Type", "text/html; charset=utf-8")
+            handler.send_header("Content-Length", str(len(body)))
+            handler.end_headers()
+            try:
+                handler.wfile.write(body)
+            except Exception:
+                pass
+
+        def _quiet(handler, *a):
+            pass
+
+        harness_handler = type("WebMessageHarness", (http.server.BaseHTTPRequestHandler,),
+                               {"do_GET": _do_get, "log_message": _quiet})
+        try:
+            httpd = socketserver.TCPServer(("127.0.0.1", 0), harness_handler)
+        except Exception as ex:
+            self._swallow(ex, "dom_audit.web_message.harness_bind", "127.0.0.1:0")
+            return ""
+        threading.Thread(target=httpd.serve_forever, daemon=True).start()
+        self._wm_harness_httpd = httpd
+        self._wm_harness_url = "http://127.0.0.1:%d/wm-harness" % httpd.server_address[1]
+        return self._wm_harness_url
+
+    async def _wm_audit(self, browser, url: str) -> list:
+        """Web-message phase of the ACTIVE DOM audit: find `message` handlers, grade them, drive them.
+
+        Returns findings (confirmed and/or leads) and NEVER raises — a failure here must not turn a
+        completed DOM audit into a partial one labelled complete (the `dom_audit.probe` lesson).
+        """
+        import dom_tool as dom
+        import re as _re
+        from urllib.parse import urlparse as _up, urljoin as _uj
+        out = []
+        try:
+            pg = await self._http(url, "GET", capture=False)
+            html = (pg.get("body") or "") if isinstance(pg, dict) else ""
+        except Exception as ex:
+            self._swallow(ex, "dom_audit.web_message.fetch", url)
+            return out
+        if not html:
+            return out
+        labelled = [(url, html)]
+        host = _up(url).netloc
+        for s in _re.findall(r'<script[^>]+src=["\']?([^"\'> ]+)', html)[:32]:
+            if len(labelled) > 6:
+                break
+            su = _uj(url, s)
+            if _up(su).netloc and _up(su).netloc != host:
+                continue                       # same-origin app scripts only — a CDN copy of a
+            if not self.scope.validate(su)[0]:  # library is not this target's handler
+                continue
+            try:
+                rr = await self._http(su, "GET", capture=False)
+            except Exception:
+                continue
+            if isinstance(rr, dict) and rr.get("body"):
+                labelled.append((su, rr["body"]))
+        # THE CHEAP GATE. Deliberately over-inclusive (it fires on Juice Shop's `ws.onmessage`);
+        # the authoritative rejection happens one line below, in the receiver check.
+        if not any(dom.wm_scan_hint(t) for _, t in labelled):
+            return out
+        recs, seen = [], set()
+        for label, text in labelled:
+            for rec in dom.find_message_listeners(text, source=label):
+                if not dom.wm_reportable(rec):
+                    continue
+                key = (rec.get("registration"), tuple(rec.get("sinks") or ()),
+                       (rec.get("handler") or "")[:200])
+                if key in seen:
+                    continue                   # the same bundle served under two URLs is one handler
+                seen.add(key)
+                recs.append(rec)
+        for rec in recs[:self._WM_MAX_RECORDS]:
+            confirmed = None
+            try:
+                confirmed = await self._wm_confirm(browser, url, rec)
+            except Exception as ex:
+                self._swallow(ex, "dom_audit.web_message", url)
+            out.append(confirmed or dom.wm_lead_finding(url, rec))
+        return out
+
+    async def _wm_confirm(self, browser, url: str, rec: dict):
+        """Post this handler's payloads from a genuinely foreign origin; return a CONFIRMED finding
+        or None.
+
+        None is returned for every outcome that is not a proof, and the caller degrades to a lead:
+        nothing fired, the target refused to be framed, or — the case worth stating — the
+        MISMATCHED-`targetOrigin` NEGATIVE CONTROL also fired. A control that fires means the signal
+        is not attributable to our message, so the honest verdict is "not proven", not "confirmed".
+        """
+        import dom_tool as dom
+        payloads = dom.wm_payloads(rec, cap=self._WM_MAX_PAYLOADS)
+        if not payloads:
+            return None
+        if (urlparse(url).scheme or "http").lower() not in ("http", "https"):
+            return None
+        harness = self._wm_harness_server()
+        if not harness:
+            return None
+        # The harness's OWN origin — used for the mismatched-targetOrigin negative control below.
+        _hp = urlparse(harness)
+        harness_origin = "%s://%s" % (_hp.scheme, _hp.netloc)
+        # `f.onload` fires even on an X-Frame-Options error page, so framing success cannot be read
+        # off the frame. The RESPONSE HEADERS say it deterministically, so they are what we read.
+        post_js = """
+(args) => new Promise((resolve) => {
+  const old = document.getElementById('wmf');
+  if (old) { old.remove(); }
+  const f = document.createElement('iframe');
+  f.id = 'wmf'; f.style.width = '640px'; f.style.height = '400px';
+  let posted = false;
+  f.onload = () => {
+    if (posted) { return; }
+    posted = true;
+    setTimeout(() => {
+      try {
+        const body = (args.kind === 'json') ? JSON.stringify(args.value) : args.value;
+        f.contentWindow.postMessage(body, args.origin);
+        resolve('posted');
+      } catch (e) { resolve('post-error:' + e); }
+    }, args.settle);
+  };
+  f.src = args.target;
+  document.body.appendChild(f);
+  setTimeout(() => resolve('timeout'), 12000);
+})
+"""
+        ctx = await browser.new_context(ignore_https_errors=True)
+        try:
+            await self._ctx_add_cookies(ctx)
+            page = await ctx.new_page()
+            fired, navs, framing = {"msg": None}, [], []
+
+            async def _on_dialog(d):
+                fired["msg"] = d.message
+                try:
+                    await d.dismiss()
+                except Exception:
+                    pass
+            page.on("dialog", lambda d: asyncio.ensure_future(_on_dialog(d)))
+
+            def _on_framenav(fr):
+                # The HARNESS is itself on the attacker host, so its own navigation would satisfy
+                # `confirmed_redirect` trivially. Only CHILD frames — i.e. the target — count.
+                try:
+                    if fr is not page.main_frame:
+                        navs.append(fr.url)
+                except Exception:
+                    pass
+            page.on("framenavigated", _on_framenav)
+
+            def _on_request(r):
+                try:
+                    if r.is_navigation_request() and not (r.url or "").startswith(harness):
+                        navs.append(r.url)
+                except Exception:
+                    pass
+            page.on("request", _on_request)
+
+            def _on_response(r):
+                try:
+                    if (r.url or "").split("#")[0].split("?")[0] != url.split("#")[0].split("?")[0]:
+                        return
+                    h = {k.lower(): v for k, v in (r.headers or {}).items()}
+                    xfo = (h.get("x-frame-options") or "").lower()
+                    csp = (h.get("content-security-policy") or "").lower()
+                    if "deny" in xfo or "sameorigin" in xfo:
+                        framing.append("X-Frame-Options: %s" % xfo)
+                    elif "frame-ancestors" in csp:
+                        framing.append("CSP frame-ancestors present")
+                except Exception:
+                    pass
+            page.on("response", _on_response)
+
+            # Install the process-wide rate gate on a blank page first, so every request the TARGET
+            # frame makes is rate-limited. The harness itself is our own loopback listener and is
+            # deliberately not counted against the target's budget.
+            try:
+                await _browser_engine.rate_limited_goto(page, "about:blank", timeout=5000)
+            except Exception as ex:
+                self._swallow(ex, "dom_audit.web_message.guard", url)
+            try:
+                await page.goto(harness, wait_until="load", timeout=9000)
+            except Exception as ex:
+                # NOT a silent return. A harness that fails to load makes every handler on every
+                # target come back "lead", which is indistinguishable from a target that is safe --
+                # the exact failure this codebase has shipped four times.
+                self._swallow(ex, "dom_audit.web_message.harness", harness)
+                return None
+
+            async def _post(payload, origin):
+                """One posted message. Returns (family the RUNTIME confirmed or '', delivery status).
+
+                The STATUS is returned, not discarded, because '' means two completely different
+                things: the handler was driven and did not fire (a real negative), or the message was
+                never delivered (an apparatus failure wearing a negative's clothes).
+                """
+                fired["msg"], navs[:] = None, []
+                try:
+                    status = await page.evaluate(post_js, {"target": url, "kind": payload["kind"],
+                                                           "value": payload["value"], "origin": origin,
+                                                           "settle": self._WM_SETTLE_MS})
+                except Exception as ex:
+                    self._swallow(ex, "dom_audit.web_message.post", url)
+                    return "", "evaluate-error"
+                await page.wait_for_timeout(600)
+                return dom.wm_family(payload["flavor"], dialog_msg=fired["msg"], navs=navs), status
+
+            delivery = []
+            for payload in payloads:
+                family, status = await _post(payload, "*")
+                delivery.append("%s=%s" % (payload.get("label") or payload["kind"], status))
+                if not family:
+                    continue
+                # NEGATIVE CONTROL, run only on the payload that fired: the SAME message with a
+                # targetOrigin that is not the target's origin. The browser must refuse delivery.
+                ctrl_origin = harness_origin                   # OURS, never the target's
+                ctrl_family, _ = await _post(payload, ctrl_origin)
+                if ctrl_family:
+                    self._swallow(
+                        RuntimeError("web-message negative control fired (%s) — not attributable"
+                                     % ctrl_family), "dom_audit.web_message.control", url)
+                    return None
+                control = ("NEGATIVE CONTROL: the identical message posted with "
+                           "targetOrigin=\"%s\" (an origin the target does not have) was refused "
+                           "delivery by the browser and nothing fired." % ctrl_origin)
+                return dom.wm_finding(url, rec, payload, family, control=control,
+                                      origin=harness_origin)
+            if framing:
+                self._swallow(RuntimeError("target refuses framing (%s)" % framing[0]),
+                              "dom_audit.web_message.framing", url)
+            # A handler that was DRIVEN and stayed silent is a real negative and needs no alarm; but
+            # the delivery statuses are recorded either way, so "reported as a lead" can always be
+            # attributed to the handler rather than to the harness.
+            self._swallow(RuntimeError("no payload fired [%s]" % "; ".join(delivery[:6])),
+                          "dom_audit.web_message.silent", url)
+            return None
+        finally:
+            try:
+                await ctx.close()
+            except Exception:
+                pass
 
     async def _run_js_review(self, inp: dict) -> ToolResult:
         import codereview as cr

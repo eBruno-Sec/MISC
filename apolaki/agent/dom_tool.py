@@ -22,6 +22,7 @@ browser transport lives in tools._run_dom_audit.
 """
 from __future__ import annotations
 
+import re
 from urllib.parse import urlparse, urlunparse, parse_qsl, urlencode
 
 MARK = "bbhdom8842"          # unique canary (execution / render marker)
@@ -380,3 +381,521 @@ def build_finding(probe: dict, *, pp_value=None, nav_targets=None, dialog_msg=No
         if fam:
             return gadget_finding(url, probe["prop"], nav, fam)
     return None
+
+
+# ===============================================================================================
+# Q-003 -- `postMessage` as a DOM source (CWE-346 -> CWE-79), WSTG-CLNT-11
+#
+# A page that registers `window.addEventListener("message", h)` and lets `event.data` reach a
+# dangerous sink is exploitable by ANY page that can obtain a handle to it (an iframe it embeds, or
+# a `window.open` popup it holds). The classic aggravator is a handler that never checks
+# `event.origin`.
+#
+# THE LADDER, and why each rung exists:
+#   1. DETECT   - a static match on `addEventListener("message")` is a LEAD, never a finding. This
+#                 project's whole claim is that what it reports is proven.
+#   2. GRADE    - a handler comparing `event.origin` against an allowlist is materially different
+#                 from one that does not, and from one that does `origin.indexOf("target.com")`
+#                 (bypassable by `https://evil.example/?x=https://target.com`). Reporting the three
+#                 identically is the noise that makes a report worthless.
+#   3. CONFIRM  - post the canary from a context we control and observe the SINK FIRE. That is the
+#                 difference between a finding and a guess; the transport lives in
+#                 `tools._wm_audit`, which drives a real Chromium exactly as `_run_dom_audit` does.
+#
+# THE STATIC GRADE IS A PREDICTION; THE RUNTIME IS THE VERDICT. A handler this module grades
+# `strict` that nevertheless fires on our cross-origin post is CONFIRMED and the grade was wrong --
+# disagreements are resolved in favour of what the browser actually did, in both directions.
+#
+# REAL FIXTURE, COPIED FROM A LIVE TARGET (Juice Shop `main.js`, the only `onmessage` in the whole
+# bundle): `this.ws.onmessage=function(e){a.onData(e.data)}` -- socket.io's WebSocket transport, NOT
+# a window handler. A regex on `onmessage` alone reports a web-message vulnerability on Juice Shop
+# that does not exist, so the RECEIVER is checked, not just the event name.
+# ===============================================================================================
+
+WM_MARK = "bbhwm8842"          # web-message canary, DISTINCT from MARK so a hash-sourced XSS
+                               # confirmation can never be mis-attributed to the message source.
+
+#: Receivers on which a `message` listener really is a WINDOW web-message handler. A bare
+#: `addEventListener("message", ...)` (no receiver) is window's in a normal script, so it counts.
+#: Everything else -- `ws`, `socket`, `worker`, `port`, `es`, `channel` -- is a different transport
+#: whose `message` event is not attacker-reachable via `postMessage` to the page.
+_WM_WINDOW_RECEIVERS = frozenset({"window", "self", "globalThis", "top", "parent", "this.window"})
+
+_WM_ADD_RE = re.compile(
+    r"""(?:(?P<recv>[\w$][\w$.]{0,40})\s*\.\s*)?addEventListener\s*\(\s*(?P<q>['"])message(?P=q)\s*,""")
+#: THE WRAPPER FORM, and it is not a hypothetical. `iframe-resizer` 4.3.9 -- a library on millions of
+#: pages -- defines its own `addEventListener(el, evt, func)` helper and registers with
+#: `addEventListener(window, 'message', iFrameListener)`. MEASURED against the real jsDelivr build:
+#: with only the receiver-dot form above, `find_message_listeners` returned 0 listeners AND
+#: `wm_scan_hint` returned False, so the page would never even have been loaded in a browser. The
+#: receiver is still checked -- `addEventListener(port, 'message', f)` is rejected -- so widening the
+#: shape does not widen what counts as a window handler.
+_WM_ADD_ARG_RE = re.compile(
+    r"""addEventListener\s*\(\s*(?P<recv>[\w$][\w$.]{0,40})\s*,\s*(?P<q>['"])message(?P=q)\s*,""")
+_WM_ON_RE = re.compile(
+    r"""(?:(?P<recv>[\w$][\w$.]{0,40})\s*\.\s*)?onmessage\s*=""")
+
+#: sink name -> the pattern that shows `event.data` can reach it. Checked INSIDE the handler body
+#: only, so an unrelated `innerHTML` elsewhere in the bundle cannot manufacture a lead.
+_WM_SINK_PATTERNS = (
+    ("innerHTML",          r"\.\s*innerHTML\s*="),
+    ("outerHTML",          r"\.\s*outerHTML\s*="),
+    ("insertAdjacentHTML", r"\.\s*insertAdjacentHTML\s*\("),
+    ("srcdoc",             r"\.\s*srcdoc\s*="),
+    ("document.write",     r"document\s*\.\s*write(?:ln)?\s*\("),
+    ("eval",               r"\beval\s*\("),
+    ("Function",           r"\bnew\s+Function\s*\("),
+    ("setTimeout",         r"\bset(?:Timeout|Interval)\s*\("),
+    ("location",           r"\blocation\s*\.\s*(?:href|replace|assign)\s*[=(]|\blocation\s*=[^=]"),
+    ("element.src",        r"\.\s*src\s*="),
+    ("jQuery.html",        r"\.\s*(?:html|append|prepend|after|before|replaceWith)\s*\("),
+)
+_WM_SINKS = tuple((name, re.compile(pat)) for name, pat in _WM_SINK_PATTERNS)
+
+#: the handler must actually READ the event payload, or there is no source->sink flow to report.
+_WM_READS_DATA = re.compile(r"\.\s*data\b|\{\s*data\s*[,}]")
+
+# -- origin validation grading -------------------------------------------------------------------
+# STRICT: `e.origin === "https://x"` (either operand order), or exact membership in an allowlist
+#         (`ALLOWED.includes(e.origin)` / `.indexOf(e.origin)` / `.has(e.origin)`), i.e. the ORIGIN
+#         is the ARGUMENT.
+# WEAK:   a substring/prefix/regex test performed ON the origin (`e.origin.indexOf("target.com")`),
+#         the classic bypass. `.origin` referenced but never compared grades weak too: silence about
+#         how a value is used is not evidence that it gates anything.
+_WM_ORIGIN_REF = re.compile(r"[\w$]+\s*\.\s*origin\b")
+_WM_ORIGIN_STRICT = re.compile(
+    r"[\w$]+\s*\.\s*origin\s*(?:===|!==|==|!=)"
+    r"|(?:===|!==|==|!=)\s*[\w$]+\s*\.\s*origin\b"
+    r"|\.\s*(?:includes|indexOf|has|contains|lastIndexOf)\s*\(\s*[\w$]+\s*\.\s*origin\s*[,)]")
+_WM_ORIGIN_WEAK = re.compile(
+    r"[\w$]+\s*\.\s*origin\s*\.\s*"
+    r"(?:indexOf|lastIndexOf|startsWith|endsWith|includes|search|match|replace|slice|substr|substring)\s*\(")
+
+#: `X.<key> === "<literal>"` inside the handler: a routing gate the payload must satisfy or the
+#: handler returns early. Target-derived -- the literal is read off the target, never guessed.
+_WM_GATE_RE = re.compile(
+    r"""[\w$]+\s*\.\s*([A-Za-z_$][\w$]{0,29})\s*(?:===|==)\s*(['"])([^'"]{1,40})\2"""
+    r"""|(['"])([^'"]{1,40})\4\s*(?:===|==)\s*[\w$]+\s*\.\s*([A-Za-z_$][\w$]{0,29})""")
+
+#: THE SAME GATE WRITTEN AS A SWITCH, which is how real message routers are written. The equality
+#: form above found NOTHING on the canonical JSON.parse shape (`switch(d.type){case "load-channel":`)
+#: -- a real handler shape whose gate is a `case` label, not an `==`. A payload that misses the gate
+#: is dropped by the handler's default branch and the engine reports clean on a vulnerable page,
+#: which is exactly the "probe with an invented value" failure. `case` labels are collected in SOURCE
+#: ORDER and the discriminant property is taken from the nearest preceding `switch`.
+_WM_SWITCH_RE = re.compile(r"switch\s*\(\s*[\w$]+\s*\.\s*([A-Za-z_$][\w$]{0,29})\s*\)")
+_WM_CASE_RE = re.compile(r"""\bcase\s+(['"])([^'"]{1,40})\1\s*:""")
+
+#: THE PROPERTY ON THE RIGHT OF THE ASSIGNMENT -- the one that actually flows INTO the sink.
+#: MEASURED on the canonical JSON.parse shape (`ACMEplayer.element.src = d.url`): ranking by
+#: sink-proximity alone put `src` -- the SINK's own property name -- ahead of `url`, the only
+#: property that carries attacker data. Probing `{"type":"load-channel","src":...}` sets a property
+#: the handler never reads, so the engine reports clean on a page it is looking straight at.
+_WM_SINK_FED_RE = re.compile(
+    r"""\.\s*(?:innerHTML|outerHTML|srcdoc|src|href|action|text|value)\s*=\s*"""
+    r"""[\w$]+(?:\s*\.\s*[\w$]+)*\s*\.\s*([A-Za-z_$][\w$]{0,29})"""
+    r"""|\b(?:eval|write|writeln|setTimeout|setInterval|html|assign|replace|insertAdjacentHTML)"""
+    r"""\s*\(\s*[\w$]+(?:\s*\.\s*[\w$]+)*\s*\.\s*([A-Za-z_$][\w$]{0,29})""")
+
+_WM_PARSES_JSON = re.compile(r"JSON\s*\.\s*parse\s*\(")
+
+#: properties read off the event payload: `e.data.url`, `e.data["url"]`, `JSON.parse(e.data).url`.
+_WM_DATA_PROP_RE = re.compile(
+    r"""\.\s*data\s*\.\s*([A-Za-z_$][\w$]{0,29})"""
+    r"""|\.\s*data\s*\[\s*(['"])([A-Za-z_$][\w$]{0,29})\2\s*\]"""
+    r"""|JSON\s*\.\s*parse\s*\([^()]{0,80}\)\s*\.\s*([A-Za-z_$][\w$]{0,29})""")
+
+_WM_BODY_CAP = 4000        # a handler longer than this is minified app soup; grade what we can see
+
+
+def _wm_brace_body(text: str, start: int, cap: int = _WM_BODY_CAP) -> str:
+    """The `{...}` block beginning at/after `start`, brace-matched with minimal string awareness.
+
+    Quotes are tracked (with escapes) so a `{` inside a string literal cannot unbalance the scan;
+    regex literals are NOT tracked, which is a known and bounded imprecision -- it can only truncate
+    a body early, i.e. UNDER-report sinks, never invent one.
+    """
+    n = len(text)
+    i = text.find("{", start)
+    if i < 0 or i - start > 200:
+        return ""
+    depth, j, quote, esc = 0, i, "", False
+    while j < n and j - i < cap:
+        c = text[j]
+        if quote:
+            if esc:
+                esc = False
+            elif c == "\\":
+                esc = True
+            elif c == quote:
+                quote = ""
+        elif c in "'\"`":
+            quote = c
+        elif c == "{":
+            depth += 1
+        elif c == "}":
+            depth -= 1
+            if depth == 0:
+                return text[i:j + 1]
+        j += 1
+    return text[i:min(n, i + cap)]
+
+
+def _wm_resolve_handler(js: str, after: int) -> str:
+    """The handler source for a listener whose registration ends at `after`.
+
+    Inline `function(e){...}` / `(e)=>{...}` / `e=>{...}` are brace-matched in place. A NAMED
+    reference (`addEventListener("message", handleMsg)`) is resolved by finding its declaration
+    elsewhere in the same file. An unresolvable handler returns "" -- which downgrades the record
+    rather than inventing an analysis of code we never read.
+    """
+    tail = js[after:after + 400]
+    stripped = tail.lstrip()
+    lead = len(tail) - len(stripped)
+    if stripped.startswith(("function", "async function", "(", "async (")) or re.match(
+            r"^(?:async\s+)?[\w$]+\s*=>", stripped):
+        body = _wm_brace_body(js, after + lead)
+        if body:
+            return body
+    m = re.match(r"^([\w$]{1,60})\s*[,)]", stripped)
+    if not m:
+        return ""
+    name = m.group(1)
+    for pat in (r"function\s+%s\s*\(" % re.escape(name),
+                r"\b%s\s*=\s*(?:async\s+)?function\b" % re.escape(name),
+                r"\b%s\s*=\s*(?:async\s+)?\(?[\w$,\s]*\)?\s*=>" % re.escape(name),
+                r"\b%s\s*\([^)]{0,80}\)\s*\{" % re.escape(name)):
+        d = re.search(pat, js)
+        if d:
+            body = _wm_brace_body(js, d.end() - 1)
+            if body:
+                return body
+    return ""
+
+
+def wm_origin_grade(handler_src: str) -> str:
+    """`strict` | `weak` | `none` -- how the handler validates `event.origin`.
+
+    A PREDICTION about exploitability, not a verdict: `tools._wm_audit` posts from a genuinely
+    foreign origin and the browser's own delivery decision overrules this in both directions.
+    """
+    h = handler_src or ""
+    if _WM_ORIGIN_STRICT.search(h):
+        return "strict"
+    if _WM_ORIGIN_WEAK.search(h) or _WM_ORIGIN_REF.search(h):
+        return "weak"
+    return "none"
+
+
+def _wm_switch_gates(handler_src: str) -> list:
+    """[(discriminant_property, case_literal)] for switch cases whose BODY reaches a sink.
+
+    Only sink-reaching cases are returned. A `switch(d.type)` typically routes half a dozen benign
+    messages and one dangerous one; posting the benign literal makes the handler take a harmless
+    branch and the engine reports clean on a page that is genuinely vulnerable.
+    """
+    h, out = handler_src or "", []
+    for sw in _WM_SWITCH_RE.finditer(h):
+        prop = sw.group(1)
+        region = h[sw.end():sw.end() + _WM_BODY_CAP]
+        cases = list(_WM_CASE_RE.finditer(region))
+        for i, c in enumerate(cases):
+            end = cases[i + 1].start() if i + 1 < len(cases) else len(region)
+            body = region[c.end():end]
+            if any(rx.search(body) for _, rx in _WM_SINKS):
+                pair = (prop, c.group(2))
+                if pair not in out:
+                    out.append(pair)
+    return out
+
+
+def wm_handler_facts(handler_src: str) -> dict:
+    """Everything the handler SOURCE says about itself: which sinks it reaches, whether it reads the
+    event payload at all, how it grades `event.origin`, which payload properties it consumes, and
+    which literal gates a payload has to satisfy. Used unchanged on both the statically-scraped
+    handler and the one read back off the live page over CDP -- one analyser, two inputs."""
+    h = handler_src or ""
+    sinks = [name for name, rx in _WM_SINKS if rx.search(h)]
+    gates, props = {}, []
+    for m in _WM_GATE_RE.finditer(h):
+        key, val = (m.group(1), m.group(3)) if m.group(1) else (m.group(6), m.group(5))
+        if key and val and key.lower() not in ("origin", "source") and key not in gates:
+            gates[key] = val
+        if len(gates) >= 2:
+            break
+    # STRONGEST FIRST: a property assigned into (or passed to) a sink is the one carrying attacker
+    # data; an explicit `e.data.X` read is next; the sink-proximity harvest only backfills.
+    for m in _WM_SINK_FED_RE.finditer(h):
+        p = m.group(1) or m.group(2)
+        if p and p not in props:
+            props.append(p)
+    for m in _WM_DATA_PROP_RE.finditer(h):
+        p = m.group(1) or m.group(3) or m.group(4)
+        if p and p not in props:
+            props.append(p)
+    # backfill with sink-adjacent property names read off the handler itself (target-derived, the
+    # same ranking `harvest_gadget_props` already applies to prototype-pollution gadgets)
+    # a switch-based router contributes ALTERNATIVE gate sets, one per sink-reaching case, because
+    # only one branch of the switch usually reaches the sink and we do not know which in advance
+    alts = []
+    for prop, lit in _wm_switch_gates(h)[:3]:
+        g = dict(gates)
+        g[prop] = lit
+        if g not in alts:
+            alts.append(g)
+    if alts:
+        gates = alts[0]
+    for p in harvest_gadget_props(h, cap=6):
+        if p not in props and p not in gates:
+            props.append(p)
+    return {"sinks": sinks, "reads_data": bool(_WM_READS_DATA.search(h)),
+            "origin_check": wm_origin_grade(h), "props": props[:6], "gates": gates,
+            "gate_alts": alts or [gates], "parses_json": bool(_WM_PARSES_JSON.search(h)),
+            "resolved": bool(h.strip())}
+
+
+def find_message_listeners(js_text: str, *, source: str = "") -> list:
+    """Every WINDOW `message` listener in one script, with its handler analysed. STATIC => LEADS.
+
+    The receiver is checked, not just the event name: `this.ws.onmessage = ...` (socket.io's
+    WebSocket transport, and the ONLY `onmessage` in Juice Shop's live bundle) is a different
+    transport and is rejected here. `postMessage` cannot reach it, so reporting it would be a false
+    positive on a real target -- measured, not hypothesised.
+    """
+    js, out = js_text or "", []
+    for rx in (_WM_ADD_RE, _WM_ADD_ARG_RE, _WM_ON_RE):
+        for m in rx.finditer(js):
+            recv = (m.group("recv") or "").strip()
+            if recv and recv not in _WM_WINDOW_RECEIVERS:
+                continue                       # ws/socket/worker/port/EventSource: not a web message
+            # `onmessage` is a PROPERTY ASSIGNMENT, so the handler begins at the `=`, not after it;
+            # every other form ends its match on the comma that precedes the handler.
+            handler = _wm_resolve_handler(js, m.end() - (1 if rx is _WM_ON_RE else 0))
+            rec = {"receiver": recv or "window",
+                   "registration": "onmessage" if rx is _WM_ON_RE else "addEventListener",
+                   "source": source, "handler": handler[:_WM_BODY_CAP]}
+            rec.update(wm_handler_facts(handler))
+            out.append(rec)
+    return out
+
+
+def wm_reportable(rec: dict) -> bool:
+    """A listener worth spending browser budget on / worth reporting as a lead: it reaches a sink AND
+    reads the event payload. A handler that never touches `event.data` has no source->sink flow, and
+    a handler with no sink cannot become XSS -- reporting either is the lint-rule noise this ticket
+    exists to avoid."""
+    return bool(rec.get("sinks")) and bool(rec.get("reads_data"))
+
+
+def wm_scan_hint(text: str) -> bool:
+    """LOOSE, CHEAP gate over raw page/script text: is it worth loading this page in a browser to
+    enumerate its real listeners? Deliberately over-inclusive -- it fires on Juice Shop's
+    `ws.onmessage` -- because the authoritative decision is the CDP listener enumeration, and a loose
+    cheap gate in front of an authoritative expensive check wastes a page load, whereas a tight one
+    would silently lose every `window`-aliased minified bundle.
+
+    The `addEventListener` half deliberately allows arguments BEFORE the event name: the first
+    version of this gate required the string literal immediately after the paren and MEASURED False
+    on the real iframe-resizer build, which registers `addEventListener(window, 'message', fn)`.
+    """
+    t = text or ""
+    return bool(re.search(r"onmessage\s*=|addEventListener\s*\([^)]{0,60}['\"]message['\"]", t))
+
+
+# -- payloads: what we post, and why each shape exists -------------------------------------------
+_WM_EXEC_HTML = '<img src=x onerror=alert("%s")>' % WM_MARK   # innerHTML / document.write / srcdoc
+_WM_EXEC_JS = 'alert("%s")' % WM_MARK                         # eval / setTimeout / new Function
+_WM_JS_URL = 'javascript:alert("%s")' % WM_MARK               # location / element.src
+_WM_NAV_URL = "https://%s/%s" % (EVIL, WM_MARK)               # location -> open redirect
+
+
+def wm_payloads(rec: dict, cap: int = 10) -> list:
+    """Bounded payloads to post at one handler. Each item:
+    {"kind": "string"|"json"|"object", "value", "flavor": "exec"|"nav", "label"}.
+
+    Shapes are chosen from what the HANDLER ITSELF does -- the sinks it reaches pick the exec vs nav
+    flavour, and the JSON/object shapes are built from properties and literal gates read off the
+    target's own handler. Nothing here is a guessed property name from a wordlist: a handler that
+    early-returns unless `d.type === "load-channel"` is satisfied with the literal it was MEASURED
+    to require.
+
+    ORDER IS LOAD-BEARING, NOT COSMETIC -- the same rule `build_probes` already records: whatever the
+    cap cuts must be the least valuable thing, not the most. A handler that does
+    `try { d = JSON.parse(e.data) } catch(e) { return }` DISCARDS every plain-string payload, so for a
+    structured handler the strings are the waste and the gate-satisfying object is the whole point.
+    MEASURED before this fix on the canonical JSON.parse shape: the one payload that reproduces the
+    documented exploit sat at index 10 of a list capped at 10.
+    """
+    sinks = set(rec.get("sinks") or ())
+    strings, structured = [], []
+    markup = sinks & {"innerHTML", "outerHTML", "insertAdjacentHTML", "srcdoc",
+                      "document.write", "jQuery.html"}
+    code = sinks & {"eval", "Function", "setTimeout"}
+    urlish = sinks & {"location", "element.src"}
+    if markup or not sinks:
+        strings.append({"kind": "string", "value": _WM_EXEC_HTML, "flavor": "exec", "label": "html"})
+    if code or not sinks:
+        strings.append({"kind": "string", "value": _WM_EXEC_JS, "flavor": "exec", "label": "js"})
+    if urlish or not sinks:
+        strings.append({"kind": "string", "value": _WM_JS_URL, "flavor": "exec", "label": "js-url"})
+        strings.append({"kind": "string", "value": _WM_NAV_URL, "flavor": "nav", "label": "nav-url"})
+    out = structured
+    for gates in (rec.get("gate_alts") or [dict(rec.get("gates") or {})])[:3]:
+        for prop in (rec.get("props") or [])[:3]:
+            if prop in gates:
+                continue                       # never overwrite the literal the gate demands
+            for val, flavor, label in ((_WM_EXEC_HTML, "exec", "html"),
+                                       (_WM_JS_URL, "exec", "js-url"),
+                                       (_WM_NAV_URL, "nav", "nav-url")):
+                if flavor == "nav" and not urlish:
+                    continue
+                body = dict(gates)
+                body[prop] = val
+                out.append({"kind": "json", "value": body, "flavor": flavor,
+                            "label": "json:%s=%s" % (prop, label)})
+                out.append({"kind": "object", "value": body, "flavor": flavor,
+                            "label": "object:%s=%s" % (prop, label)})
+    # A handler that parses JSON, or gates on a literal, drops raw strings on the floor -- put the
+    # structured payloads in front of the cap for it, and behind the cap for everyone else.
+    ordered = (structured + strings) if (rec.get("parses_json") or rec.get("gates")) \
+        else (strings + structured)
+    seen, uniq = set(), []
+    for p in ordered:
+        key = (p["kind"], repr(p["value"]))
+        if key not in seen:
+            seen.add(key)
+            uniq.append(p)
+    return uniq[:cap]
+
+
+def confirmed_wm(dialog_msg) -> bool:
+    """Execution, not reflection: an alert carrying the web-message canary actually fired."""
+    return bool(dialog_msg) and WM_MARK in str(dialog_msg)
+
+
+def wm_family(flavor, *, dialog_msg=None, navs=None) -> str:
+    """Which family the runtime signals CONFIRM for one posted payload, or '' if nothing fired."""
+    if confirmed_wm(dialog_msg):
+        return "dom_xss"
+    if flavor == "nav" and confirmed_redirect(navs):
+        return "open_redirect"
+    return ""
+
+
+_DOM_CVSS["web_message"] = ("CVSS:3.1/AV:N/AC:L/PR:N/UI:R/S:U/C:L/I:L/A:N", 5.4)
+
+
+def _wm_origin_sentence(grade: str) -> str:
+    return {
+        "none": "The handler performs NO check on event.origin, so any page that can obtain a "
+                "handle to this one (by framing it, or by window.open) can drive the sink.",
+        "weak": "The handler's event.origin check is a substring/prefix test rather than an equality "
+                "or allowlist-membership test, so an attacker origin such as "
+                "https://evil.example/?x=<expected-origin> or <expected-origin>.evil.example "
+                "satisfies it.",
+        "strict": "The handler compares event.origin for equality or allowlist membership.",
+    }.get(grade, "The handler's origin validation could not be determined from its source.")
+
+
+def wm_lead_finding(url: str, rec: dict) -> dict:
+    """A LEAD -- a `message` handler whose source reaches a sink, NOT driven to execution.
+
+    Deliberately NOT built through `_base`: that builder stamps `confidence: "confirmed"` on
+    everything it touches, and a static match graded confirmed is the most expensive defect class in
+    this platform. A lead carries no proof burden (`proof_schema.UNPROVEN_CONFIDENCE`) precisely
+    because it makes no proof claim.
+    """
+    vec, score = _DOM_CVSS["web_message"]
+    grade = rec.get("origin_check") or "none"
+    sinks = ", ".join(rec.get("sinks") or []) or "an unidentified sink"
+    where = rec.get("source") or url
+    return {
+        "title": "Web-message (postMessage) handler reaches a DOM sink (origin check: %s)" % grade,
+        "severity": _sev_from_score(score, "medium"), "target": url,
+        "description": (
+            "This page registers a window '%s' handler (%s) that reads event.data and passes it to "
+            "%s. %s Any page able to obtain a handle to this document can post to that handler."
+            % (rec.get("registration") or "message", rec.get("receiver") or "window", sinks,
+               _wm_origin_sentence(grade))),
+        "impact": ("If the payload reaches the sink unfiltered, attacker script runs in the victim's "
+                   "authenticated session from this trusted origin (session/token theft, actions as "
+                   "the victim). Client-side; not server compromise."),
+        "evidence": ("Static analysis of %s found a window message listener registered via %s whose "
+                     "handler reads event.data and reaches: %s. Origin validation graded '%s'. "
+                     "NOT DRIVEN TO EXECUTION -- this is a lead, not a proof."
+                     % (where, rec.get("registration") or "addEventListener", sinks, grade)),
+        "reproduction_steps": [
+            "Open %s" % url,
+            "In DevTools, inspect the window 'message' listener (Elements > Event Listeners, or "
+            "getEventListeners(window).message)",
+            "From a page you control, frame this document (or window.open it) and call "
+            "targetWindow.postMessage(<payload>, '*')",
+            "Observe whether the payload reaches %s" % sinks],
+        "cwe": "CWE-346", "family": "web_message",
+        "tags": ["postmessage", "web-message", "dom", "cwe-346", "wstg-clnt-11"],
+        "confidence": "lead",
+        "cvss_vector": vec, "cvss_score": score,
+        "success_oracle": ("UNPROVEN at this confidence. To confirm: post a unique canary from a "
+                           "foreign origin and observe the sink fire at runtime."),
+        "capec": "CAPEC-588: DOM-Based Cross-Site Scripting",
+    }
+
+
+def wm_finding(url: str, rec: dict, payload: dict, family: str, *, control: str = "",
+               origin: str = "") -> dict:
+    """A CONFIRMED web-message finding: the canary was posted from a FOREIGN origin and the sink
+    fired in a real browser. `control` records the mismatched-`targetOrigin` negative control that
+    had to stay silent for this to be reported at all.
+
+    `origin` IS THE ORIGIN THAT ACTUALLY POSTED, and it is a parameter rather than a constant because
+    hardcoding one made the evidence FALSE. This function printed "from the foreign origin
+    https://bbh-evil.example/" while `tools._wm_confirm` was posting from a loopback harness on an
+    ephemeral port -- a true finding described by a sentence that never happened. Evidence naming the
+    wrong actor is not a cosmetic defect: it is the part a human re-runs to check the claim.
+    """
+    grade = rec.get("origin_check") or "none"
+    label = payload.get("label") or payload.get("kind")
+    posted = payload.get("value")
+    evidence = ("Framed %s from the foreign origin %s and called "
+                "postMessage(%r, \"*\"); %s. %s"
+                % (url, origin or "an origin under our control", posted,
+                   ("alert(\"%s\") EXECUTED in the page" % WM_MARK) if family == "dom_xss"
+                   else ("the page navigated to https://%s/" % EVIL),
+                   control or ""))
+    if family == "dom_xss":
+        f = _base(url, "DOM XSS via postMessage web message (%s)" % label, "high",
+                  ("A window 'message' handler on this page passes event.data to a DOM sink. A "
+                   "message posted from an origin we control reached that sink and EXECUTED script "
+                   "in the page's own origin. Origin validation was graded '%s' from the handler "
+                   "source and the runtime confirms it does not stop a foreign sender." % grade),
+                  evidence, "dom_xss", "CWE-79",
+                  ["postmessage", "web-message", "dom-xss", "cwe-346", "wstg-clnt-11"],
+                  ["From a page on an origin you control, embed %s in an iframe (or open it with "
+                   "window.open)" % url,
+                   "Wait for it to load, then call frame.contentWindow.postMessage(%r, \"*\")" % posted,
+                   "Observe alert(\"%s\") fire -- attacker script executing in the target's origin"
+                   % WM_MARK],
+                  impact=("Any page that can frame or open this one runs arbitrary JavaScript in the "
+                          "victim's authenticated session on this origin: session/token theft, "
+                          "account actions as the victim, keylogging, phishing from the trusted "
+                          "domain."),
+                  oracle=("a message posted from a foreign origin caused alert() carrying the unique "
+                          "canary \"%s\" to execute, while the same payload sent with a mismatched "
+                          "targetOrigin did not" % WM_MARK))
+        f["capec"] = "CAPEC-588: DOM-Based Cross-Site Scripting"
+        return f
+    f = _base(url, "DOM open redirect via postMessage web message (%s)" % label, "medium",
+              ("A window 'message' handler uses event.data as a navigation target without validating "
+               "event.origin (graded '%s'), so any page that can obtain a handle to this document "
+               "can send visitors to an attacker-chosen site." % grade),
+              evidence, "open_redirect", "CWE-601",
+              ["postmessage", "web-message", "open-redirect", "cwe-346", "wstg-clnt-11"],
+              ["From an origin you control, frame %s" % url,
+               "Call frame.contentWindow.postMessage(%r, \"*\")" % posted,
+               "Observe the browser navigate to https://%s/" % EVIL],
+              impact=("An attacker page drives the victim's browser from this trusted origin to a "
+                      "site of its choosing, enabling phishing and OAuth/token forwarding."),
+              oracle=("a message posted from a foreign origin caused a top-level navigation to the "
+                      "attacker host %s, while the same payload sent with a mismatched targetOrigin "
+                      "did not" % EVIL))
+    return f
