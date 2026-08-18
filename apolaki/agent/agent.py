@@ -216,7 +216,20 @@ def _is_generic_objective(objective: str) -> bool:
 #
 # The cost prediction was WRONG in the good direction: +22% elapsed, not the +57% predicted from a
 # linear per-URL model. Per-URL cost is evidently sublinear in target count, which is worth
-# understanding before the next budget change is priced -- 00438, the ninth case, is still unprobed.
+# understanding before the next budget change is priced.
+#
+# CORRECTION 2026-08-17: this comment used to end "-- 00438, the ninth case, is still unprobed".
+# That was FALSE and it sat in product source for days. MEASURED against mission ebd96f45: 00438
+# was probed by EIGHT engines (run_sqli, run_sqli_structural, run_injection_probes, run_xpath,
+# run_ldap, run_ssi, run_css_injection, run_waf_bypass) and produced a CONFIRMED sqli finding --
+# identically to the other eight cases. Negative control: the paired mission 90cee81c shows 0 log
+# rows and 0 findings for it. The selection model picks it at index 58 with the cap at 700, i.e.
+# with 12 slots to spare, so raising the cap could never have been the fix for a case the cap
+# already covered.
+#
+# The claim came from reading the wp3 SEAL, which has 0 mentions of 00438 -- but that seal's keys
+# carry CLAIMS ONLY and no probed-cases list, so "unprobed" was an inference from "no claim".
+# Absence of a claim is not evidence of absence of a probe.
 SWEEP_TARGET_CAP = max(1, int(os.getenv("BBH_SWEEP_TARGETS", "700") or 700))
 # targets that additionally get the browser-backed confirmers, taken off the FRONT of the shape-spread
 # order so they are representatives of the whole site rather than the first N of one directory.

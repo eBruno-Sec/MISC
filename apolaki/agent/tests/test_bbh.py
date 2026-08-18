@@ -1174,7 +1174,7 @@ def test_zap_client_issues_expected_api_calls():
         await c.add_scan_header()
         await c.set_oast_service("BOAST")
 
-    asyncio.get_event_loop().run_until_complete(go())
+    _run(go())          # was asyncio.get_event_loop(): the last direct caller of the ambient loop
     ascan = next(x for x in calls if x[2] == "scan")
     assert ascan[3]["scanPolicyName"] == "My Policy" and ascan[3]["inScopeOnly"] == "true"
     inj = next(x for x in calls if x[2] == "setOptionTargetParamsInjectable")
@@ -2572,7 +2572,27 @@ def test_scope_summary_report_download_and_empty_header_filter():
 
 
 def _run(coro):
-    return asyncio.get_event_loop().run_until_complete(coro)
+    """Run a coroutine on a loop this module OWNS.
+
+    Was `asyncio.get_event_loop().run_until_complete(coro)`, which depended on ambient global
+    state: it reused whatever loop happened to be current. That held until a test file sorting
+    BEFORE this one started using `asyncio.run()`, which closes its loop and leaves the current
+    loop unset -- and on 3.12 `get_event_loop()` then raises "There is no current event loop".
+
+    MEASURED: this file passed 244/244 in isolation while 11 of its tests failed in the full
+    suite, which is the signature of an ordering dependency rather than a defect in the code
+    under test. The loop is kept module-wide rather than created per call, because objects built
+    in one `_run` are used by the next and a fresh loop per call would break that -- the fix
+    removes the ambient dependency without changing the semantics the tests were written against.
+    """
+    global _LOOP
+    if _LOOP is None or _LOOP.is_closed():
+        _LOOP = asyncio.new_event_loop()
+        asyncio.set_event_loop(_LOOP)
+    return _LOOP.run_until_complete(coro)
+
+
+_LOOP = None
 
 
 class _StubTools:

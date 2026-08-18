@@ -268,6 +268,13 @@ a backoff is neither "ran and concluded" nor "broke", so it must NOT touch the s
 
 Until it lands, the note prefix carries the information and nothing is lost.
 
+**One cost, stated rather than discovered later.** `db.get_logs` keeps the NEWEST `limit` rows when
+the limit bites (Q-017), so on a mission that exceeds the ledger's 4000-row window every
+`tool_backoff` row displaces one older event. The row is written only when a backoff really
+happened, at most one per dispatch, so the pressure is proportional to how rate-limited the target
+actually was -- but it is not zero, and the producer patch above is also what would let the row be
+dropped again once its counts are folded into the tool row.
+
 ---
 
 ## 7. Status
