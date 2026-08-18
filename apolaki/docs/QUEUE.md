@@ -3184,3 +3184,30 @@ still held because it touches seven files and would collide with two live lanes.
 **Q-052 is unchanged and remains Erwin's.** 40 of 111 engines are structurally unselectable at
 `active`; both proposals were measured and rejected; what `active` should MEAN to an operator is not
 an engineering trade.
+
+---
+
+## LANE OWNERSHIP — cycle 13, 2026-08-18. Three lanes, disjoint by file.
+
+| lane | owns (WRITE) | tickets |
+|---|---|---|
+| effects run 2 | `agent/engine_descriptor.py`, `agent/techniques.py`, `agent/effect_search.py`, `docs/handoff/effects2.md` | Q-074 - the negative-effects model is EMPTY rather than wrong; populate `session_lifecycle`'s real invalidations |
+| findings-gate | `agent/main.py`, `docs/handoff/findings_gate.md` | Q-017 - 13 raw vs 7 gated `get_findings` sites; Q-023 - ZAP's one remaining live clause |
+| postMessage | `agent/dom_tool.py`, `agent/tools.py`, `docs/handoff/postmessage.md` | Q-003 - `postMessage` as a DOM-XSS source (CWE-346 -> CWE-79) |
+
+**Q-003 is the first genuine CAPABILITY ticket in a long run of correctness fixes**, and its brief
+carries the standard that makes it worth doing: a static match on `addEventListener("message")` is a
+LEAD, not a finding. Detect the listener, check whether `event.origin` is validated, and CONFIRM by
+driving a real message into the sink. If confirmation is not reachable this cycle, ship the lead and
+say so - **do not grade an unconfirmed static match as `confirmed`**, because a false confirmation is
+the most expensive defect class here.
+
+All three lanes were told to measure before building. Four tickets in four days turned out wrong in
+scope, mechanism, or existence - one was already implemented and this file listed it CLOSED and
+`ready` simultaneously - so each brief says plainly that disproving its own ticket is a full result.
+
+**Still open after these:** Q-021D/E/F, Q-004/Q-005, the re-scoped Q-030/Q-036, Q-035 (an experiment
+rather than a defect), and **Q-044**, still held because it touches seven files including `main.py`,
+which the findings-gate lane holds this cycle.
+
+**Q-052 remains Erwin's and nothing this cycle touched it.**
