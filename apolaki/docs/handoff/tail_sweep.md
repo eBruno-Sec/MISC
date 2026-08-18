@@ -573,3 +573,157 @@ branch is unreachable through the product, and the earlier replay found the guar
 **Verdict: OPEN as filed, LOW, hardening only.** The ticket is accurate and correctly de-escalated;
 it simply has not been done. Its real value is the "do not re-raise this as CRITICAL" note at the
 top, which is worth keeping in the queue verbatim.
+
+### Q-019 - "2756 URLs discovered, 36 probed" - SUBSTANTIALLY CLOSED. Three of three root causes fixed, and the acceptance oracle is MIS-SPECIFIED.
+
+**The duplicate first.** Q-019 appears twice: `docs/QUEUE.md:1346` (Rank 0, `CRITICAL`, `ready`,
+"take this first") and `docs/QUEUE.md:1642` (Rank 3b, `proposed`). They are the SAME ticket - the
+Rank 0 entry is a promotion header plus four refinements that points at "Full ticket below under
+the Distillation pass". **Recommend: keep the Rank 0 entry, delete the Rank 3b copy.** Two states
+for one ticket is the rot itself.
+
+**Root cause 1 (hostless URLs poison the surface): FIXED.** MEASURED live against the real modules:
+
+```
+surface.clean_url("https:///benchmark/cmdi-Index.html")   -> False
+scope.validate("https:///benchmark/cmdi-Index.html")      -> (False, 'Invalid target')
+POSITIVE CONTROL clean_url("https://owaspbench:8443/benchmark/cmdi-Index.html") -> True
+POSITIVE CONTROL validate ("https://owaspbench:8443/benchmark/cmdi-Index.html") -> (True, 'In scope via owaspbench:8443')
+```
+
+`tools._add_urls` (`tools.py:3477`) admits a URL only if BOTH pass, and `surface.py:42` / `:64`
+reject `not p.netloc`. So a hostless URL cannot enter the surface, and the positive controls prove
+the two gates still admit a good one.
+
+**Root cause 2 (`limit` default of 20; candidates in discovery order): FIXED.** MEASURED, source:
+
+```
+agent.py:220   SWEEP_TARGET_CAP = max(1, int(os.getenv("BBH_SWEEP_TARGETS", "700") or 700))
+agent.py:318   def sweep_targets(urls, forms, in_scope, limit: int = SWEEP_TARGET_CAP)
+agent.py:3630  sweep_targets(..., limit=SWEEP_TARGET_CAP)     <- passed EXPLICITLY
+```
+
+The call site comment names Q-019 and states why the budget is passed rather than defaulted. The
+docstring records the second half of the fix, which matters more than the number: the candidate set
+is built in full and **round-robined across structural shapes before truncation**, so the budget is
+spent across the whole application instead of landing entirely in the first category folder the
+crawl walked.
+
+**Root cause 3 (`depth(2) x frontier(30)` = 60 visits): FIXED.** `agent.py:1831`
+`depth = max(1, min(int(os.environ.get("BBH_SURFACE_DEPTH", "4") or 4), 8))` and the frontier is now
+`limit=budget - visited` (`agent.py:1866`) - a page BUDGET spread over levels rather than a fixed
+per-round frontier. The docstring carries the original 12-page measurement and the reason (a BFS
+round picks its frontier from what was known when the round started, so everything discovered after
+the last frontier was picked was never fetched).
+
+**THE ACCEPTANCE ORACLE, RUN.** Mission `ebd96f45` ("owaspbench-q019", 2026-08-11) is the verification
+run against the same lab as the baseline `90cee81c` ("owaspbench-clean", 2026-08-10). Same query,
+same field names (`input.url` / `input.target` / `input.base_url` on `etype='tool_call'`):
+
+```
+                                          BEFORE 90cee81c   AFTER ebd96f45   target   result
+(a) hostless URLs any tool aimed at                   10               0      0       PASS
+(b) scope_block events                                34              20      0 (*)   PASS
+(c) distinct URLs http_probe/http_read touched        36              36    > 200     FAIL
+(d) findings                                           2              29    > 2       PASS
+    distinct URLs ANY tool aimed at                   63             432
+    tool_call events                                 433            3490
+    wall clock                                     3716 s          5329 s
+```
+
+(*) (b) passes on the clause that matters: hostless causes are 0. The residual 20 are a DIFFERENT
+and correct refusal - sampled verbatim, all three are
+`{'tool': 'run_subfinder' / 'run_crtsh' / 'run_wayback', 'error': 'SCOPE BLOCK: owaspbench/ not in
+scope (host is in scope, but the request path is outside the pinned scope...'}` - passive recon
+tools handed a bare host under a path-pinned scope. Nothing to fix.
+
+**(c) FAILS, and the oracle is wrong, not the fix.** MEASURED: `http_probe` was dispatched **37
+times in BOTH missions**, with `input` carrying exactly one key (`url`) in both, touching 36
+distinct URLs in both. That number did not move because `http_probe` is a recon/fetch tool and was
+never the stage that widened. The stage that widened is the injection sweep:
+
+```
+BEFORE top tools: run_xss 45, http_probe 37, run_xpath 32, run_ldap 32, run_ssi 32, run_dom_trace 32
+AFTER  top tools: run_xpath 412, run_ldap 412, run_ssi 412, run_sqli 400,
+                  run_sqli_structural 400, run_css_injection 400
+```
+
+**Distinct URLs reaching an engine went 63 -> 432 (6.9x) and findings went 2 -> 29.** Anyone who
+re-runs oracle (c) as written will record a FAIL against a fix that worked. **Recommend rewriting
+(c) as "distinct URLs reaching an injection engine > 200", which passes at 432.**
+
+**Verdict: CLOSE Q-019** with the numbers above, delete the Rank 3b duplicate, and correct oracle
+(c) in the process so the correction is recorded rather than silently dropped.
+
+**What honestly REMAINS from the ticket, and it is smaller than the ticket implies:** root cause 2
+in its deepest form still stands - `sweep_targets` still begins `if "?" not in u or not in_scope(u):
+continue`, so a query-less URL can only reach an engine through a captured form, and forms only
+exist for pages that were FETCHED. Coverage of plain `.html` cases remains O(pages fetched). The
+mitigation is the wider crawl budget, not a change to that rule. If that is wanted it is a new,
+narrow ticket, not the reason to keep Q-019 open.
+
+### The unexplained sublinear per-URL cost - EXPLAINED. Two measured causes, no mystery.
+
+The Q-019 refinement recorded "8.5 s per tool call, ~12 calls per URL, ~100 s per URL" and projected
+"2740 cases at 100 s/URL is ~76 hours". Re-measured across both missions:
+
+```
+                    wall     tool_calls   distinct URLs   s/tool_call   s/URL   calls/URL
+BEFORE 90cee81c    3716 s          433              63          8.58    59.0         6.9
+AFTER  ebd96f45    5329 s         3490             432          1.53    12.3         8.1
+```
+
+URLs rose 6.9x and tool calls rose 8.1x, but **wall clock rose only 1.43x**. Per-call cost fell
+5.6x. Two measured causes account for it.
+
+**Cause 1 - a large FIXED cost that does not scale with targets.** From the `phase` events, time
+from mission start:
+
+```
+BEFORE  recon t+0  enum t+45  probe t+48  scan t+188 ... probe t+1652 | report t+3716
+AFTER   recon t+0  enum t+32  probe t+33  scan t+173 ... probe t+1633 | report t+5329
+```
+
+Everything before the injection sweep costs **1652 s vs 1633 s - a difference of 19 seconds across a
+6.9x change in target count.** That ~27 minutes is fixed overhead. Averaging it over 433 calls
+versus 3490 calls alone drops the reported "per call" figure without anything getting faster.
+
+**Cause 2 - the expensive engines are CAPPED while the cheap ones scale.**
+
+```
+agent.py:223   SWEEP_BROWSER_CAP = max(0, int(os.getenv("BBH_SWEEP_BROWSER_TARGETS", "30") or 30))
+agent.py:3668  for tool in (_SWEEP_HTTP_ENGINES
+                            + (_SWEEP_BROWSER_ENGINES if _i < SWEEP_BROWSER_CAP else ()))
+```
+
+MEASURED browser-backed dispatch (run_xss, run_dom_trace, run_dom_audit, run_stored_xss,
+run_form_xss, browser_navigate, confirm_browser_persona_bola, run_client_checks):
+
+```
+BEFORE  119 of 433 calls  = 27.5%
+AFTER   139 of 3490 calls =  4.0%
+```
+
+The browser confirmers grew by 20 calls while everything else grew by 3037. And inside the sweep
+window itself:
+
+```
+BEFORE  injection sweep spans t+1652s .. t+3428s    156 calls   11.39 s/call
+AFTER   injection sweep spans t+1633s .. t+5068s   2436 calls    1.41 s/call
+```
+
+In the BEFORE run the sweep had ~20 targets, all of them under the 30-target browser cap, so every
+target paid the ~19 s browser confirmation. In the AFTER run 400+ targets share the same cap of 30,
+so roughly 370 of them pay only the cheap HTTP engines.
+
+**Verdict: the sublinear cost is a designed property, not an anomaly, and the "76 hours" projection
+is DISPROVED.** The marginal cost of one more target is the HTTP-engine cost of ~1.41 s/call, not
+the 59-100 s/URL average that the projection extrapolated from an average dominated by fixed
+overhead and an uncapped browser pass. ESTIMATE, clearly labelled as one and not a measurement:
+2740 targets at the measured marginal rate plus the measured ~1640 s fixed cost is single-digit
+hours, roughly an order of magnitude below the projection. That estimate should be checked by
+running it, not quoted.
+
+**Recommend: delete the "unexplained sublinear per-URL cost" item and fold the two causes into the
+Q-019 close.** Anyone tuning throughput should be pointed at `BBH_SWEEP_BROWSER_TARGETS` and at the
+27-minute fixed pre-sweep phase, which is now the dominant term for any small mission.
