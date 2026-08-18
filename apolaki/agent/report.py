@@ -1257,19 +1257,82 @@ def browser_evidence_html(finding: dict, e) -> str:
 #: import through it: the report is one of four surfaces that must agree about the same fact.
 _CONTROL_KEYS = ("negative_controls", "controls", "control", "control_evidence", "control_response")
 
+#: Evidence CONTAINERS a producer may nest its control artifact inside, and the ONE key that means
+#: "a negative control ran" once you are inside one (Q-071).
+#:
+#: `proof_schema.control_status` scans top-level keys. Measured over the live mission database
+#: (`apolaki_bbh_data`, 1057 stored findings, 0 unparsed): **0** carry a top-level control key, **3**
+#: carry one nested at `browser_evidence.negative_controls`, and **0** read RECORDED. So the report
+#: printed "NO NEGATIVE CONTROL WAS RECORDED" beside `browser_evidence_html`'s table of the three
+#: real controls for that same finding — one document contradicting itself on the page.
+#:
+#: DECLARED LOOKUP, NOT A DEEP SCAN, and the difference is a false RECORDED. BIE's client-side-authz
+#: phase writes, inside this same container, a key literally named `control` holding the DOM element
+#: the interface WITHHELD — the thing under test, not an experiment that ruled out a benign
+#: explanation. A scan for "any `_CONTROL_KEYS` name at any depth" would count it and stamp RECORDED
+#: on a finding whose `negative_controls` is empty, which is a worse lie than the bug being fixed.
+#: Inside a container only `negative_controls` counts, because inside a container the bare alias
+#: `control` provably means something else.
+#:
+#: The top-level path is NOT dead and is not weakened here: `mass_assign_tool` and `ws_tool` both
+#: write top-level `negative_controls`. Neither has stored a finding yet (mass_assignment 0, cswsh 0
+#: of those 1057), which is exactly why the old fixture's top-level shape never caught this.
+_NESTED_CONTROL_CONTAINERS = ("browser_evidence",)
+_NESTED_CONTROL_KEY = "negative_controls"
+
+
+def nested_control(finding: dict):
+    """The control artifact a producer nested inside an evidence container, or None. Pure.
+
+    Deliberately as strict as `proof_schema.control_status` is about the top level: an empty dict or
+    list is a producer recording that it ran NO control, not that it ran an unknown one."""
+    if not isinstance(finding, dict):
+        return None
+    for container in _NESTED_CONTROL_CONTAINERS:
+        box = finding.get(container)
+        if not isinstance(box, dict):
+            continue
+        v = box.get(_NESTED_CONTROL_KEY)
+        if isinstance(v, (list, tuple, dict)) and len(v):
+            return v
+        if isinstance(v, str) and v.strip():
+            return v
+    return None
+
+
+def control_status(finding: dict) -> str:
+    """Was the benign explanation ruled out? Three-valued, and container-aware. Pure.
+
+    `proof_schema.control_status` decides everything; this only widens WHERE the artifact is looked
+    for, so the three values, their meanings and every top-level answer are byte-for-byte unchanged.
+    A nested artifact is lifted to the top level of a shallow COPY and handed to the same predicate
+    rather than re-implemented — one definition of "recorded", not a second one that can drift.
+
+    THE ARTIFACT IS CHECKED FIRST, for the same reason `proof_schema` gives: deciding from a label
+    before looking is a guard that checks a declaration instead of a fact. A finding with a real
+    recorded control had one, whatever its lane says.
+    """
+    import proof_schema as _ps
+    if not isinstance(finding, dict):
+        return _ps.control_status(finding)
+    art = nested_control(finding)
+    if art is None:
+        return _ps.control_status(finding)
+    return _ps.control_status(dict(finding, **{_NESTED_CONTROL_KEY: art}))
+
 
 def control_ran(finding: dict) -> bool:
     """Did a REQUEST-BASED negative control actually run for THIS finding? Pure, deliberately strict.
 
     Unchanged in meaning and in return values. A source-derived finding still answers False, because
     it genuinely holds no request-based artifact — what changed is that False is no longer the whole
-    answer. `negative_control_claim` reads the three-valued `proof_schema.control_status` to tell
-    "the experiment was not run" apart from "the experiment cannot exist for this proof kind"."""
+    answer. `negative_control_claim` reads the three-valued `control_status` to tell "the experiment
+    was not run" apart from "the experiment cannot exist for this proof kind"."""
     if not isinstance(finding, dict):
         return False
     try:
         import proof_schema as _ps
-        return _ps.control_status(finding) == _ps.CONTROL_RECORDED
+        return control_status(finding) == _ps.CONTROL_RECORDED
     except Exception:
         pass
     for k in _CONTROL_KEYS:
@@ -1278,7 +1341,8 @@ def control_ran(finding: dict) -> bool:
             return True
         if isinstance(v, str) and v.strip():
             return True
-    return False
+    nested = nested_control(finding)
+    return nested is not None
 
 
 def negative_control_claim(finding: dict) -> dict:
@@ -1291,12 +1355,13 @@ def negative_control_claim(finding: dict) -> dict:
     target 3b and session 3 target 3a — REJECTED twice).
 
     Returns {"status", "heading", "text", "counter_example"}. `status` is the three-valued
-    `proof_schema.control_status`; the caller renders, it does not decide.
+    `control_status` — `proof_schema.control_status` widened to the nested location BIE actually
+    writes (Q-071); the caller renders, it does not decide.
     """
     import proof_schema as _ps
     import technique_model as _tm
     f = finding if isinstance(finding, dict) else {}
-    status = _ps.control_status(f)
+    status = control_status(f)
     fam = str(f.get("family") or "").strip().lower()
     contract = _tm.proof_contract({"vuln_class": fam or str(f.get("cwe") or ""), "oracle": ""})
     nc = str(contract.get("negative_control") or "").strip()

@@ -111,6 +111,23 @@ def boolean_probe_pairs(value: str) -> list:
     ]
 
 
+def _is_row_collection(body: str) -> bool:
+    """True when the body is a BARE JSON array, i.e. when `_row_fragment` can separate
+    the ROWS from the envelope that carries them.
+
+    Q-070. This is the precondition of the containment oracle, promoted from a
+    documented observation to an enforced one. When it holds, `frag` is the baseline's
+    ROW CONTENT and `frag in op` really does test "the operator response contains the
+    baseline's rows AND whatever else the broadened match returned". When it does NOT
+    hold, `_row_fragment` returns the WHOLE body, `frag in op` degenerates into "the
+    operator response is byte-identical to the baseline", and that is not a broadening
+    test at all -- it is satisfied by a page that simply did not change, which is what a
+    BIMODAL page produces for free about half the time.
+    """
+    b = (body or "").strip()
+    return b.startswith("[") and b.endswith("]") and len(b) > 2
+
+
 def _row_fragment(body: str) -> str:
     """The baseline's real record content, stripped of ONE enclosing array
     bracket pair if present (so a broadened `[row, row2, row3]` response can
@@ -119,7 +136,7 @@ def _row_fragment(body: str) -> str:
     rows, not a byte-identical response, so pure text similarity scores it as
     dissimilar even though the injection worked)."""
     b = (body or "").strip()
-    if b.startswith("[") and b.endswith("]") and len(b) > 2:
+    if _is_row_collection(b):
         b = b[1:-1]
     return b
 
@@ -184,6 +201,41 @@ def analyze_boolean(baseline: str, operator_body: str, control_body: str,
     xfail in `tests/test_boolean_oracle_stability.py`, patch in
     `docs/handoff/boolean_oracle.md` section 5a.
 
+    ONE REPEAT CANNOT ESTABLISH STABILITY ON A BIMODAL PAGE (Q-070).
+    ----------------------------------------------------------------------------------
+    The gate above is sound and closes the single-sample case, and it still left 18 of the
+    120 ordered triples confirming on responses containing no injection at all: `NOISE_A`/
+    `NOISE_B` are the two states of ONE clean endpoint, so a single `baseline_repeat` lands
+    in the baseline's state about half the time, the page then looks stable to the gate, and
+    the differential is indistinguishable from the injection it is meant to prove.
+
+    MEASURED, and the 18 turned out to be exactly ONE shape — the triples `(X, X, Y)` where
+    the OPERATOR response is byte-identical to the baseline and only the CONTROL diverged.
+    That is not a broadening at all. It only counted as one because `BenchmarkTest00494`
+    serves an HTML page rather than a bare array, so `_row_fragment` could not separate rows
+    from envelope, returned the WHOLE body, and `frag in op` collapsed into `op == baseline`.
+
+    So the fix is not a bigger threshold, it is the oracle refusing to read a non-answer as
+    evidence: a confirmation now requires `_is_row_collection(baseline)` (the fingerprint
+    really is ROWS) or `len(op) > len(baseline)` (the response really did carry more).
+    MEASURED on the live bodies, 40 identical POSTs captured 2026-08-18:
+
+        candidate                        FP/attempt, live arrival   FP, pin's 120 triples
+        containment as shipped, 1 repeat        0.189                    18/120
+        containment as shipped, 2 repeats       0.000                     7/120
+        broadening required, 1 repeat           0.000                     0/120
+
+    and it costs NO extra request. RECALL, measured not asserted, on `GET
+    http://juice-shop:3000/rest/languages` (1 distinct body in 6, i.e. genuinely stable): a
+    real one-row baseline broadened to the real 42-row array still confirms, under both the
+    old rule and the new one.
+
+    THE BOUND, stated because it is real: this closes the DEGENERATE fingerprint, not
+    bimodality itself. A bimodal endpoint that serves a BARE ARRAY can still present the
+    same coin flip, and nothing but more reference samples answers that — see
+    `BOOLEAN_BASELINE_SAMPLE_COUNT` in `sqli_tool` for the measured N curve, and
+    `tests/test_boolean_bimodal_noise.py` for the pin.
+
     RETURNS THREE THINGS, NOT TWO. `True` / `False` / `Inconclusive` — see
     `sqli_tool.Inconclusive`. The third is FALSY, so callers that have not been taught about
     it degrade to the old safe reading instead of being tricked into a finding.
@@ -217,7 +269,20 @@ def analyze_boolean(baseline: str, operator_body: str, control_body: str,
     def _matches(body: str) -> bool:
         return len(body) >= len(b) and frag in body
 
-    return _matches(op) and not _matches(ctl)
+    if not (_matches(op) and not _matches(ctl)):
+        return False
+    # Q-070. THE OPERATOR RESPONSE HAS TO BE EVIDENCE OF BROADENING, not merely evidence
+    # that it failed to differ from the baseline. Either the fingerprint really is a set of
+    # ROWS inside an envelope this function can open (`_is_row_collection`), or the operator
+    # response literally carries MORE than the baseline did. With neither, all that has been
+    # observed is `op == baseline` while the garbage-value control landed somewhere else --
+    # and a BIMODAL endpoint hands that out for free, no injection required. MEASURED on the
+    # live `BenchmarkTest00494` bodies: this is the ENTIRE residual, all 18 of the 120 ordered
+    # triples being (X, X, Y) with `op` byte-identical to the baseline. See
+    # `tests/test_boolean_oracle_stability.py` and `docs/handoff/bimodal.md` section 3.
+    if not (_is_row_collection(b) or len(op) > len(b)):
+        return False
+    return True
 
 
 def _base(surface: str, param: str, oracle: str, sev: str, desc: str, evidence: str, steps: list) -> dict:

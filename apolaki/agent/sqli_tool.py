@@ -97,6 +97,41 @@ def similar(a: str, b: str) -> float:
     return SequenceMatcher(None, a or "", b or "").ratio()
 
 
+#: How many responses to the SAME unprobed request the transport takes before it trusts a
+#: boolean differential. Read by `tools._run_sqli` (both the query-string and the POST-form
+#: carrier), which is why the number lives here.
+#:
+#: STILL 2, AND THAT IS A MEASURED CHOICE RATHER THAN A DEFAULT (Q-070).
+#: -------------------------------------------------------------------------------------
+#: N is the only general answer to a BIMODAL page -- one whose output is not a function of
+#: its input and which therefore hands out a "stable" reference pair by coincidence. MEASURED
+#: 2026-08-18, 40 identical POSTs to the live `BenchmarkTest00494` (a CLEAN cmdi case the
+#: application never reads, so every confirmation is a false positive by construction). The
+#: two states arrived in a period-5 cycle, run lengths [2, 3] repeating 16 times:
+#:
+#:     AABBBAABBBAABBBAABBBAABBBAABBBAABBBAABBB
+#:
+#: Sliding the transport's real request order over that sequence -- base, N-1 repeats, TRUE,
+#: FALSE -- gives the price of each N. Recall is the five live boolean-blind true positives
+#: (00033/00428/00429/00433/00438), replayed the same day, POST-form lane:
+#:
+#:     N   references   FP/attempt on the bimodal page   true positives still confirming
+#:     1   none              0.395  (15/38)                       5 of 5
+#:     2   1 repeat          0.189  ( 7/37)                       5 of 5      <- SHIPPED
+#:     3   2 repeats         0.000  ( 0/36)                       5 of 5
+#:     4   3 repeats         0.000  ( 0/35)                       5 of 5
+#:
+#: So N costs recall NOTHING here -- all five true positives return ONE distinct body in six
+#: identical requests, so extra samples simply agree -- and N=3 is what this page's longest
+#: run (3) demands. The cost is REQUESTS: N-1 extra per `_run_sqli` call in the query-string
+#: lane (taken once, before the parameter loop, so it amortises over every parameter) and
+#: N-1 per FIELD in the POST-form lane (taken inside the field loop, so it does not).
+#:
+#: IT IS NOT RAISED HERE, deliberately. `tools.py:7463` forwards only `base_samples[1]`, so
+#: raising this number today buys extra requests and no extra evidence. Raising it is correct
+#: ONLY together with the one-line call-site patch in `docs/handoff/bimodal.md` section 5,
+#: which passes `baseline_samples=base_samples[1:]`; `analyze_boolean` already accepts it and
+#: `tests/test_boolean_bimodal_noise.py` pins the gap until it lands.
 BOOLEAN_BASELINE_SAMPLE_COUNT = 2
 _MISSING = object()
 _MISSING_BASELINE_REPEAT = _MISSING      # kept: existing callers/tests import this name

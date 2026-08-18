@@ -365,6 +365,13 @@ async def oob_hits(token: str):
 # ── mission lifecycle ────────────────────────────────────────────
 _SOURCE_REVIEW_TOOL = "codeintel.review_source_tree"
 
+#: Q-018. The ledger name `POST /retest/{sid}` logs under. A closure loop that re-fires oracles
+#: against live targets is a TOOL by every meaning the ledger uses, and until this ticket it was the
+#: only one that ran without leaving a single row -- so "the retest refused" and "the retest ran
+#: unguarded" were the same empty log. Named here rather than spelled inline so the refusal row and
+#: the completion row cannot drift apart into two ledger entries.
+_RETEST_TOOL = "retest"
+
 
 def _source_review_state(source_root: Optional[str] = None) -> dict:
     root = str(source_root or "").strip()
@@ -2985,17 +2992,62 @@ async def retest_findings(session_id: str, finding_id: str = ""):
     # ScopeEngine from m["scope"] (the CORRECT shape — the old m.get("in_scope") always read empty because
     # scope lives at m["scope"]["in_scope"], so the guard silently NEVER fired, #9) and validate EVERY
     # retest URL — host, pinned port, and pinned path included.
+    #
+    # Q-018: this guard now FAILS CLOSED. It used to swallow the construction error and set
+    # `_eng = None`, which does not weaken the check -- it DELETES it, because every use site is
+    # `if _eng is not None and ...`. MEASURED before the fix, through this handler, with outbound
+    # requests counted (both hosts local authorized labs; "off scope" = off THIS mission's scope):
+    #     bases=['http://juice-shop:3000'] -> 0 requests, "target out of mission scope"
+    #     bases=[{'nested':'dict'}]        -> 1 request to http://dvwa/robots.txt, verdict "open"
+    # The well-formed row is the positive control: same finding, same handler, guard demonstrably
+    # refuses -- so the empty request list is enforcement, not an inert probe.
+    #
+    # Scope is the boundary between authorised testing and hitting something nobody asked us to
+    # touch, so an exception while BUILDING that boundary can only mean "the boundary is unknown".
+    # Unknown is not permission. The fix is not to make `load_manual` tolerant -- raising on a
+    # non-string entry is correct, and a lenient parse would invent a boundary out of a shape it
+    # could not read. The caller is what mishandled it.
+    #
+    # Refusal is WHOLESALE rather than per-finding: with no enforceable boundary, no target can be
+    # proved in scope, so there is nothing to partially allow. Nothing is lost by refusing the
+    # not_retestable ones too -- they were never going to produce a request.
     import scope as _scope
     _sc = m.get("scope") or {}
-    _scoped = bool(_sc.get("in_scope"))
-    _eng = None
-    if _scoped:
-        _eng = _scope.ScopeEngine()
+    _eng, _refusal = None, ""
+    if not _sc.get("in_scope"):
+        # No declared boundary at all. `in_scope` is required on EngageRequest and all 153 stored
+        # missions carry one, so this is unreachable through the product today (MEASURED) -- but the
+        # old code answered "no scope" with "no check", which is the same wrong direction as above.
+        _refusal = "this mission declares no in_scope, so no retest target can be proved authorised"
+    else:
         try:
+            _eng = _scope.ScopeEngine()
             _eng.load_manual(_sc.get("bases") or _sc.get("in_scope") or [], _sc.get("out_of_scope") or [],
                              _sc.get("program") or "Program")
-        except Exception:
+        except Exception as _ex:
             _eng = None
+            _refusal = ("this mission's scope could not be parsed into an enforceable boundary "
+                        "(%s: %s); fix the malformed entry in scope['bases'] / scope['in_scope'] "
+                        "and re-run" % (type(_ex).__name__, str(_ex)[:160]))
+    # VISIBILITY. Before this ticket the handler logged NOTHING on either path, so a refused retest
+    # and an unguarded retest left byte-identical evidence in the mission log: none. Both outcomes
+    # are now rows, using the SAME vocabulary as `_tool_ledger` (Q-067/Q-069): a real fault is
+    # `tool_error`, so the ledger reads this as a tool that failed rather than one that ran clean.
+    # It is NOT a `scope_block` -- that type means an out-of-scope target was correctly skipped,
+    # which is enforcement working, the opposite of what happened here.
+    db.add_log(session_id, "tool_call", {
+        "tool": _RETEST_TOOL, "input": {"finding_id": finding_id or "*", "candidates": len(findings)}})
+    if _refusal:
+        _reason = "SCOPE GUARD UNAVAILABLE: refusing to retest -- " + _refusal
+        db.add_log(session_id, "tool_error", {"tool": _RETEST_TOOL, "error": _reason})
+        from fastapi.responses import JSONResponse
+        # 409, not 200. A 200 with an empty result set is exactly what a caller mistakes for
+        # "nothing is still open", which is the false closure this whole endpoint exists to avoid.
+        return JSONResponse(status_code=409, content={
+            "session_id": session_id, "refused": True, "reason": _reason, "retested": 0,
+            "summary": {"open": 0, "closed": 0, "inconclusive": 0, "not_retestable": 0,
+                        "refused": len(findings)},
+            "results": []})
     results, summary = [], {"open": 0, "closed": 0, "inconclusive": 0, "not_retestable": 0}
     async with httpx.AsyncClient(verify=False, follow_redirects=False, timeout=20) as c:
         for f in findings:
@@ -3006,9 +3058,14 @@ async def retest_findings(session_id: str, finding_id: str = ""):
                 results.append({**base, "verdict": "not_retestable", "detail": plan.get("reason", "")})
                 continue
             url = plan["url"]
-            if _eng is not None and not _eng.validate(url)[0]:
+            # Unconditional. `_eng is not None` was the escape hatch the fail-open above walked
+            # through; past the refusal the engine is guaranteed built, so the check has no
+            # "unless we could not build it" clause left to exploit.
+            _ok, _why = _eng.validate(url)
+            if not _ok:
                 summary["inconclusive"] += 1
-                results.append({**base, "verdict": "inconclusive", "detail": "target out of mission scope"})
+                results.append({**base, "verdict": "inconclusive",
+                                "detail": "target out of mission scope: %s" % _why})
                 continue
             try:
                 r = await c.get(url)
@@ -3023,7 +3080,17 @@ async def retest_findings(session_id: str, finding_id: str = ""):
                            session=session_id, name="retest")
             except Exception:
                 pass
-    return {"session_id": session_id, "retested": len(results), "summary": summary, "results": results}
+    # The other half of the visibility pair. `count` is 0 on purpose: a retest re-confirms findings
+    # that already exist, it does not produce new ones, and `_tool_ledger` adds `count` straight into
+    # its findings column -- reporting the OPEN tally here would inflate the mission's finding count
+    # by re-counting the same rows. The verdict tally travels in the note instead.
+    db.add_log(session_id, "tool_result", {
+        "tool": _RETEST_TOOL, "count": 0,
+        "output": "retested %d finding%s: %s" % (
+            len(results), "" if len(results) == 1 else "s",
+            ", ".join("%d %s" % (n, k) for k, n in summary.items()))})
+    return {"session_id": session_id, "refused": False,
+            "retested": len(results), "summary": summary, "results": results}
 
 
 @app.get("/mission/{session_id}/poc-bundle")

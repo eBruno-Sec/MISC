@@ -171,47 +171,88 @@ def test_sqli_refuses_rather_than_clears_when_the_false_differential_does_not_re
 
 # ── nosqli: the control that did not exist ────────────────────────────────────────
 def test_nosqli_refuses_the_live_false_positive_the_gate_was_missing():
-    """THE regression test for the 0.229 measured above.
+    """THE regression test for the 0.229 measured above, and now for Q-070 on top of it.
 
     `NOISE_A`/`NOISE_B` are two responses to byte-identical POSTs on a CLEAN benchmark case, so a
     confirmation here is a false positive by construction. The operator body being byte-equal to
     the baseline while the control landed in the other state is exactly how the containment oracle
     fired: no injection is required to produce it.
-    """
-    # UNGATED -- the pre-fix behaviour, kept visible so the defect cannot be argued about
-    assert nosqli.analyze_boolean(NOISE_A, NOISE_A, NOISE_B) is True, (
-        "fixture must reproduce the measured false positive, or this test proves nothing")
 
-    # GATED with a real second response to the same unprobed request
+    HISTORY, kept because the numbers are the argument. UNGATED, this call returned ``True`` and
+    that was the measured 0.229 FP/attempt. Q-040's reference gate took it to a refusal only when
+    the second sample happened to land in the OTHER state; Q-070 closed the rest by refusing to
+    read ``op == baseline`` as a broadening at all. Both refusals are asserted below, and they are
+    different refusals -- the second is not a substitute for the first.
+    """
+    # The fixture still produces the exact containment match that USED to be read as a
+    # confirmation, so what changed is the oracle and not the fixture drifting out from under it.
+    assert not nosqli._is_row_collection(NOISE_A), "an HTML page, so no rows can be isolated"
+    assert nosqli._row_fragment(NOISE_A) == NOISE_A.strip(), "the fingerprint is the WHOLE body"
+    assert NOISE_A in NOISE_A and len(NOISE_A) >= len(NOISE_A), "so containment trivially holds"
+    assert NOISE_A not in NOISE_B, "while the control does not match -- the old confirmation"
+
+    # UNGATED, i.e. no reference sample at all. There is nothing here that a bimodal page does
+    # not hand out for free, and the oracle now says so without needing a second sample.
+    v = nosqli.analyze_boolean(NOISE_A, NOISE_A, NOISE_B)
+    assert v is False and not nosqli.is_inconclusive(v), (
+        "a decided negative: the operator response carried no more than the baseline did")
+
+    # GATED with a real second response to the same unprobed request. The Q-040 control is
+    # upstream of the Q-070 one and still fires FIRST, because "I could not measure this
+    # endpoint" outranks "I measured it and there is no broadening".
     v = nosqli.analyze_boolean(NOISE_A, NOISE_A, NOISE_B, baseline_repeat=NOISE_B)
     assert not v, "an endpoint that does not reproduce must not confirm a NoSQL injection"
     assert nosqli.is_inconclusive(v) and "did not reproduce" in v.reason
 
 
-@pytest.mark.xfail(strict=True, reason=(
-    "MEASURED, and a REAL residual rather than a test bug: 18 of the 120 ordered triples still "
-    "confirm with the stability gate applied. Diagnosed, not guessed -- ONE repeat cannot "
-    "establish stability on a BIMODAL page. NOISE_A/NOISE_B are the two states of one clean "
-    "endpoint, so a single baseline_repeat lands in the SAME state as the baseline roughly half "
-    "the time; the page then looks stable to the gate and the differential is indistinguishable "
-    "from the injection it is supposed to prove. The gate is sound and closes the single-sample "
-    "case -- the test above passes -- but it cannot decide bimodality from one sample. Closing "
-    "this needs a stronger control: more than one repeat, or requiring the TRUE/FALSE pair to "
-    "fall outside the OBSERVED noise envelope rather than merely differ. That carries a "
-    "false-negative risk (an over-strict envelope blinds the oracle on a genuinely stable "
-    "target), so it is filed as Q-070 rather than rushed. STRICT: the day a stronger control "
-    "lands this XPASSes and must be retired deliberately."))
 def test_nosqli_false_positive_rate_on_real_noise_goes_to_zero():
     """The measured rate, at scale, on the real bodies. Ordered triples with the reference drawn
-    from the same two-state page -- every fire is a false positive by construction."""
+    from the same two-state page -- every fire is a false positive by construction.
+
+    THE PIN THAT USED TO BE HERE, AND THE NUMBERS THAT RETIRED IT (Q-070).
+    ---------------------------------------------------------------------------------
+    This carried a STRICT xfail reading "18 of the 120 ordered triples still confirm with the
+    stability gate applied ... ONE repeat cannot establish stability on a BIMODAL page". That
+    was correct and the measurement is kept:
+
+        ungated (no reference sample)                     36 / 120
+        Q-040 gated, ONE baseline_repeat                  18 / 120     <- the pinned residual
+        Q-070, broadening required                         0 / 120
+
+    The 18 were enumerated rather than guessed at, and they were ONE shape:
+
+        (A, A, B) ref=A   x10          (B, B, A) ref=B   x8
+
+    i.e. every single one had the OPERATOR response byte-identical to the baseline, with only
+    the CONTROL diverging. `BenchmarkTest00494` serves an HTML page, so `_row_fragment` cannot
+    separate rows from envelope, returns the whole body, and `frag in op` degenerates into
+    `op == baseline` -- a non-answer that a bimodal page produces about half the time. Requiring
+    the operator response to be evidence of BROADENING (rows that can be isolated, or a response
+    that literally carries more than the baseline) removes the shape and costs no request.
+
+    The pin was inverted onto the fix rather than deleted, which is why this is now a plain
+    passing test with the history in its docstring. What it does NOT close is bimodality itself
+    on a bare-array endpoint -- see `test_boolean_bimodal_noise.py` for the measured N curve.
+    """
     bodies = [NOISE_A, NOISE_A, NOISE_B, NOISE_A, NOISE_B, NOISE_B]
     ungated = gated = 0
     for i, (a, b, c) in enumerate(itertools.permutations(bodies, 3)):
         ref = bodies[(i + 1) % len(bodies)]
         ungated += bool(nosqli.analyze_boolean(a, b, c))
         gated += bool(nosqli.analyze_boolean(a, b, c, baseline_repeat=ref))
-    assert ungated > 0, "positive control: the sweep must be able to fire, or the zero means nothing"
     assert gated == 0, "%d confirmations on responses containing no injection at all" % gated
+    assert ungated == 0, (
+        "%d confirmations WITHOUT even a reference sample -- the shape is closed by the "
+        "confirmation criterion, so it does not depend on the gate running" % ungated)
+
+    # POSITIVE CONTROL. The same sweep machinery over bodies where a broadening really did
+    # happen must still fire, or the two zeros above are the zero of an apparatus that stopped
+    # looking. Real Juice Shop `/rest/languages` rows, on a page measured 1 distinct in 6.
+    real = [LANGS_ONE, LANGS_THREE, LANGS_EMPTY]
+    fires = 0
+    for a, b, c in itertools.permutations(real, 3):
+        fires += bool(nosqli.analyze_boolean(a, b, c, baseline_repeat=a))
+    assert fires > 0, "the sweep cannot fire at all, so the zeros above mean nothing"
 
 
 def test_nosqli_still_confirms_a_real_broadening_on_a_page_that_reproduces():
@@ -246,10 +287,23 @@ def test_the_nosqli_containment_oracle_only_fires_on_a_bare_array():
     NOT this ticket, and deliberately not fixed here: widening the fingerprint is a change to what
     the oracle CONFIRMS on, which needs its own false-positive measurement. Pinned so it is a
     known bound rather than a surprise. See docs/handoff/boolean_oracle.md section 6.
+
+    Q-070 turned this bound from an OBSERVATION into an ENFORCED precondition, because the
+    degenerate whole-body fingerprint was where every one of the 18 residual false positives
+    lived. The last two assertions below are the negative control for that: "not a bare array"
+    must not have quietly become "never confirms".
     """
     assert nosqli.analyze_boolean(LANGS_ONE, LANGS_THREE, LANGS_EMPTY) is True
     assert nosqli.analyze_boolean(REVIEWS, REVIEWS_BROADENED, '{"status":"success","data":[]}') \
         is False, "object-wrapped broadening cannot fire the containment oracle"
+
+    # A body that is NOT a bare array but whose operator response literally carried MORE than
+    # the baseline still confirms -- the rule is "no broadening evidence", not "not an array".
+    # CONSTRUCTED, and labelled as such: no lab returns this. It is a reachability check on the
+    # second leg of the rule, not a measurement about any target.
+    grown = REVIEWS + LANGS_THREE
+    assert nosqli._row_fragment(REVIEWS) in grown and len(grown) > len(REVIEWS)
+    assert nosqli.analyze_boolean(REVIEWS, grown, '{"status":"success","data":[]}') is True
 
 
 def test_nosqli_refuses_a_per_response_nonce_endpoint_instead_of_calling_it_clean():
