@@ -101,13 +101,40 @@ Grepped for secrets before using it: the only hits for
 error page "No Authorization header was found", (2) `"secrets": "[REDACTED -- held server-side]"`,
 (3) the replay script's `$1` placeholders. No credential material. The file is already committed.
 
+## MEASURED -- the test fails BEFORE the fix, and fails on the intended assertion
+
+`agent/tests/test_nested_negative_control.py`, 10 tests, run against unmodified `report.py`:
+
+```
+.FFF......                                                               [100%]
+FAILED ...::test_report_reads_the_nested_control_the_only_producer_that_records_one_writes
+FAILED ...::test_the_rendered_page_does_not_contradict_itself
+FAILED ...::test_the_poc_bundle_agrees_with_the_report
+  E  assert 'not_recorded' == 'recorded'
+```
+
+Three red, and each on its substantive assertion rather than on a missing attribute -- the tests
+run entirely through the EXISTING public surface (`report.control_ran`,
+`report.negative_control_claim`, `generate_report`, `generate_html_report`, `poc_bundle.build`), so
+nothing here passes merely because a new symbol appeared.
+
+**The other seven are green before the fix as well, on purpose.** They are the regression half: the
+stored finding with no control, the emptied nested control, the withheld-DOM-element decoy, the
+top-level `ws_tool` shape, source-derived NOT_APPLICABLE, and the bare/non-dict inputs. Green ->
+green is the evidence that the fix did not simply make everything read RECORDED, which DoD 3 says
+would be strictly worse than the bug.
+
+The rendered-page test is the one a reader would recognise: with the finding rendered by the real
+`generate_html_report`, the page contains BOTH the three control rows and the sentence
+"NO NEGATIVE CONTROL WAS RECORDED". That is the self-contradiction, measured on one document.
+
 ## Status
 
 | slice | state |
 | --- | --- |
 | population + producer census re-measured | MEASURED, above |
 | fixture identified (real, already committed) | MEASURED, above |
-| failing test | in progress |
+| failing test, 3 red / 7 green before the fix | MEASURED, above |
 | fix in `report.py` | in progress |
 | mutation test | in progress |
 | full suite | in progress |
