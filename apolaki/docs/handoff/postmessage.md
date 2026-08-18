@@ -265,3 +265,84 @@ report 0 uncalled methods instead of 13, so they excluded the file from its own 
 needed for the CROSS-MODULE reader: either `deadcode_gate.py` joins `engine_descriptor._PROSE_FILES`,
 or the recorded sets stop being readable as identifiers. **A record of what a checker found must
 never be readable BY a checker** -- including a different one.
+
+## 13. The SECOND confirmation family, measured separately
+
+Section 9's six cases all confirmed (or correctly refused to confirm) `dom_xss`. That left
+`open_redirect` -- the other branch of `wm_family` -- shipped but UNVERIFIED, which is the kind of
+gap that survives a green suite. So it was isolated with a handler that allowlists the scheme, and
+therefore CANNOT become XSS:
+
+    window.addEventListener('message', function(e) {
+      if (/^https?:/.test(e.data)) { location.href = e.data; }
+    });
+
+MEASURED, live:
+
+    /navsink -> confidence=confirmed family=open_redirect cwe=CWE-601
+    Framed http://127.0.0.1:8099/navsink from the foreign origin http://127.0.0.1:36039 and called
+    postMessage('https://bbh-evil.example/bbhwm8842', "*"); the page navigated to
+    https://bbh-evil.example/. NEGATIVE CONTROL: the identical message posted with
+    targetOrigin="http://127.0.0.1:36039" ... was refused delivery and nothing fired.
+    swallowed: []
+
+Both families of `wm_family` are now driven end to end. The `javascript:` payload was correctly
+rejected by the handler's own scheme test, so the finding is CWE-601 and not CWE-79 -- the grade
+follows what the target actually did.
+
+## 14. ANTI-IDLE: is Q-005 (server-side prototype pollution, CWE-1321) genuinely open?
+
+Asked to MEASURE rather than start it. **CONFIRMED OPEN.** Every probe below was run against the
+live tree, with a positive control proving the apparatus was looking.
+
+POSITIVE CONTROL first -- a token that MUST exist if the grep works at all:
+
+    $ grep -rlc "PP_KEY" agent/*.py
+    agent/dom_tool.py   agent/exposure_tool.py   agent/tools.py
+
+So the greps below are reading real files.
+
+**Probe 1 -- every `__proto__` occurrence in production, classified.** 22 hits across 10 files, and
+not one of them sends a polluting key to a SERVER and observes a behaviour change:
+
+| where | what it actually is |
+|---|---|
+| `dom_tool.py:133-134, 313-314` | URL probes `?__proto__[KEY]=VAL` (hash + query), confirmed **in the browser** |
+| `codereview.py:83-86` | a static SOURCE-review regex, labelled "client-side prototype pollution" |
+| `dependency_intel.py:409-512` | jQuery `$.extend` CVE-2019-11358 guard analysis -- reading a library, not probing a server |
+| `defense_mapping.py`, `technique_model.py:107`, `blind_benchmark.py`, `candidate_pipeline.py`, `techniques.py` | prose: remediation text, a negative-control sentence, family mapping |
+
+**Probe 2 -- the confirmation channel the pipeline declares for this family:**
+
+    agent/candidate_pipeline.py:60
+    "prototype_pollution": ("run_dom_audit",
+        "browser prototype-pollution canary (__proto__ write observed at runtime)", "browser")
+
+The channel is literally `"browser"`. There is no server-side channel for CWE-1321.
+
+**Probe 3 -- the technique record says so itself:**
+
+    agent/techniques.py:772  id="prototype_pollution" ... validated_on=["ginandjuice"]
+        maps_to={"ginandjuice": ["Client-side prototype pollution (DOM, query)"]}
+
+**Probe 4 -- the two things Q-005's own oracle and negative control require are ABSENT:**
+
+    $ grep -rn "constructor\.prototype\|constructor\[.prototype" agent/*.py   -> 0 hits
+    $ grep -rn "json spaces\|json_spaces" agent/ --include=*.py               -> 0 hits
+
+So the ticket's stated oracle (`{"__proto__":{"json spaces":10}}`, then confirm the NEXT response's
+JSON is indented) and its stated negative control (the same payload via `constructor.prototype`, to
+defeat naive `__proto__` string filters) are both unimplemented.
+
+**Probe 5 -- no engine surface:** no `TOOL_PERMISSIONS` key and no `CLAUDE_TOOLS` entry contains
+`proto`. `mass_assign_tool.py` -- the closest engine, since it also posts attacker-chosen object
+keys -- contains no prototype keys at all.
+
+**Verdict: Q-005 is OPEN, and it is NOT partially covered.** What exists is a complete CLIENT-side
+capability that shares the CWE. The distinction matters for whoever picks it up: this is not
+"extend the browser probe", it is a new request/response capability, and the ticket's own
+`Non-destructive: NO` still stands -- polluting `Object.prototype` server-side persists for every
+subsequent request until restart, which is why the ticket already specifies `execution: "operator"`.
+One caution for that lane: `techniques.py` has exactly one `prototype_pollution` record and its
+`maps_to` says "Client-side". Adding a server-side technique under the SAME id would make one record
+claim two capabilities with one `validated_on`; it needs its own id.
