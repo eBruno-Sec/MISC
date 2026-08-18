@@ -283,7 +283,42 @@ rebuild** — that is now the gate's most valuable output, not an aside.
 
 </details>
 
-### Q-069 · The ledger keeps only the LAST error per tool, so an engine failing ten ways reports one · **MEDIUM** · `ready`
+### Q-069 · The ledger keeps only the LAST error per tool · **CLOSED** `b3bef1c` `5dc11ed`
+
+Measured across **all 153 missions**, and the worst case is far worse than the one that prompted the
+ticket: `http_probe` in mission `5102527f` rendered **48 failed dispatches — 31x NXDOMAIN plus 17x
+no-address — as a single sentence**, indistinguishable from one flaky request.
+
+Adds `errors` and `error_kinds` beside the Q-067 counters without disturbing them, keyed on the FULL
+message so distinctness is not an artifact of the 140-char display budget. Executed rows trade the
+vague "1+ call errored" for real counts, and every row now carries `errors` / `error_distinct` /
+`error_kinds` for the JSON export.
+
+The detail worth keeping: `_rank_errors` sorts **count desc, message asc**, because two identical
+runs must not print two different sentences. A deterministic-first tool has to be deterministic in
+its prose too, and a dict-ordering-dependent digest would have been a quiet violation nobody noticed
+until two reports of the same target disagreed.
+
+### Q-058 · Four defects the description gate surfaced, in `tools.py` · **CLOSED** `6e16197` `ea7f0cb` `2b6e3ec` `552215e`
+
+All four. Verified by the Coordinator after landing: the gate now flags **0** (was 2) with a positive
+control showing 111 engines parsed, and `hash_type` went from **1 occurrence to 8** — the schema line
+plus the code that now actually reads it.
+
+Items 1 and 2 landed with the ratchet emptied in the same commit, as designed. Both docstrings now
+open with the registered tier as a **bare token** and keep the qualifier in prose after it, because a
+hyphen-softened tier reads softer than the tier it names and that is the entire defect.
+
+Item 4 became more than a docstring edit: **an engine whose tier is written down nowhere is now a
+suite failure**, so the gap the gate was deliberately silent about is closed by a test rather than by
+a convention.
+
+One cosmetic artifact recorded so it is not mysterious later: commit `6e16197`'s SUBJECT carries a
+stray `@ ` prefix from shell mangling — a known failure mode in this project. The body is intact and
+the commits were not yet pushed when found, but rewriting seven commits mid-cycle to fix a cosmetic
+prefix was the worse trade.
+
+### Q-069 · superseded by the entry above · `CLOSED`
 
 Found while measuring Q-067. `main._tool_ledger` stores `a["error"] = <latest>` with no count and no
 histogram, so `fetch_openapi`'s row showed a single message while the log held **5 SSL faults + 5
@@ -437,7 +472,51 @@ merge-two-classes defect as the `blocked_by_mode` one just fixed, one level up: 
 the single most valuable class in the four-way classification and the summary hides it inside the
 class that means "nothing to see".
 
-### Q-064 · `ledger_finding_disagreement()` raises a FALSE integrity alarm · **MEDIUM** · `ready`
+### Q-064 · `ledger_finding_disagreement()` raises a FALSE integrity alarm · **CLOSED** `676923a` + stamping fix
+
+**VERIFIED BY THE COORDINATOR on the live records**, because the lane died mid-sentence and its own
+last words understated what it had finished:
+
+```
+pre-stamp (historical)  unlogged: ['browser_persona_bola', 'xss']   productive: []
+stamped by the product  unlogged: []   productive: ['confirm_browser_persona_bola', 'run_xss']
+```
+
+`agent._stamp_dispatch` binds the dispatch name onto every finding at the wrapper that knows it, and
+the checker prefers `dispatch` over `engine`.
+
+**The historical rows still disagreeing is DELIBERATE and is the best decision in the change.** A
+finding written before the stamp existed, or stored outside a dispatch, has only its self-declared
+`engine` name — and those are exactly the records whose provenance cannot be corroborated, so they
+stay reportable. Retiring the check for them would silently drop the real case it exists to catch.
+`test_the_LIVE_pre_stamp_records_still_disagree_and_that_is_correct` pins that on purpose.
+
+15 tests, including the ones that matter most: a finding whose engine never appears in the ledger is
+**still reported**; a STAMPED dispatch the ledger never recorded is **still reported**; a wrong stamp
+is **not excused** by a matching engine name (dispatch is judged alone, never given a second chance);
+a blank dispatch stamps nothing; the warning reaches BOTH renderers only when it should. Plus a
+ratchet that no agent function consumes dispatch findings without stamping them — **and a test that
+the ratchet can actually see the shape it is looking for**, which is the second time this week a lane
+wrote that pairing unprompted.
+
+**The measurement is much worse than the ticket.** I filed this as one engine's naming quirk. AST over
+`tools.py` against `TOOL_PERMISSIONS`: **only 15 of 111 engines emit a `ToolResult` whose name equals
+their dispatch name.** So the alarm fires on every finding **95 engines** will ever produce.
+
+Reproduced on the LIVE records rather than a fixture — the real 46-row ledger for mission `57cc3b49`
+against the real findings table for the same mission. **Both halves are wrong there:** two engines
+that plainly ran are reported `produced_but_unlogged`, and `productive` is **EMPTY on a mission that
+produced two findings**.
+
+**And it independently vindicates the instruction not to prefix-strip:** three distinct dispatches —
+`run_sqli`, `run_path_sqli`, `run_sqli_structural` — all emit `sqli`. The map is **many-to-one**, so
+no normaliser could resolve a finding back to its ledger row even if loosening the check were
+acceptable. The forbidden fix was not merely against policy; it could not have worked.
+
+The fixture pairing is right: `findings_57cc3b49.json` is the verbatim findings table for the same
+mission as the existing verbatim ledger fixture, so the two files are the **two independent records
+of one run** rather than two hand-written halves that agree by construction. Grepped for credentials
+before committing.
 
 The two records use different vocabularies. Findings carry the **ToolResult** name
 (`browser_persona_bola`, bound at `ToolResult.__post_init__`) while the ledger carries the **dispatch**

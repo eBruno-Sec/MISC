@@ -605,6 +605,7 @@ class BBHAgent:
         yield {"type": "tool_call", "tool": tool_name, "input": tool_input, "permission": perm.value,
                "logged_at_dispatch": True}
         result = await self.tools.execute(tool_name, tool_input, session_id)
+        self._stamp_dispatch(tool_name, result)
 
         if result.error:
             etype = "scope_block" if "SCOPE BLOCK" in result.error else "tool_error"
@@ -687,7 +688,58 @@ class BBHAgent:
         # `ToolRegistry.execute` now records every dispatch, so writing here as well would double-count
         # exactly the engines this comment was added to make visible. The gates above stay: a call this
         # method REFUSES never reaches execute and correctly leaves no row, because it made no dispatch.
-        return await self.tools.execute(tool_name, tool_input, session_id)
+        res = await self.tools.execute(tool_name, tool_input, session_id)
+        self._stamp_dispatch(tool_name, res)
+        return res
+
+    @staticmethod
+    def _stamp_dispatch(tool_name: str, result) -> None:
+        """Q-064: BIND THE DISPATCH NAME onto every finding, here, at the boundary that knows it.
+
+        THE DEFECT. Two records describe one mission and they were written in two vocabularies. The
+        tool ledger keys on the DISPATCH name (`ToolRegistry.execute`'s `tool_name`, e.g.
+        `confirm_browser_persona_bola`); a finding carries the ENGINE name, bound by
+        `ToolResult.__post_init__` from the name the engine gives itself (`browser_persona_bola`).
+        MEASURED over `TOOL_PERMISSIONS`: only 15 of 111 engines use the same string for both, so
+        `report.ledger_finding_disagreement()` accused 95 engines of producing findings the ledger
+        never recorded -- on missions where they plainly ran -- and its useful half, `productive`,
+        could only ever name the other 15. On the live mission 57cc3b49 it flagged BOTH findings and
+        reported `productive: []`.
+
+        WHY NOT NORMALISE IN THE CHECKER. Besides being the forbidden move (loosening a check to
+        stop it complaining masks the real `produced_but_unlogged` case), it cannot work: the map is
+        many-to-one. `run_sqli`, `run_path_sqli` and `run_sqli_structural` ALL emit `sqli`, so no
+        rule recovers the ledger row from the finding. `run_default_creds` ->
+        `default_credentials` is an expansion, not a truncation. A hardcoded table would be a third
+        vocabulary that rots like the two it joins.
+
+        WHY HERE. Same argument as the `engine` stamp one layer in, pointed the other way. `engine`
+        must be bound in the ToolResult constructor because engines call each other directly and the
+        INNERMOST producer is the honest answer. `dispatch` is the opposite: only the OUTERMOST call
+        is what the ledger recorded, and the two agent-side wrappers (`_run_tool`, `_exec_internal`)
+        are where a dispatch name exists. Every one of the 13 sites in `agent.py` that persists a
+        `ToolResult`'s findings reads them off a result that came through one of these two, so one
+        stamp at the boundary covers all of them -- and a 14th site added later inherits it instead
+        of being a 14th chance to forget.
+
+        THE RULES, each with a negative control in tests/test_dispatch_provenance.py:
+          * A blank/None dispatch name stamps NOTHING. `x or DEFAULT` where empty is a real input
+            has bitten this codebase repeatedly; `dispatch: ""` would read as a dispatch that is not
+            in any ledger, i.e. it would MANUFACTURE the alarm this ticket removes.
+          * A finding that already names a dispatch KEEPS it -- the first dispatch that produced it
+            is the one the ledger recorded, and a later carrier must not overwrite that.
+          * Non-dict entries are skipped, never coerced: several engines put raw URLs in `findings`.
+        """
+        name = tool_name.strip() if isinstance(tool_name, str) else ""
+        if not name or result is None:
+            return                                    # "" is a real input -- record nothing, not a lie
+        for f in (getattr(result, "findings", None) or []):
+            if not isinstance(f, dict):
+                continue
+            existing = f.get("dispatch")
+            if isinstance(existing, str) and existing.strip():
+                continue
+            f["dispatch"] = name
 
     def _is_confirmed(self, tool: str, f: dict) -> bool:
         """A finding is report-worthy CONFIRMED only when the probe says so. The
@@ -851,6 +903,13 @@ class BBHAgent:
                     r = await self.tools.execute("run_dom_audit", {"url": page}, session_id)
                 except Exception:
                     continue
+                # Q-064: the THIRD store path, found by the ratchet in tests/test_dispatch_provenance.py
+                # rather than by the ticket. This is the one dispatch in agent.py that neither wrapper
+                # covers, and its findings are persisted below as promoted candidates -- so without
+                # this line a promoted DOM finding reaches the report carrying `engine: dom_audit`
+                # against a ledger row keyed `run_dom_audit`, and the false alarm survives the fix in
+                # exactly the place nobody would look for it.
+                self._stamp_dispatch("run_dom_audit", r)
                 dom_ran = True
                 for f in (r.findings or []):
                     f.setdefault("target", page)

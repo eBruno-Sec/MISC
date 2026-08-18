@@ -339,6 +339,47 @@ defend.
 
 ---
 
+## ★★ EVERY TICKET I FILED THIS CYCLE WAS TOO SMALL. 2026-08-17, three lanes
+
+Not one of these was wrong in substance. Every one was **understated**, and in each case the lane's
+first act was measuring the real size before touching code. That is the pattern worth keeping: the
+ticket is a hypothesis about scope, and measuring it first changed what got built three times out of
+three.
+
+| I filed | the measurement |
+|---|---|
+| Q-060: two callers rebuild an origin | **three** — the browser-harvest seed was the third |
+| Q-064: one engine names itself oddly | **only 15 of 111 engines** emit a ToolResult name matching their dispatch name; the alarm fires on findings from **95** |
+| Q-067: 10 paths correctly found no spec | **5 verdicts + 5 SSL faults that never reached the target** — my framing would have buried them |
+| Q-069: a row shows one of ten errors | `http_probe` showed **1 of 48** (31x NXDOMAIN + 17x no-address) across all 153 missions |
+
+**Q-064 also vindicated an instruction with a measurement rather than an argument.** I forbade fixing
+the false alarm by prefix-stripping in the checker, on the grounds that loosening a check to silence
+it is the wrong move. The lane found a stronger reason: `run_sqli`, `run_path_sqli` and
+`run_sqli_structural` **all emit `sqli`**, so the name map is many-to-one and no normaliser could
+resolve a finding back to its ledger row. The forbidden fix was not just against policy — it was
+impossible.
+
+Its fixture discipline is the model: `findings_57cc3b49.json` is the verbatim findings table for the
+**same mission** as the existing verbatim ledger fixture, so the two files are the two INDEPENDENT
+records of one run rather than two hand-written halves that agree by construction. A cross-check
+between a source and a copy of itself proves nothing.
+
+**Q-069's quiet win is determinism in prose.** `_rank_errors` sorts count desc, message asc, because
+two identical runs must not print two different sentences. A dict-ordering-dependent digest would
+have been a violation of this project's central claim that nobody would notice until two reports of
+the same target disagreed.
+
+**Q-058 closed all four items**, verified after landing: the description gate flags **0** where it
+flagged 2, with a positive control showing 111 engines parsed, and `hash_type` went from 1 occurrence
+to 8. Item 4 grew past a docstring edit — **an engine whose tier is written down nowhere is now a
+suite failure**, so the gap the gate was deliberately silent about is held by a test rather than a
+convention.
+
+Recorded because it recurred: commit `6e16197` carries a stray `@ ` in its SUBJECT from shell
+mangling, a known failure mode here. Body intact, commits unpushed when found; rewriting seven
+commits mid-cycle for a cosmetic prefix was the worse trade.
+
 ## ★★★ THE FIFTH INSTANCE OF ONE SHAPE — and my own ticket had the mechanism wrong. 2026-08-17
 
 **The shape: a producer and a consumer name the same thing differently and never meet.** Five

@@ -1722,13 +1722,32 @@ def ledger_finding_disagreement(ledger: dict, findings: list) -> dict:
     This is only possible because the two records are INDEPENDENT. A cross-check between a source and
     a copy of itself proves nothing, which is why the engine name is bound at construction and not
     back-filled from the ledger.
+
+    Q-064 -- COMPARE LIKE WITH LIKE. The ledger keys on the DISPATCH name; `finding["engine"]` is the
+    name the engine gives ITSELF, and MEASURED over the registry those differ for 95 of 111 engines
+    (`confirm_browser_persona_bola` vs `browser_persona_bola`). Comparing them accused nearly every
+    engine of producing unlogged findings and left `productive` permanently empty. The finding now
+    carries `dispatch`, stamped by `agent._stamp_dispatch` at the wrapper that knows it, so the
+    comparison is between the ledger's key and the finding's record of the same key.
+
+    The fallback when a finding has no `dispatch` is its `engine`, UNCHANGED from before: that is the
+    only identity such a finding has, and dropping it would silently retire the check for every
+    finding written before the stamp existed and for every finding stored outside a dispatch. Those
+    are exactly the records whose provenance cannot be corroborated, so they stay reportable. Nothing
+    here strips a prefix or consults a name table -- the map is many-to-one (`run_sqli`,
+    `run_path_sqli` and `run_sqli_structural` all emit `sqli`), so a normaliser could only guess, and
+    a guess inside an integrity check destroys the thing the check is for.
     """
     logged = {str(t.get("tool") or "") for t in ((ledger or {}).get("tools") or []) if t.get("tool")}
     produced: dict = {}
     for f in (findings or []):
-        eng = str((f or {}).get("engine") or "")
-        if eng:
-            produced[eng] = produced.get(eng, 0) + 1
+        # The identity the LEDGER would have recorded for this finding's producer. `dispatch` first:
+        # it is the same vocabulary the ledger key is written in. `engine` is the fallback, never a
+        # second chance -- a finding with a dispatch is judged on that alone, or a wrong stamp could
+        # be excused by a matching engine name.
+        ident = str((f or {}).get("dispatch") or "").strip() or str((f or {}).get("engine") or "").strip()
+        if ident:
+            produced[ident] = produced.get(ident, 0) + 1
     return {"productive": sorted(e for e in produced if e in logged),
             "produced_but_unlogged": sorted(e for e in produced if e not in logged),
             "counts": produced}
