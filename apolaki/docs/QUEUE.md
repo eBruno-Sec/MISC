@@ -2937,3 +2937,31 @@ Coordinator keeps `docs/QUEUE.md`, `docs/STATUS.md`, `docs/LEDGERS.md` and does 
 proposals measured and rejected), plus the UNSWEPT tail recorded in the 2026-08-17 sweep block, which
 is marked UNKNOWN rather than open because its markers predate several closes and I have not verified
 their claims against code.
+
+---
+
+## LANE OWNERSHIP — cycle 10, 2026-08-17 evening. The tail, declared before spawning.
+
+The engineering backlog above is empty. What is left is the tail whose markers predate several
+closes, which the last sweep recorded as UNKNOWN rather than open because guessing a total is the
+same defect this queue keeps producing. Three lanes, disjoint by file.
+
+| lane | owns (WRITE) | scope |
+|---|---|---|
+| tail-sweep | `docs/handoff/tail_sweep.md` ONLY, read-only on product code | verify Q-001..Q-023, Q-030/035/036, B-011+, `00438`, the sublinear per-URL cost against CODE; verdict + evidence per ticket |
+| source-lane | `agent/codereview.py`, `agent/tests/test_source_lane_*.py`, `docs/handoff/source_lane.md` | Q-041 (aliased imports invisible - a false NEGATIVE in a scanner), Q-042 (`_PY_CLOCK_TOKEN` matches a substring - a false POSITIVE) |
+| boolean-oracle | `agent/sqli_tool.py`, `agent/nosqli_tool.py`, `agent/tests/test_sqli_boolean_noise_floor.py`, `docs/handoff/boolean_oracle.md` | Q-040 (no baseline-stability control - a false POSITIVE in a CONFIRMATION oracle) |
+
+All three tickets are pinned by STRICT xfails, so each fix must INVERT its pin in the same commit
+rather than delete it. Q-041 and Q-042 pull in opposite directions on purpose - one under-matches and
+one over-matches - so a fix that trades one error class for the other is not a fix, and both lanes
+were told so.
+
+Held for the next cycle because they collide on `agent/tools.py`, which the boolean lane may need:
+**Q-043** (`Retry-After` unhonoured, and the Coordinator once asserted it was honoured) and **Q-044**
+(the code-assisted lane is benchmark-only; 61.1% is not reachable in an engagement).
+
+**Still the only item that is genuinely Erwin's and not mine: Q-052.** Both proposals measured and
+rejected. 40 of 111 engines are structurally unselectable at `active`, which is why an unauthenticated
+active scan yields leads rather than confirmations. Nobody should ship a third proposal without a
+decision about what `active` is supposed to mean to a user.
