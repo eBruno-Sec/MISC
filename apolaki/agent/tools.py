@@ -6093,8 +6093,8 @@ class ToolRegistry:
             page.on("dialog", lambda d: asyncio.ensure_future(_on_dialog(d)))
 
             def _on_framenav(fr):
-                # The HARNESS is itself on the attacker host, so its own navigation would satisfy
-                # `confirmed_redirect` trivially. Only CHILD frames — i.e. the target — count.
+                # Only CHILD frames — i.e. the target — count. The harness's own navigation is not
+                # evidence of anything the target did.
                 try:
                     if fr is not page.main_frame:
                         navs.append(fr.url)
@@ -6125,15 +6125,13 @@ class ToolRegistry:
                     pass
             page.on("response", _on_response)
 
-            # Install the process-wide rate gate on a blank page first, so every request the TARGET
-            # frame makes is rate-limited. The harness itself is our own loopback listener and is
-            # deliberately not counted against the target's budget.
+            # Through the shared policy helper, never `page.goto` directly: `test_rate_policy`
+            # gates every navigation in this file, and it is right to — an unguarded goto here would
+            # also skip `_guard_playwright_page`, so every SUBRESOURCE the target frame loads would
+            # bypass the rate limit too. Navigating the harness through it installs that gate.
             try:
-                await _browser_engine.rate_limited_goto(page, "about:blank", timeout=5000)
-            except Exception as ex:
-                self._swallow(ex, "dom_audit.web_message.guard", url)
-            try:
-                await page.goto(harness, wait_until="load", timeout=9000)
+                await _browser_engine.rate_limited_goto(
+                    page, harness, wait_until="load", timeout=9000)
             except Exception as ex:
                 # NOT a silent return. A harness that fails to load makes every handler on every
                 # target come back "lead", which is indistinguishable from a target that is safe --

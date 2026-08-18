@@ -253,11 +253,13 @@ counts a bare-name match in any non-prose `.py` file as a REFERENCE, so that str
     assert r["ok"] is False
     E   assert True is False
 
-Attribution, measured three ways:
+Attribution, measured four ways:
 
-* `git archive HEAD` + only my three files -> the test PASSES.
-* the live tree (which includes the other lane's uncommitted `deadcode_gate.py`) -> FAILS.
-* the offending literal is at `agent/deadcode_gate.py:164`, in an uncommitted hunk I did not write.
+* `git archive` of the HEAD BEFORE that lane landed, plus only my three files -> the test PASSES.
+* the current tree -> FAILS, `assert r["ok"] is False` / `E assert True is False`.
+* the offending literal is at `agent/deadcode_gate.py:164`, in a hunk I did not write.
+* `git log -S "bie.resolve_locator" -- apolaki/agent/deadcode_gate.py` -> **`4c50007`**, the Q-075
+  lane's commit. It is now committed on `main`, so the suite is red for everyone until it is fixed.
 
 **That lane already found this exact defect shape one level down** -- their own docstring records that
 recording `METHOD_BASELINE_SET` in `deadcode_gate.py` made `scan_methods` read its own record and
@@ -346,3 +348,18 @@ subsequent request until restart, which is why the ticket already specifies `exe
 One caution for that lane: `techniques.py` has exactly one `prototype_pollution` record and its
 `maps_to` says "Client-side". Adding a server-side technique under the SAME id would make one record
 claim two capabilities with one `validated_on`; it needs its own id.
+
+## 15. A GATE I TRIPPED, and why routing through it was the right fix
+
+The full suite caught `test_rate_policy.py::test_tools_has_no_unguarded_target_page_goto`. My harness
+navigation used `page.goto` directly, which that gate forbids for every navigation in `tools.py`.
+
+The tempting reading was that the harness is OUR OWN loopback server, so rate-limiting it is
+meaningless and the gate is over-broad here. That reading is wrong, and the mechanism says why:
+`rate_limited_goto` does not only wait -- it calls `_guard_playwright_page`, which installs the
+per-page request gate. Skipping it for the harness would leave every SUBRESOURCE THE TARGET FRAME
+LOADS unguarded, because the gate is installed per page and the harness navigation is the first one.
+So the direct `goto` was not a harmless exemption, it was a hole in the target's rate limiting.
+
+Routed through the helper. MEASURED after the change: `/eval` confirmed, `/strict` still a lead,
+`/navsink` confirmed, `/inert` silent -- behaviour identical, hole closed.
