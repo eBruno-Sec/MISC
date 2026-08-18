@@ -2988,3 +2988,26 @@ Held for the next cycle because they collide on `agent/tools.py`, which the bool
 rejected. 40 of 111 engines are structurally unselectable at `active`, which is why an unauthenticated
 active scan yields leads rather than confirmations. Nobody should ship a third proposal without a
 decision about what `active` is supposed to mean to a user.
+
+---
+
+## LANE OWNERSHIP — cycle 11, 2026-08-17 late. Three lanes, disjoint by file.
+
+| lane | owns (WRITE) | scope |
+|---|---|---|
+| effects | `agent/engine_descriptor.py`, `agent/techniques.py`, `agent/effect_search.py`, `docs/handoff/effects.md` | Q-007 - the negative-effects model is generated entirely by a phantom |
+| backoff | `agent/tools.py`, `agent/browser_engine.py`, `agent/zap_client.py`, `docs/handoff/backoff.md` | Q-043 - `Retry-After` documented but not implemented |
+| tail-sweep run 2 | `docs/handoff/tail_sweep.md` ONLY, read-only on product code | Q-003/004/005, Q-015..Q-018, Q-021B/D/E/F, Q-022, Q-023, Q-030/035/036, B-011+, `00438`, the sublinear cost |
+
+`weak_password_reset` also appears in `report.py` and `benchmark.py`; the effects lane may not edit
+those and hands the patches over instead. Q-043's ledger visibility may need `main.py`, which it also
+may not edit - same rule.
+
+**Q-044 is HELD, not forgotten.** It touches `main.py`, `codereview.py`, `codeintel.py`,
+`owasp_bench.py`, `bench_juliet.py`, `poc_bundle.py` and `proof_schema.py` - it would collide with
+two live lanes at once. Declaring that beats discovering it in a merge, which is what cost a night
+earlier this week.
+
+**Q-052 remains Erwin's**, and is the only queue item nobody should close on his behalf: 40 of 111
+engines are structurally unselectable at `active`, both proposals were measured and rejected, and
+what `active` should MEAN to an operator is a product decision rather than an engineering trade.
