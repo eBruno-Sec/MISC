@@ -438,3 +438,138 @@ ticket:
 **Verdict: DELETE Q-009.** It holds no content of its own. Leaving it is exactly the queue rot the
 header warns about: a reader who trusts it re-verifies six things that are already tracked, two of
 which are closed.
+
+### Q-015 - `risk_signals` is the unfiltered twin of `risk_score` - CLOSED, and the fix passes the ticket's own oracle
+
+MEASURED, source (`agent/report.py`, WORKTREE == HEAD `6d373c06`): `risk_signals` at line 1413 now
+computes `confirmed = [f for f in findings if _confirmed(f)]` and reports
+`f"{len(confirmed)} confirmed finding(s), severity-weighted"`. It uses `_confirmed`, the SAME
+shared predicate `risk_score` uses at line 1386 - not a private fourth copy, which was the fix
+contract. The comment above it names Q-015 and restates why.
+
+MEASURED, live - the ticket's oracle, run verbatim (IMAGE `report.py` `d87760a0`, so source and
+running image were checked independently and agree):
+
+```
+DEMOTED (proof gate rejected, demote_unproven left the row in the list)
+   risk_score      -> {'score': 0, 'label': 'No Confirmed Risk'}
+   risk_signals[0] -> {'label': 'Confirmed vulnerability load', 'pct': 0,
+                       'basis': '0 confirmed finding(s), severity-weighted'}
+
+CONFIRMED (the ticket's NEGATIVE CONTROL - the fix must not have zeroed the signal)
+   risk_score      -> {'score': 25, 'label': 'Medium'}
+   risk_signals[0] -> {'label': 'Confirmed vulnerability load', 'pct': 25,
+                       'basis': '1 confirmed finding(s), severity-weighted'}
+```
+
+The contradiction the ticket recorded (headline "No Confirmed Risk" beside "25% confirmed
+vulnerability load, 1 confirmed finding") is gone, and the negative control still reads 25 in both.
+
+**Verdict: CLOSED.** No commit hash is recorded on the ticket, which is why it still read
+`proposed`.
+
+### Q-016 - `bie._read_controls` returns `[]` on failure - CLOSED, including the distinction test
+
+MEASURED, source (`agent/bie.py`, HEAD == IMAGE == WORKTREE `1388e9e2`):
+
+- `_read_controls(page, errors=None)` at `bie.py:1487` now appends
+  `"%s: %s" % (type(exc).__name__, str(exc)[:160])` to the caller's `errors` list before returning
+  `[]`. It still never raises - the ticket asked for the failure to be RECORDED, not to abort.
+- The failure reaches the output, so it is not swallowed one level up: `bie.py:1568`
+  `ctl_errors = out.setdefault("control_read_errors", [])`, passed at `:1569` and `:1578`, and
+  surfaced at `:1665-1666` as `out["control_surface"]["read_errors"]`.
+- The docstring names Q-016 and states the consequence it existed to prevent.
+
+MEASURED, test: `agent/tests/test_bie_control_read_is_not_silent.py` exists and is written against
+**the distinction**, which is the part that makes it a real guard. It defines two fake pages -
+`_Boom` (evaluate raises `RuntimeError("Execution context was destroyed")`) and `_Empty` (evaluate
+returns `[]`) - so a fix that flagged both would fail it. That is the negative control the ticket
+demanded, and it is in the test rather than only in prose.
+
+**Verdict: CLOSED.** Again no hash on the ticket, hence the stale `proposed`.
+
+### Q-017 - `get_logs` oldest-first with a LIMIT - HALF CLOSED. The logs half is fixed; the ungated-findings half is now MEASURED and still live.
+
+**The logs half: CLOSED.** MEASURED, `agent/db.py:326-344`:
+
+```sql
+SELECT etype,data,created_at FROM (
+  SELECT id,etype,data,created_at FROM logs WHERE mission_id=? ORDER BY id DESC LIMIT ?
+) ORDER BY id
+```
+
+Inner `DESC LIMIT` keeps the NEWEST n, outer `ORDER BY id` restores chronological order, so every
+existing caller sees the same shape and only WHICH rows survive truncation changed. The docstring
+cites Q-017 and carries the original measurement (mission `54155d4b`, 1287 rows, 22:31:01 against a
+true last event of 22:35:20). Both truncating call sites the ticket named are unchanged and now
+benefit: `main.py:730` (`GET /missions/{session_id}`) and `main.py:3884` (`GET /backup/{session_id}`),
+both `limit=500`.
+
+**The half the ticket left UNVERIFIED is now MEASURED, and it is real.** `db.get_findings` is the
+RAW accessor; its own docstring says "the proof gate has NOT been applied. Prefer
+`get_findings_gated()` for anything a human or a model will read." In `main.py` there are **13 raw
+call sites against 7 gated**. Four of the raw ones are unambiguously reader-facing (decorator within
+ten lines of the call):
+
+```
+main.py:709   @app.get("/status/{session_id}")     "findings_count": len(db.get_findings(...))
+main.py:728   @app.get("/missions/{session_id}")   "findings": db.get_findings(...)     <- the UI
+main.py:3518  @app.get("/findings/{session_id}")   return {"findings": db.get_findings(...)}
+main.py:3882  @app.get("/backup/{session_id}")     "findings": db.get_findings(...)     <- export
+```
+
+POSITIVE CONTROL that the distinction is honoured elsewhere in the same file: the retest handler at
+`main.py:2981` uses `db.get_findings_gated(session_id)`. So this is inconsistency, not an absent
+concept.
+
+CAVEAT, stated because I will not overstate it: the remaining nine raw sites were NOT individually
+attributed - a naive "nearest preceding decorator" scan mis-assigned at least one (line 1033 to a
+handler 294 lines earlier), so only the four tight ones above are claimed. Several of the rest are
+plausibly internal (dedupe at `:3306`, single-finding lookup at `:3648`) and would be correct as
+raw reads.
+
+**Verdict: SPLIT.** Close the logs half. The ungated-findings half deserves its own ticket -
+`GET /findings/{sid}` returning gate-demoted rows unlabelled is the same class of defect as Q-015,
+one layer out, and Q-015 is closed while this is not.
+
+### Q-018 - retest scope guard - the DISPROVED half holds. The hardening half is UNCHANGED and reproduces.
+
+MEASURED, source (`agent/main.py:2988-2999`) - the code is exactly as the ticket described, and the
+fail-closed fix contract has NOT been applied:
+
+```python
+_eng = None
+if _scoped:
+    _eng = _scope.ScopeEngine()
+    try:
+        _eng.load_manual(_sc.get("bases") or _sc.get("in_scope") or [], ...)
+    except Exception:
+        _eng = None                              # <- fail OPEN
+...
+if _eng is not None and not _eng.validate(url)[0]:   # <- guard skipped entirely when _eng is None
+```
+
+MEASURED, live - the ticket's own oracle reproduced against the real `ScopeEngine`:
+
+```
+load_manual([{"nested":"dict"}], [], "Program")
+  -> AttributeError: 'dict' object has no attribute 'strip'
+  -> main.py:2998 sets _eng = None
+  -> the guard `if _eng is not None and ...` is skipped: retest proceeds UNGUARDED
+
+POSITIVE CONTROL, a normally built engine:
+  validate("http://evil.example.com/x") -> (False, 'evil.example.com not in scope')
+  validate("http://juice-shop:3000/x")  -> (True,  'In scope via juice-shop:3000')
+```
+
+The positive control matters here: it proves the engine really does refuse an out-of-scope host, so
+"guard skipped" means an actual loss of protection and not a guard that was inert anyway.
+
+The DISPROVED half stands - `in_scope` is a required field on `EngageRequest`, so the unscoped
+branch is unreachable through the product, and the earlier replay found the guard active on 151 of
+151 missions. The reachable-in-principle path is still the non-string element in
+`scope["bases"]`/`["in_scope"]`.
+
+**Verdict: OPEN as filed, LOW, hardening only.** The ticket is accurate and correctly de-escalated;
+it simply has not been done. Its real value is the "do not re-raise this as CRITICAL" note at the
+top, which is worth keeping in the queue verbatim.
