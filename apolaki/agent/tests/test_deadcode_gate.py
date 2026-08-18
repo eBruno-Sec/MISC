@@ -4,6 +4,9 @@ The no-island doctrine one level down. Both failure modes it guards against were
 integration gap (something written but never wired) and a superseded duplicate sitting next to the live
 engine, waiting to be called by mistake.
 """
+import os
+import shutil
+
 import pytest
 
 import deadcode_gate as dg
@@ -111,9 +114,116 @@ def test_the_ratchet_holds(qual):
     """The count may fall, never rise. A new unwired function fails this immediately, while the existing
     backlog is triaged deliberately rather than bulk-deleted — those entries are CANDIDATES, not proven
     dead, and deleting unproven code is how a working engine gets removed."""
-    q = qual
-    assert q["ok"], ("qualified dead-code count rose to %d (baseline %d). New entries:\n  %s"
-                     % (q["count"], q["baseline"], "\n  ".join(q["unused"][-5:])))
+    assert qual["ok"], qual["message"]
+
+
+# ── the failure MESSAGE: the alarm was right and pointed elsewhere (Q-075) ──────────────────────
+
+@pytest.fixture(scope="module")
+def real_tree_copy(tmp_path_factory):
+    """A frozen COPY of the real tree. The negative control needs to add an island to a live module, and
+    every live module belongs to some other lane -- so it is added here instead. Frozen also means the
+    before/after pair measures the SAME bytes, immune to another lane editing mid-test."""
+    dst = str(tmp_path_factory.mktemp("island_control"))
+    for fn in os.listdir(dg.APP_DIR):
+        if fn.endswith(".py"):
+            shutil.copyfile(os.path.join(dg.APP_DIR, fn), os.path.join(dst, fn))
+    return dst
+
+
+def test_a_deliberate_island_is_named_and_nothing_else_is(real_tree_copy):
+    """NEGATIVE CONTROL, required by Q-075.
+
+    The bug: the message printed `sorted(unused)[-5:]`, the alphabetical TAIL of the list. It named the
+    same five functions whether the tree was clean or dirty, and the five genuinely new entries
+    (`dom_tool.wm_*`) sorted into the middle where a tail slice could never reach them.
+
+    Run on a copy of the REAL tree rather than a toy directory on purpose: against a toy dir every
+    flagged name is new, so `newly_dead` is trivially the whole list and the assertion proves nothing
+    about a populated baseline. Here the delta must be exactly the one function introduced."""
+    before = dg.scan_qualified(real_tree_copy)
+    victim = os.path.join(real_tree_copy, "security.py")
+    original = open(victim, encoding="utf8").read()
+    open(victim, "a", encoding="utf8").write(
+        "\n\ndef apolaki_deliberate_island():\n"
+        "    \"\"\"Q-075 negative control. No caller anywhere, by construction.\"\"\"\n"
+        "    return 1\n")
+    try:
+        after = dg.scan_qualified(real_tree_copy)
+    finally:
+        open(victim, "w", encoding="utf8").write(original)
+
+    island = "security.apolaki_deliberate_island"
+    assert island in after["unused"], "positive control: the scan must SEE the island at all"
+    # It is named BECAUSE it was introduced. `before` is the same bytes the `finally` above restores, so
+    # this doubles as the "remove it and the message stops naming it" half, without a third full scan --
+    # each one walks 179 real modules and costs about eight seconds.
+    assert island not in before["unused"] and island not in before["message"]
+    new_names = set(after["newly_dead"]) - set(before["newly_dead"])
+    assert new_names == {island}, (
+        "the message must name the island and nothing else; it named %s" % sorted(new_names))
+    assert island in after["message"]
+
+    # The exact regression: these are the five the old slice printed. All are in the recorded baseline,
+    # so a true set difference can never surface them, however the list sorts.
+    for innocent in ("technique_store.stats", "techniques.techniques_for_lab", "waf_bypass_tool.pad",
+                     "web_security.is_url_in_scope", "xxe_tool.looks_like_xml"):
+        assert innocent not in after["newly_dead"], innocent
+        assert innocent not in after["message"], "%s is not the delta and must not be named" % innocent
+
+
+def test_a_recorded_baseline_set_smaller_than_the_ratchet_guarantees_a_named_entry():
+    """The property that makes the alarm's message provably non-empty, for BOTH ratchets.
+
+    If everything flagged were already in the recorded set, the count could be at most len(set); with
+    len(set) <= baseline the ratchet would not have fired. So whenever it fires there is at least one
+    newly-dead name to print. Raising a baseline above its set, or letting a set outgrow its ratchet,
+    silently reintroduces the empty-message case."""
+    assert len(dg.QUALIFIED_BASELINE_SET) <= dg.QUALIFIED_BASELINE, (
+        "recorded set of %d exceeds the ratchet of %d -- a rise could then name nothing"
+        % (len(dg.QUALIFIED_BASELINE_SET), dg.QUALIFIED_BASELINE))
+    assert len(dg.METHOD_BASELINE_SET) <= dg.METHOD_BASELINE, (
+        "recorded method set of %d exceeds the ratchet of %d"
+        % (len(dg.METHOD_BASELINE_SET), dg.METHOD_BASELINE))
+
+
+def test_the_recorded_sets_are_shaped_like_real_measurements():
+    """A hand-typed set rots into fiction quietly. These are the cheap structural checks: qualified
+    entries are `module.function`, method entries are `file.py::Class.method`, and neither set may hold
+    an allowlisted name -- allowlisted entries are filtered out of `flagged` before the diff, so one
+    recorded here would sit in `resolved` forever and never be a real measurement of anything."""
+    for e in dg.QUALIFIED_BASELINE_SET:
+        assert "." in e and "::" not in e, e
+        assert e not in dg.ALLOWED_UNUSED_QUALIFIED, "%s is allowlisted; it is never flagged" % e
+        assert e.split(".")[-1] not in dg.ALLOWED_UNUSED, "%s is allowlisted; it is never flagged" % e
+    for e in dg.METHOD_BASELINE_SET:
+        assert e.count("::") == 1, e
+        path, qualified = e.split("::")
+        assert path.endswith(".py") and qualified.count(".") == 1, e
+        assert e.split(".")[-1] not in dg.ALLOWED_UNUSED_METHODS, e
+
+
+def test_the_message_says_so_when_it_cannot_name_the_delta():
+    """The one case where a true set difference has nothing to show: a recorded set at or above the
+    ratchet. It must not print an empty list -- next to a failure that reads as `no new dead code`,
+    which is the same misdirection this ticket replaces."""
+    named = dg._ratchet_message("qualified dead-code count", 40, 37, ["mod.fn"], [], 35)
+    assert "mod.fn" in named and "NEWLY DEAD" in named
+
+    blind = dg._ratchet_message("qualified dead-code count", 40, 37, [], [], 40)
+    assert "re-recorded" in blind and "names are not available" in blind
+
+    drifted = dg._ratchet_message("qualified dead-code count", 40, 37, ["mod.fn"], ["old.gone"], 35)
+    assert "old.gone" in drifted and "no longer dead" in drifted
+
+
+def test_the_scans_report_a_true_difference_not_a_slice(qual, meth):
+    """Both ratchets return a real set difference against their recorded set. The old message took
+    `unused[-5:]`; assert the reported delta is exactly what set arithmetic says it is."""
+    for res, recorded in ((qual, dg.QUALIFIED_BASELINE_SET), (meth, dg.METHOD_BASELINE_SET)):
+        assert res["newly_dead"] == sorted(set(res["unused"]) - recorded)
+        assert res["resolved"] == sorted(recorded - set(res["unused"]))
+        assert not (set(res["newly_dead"]) & set(res["resolved"])), "an entry cannot be both"
 
 
 def test_the_baseline_is_not_slack(qual):
@@ -179,11 +289,35 @@ def test_base_class_callbacks_are_not_flagged(meth):
         assert "handle_starttag" not in cb and "handle_endtag" not in cb, cb
 
 
+def test_the_method_scan_can_still_find_something(meth):
+    """POSITIVE CONTROL, and the assertion whose absence let a silenced ratchet ship green.
+
+    `0 <= 14` passes. Every other method test passes on an empty result too -- `methods_examined` counts
+    DEFINITIONS, so it stays above 300 even when resolution marks everything used. Recording
+    METHOD_BASELINE_SET put strings like `"vault.py::Vault.purge"` into the scanned corpus, the `.name`
+    rule matched `.purge` inside the literal, and the count went 13 -> 0 with nothing red. A count of
+    zero here means the scan stopped looking; re-record the set only after proving otherwise."""
+    assert meth["count"] > 0, (
+        "the method scan reports NOTHING uncalled. Before re-recording METHOD_BASELINE_SET, check the "
+        "scan is not reading a file that names its own findings")
+
+
+def test_the_method_scan_does_not_read_its_own_findings(tmp_path):
+    """The mechanism, isolated. A file named like this module must not be part of the corpus: it holds a
+    record of what the scan found, and `.orphan` inside `"m.py::C.orphan"` matches the attribute rule."""
+    (tmp_path / "m.py").write_text(
+        "class C:\n    def orphan(self):\n        return 2\n", encoding="utf8")
+    (tmp_path / "deadcode_gate.py").write_text(
+        'RECORDED = {"m.py::C.orphan"}\n', encoding="utf8")
+    out = set(dg.scan_methods(str(tmp_path))["unused"])
+    assert "m.py::C.orphan" in out, (
+        "a recorded finding was read back as a call -- the scan is self-approving")
+
+
 def test_the_method_ratchet_holds(meth):
     """May fall, never rise. These are CANDIDATES — some resolve through dynamic dispatch the checker
     does not model — so they get triaged, not bulk-deleted."""
-    assert meth["ok"], ("uncalled method count rose to %d (baseline %d):\n  %s"
-                        % (meth["count"], meth["baseline"], "\n  ".join(meth["unused"][-5:])))
+    assert meth["ok"], meth["message"]
 
 
 def test_a_genuinely_uncalled_method_is_caught(tmp_path):

@@ -136,6 +136,71 @@ def scan(app_dir: str = None) -> dict:
 # the ratchet stays tight enough to catch the next regression.
 QUALIFIED_BASELINE = 37
 
+# The baseline as a SET, which is a different thing from the number above and exists for a different
+# reason (Q-075).
+#
+# The ratchet fired correctly on a real island -- five `dom_tool.wm_*` helpers -- and reported as "New
+# entries" five names that were not the delta, sat in files the cycle never touched, and cost four probes
+# to clear. The message was printing `sorted(unused)[-5:]`: the alphabetical TAIL, identical on a clean
+# tree and a dirty one.
+#
+# The reason it printed a slice is worth stating rather than fixing quietly: a COUNT CANNOT BE DIFFED.
+# `QUALIFIED_BASELINE` is a number, so the gate had nothing to subtract and no way to name what changed.
+# Printing the true set difference is not a formatting change; it requires recording which functions were
+# dead when the baseline was taken. That is this set, MEASURED on a clean `git archive HEAD` snapshot.
+#
+# It is a DIAGNOSTIC REFERENCE, never the threshold -- the ratchet is still the count. Two consequences:
+#
+#   * `len(QUALIFIED_BASELINE_SET) <= QUALIFIED_BASELINE` is enforced by a test, and that inequality is
+#     what makes the alarm's message provably non-empty. If everything flagged were already in this set,
+#     the count could be at most len(set) <= baseline and the ratchet would not have fired. So a failure
+#     always has at least one name to print.
+#   * Rot runs one way only. Wiring a recorded entry leaves a name here that is no longer dead, which
+#     shows up in `resolved` and can never invent a false `newly_dead`. There is deliberately no hard
+#     staleness test: this set moves whenever any lane wires anything, and failing their green work to
+#     force an edit to a file they do not own is how a gate earns the distrust that gets it silenced.
+QUALIFIED_BASELINE_SET = frozenset({
+    "action_envelope.mark", "archive_intel.mark_validated", "bench_all.scan_via_mission",
+    "bie.har_response_for", "bie.resolve_locator", "candidate_pipeline.plan_targets",
+    "db.get_snapshot", "graph_model.neighbors", "graph_model.related_findings",
+    "hashid_tool.summarize", "ics_dnp3_s7.is_read_only", "ics_fingerprint.ethernetip_list_identity",
+    "ics_fingerprint.identify_protocol", "ics_fingerprint.is_read_only",
+    "ics_fingerprint.modbus_read_device_id", "ics_fingerprint.parse_ethernetip_identity",
+    "ics_fingerprint.parse_modbus_device_id", "intel_connectors.reset", "intel_registry.advance",
+    "intel_registry.reset", "mission_export.summary", "ot_context.declare_protocol_safety",
+    "race_tool.best_round", "remediation_depth.families_covered", "report_integrity.cvss_version_of",
+    "security.expand_cidr", "service_router.known_services", "sqli_tool.looks_like_login",
+    "stealth.describe", "technique_store.dedup_key", "technique_store.stats",
+    "techniques.techniques_for_lab", "waf_bypass_tool.pad", "web_security.is_url_in_scope",
+    "xxe_tool.looks_like_xml",
+})
+
+
+def _ratchet_message(kind, count, baseline, newly, resolved, recorded):
+    """The failure text for either ratchet. Lives HERE, beside the data, rather than in the assertion.
+
+    A message assembled at the call site is re-derived by every caller and drifts from what the scan
+    actually found -- which is the defect this replaces. The scan reports its own finding; the test, a
+    liveness script and an operator at a REPL all read the same sentence."""
+    head = "%s rose to %d (baseline %d)." % (kind, count, baseline)
+    if newly:
+        msg = ("%s\nNEWLY DEAD -- in this tree, not in the recorded baseline set of %d:\n  %s"
+               % (head, recorded, "\n  ".join(newly)))
+    else:
+        # Unreachable while len(SET) <= baseline (see the note on QUALIFIED_BASELINE_SET). Say so
+        # honestly rather than printing nothing: an empty list beside a failure reads as "no new dead
+        # code", which is the same misdirection this replaces.
+        msg = ("%s\nNothing outside the recorded baseline set of %d, so that set is larger than the "
+               "ratchet permits and must be re-recorded -- the count is right, the names are not "
+               "available." % (head, recorded))
+    if resolved:
+        # Drift, shown where someone is already reading. Not a failure: entries leave this set by being
+        # WIRED, which is the direction the ratchet exists to encourage.
+        msg += ("\n(%d recorded entr%s since been wired and no longer dead: %s)"
+                % (len(resolved), "y has" if len(resolved) == 1 else "ies have",
+                   ", ".join(resolved[:8]) + (", ..." if len(resolved) > 8 else "")))
+    return msg
+
 
 def _module_bindings(tree, known_modules):
     """({module: {names it is bound to here}}, {(module, original, local)}) for one parsed file. Pure."""
@@ -230,8 +295,15 @@ def scan_qualified(app_dir: str = None) -> dict:
 
     allowed = [u for u in unused if _justified(u)]
     flagged = [u for u in unused if not _justified(u)]
+    # The TRUE set difference, not a slice of the sorted list. `newly_dead` is what this tree has that the
+    # recorded baseline did not; `resolved` is what has been wired since it was recorded.
+    newly = sorted(set(flagged) - QUALIFIED_BASELINE_SET)
+    resolved = sorted(QUALIFIED_BASELINE_SET - set(flagged))
     return {"unused": flagged, "allowed": allowed, "count": len(flagged),
-            "baseline": QUALIFIED_BASELINE, "ok": len(flagged) <= QUALIFIED_BASELINE}
+            "baseline": QUALIFIED_BASELINE, "ok": len(flagged) <= QUALIFIED_BASELINE,
+            "newly_dead": newly, "resolved": resolved,
+            "message": _ratchet_message("qualified dead-code count", len(flagged), QUALIFIED_BASELINE,
+                                        newly, resolved, len(QUALIFIED_BASELINE_SET))}
 
 
 # Methods flagged by `scan_methods` that are deliberately kept. Same rule as ALLOWED_UNUSED: a reason or
@@ -247,6 +319,19 @@ ALLOWED_UNUSED_METHODS = {}
 # 14 after both fixes. A checker whose obvious false positives are that visible gets ignored wholesale,
 # which is worse than not having one at all.
 METHOD_BASELINE = 14
+
+# The method ratchet's message carried the SAME defect as the qualified one and is fixed the same way --
+# it was printing `unused[-5:]`, a slice of a sorted list, with no set to diff against. Measured on the
+# same clean `git archive HEAD` snapshot: 13 entries against a baseline of 14. Diagnostic reference only;
+# METHOD_BASELINE stays the ratchet. See QUALIFIED_BASELINE_SET for why there is no staleness test.
+METHOD_BASELINE_SET = frozenset({
+    "asset_graph.py::AssetGraph.add_enable", "asset_graph.py::AssetGraph.enabling",
+    "asset_graph.py::AssetGraph.mark_consumed", "asset_graph.py::AssetGraph.plan_next",
+    "browser_engine.py::TargetRatePolicy.reset_stats", "budget.py::MissionBudget.exhausted",
+    "investigation.py::InvestigationState.get_var", "personas.py::PersonaManager.headers_for",
+    "personas.py::PersonaManager.prove_privileged", "scope.py::ScopeEngine._extract_host",
+    "scope.py::ScopeEngine.to_rules", "vault.py::Vault.list_refs", "vault.py::Vault.purge",
+})
 
 
 def scan_methods(app_dir: str = None) -> dict:
@@ -269,11 +354,20 @@ def scan_methods(app_dir: str = None) -> dict:
         so both spellings are checked. This is the rule that stops all 147 tool methods being flagged.
       * dunder, `test_`, decorated (framework-invoked) names are skipped
 
-    Returns {unused, allowed, count, baseline, ok, methods_examined}."""
+    It EXCLUDES ITS OWN SOURCE, for the reason `scan()` does and one this module learned the hard way.
+    Recording `METHOD_BASELINE_SET` for the Q-075 message put 13 strings shaped
+    `"vault.py::Vault.purge"` into this file. The `.name` attribute rule then matched `.purge` INSIDE
+    that literal, so all 13 recorded methods counted as called and the scan reported **0 uncalled
+    methods, down from 13** — a completely silenced ratchet, with every test in this file still green
+    (`0 <= 14` passes; nothing asserted the scan could still find anything). Measured, not theorised:
+    same snapshot, count 13 before the set was added and 0 after. A record of what a checker found must
+    never be readable BY that checker.
+
+    Returns {unused, allowed, count, baseline, ok, methods_examined, newly_dead, resolved, message}."""
     app = app_dir or APP_DIR
     srcs, trees = {}, {}
     for fn in sorted(os.listdir(app)):
-        if not fn.endswith(".py"):
+        if not fn.endswith(".py") or fn == os.path.basename(__file__):
             continue
         try:
             s = open(os.path.join(app, fn), encoding="utf8").read()
@@ -326,6 +420,10 @@ def scan_methods(app_dir: str = None) -> dict:
 
     allowed = [u for u in unused if u.split(".")[-1] in ALLOWED_UNUSED_METHODS]
     flagged = [u for u in unused if u.split(".")[-1] not in ALLOWED_UNUSED_METHODS]
+    newly = sorted(set(flagged) - METHOD_BASELINE_SET)
+    resolved = sorted(METHOD_BASELINE_SET - set(flagged))
     return {"unused": flagged, "allowed": allowed, "count": len(flagged),
             "baseline": METHOD_BASELINE, "ok": len(flagged) <= METHOD_BASELINE,
-            "methods_examined": len(methods)}
+            "methods_examined": len(methods), "newly_dead": newly, "resolved": resolved,
+            "message": _ratchet_message("uncalled method count", len(flagged), METHOD_BASELINE,
+                                        newly, resolved, len(METHOD_BASELINE_SET))}
