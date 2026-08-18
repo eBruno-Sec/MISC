@@ -283,6 +283,29 @@ rebuild** — that is now the gate's most valuable output, not an aside.
 
 </details>
 
+
+### Q-070 · One repeat cannot establish stability on a BIMODAL page · **HIGH** · `ready`
+
+Pinned by a STRICT xfail in `agent/tests/test_boolean_oracle_stability.py`, carrying the measurement.
+
+Q-040's stability gate closed the single-sample case and is sound: an endpoint that does not
+reproduce no longer confirms. **18 of the 120 ordered triples still confirm on responses containing
+no injection at all**, and the cause is diagnosed rather than guessed. `NOISE_A`/`NOISE_B` are the
+two states of ONE clean endpoint, so a single `baseline_repeat` lands in the SAME state as the
+baseline roughly half the time; the page then looks stable to the gate, and the TRUE/FALSE
+divergence is indistinguishable from the injection it is supposed to prove.
+
+**Closing it needs a stronger control** - more than one repeat, or requiring the TRUE/FALSE pair to
+fall outside the OBSERVED noise envelope rather than merely differ.
+
+**Why it was filed instead of rushed at the end of a cycle:** every candidate fix carries a
+FALSE-NEGATIVE risk pointing the other way. An over-strict envelope blinds the oracle on a genuinely
+stable target, and this project has already paid for a fix that traded one error class for the other.
+The DoD therefore has two halves, not one: the 18 go to zero AND a real injection on a stable target
+still confirms, both measured.
+
+Note this is a CONFIRMATION oracle, so a false positive here is the most expensive class in the
+platform: everything it reports is supposed to be proven.
 ### Q-069 · The ledger keeps only the LAST error per tool · **CLOSED** `b3bef1c` `5dc11ed`
 
 Measured across **all 153 missions**, and the worst case is far worse than the one that prompted the

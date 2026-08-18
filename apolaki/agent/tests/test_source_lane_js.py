@@ -265,6 +265,86 @@ def test_clock_derived_secrets_use_the_same_head_noun_rule_as_q042():
     assert [h["cwe"] for h in hits] == ["CWE-337"]
 
 
+# ════════════════════════════════════════════════ Q-041, one dialect over
+# Found by auditing this file's own claim. The docstring above says the aliased-module control is
+# "Q-041's lesson applied as a PRECONDITION" -- but it was only ever exercised on the CommonJS
+# spellings. Enumerating all eight import spellings against the committed tree measured 7 resolving
+# and exactly one not: the ESM RENAME. `_js_destructured` understood object destructuring's colon
+# (`{ createHash: mk }`) and not the ESM keyword (`{ createHash as mk }`), and two of its three
+# call sites feed it the ESM spelling. Same defect as Q-041: the specifier is parsed, the rename is
+# computed, and the binding is thrown away -- so an aliased dangerous symbol read CLEAN.
+
+def test_an_esm_renamed_import_resolves_to_the_symbol_it_binds():
+    """`import { createHash as mk } from 'crypto'` -- measured at 0 findings before the fix."""
+    assert _algs(cr.scan_js_hash("import { createHash as mk } from 'crypto';\n"
+                                 "const h = mk('md5');\n")) == ["MD5"]
+    assert _algs(cr.scan_js_hash("import { createHash as mk } from 'node:crypto';\n"
+                                 "const h = mk('sha1');\n")) == ["SHA1"]
+
+
+def test_the_default_plus_named_rename_spelling_resolves_too():
+    """The second of the two call sites that feed the ESM spelling."""
+    assert _algs(cr.scan_js_hash("import c, { createHash as mk } from 'crypto';\n"
+                                 "const h = mk('md5');\n")) == ["MD5"]
+
+
+def test_a_weak_generator_reached_through_an_esm_rename_is_reported():
+    assert _constructs(cr.scan_js_random("import { pseudoRandomBytes as prb } from 'crypto';\n"
+                                         "const b = prb(32);\n")) == ["crypto.pseudoRandomBytes()"]
+
+
+# ── the negative controls: catching the alias must not start flagging innocent names ──
+
+def test_a_csprng_renamed_to_the_name_of_a_weak_api_is_not_flagged():
+    """The mirror, and the one that matters. `randomBytes as createHash` binds a SAFE symbol to a
+    dangerous-looking LOCAL name. A rule that read the local name instead of the imported symbol
+    would report it -- the same error the Python lane already has a control for."""
+    assert cr.scan_js_hash("import { randomBytes as createHash } from 'crypto';\n"
+                           "const b = createHash(32);\n") == []
+    assert cr.scan_js_random("import { randomBytes as rb } from 'crypto';\n"
+                             "const b = rb(32);\n") == []
+
+
+def test_a_rename_does_not_resurrect_a_foreign_module():
+    """Resolving the rename must not make the rule credulous: `createHash` out of a local helper
+    is not Node's crypto, whatever it is renamed to."""
+    assert cr.scan_js_hash("import { createHash as mk } from './myutil';\n"
+                           "const h = mk('md5');\n") == []
+
+
+def test_as_is_a_token_not_a_substring():
+    """Q-042's error, guarded against inside Q-041's fix. `hasOwn` CONTAINS the letters "as"; a
+    rename split on the substring would shred it into a binding that was never written. Fixing an
+    under-match by committing an over-match is not a fix."""
+    assert cr._js_destructured("hasOwn") == [("hasOwn", "hasOwn")]
+    assert cr._js_destructured("createHash as mk") == [("mk", "createHash")]
+    assert cr._js_destructured("createHash: mk") == [("mk", "createHash")]
+    assert cr._js_destructured("createHash") == [("createHash", "createHash")]
+    # all three spellings coexist in one specifier list
+    assert cr._js_destructured("createHash, createHmac: hmac, randomBytes as rb") == [
+        ("createHash", "createHash"), ("hmac", "createHmac"), ("rb", "randomBytes")]
+    assert cr.scan_js_hash("import { hasOwn } from 'crypto';\nconst h = hasOwn('md5');\n") == []
+
+
+def test_a_strong_digest_through_a_rename_is_still_strong():
+    """Widening the receiver must not widen the verdict: the rename resolves, and sha256 through
+    it is still not a weak hash."""
+    assert cr.scan_js_hash("import { createHash as mk } from 'crypto';\n"
+                           "const h = mk('sha256');\n") == []
+
+
+def test_the_commonjs_spellings_did_not_regress():
+    """The four spellings that already worked. The colon path shares the function that was changed."""
+    assert _algs(cr.scan_js_hash("const c = require('crypto');\n"
+                                 "const h = c.createHash('md5');\n")) == ["MD5"]
+    assert _algs(cr.scan_js_hash("const { createHash: mk } = require('crypto');\n"
+                                 "const h = mk('md5');\n")) == ["MD5"]
+    assert _algs(cr.scan_js_hash("const { createHash } = require('crypto');\n"
+                                 "const h = createHash('md5');\n")) == ["MD5"]
+    assert _algs(cr.scan_js_hash("import * as c from 'crypto';\n"
+                                 "const h = c.createHash('md5');\n")) == ["MD5"]
+
+
 def test_an_unterminated_literal_costs_one_line_not_the_file():
     """A masker that swallows the rest of the file on a broken literal reports everything after it
     clean. One line is the correct blast radius."""

@@ -102,6 +102,69 @@ _MISSING = object()
 _MISSING_BASELINE_REPEAT = _MISSING      # kept: existing callers/tests import this name
 
 
+# ── the THIRD outcome: "I could not establish this" ──────────────────────────────────
+#: Q-040. A boolean oracle has three answers, not two: CONFIRMED, NOT PRESENT, and
+#: NOT MEASURABLE. Collapsing the third into either neighbour is how a report starts
+#: lying -- Q-063 and Q-067 both landed on that principle, and this is the same shape one
+#: layer down, in the oracle rather than in the ledger.
+#:
+#: Before this, `analyze_boolean` returned `False` both for "the reference reproduced and
+#: there is no injection here" and for "the reference did NOT reproduce, so I refused to
+#: decide". The engine reported the second as `tested N param(s), 0 confirmed` -- an
+#: endpoint that cannot be measured at all, reported to the operator as measured and clean.
+#:
+#: THE WIRE FORM is a PREFIX, matched as one, exactly like `main.NEGATIVE_RESULT_TOKEN`
+#: ("NOT PRESENT:"). That convention is reused rather than reinvented, but the LITERAL is
+#: deliberately different: "the thing is not here" and "I could not establish whether the
+#: thing is here" are different verdicts, and folding the second into the first would be
+#: the same lie this constant exists to stop, merely pointing the other way.
+#:
+#: The word INCONCLUSIVE is the project's existing vocabulary for exactly this state --
+#: `dependency_intel.INCONCLUSIVE` ("the probe ran and could not decide -- never treated as
+#: either"), `bie.retest_verdict`, `bench_contract.INCONCLUSIVE`.
+INCONCLUSIVE_TOKEN = "NOT MEASURABLE:"
+
+
+class Inconclusive(int):
+    """A FALSY verdict carrying WHY the oracle refused to decide.
+
+    Falsy on purpose, and that is a safety property rather than a convenience: every
+    existing call site is `if <oracle>(...)` or `assert not <oracle>(...)`, so a caller
+    that has not been taught about the third outcome degrades to the OLD, SAFE reading
+    ("not confirmed") instead of being tricked into raising a finding. A truthy sentinel
+    would have turned every un-updated caller into a false positive on exactly the
+    endpoints this ticket exists to protect.
+
+    Subclasses `int` (value 0) rather than being a bare object so `bool()`, `not`, `==
+    False` and `if` all behave; `is False` deliberately does NOT match, because a caller
+    doing an identity check is asking a stricter question than "was it confirmed".
+    """
+
+    # No __slots__: `int` is a variable-length built-in and CPython rejects a nonempty
+    # __slots__ on its subtypes ("nonempty __slots__ not supported for subtype of 'int'").
+
+    def __new__(cls, reason: str):
+        self = int.__new__(cls, 0)
+        self.reason = str(reason)
+        return self
+
+    def __repr__(self):
+        return "Inconclusive(%r)" % self.reason
+
+    @property
+    def token(self) -> str:
+        """The prefix-matchable string an engine puts on the ToolResult error channel."""
+        return "%s %s" % (INCONCLUSIVE_TOKEN, self.reason)
+
+
+def is_inconclusive(verdict) -> bool:
+    """True when the oracle declined to decide, as opposed to deciding NO.
+
+    Use this, never `verdict == False` -- the two are equal by design and the whole point
+    of the class is that they mean different things."""
+    return isinstance(verdict, Inconclusive)
+
+
 def analyze_boolean(baseline: str, true_body: str, false_body: str, thresh: float = 0.95,
                     *, baseline_repeat=_MISSING, baseline_samples=None,
                     false_repeat=_MISSING) -> bool:
@@ -162,6 +225,22 @@ def analyze_boolean(baseline: str, true_body: str, false_body: str, thresh: floa
     Both are optional and additive, so callers that cannot supply them keep working.
     ``None`` means "the request was attempted and failed", and is refused -- the same
     convention ``baseline_repeat=None`` already had. Omitted means "not attempted".
+
+    RETURNS THREE THINGS, NOT TWO (Q-040).
+    ----------------------------------------------------------------------
+    ``True``           confirmed: the reference reproduced and the payload moved the page.
+    ``False``          a real negative: the reference reproduced (or none was asked for)
+                       and the differential is not there.
+    ``Inconclusive``   the oracle REFUSED to decide -- the reference did not reproduce, or
+                       an observation it needed never completed. FALSY, so every existing
+                       ``if analyze_boolean(...)`` caller degrades to the old safe reading;
+                       use ``is_inconclusive()`` to tell it from ``False``, and put
+                       ``.token`` on the engine's error channel so the ledger can report
+                       "ran, could not decide" instead of "tested, clean".
+
+    The third outcome is the point. An endpoint whose output is not a function of its input
+    was previously reported to the operator as measured and clean, which is the one thing a
+    confirmation oracle must never do quietly.
     """
     refs = None
     if baseline_samples is not None:
@@ -171,18 +250,34 @@ def analyze_boolean(baseline: str, true_body: str, false_body: str, thresh: floa
     if refs is not None:
         # A failed reference request proves nothing either way; refuse rather than guess.
         if len(refs) < 2 or any(r is None for r in refs):
-            return False
+            return Inconclusive("a reference request did not complete, so this endpoint's "
+                                "stability was never established")
         # THE TEST FOR NON-DETERMINISM, not a threshold on how much of it is tolerable.
         if any(r != refs[0] for r in refs):
-            return False
+            _n = sum(1 for r in refs if r != refs[0])
+            return Inconclusive(
+                "the reference request did not reproduce (%d of %d identical requests returned a "
+                "different body), so this endpoint's output is not a function of its input and a "
+                "similarity differential cannot be read as an injection" % (_n, len(refs)))
     st = similar(baseline, true_body)
     stf = similar(true_body, false_body)
     if not (st >= thresh and stf < thresh):
+        # A REAL negative: the reference reproduced (or none was asked for) and the
+        # differential simply is not there. Distinct from the refusals above, and it stays a
+        # plain False so that `is False` identity checks keep meaning what they meant.
         return False
     if false_repeat is not _MISSING:
         # The divergence has to happen twice. A one-off state change is not a result.
-        if false_repeat is None or similar(true_body, false_repeat) >= thresh:
-            return False
+        if false_repeat is None:
+            return Inconclusive("the FALSE payload was re-sent to confirm the divergence and "
+                                "that request did not complete")
+        if similar(true_body, false_repeat) >= thresh:
+            # The references reproduced byte-exactly, yet the SAME payload returned two
+            # different pages. The determinism the gate just certified is contradicted by the
+            # oracle's own second observation, so this is a refusal, not a clean verdict.
+            return Inconclusive("the FALSE differential did not reproduce: re-sending the same "
+                                "payload returned the baseline page, so the divergence was a "
+                                "one-off state change rather than a property of the query")
     return True
 
 

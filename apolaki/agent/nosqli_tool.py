@@ -27,6 +27,14 @@ import re
 from difflib import SequenceMatcher
 from urllib.parse import parse_qsl, urlencode, urlparse, urlunparse
 
+# Q-040. ONE convention for the third outcome across both boolean oracles, imported rather
+# than redefined -- a second literal for the same idea is how two engines start disagreeing
+# about what "could not decide" means. `sqli_tool` is the home because it is where the
+# measurement that produced the convention was made; it imports nothing local, so there is
+# no cycle.
+from sqli_tool import (INCONCLUSIVE_TOKEN, Inconclusive,  # noqa: F401  (re-exported)
+                       is_inconclusive)
+
 # ── NoSQL/driver error signatures (content-only; absent from normal pages) ──
 NOSQL_ERRORS = {
     "MongoDB": [r"MongoError", r"MongoServerError", r"BSONError", r"E11000 duplicate key",
@@ -116,8 +124,12 @@ def _row_fragment(body: str) -> str:
     return b
 
 
+_MISSING = object()
+
+
 def analyze_boolean(baseline: str, operator_body: str, control_body: str,
-                    missing_body: str = None, thresh: float = 0.97) -> bool:
+                    missing_body: str = None, thresh: float = 0.97,
+                    *, baseline_repeat=_MISSING, baseline_samples=None):
     """TRUE-shaped (operator injection) diverges from a control that uses the SAME
     param but a value guaranteed not to match (garbage). An operator bypass
     ($ne/$gt/$regex) commonly BROADENS the result set (returns more rows, not a
@@ -134,8 +146,66 @@ def analyze_boolean(baseline: str, operator_body: str, control_body: str,
     `param[$op]` as an unrecognised, absent parameter — not engaging any
     operator semantics — and this must NOT be flagged (the dominant FP shape on
     non-bracket-aware frameworks, e.g. a Java/PHP app whose query parser doesn't
-    do MongoDB-style bracket-array parsing)."""
+    do MongoDB-style bracket-array parsing).
+
+    THE REFERENCE MUST REPRODUCE EXACTLY (Q-040) — `baseline_repeat` / `baseline_samples`.
+    ----------------------------------------------------------------------------------
+    This oracle had NO baseline-stability control at all: it fingerprinted the endpoint
+    from ONE baseline sample (`frag`) and decided containment against it. On an endpoint
+    whose output is not a function of its input, that is a fingerprint of one moment, and
+    whether it turns up in the operator response or the control response is a coin flip
+    nobody had measured.
+
+    MEASURED 2026-08-17 against `POST https://owaspbench:8443/benchmark/cmdi-00/
+    BenchmarkTest00494` (`productID=1&foo=1`) — a CLEAN `cmdi` case the application never
+    reads, so every confirmation is a false positive by construction. 16 byte-identical
+    POSTs returned 2 distinct bodies in the order `AABAAABBAAABBAAA`. Ordered triples, the
+    reference being the real next response in the sequence:
+
+        sqli.analyze_boolean ungated (pre-cbcba79)   720/3150   0.229
+        sqli.analyze_boolean gated   (cbcba79)       438/3150   0.139
+        nosqli.analyze_boolean (this oracle, ungated) 720/3150  0.229
+
+    i.e. this oracle was sitting at the EXACT pre-fix rate of its sibling. The mechanism:
+    the body does not start with `[`, so `_row_fragment` returns the whole baseline, and
+    `frag in operator_body` is satisfied whenever the operator response happens to be
+    byte-identical to the baseline while the control landed in the other state.
+
+    The reference requests are identical by construction — same URL, same method, no
+    operator suffix — so on an endpoint this oracle can measure at all they MUST come back
+    byte-identical. EQUALITY, not a similarity threshold: measured on BenchmarkTest00023,
+    12 identical requests returned 12 distinct bodies whose pairwise similarity was
+    0.9495..0.9766, so every pair cleared a 0.95 threshold and a threshold-based gate
+    contributed nothing. A threshold on noise is not a test for its absence.
+
+    Optional and additive by NECESSITY, not by preference: `tools._run_nosqli` calls this
+    positionally, so a required parameter would break it instantly. That means the control
+    is INERT in production until that call site takes a second sample — pinned as a strict
+    xfail in `tests/test_boolean_oracle_stability.py`, patch in
+    `docs/handoff/boolean_oracle.md` section 5a.
+
+    RETURNS THREE THINGS, NOT TWO. `True` / `False` / `Inconclusive` — see
+    `sqli_tool.Inconclusive`. The third is FALSY, so callers that have not been taught about
+    it degrade to the old safe reading instead of being tricked into a finding.
+    """
     b, op, ctl = baseline or "", operator_body or "", control_body or ""
+    refs = None
+    if baseline_samples is not None:
+        refs = [baseline] + list(baseline_samples)
+    elif baseline_repeat is not _MISSING:
+        refs = [baseline, baseline_repeat]
+    if refs is not None:
+        # A failed reference request proves nothing either way; refuse rather than guess.
+        if len(refs) < 2 or any(r is None for r in refs):
+            return Inconclusive("a reference request did not complete, so this endpoint's "
+                                "stability was never established")
+        if any(r != refs[0] for r in refs):
+            _n = sum(1 for r in refs if r != refs[0])
+            return Inconclusive(
+                "the reference request did not reproduce (%d of %d identical requests returned a "
+                "different body), so this endpoint's output is not a function of its input and a "
+                "containment differential cannot be read as an operator injection"
+                % (_n, len(refs)))
     if not b or not op:
         return False
     if missing_body is not None and similar(op, missing_body) >= thresh:

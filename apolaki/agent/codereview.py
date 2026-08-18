@@ -3454,11 +3454,26 @@ def _js_module_of(skel: str, lits: dict, pos: int, limit: int = 200):
     return None
 
 
+# Two spellings mean the same thing, and this ONE function serves all three callers. Object
+# destructuring renames with a colon -- `const { createHash: mk } = require('crypto')` -- and an
+# ESM named import renames with the keyword `as`:  `import { createHash as mk } from 'crypto'`.
+# Two of the three call sites below feed the ESM spelling, so understanding only the colon was
+# Q-041 again, one dialect over: the binding is right there in the source, the specifier IS
+# parsed, and the rename is thrown away -- so an aliased dangerous symbol read clean. That is a
+# false NEGATIVE in a security scanner, which is the worst class this lane can produce.
+#
+# `as` is matched as a TOKEN (`\s+as\s+`), never as a substring: `{ hasOwn }` contains the letters
+# "as" and must not be split. Requiring whitespace on both sides is what makes that safe, because
+# an identifier cannot contain whitespace. Writing the Q-041 fix in a way that commits the Q-042
+# error would just trade one error class for the other.
+_JS_RENAME = re.compile(r"\s*:\s*|\s+as\s+")
+
+
 def _js_destructured(spec: str) -> list:
-    """`{ createHash, createHmac: hmac }` -> [(local, original), ...]"""
+    """`{ createHash, createHmac: hmac, randomBytes as rb }` -> [(local, original), ...]"""
     out = []
     for part in (spec or "").split(","):
-        bits = [b.strip() for b in part.split(":")]
+        bits = [b.strip() for b in _JS_RENAME.split(part.strip())]
         if not bits or not bits[0]:
             continue
         orig = bits[0]
