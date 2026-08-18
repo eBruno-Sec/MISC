@@ -727,3 +727,207 @@ running it, not quoted.
 **Recommend: delete the "unexplained sublinear per-URL cost" item and fold the two causes into the
 Q-019 close.** Anyone tuning throughput should be pointed at `BBH_SWEEP_BROWSER_TARGETS` and at the
 27-minute fixed pre-sweep phase, which is now the dominant term for any small mission.
+
+---
+
+## RUN 2 (2026-08-17). Run 1 was killed by a session limit; nothing above was redone.
+
+Apparatus re-checked at run 2 start. The container is STILL not at HEAD, and the drift moved:
+
+```
+report.py          HEAD=6d373c06  IMAGE=d87760a0  WORKTREE=6d373c06   IMAGE != HEAD
+proof_schema.py    HEAD=cbc7129b  IMAGE=f4be54c0  WORKTREE=f4be54c0   IMAGE != HEAD
+technique_model.py HEAD=7dd547ca  IMAGE=7dd547ca  WORKTREE=7dd547ca   (equal)
+main.py            HEAD=4d50eb1e  IMAGE=74634322  WORKTREE=c7304e33   all three differ
+tools.py           HEAD=63e32362  IMAGE=eab17583  WORKTREE=ad1364ed   all three differ
+```
+
+`docker-compose.yml:72-77` mounts only `./ui`, `bbh_data` and the feed volumes - **the agent code is
+BAKED, not mounted**, so a probe run inside the container exercises the IMAGE unless the file is
+copied in. Every live probe below states which file it loaded and its md5. Where worktree code had to
+be measured it was `docker cp`-ed to `/tmp/wt` and put FIRST on `sys.path`, and the probe prints
+`report.__file__` so the substitution is proven rather than assumed.
+
+Corpus at run 2: **29,944 tool_call rows, 153 missions, 71 distinct tool names, 1057 finding rows** -
+byte-identical to run 1, so no mission has run between the two runs. `via` census unchanged:
+`{None: 29885, internal: 59}`.
+
+### Q-022 - "How this was confirmed" is a template - FIXED IN CODE, but its own mandatory negative control (a) FAILS. OPEN, narrowed to one line.
+
+**The fix is real and it shipped.** MEASURED, `agent/report.py` (WORKTREE == HEAD `6d373c06`):
+`proof_and_retest` (`report.py:1357`) no longer calls `_tm.proof_contract` on the family; it calls
+`negative_control_claim(finding)` (`report.py:1284`), which routes on the three-valued
+`proof_schema.control_status(f)` (`proof_schema.py:253`). Both renderers go through the same two
+functions - markdown `report.py:503`/`:509`, HTML `report.py:2561`/`:2562` - so oracle 3 holds
+structurally.
+
+MEASURED, the ticket's oracles run verbatim against worktree `report.py` loaded from `/tmp/wt`
+(the probe printed `report.py loaded from: /tmp/wt/report.py`, md5 `6d373c06`):
+
+```
+ORACLE 1 (control recorded)   status=recorded
+                              heading="How this was confirmed (false-positive safety)"
+ORACLE 2 (no control)         status=not_recorded
+                              heading="False-positive safety: NOT ESTABLISHED for this finding"
+                              text="NO NEGATIVE CONTROL WAS RECORDED for this finding. ..."
+THIRD VALUE (source-derived)  status=not_applicable
+                              heading="False-positive safety: rule-level counter-example ..."
+```
+
+**ORACLE 2 AS LITERALLY WRITTEN WOULD FAIL, and the oracle is wrong, not the fix.** It demands that
+the string `does NOT reproduce` not appear. MEASURED: it DOES appear in the not-recorded text, because
+that branch deliberately quotes the contract as the experiment that *would* settle the question:
+"...The control that would settle it: An inert control ... does NOT reproduce ... -- run it before
+treating this as false-positive-safe." The indicative claim is gone from the HEADING and the sentence
+is explicitly subjunctive. This is the Q-019 oracle-(c) shape again: re-running the oracle as written
+records a FAIL against a fix that worked. **Rewrite oracle 2 as "the heading is not `How this was
+confirmed` and the text opens with `NO NEGATIVE CONTROL WAS RECORDED`".**
+
+**THE LIVE DEFECT - the ticket's mandatory negative control (a) FAILS.** The ticket made it
+mandatory: "the 34 findings that DO carry a control must still show a full control description. A fix
+that renders 'not recorded' for everything has deleted the section rather than repaired it."
+
+MEASURED over all 1057 stored finding rows, walking every JSON path at every depth for the five
+`proof_schema.CONTROL_KEYS`:
+
+```
+finding rows whose RAW JSON mentions a control token          :    3 of 1057
+NON-EMPTY control artifacts, by JSON PATH:
+   .browser_evidence.negative_controls              dict   3
+   .browser_evidence.negative_controls.control      dict   3
+   (family: bola, all 3)
+proof_schema.control_status() == RECORDED over ALL 1057 rows  :    0
+confirmed findings                                            :  665
+control_status census over confirmed  {'not_recorded': 665}   -> heading census:
+   "False-positive safety: NOT ESTABLISHED for this finding"       665
+```
+
+POSITIVE CONTROL that the apparatus can return RECORDED at all - the SAME dict in two positions:
+
+```
+{"negative_controls": {...}}                       -> control_status = recorded
+{"browser_evidence": {"negative_controls": {...}}} -> control_status = not_recorded
+    and its rendered heading -> "False-positive safety: NOT ESTABLISHED for this finding"
+```
+
+**Root cause, one line.** `control_status` / `report.control_ran` scan **TOP-LEVEL keys only**
+(`proof_schema.py:271`, `for k in CONTROL_KEYS: v = finding.get(k)`). The only producer in the entire
+corpus that actually records controls is the BIE, and it writes them **nested**, at
+`browser_evidence.negative_controls`. The ticket itself named that shape as the one to standardise on
+("the shape already exists in two places - pick one and make it the contract ... The BIE dict is the
+more general of the two"). The fix picked the top-level names and never taught the reader to look
+inside `browser_evidence`.
+
+**The report now contradicts itself about the same finding.** MEASURED, rendering the real stored
+finding `bola` / `http://juice-shop:3000/rest/basket/6`:
+
+```
+negative_control_claim(f).heading -> "False-positive safety: NOT ESTABLISHED for this finding"
+negative_control_claim(f).text    -> "NO NEGATIVE CONTROL WAS RECORDED for this finding. ..."
+
+report.browser_evidence_html(f)   -> renders, in the SAME report, a control table containing
+      "Negative control - anonymous"             (url, status 401, len)
+      "Negative control - implausible id"
+      "Negative control - attacker's own object"
+      "Negative controls: the same request anonymously, and with an implausible id, do NOT return it."
+```
+
+One report, two sections, opposite answers about whether a control was run. That is Q-015's shape
+(two projections of one fact disagreeing) one layer out, and for these 3 findings it is a
+**REGRESSION**: before the fix they printed an unbacked-but-true sentence, and they now print a
+**false** statement about a finding that carries three real recorded controls.
+
+**The green test suite cannot see it.** `agent/tests/test_evidence_contract_by_proof_kind.py:56`,
+`_behavioural_with_control()`, sets `f["negative_controls"] = [...]` at TOP LEVEL - a shape **no
+producer in the corpus emits**. The fixture invents the vocabulary the code reads instead of using
+the one the producer writes, so the suite is green and the defect ships. Same family as the standing
+memory note "guards that check declarations, not facts".
+
+**MEASURED CORRECTION to the ticket's headline number.** "626 of 660 ... 34 carry a control
+(dom_link_manipulation 32, bola 2)" does not reproduce. The 32 `dom_link_manipulation` rows carry NO
+control key at any depth; their complete key set is `title, severity, family, confidence, target,
+cwe, cvss_vector, cvss_score, evidence, success_oracle, reproduction_steps, impact, tags, id, owasp,
+analyst_notes, source`. The ticket's "34" was measured with a looser instrument, most likely
+`success_oracle` - which is a claim, not an artifact. **The true figures are 3 of 1057 rows and
+662 of 665 confirmed findings: the problem was WORSE than filed, not better.**
+
+**Verdict: OPEN, and the remaining work is small and precisely located.** The 662 unbacked claims are
+gone, which was the CRITICAL part of the ticket. What is left: teach `control_status` to read the
+nested BIE shape (or make the BIE also stamp a top-level key), and replace the top-level-only fixture
+with one built from a real stored BIE finding so the corpus under test contains the shape the producer
+emits. The ticket's non-vacuity control (c) should be strengthened to require >= 1 finding of each
+kind **drawn from stored producer output**, not hand-written.
+
+### Q-023 - ZAP has never executed in any mission - the ticket is 2 CLOSED / 1 LIVE / 1 REWRITE. Do not work it as filed.
+
+Run 1 confirmed the FACT and disproved the "three flags" EXPLANATION. Run 2 settles the four
+remaining commitments in the ticket body.
+
+**The fact, re-measured at run 2** (same instrument, positive controls restated):
+
+```
+run_zap calls: 0      any tool name containing "zap": {}
+POSITIVE CONTROL   run_nuclei 254 / run_fingerprint 2699 / http_probe 4650
+POSITIVE CONTROL   tools dispatched EXACTLY ONCE all resolve: browser_navigate, http_request,
+                   confirm_create_object_idor, confirm_read_object_idor,
+                   confirm_browser_persona_bola, run_session_lifecycle    (n=6)
+missions with enable_zap truthy: 4     of which mode=full: 4
+```
+
+The single-dispatch positive control is the one that matters: an engine that ran once IS visible, so
+0 is not the apparatus failing to look. Q-061's caveat still applies (only 59 of 29,944 rows carry a
+`via` field), which is why run 1's independent ZAP-daemon instrument remains the load-bearing
+evidence and this count is corroboration.
+
+**Sub-defect 1 - `recon["zap"]` is a dead write: CLOSED, the write is GONE.** MEASURED:
+`grep -n 'self\.recon' agent/tools.py | grep -i zap` -> **no hits**. The `tools.py:8470`
+`self.recon.setdefault("zap", []).extend(findings)` the ticket cited no longer exists anywhere in the
+tree. POSITIVE CONTROL that the grep resolves a live recon write: `recon["urls"]` at `tools.py:10095`
+and `main.py:2480`, read at `guidance.py:722`.
+
+**Sub-defect 3 - the AJAX spider fails silently: CLOSED.** MEASURED, `agent/tools.py:9889-9902`. The
+bare `except Exception: pass` is replaced by exactly the idiom the ticket asked to be mirrored:
+
+```python
+if not ajax_ok:
+    await zap.ajax_stop()
+    degraded.append("AJAX spider incomplete or timed out")
+except Exception as exc:
+    degraded.append("AJAX spider degraded: %s: %s" % (type(exc).__name__, exc))
+```
+
+Both the timeout case and the exception case now reach `degraded`, which is surfaced in the
+ToolResult note.
+
+**Sub-defect 2 - targeted rescan is NOT WIRED: STILL LIVE, unchanged.** MEASURED:
+`agent/planner.py:678-679` still builds the step with key `f"run_zap:{h}"` - host only, no path - and
+`planner.fresh()` (`planner.py:297-312`) still drops any step whose key is in `done`:
+`if k in done or k in seen or not _allowed(s["tool"], mode): continue`. **One ZAP call per host per
+mission, ever.** A second, narrower ZAP pass against a path discovered later in the mission is
+unrepresentable. This is the only clause of the ticket body still true and actionable.
+
+**The consumer contract - "ZAP Executed must be computed from a run_zap RESULT, not from the flag":
+CLOSED.** MEASURED, `agent/main.py:1113-1129`: the status is derived from `z = agg.get("run_zap")`,
+the ledger entry, and the flag only distinguishes `user_disabled` from `not_invoked`:
+
+```
+not _zap_configured -> "not_configured"
+not _zap_enabled    -> "user_disabled"
+not z               -> "not_invoked"    ("ZAP Not Invoked - enabled but not scheduled for this run")
+z["error"]          -> "failed"
+else                -> executed_{passive|safe_active|thorough_active}, read from the note's policy=
+```
+
+`report.py:1592-1601` renders all nine states including the honest `not_invoked`. The
+declaration-vs-fact defect the ticket named at the orchestration layer is fixed at the reporting layer.
+
+**QUEUE.md contradicts itself about this ticket.** `docs/QUEUE.md:1050` states "Q-023, Q-013 and
+Q-014 are all closed"; the ticket body at `docs/QUEUE.md:2810` is still headed `**HIGH**`,
+`proposed`. Two states for one ticket in one file - the Q-019 duplication rot again.
+
+**Verdict: REWRITE Q-023 down to its one live clause.** Retitle to "ZAP is one call per host per
+mission - a targeted rescan is unrepresentable" (`planner.py:679` key, `planner.py:306` dedup); carry
+forward run 1's finding that there is no wiring defect and that the coverage gap closes by RUNNING a
+mission with `enable_zap=True`, not by editing code; and DELETE sub-defects 1 and 3, the three-gate
+explanation, and the "fifth unidentified cause" paragraph - all four are settled. Resolve the
+`1050` vs `2810` state conflict in the same edit.
