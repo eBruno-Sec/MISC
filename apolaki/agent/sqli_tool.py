@@ -132,7 +132,12 @@ def similar(a: str, b: str) -> float:
 #: ONLY together with the one-line call-site patch in `docs/handoff/bimodal.md` section 5,
 #: which passes `baseline_samples=base_samples[1:]`; `analyze_boolean` already accepts it and
 #: `tests/test_boolean_bimodal_noise.py` pins the gap until it lands.
-BOOLEAN_BASELINE_SAMPLE_COUNT = 2
+BOOLEAN_BASELINE_SAMPLE_COUNT = 3   # Q-070: 3 = baseline + 2 repeats. The handoff proposed 4,
+#: but its own measured table reaches 0.000 FP/attempt at N=3 with 5 of 5 live true positives
+#: still confirming, and N=4 buys nothing measurable. The extra request is not free: on the
+#: POST-form carrier the samples are taken INSIDE the field loop, so the cost is N-1 PER FIELD
+#: and does not amortise -- and that is the lane carrying every boolean-blind confirmation on
+#: this benchmark. Ship the number the measurement supports, not the rounder one.
 _MISSING = object()
 _MISSING_BASELINE_REPEAT = _MISSING      # kept: existing callers/tests import this name
 

@@ -364,7 +364,15 @@ def test_the_sqli_carriers_all_still_supply_a_reference_sample():
     calls = _boolean_calls(tools.ToolRegistry._run_sqli, "sqli")
     assert len(calls) == 2, "measured shipping call-site baseline changed; review every new carrier"
     for c in calls:
-        assert "baseline_repeat" in {k.arg for k in c.keywords}
+        # Q-070: the carriers forward `baseline_samples=[...]` now instead of a single
+        # `baseline_repeat=`. The property under test is unchanged, and is deliberately
+        # written as "supplies A REFERENCE" rather than naming one keyword: a carrier that
+        # supplies NOTHING still fails, while one supplying MORE evidence does not. Pinning
+        # the spelling rather than the property is what turned this red on a change that
+        # strengthened the thing it guards.
+        kwargs = {k.arg for k in c.keywords}
+        assert kwargs & {"baseline_repeat", "baseline_samples"}, (
+            "a sqli boolean carrier supplies no reference sample at all: %s" % (kwargs,))
 
 
 @pytest.mark.xfail(strict=True, reason="THE GATE IS INERT UNTIL tools.py SUPPLIES THE SAMPLE. "

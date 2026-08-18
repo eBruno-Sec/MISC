@@ -98,8 +98,14 @@ def _run_get(monkeypatch, responder):
 
 def _assert_get_reference_was_resampled(client):
     values = [_value(url) for url in client.gets]
-    assert values[:3] == ["1", "1", "1'"], (
-        "the shipping GET path must issue exactly two identical reference requests before probes",
+    # Q-070: N went 2 -> 3 (baseline + 2 repeats), the measured point where FP/attempt on a
+    # bimodal page reaches 0.000 with all five live true positives still confirming. The count
+    # is pinned rather than made flexible ON PURPOSE: extra reference requests are the PRICE of
+    # this fix, they are charged per FIELD on the POST carrier, and a silent drift upward is a
+    # cost nobody would notice. If this fails, the sampling contract changed -- re-measure the
+    # FP/recall table before re-aiming it.
+    assert values[:4] == ["1", "1", "1", "1'"], (
+        "the shipping GET path must issue exactly THREE identical reference requests before probes",
         values,
     )
 
@@ -182,7 +188,10 @@ def test_shipping_post_path_resamples_and_preserves_a_real_differential(monkeypa
 
     result, client = _run_post(monkeypatch, stable_vulnerable)
     values = [_post_value(body) for _url, body in client.posts]
-    assert values[:3] == ["1", "1", TRUE_VALUE], values
+    # Q-070: N 2 -> 3 on the POST carrier too. This is the EXPENSIVE side -- samples are taken
+    # inside the FIELD loop, so the extra reference is charged per field and does not amortise
+    # the way the query-string carrier does. Pinned exactly so that cost stays visible.
+    assert values[:4] == ["1", "1", "1", TRUE_VALUE], values
     assert len(result.findings) == 1
 
 
@@ -204,7 +213,10 @@ def test_shipping_post_path_rejects_a_real_differential_on_an_unstable_page(monk
     result, client = _run_post(monkeypatch, unstable_vulnerable)
     values = [_post_value(body) for _url, body in client.posts]
     assert not result.findings
-    assert values[:3] == ["1", "1", TRUE_VALUE], values
+    # Q-070: N 2 -> 3 on the POST carrier too. This is the EXPENSIVE side -- samples are taken
+    # inside the FIELD loop, so the extra reference is charged per field and does not amortise
+    # the way the query-string carrier does. Pinned exactly so that cost stays visible.
+    assert values[:4] == ["1", "1", "1", TRUE_VALUE], values
 
 
 def test_every_shipping_boolean_call_supplies_the_reference_sample():
@@ -221,4 +233,8 @@ def test_every_shipping_boolean_call_supplies_the_reference_sample():
     ]
     assert len(calls) == 2, "measured shipping call-site baseline changed; review every new carrier"
     for call in calls:
-        assert "baseline_repeat" in {keyword.arg for keyword in call.keywords}
+        # The property is "supplies a REFERENCE", not "uses this keyword". The carriers forward
+        # baseline_samples=[...] since Q-070; a carrier supplying NOTHING must still fail here.
+        kwargs = {keyword.arg for keyword in call.keywords}
+        assert kwargs & {"baseline_repeat", "baseline_samples"}, (
+            "a shipping boolean carrier supplies no reference sample: %s" % (kwargs,))

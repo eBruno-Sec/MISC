@@ -195,16 +195,6 @@ def _boolean_calls(func, module_name):
             and n.func.attr == "analyze_boolean"]
 
 
-@pytest.mark.xfail(strict=True, reason=(
-    "N IS INERT IN PRODUCTION. analyze_boolean has accepted baseline_samples since Q-040 and the "
-    "curve above shows N=3 takes the live bimodal page from 0.189 to 0.000 at no cost in recall, "
-    "but tools._run_sqli forwards only base_samples[1] (tools.py:7463 -> :7513, and :7566 -> "
-    ":7586), so the shipped oracle runs at N=2 and the 0.189 stands. BOOLEAN_BASELINE_SAMPLE_COUNT "
-    "lives in this lane's file, yet raising it ALONE buys extra requests and no extra evidence "
-    "because the extras are dropped on the floor -- so it is deliberately left at 2 until the "
-    "call site changes, and the two changes must land together. agent/tools.py is not this lane's "
-    "file; the one-line patch is in docs/handoff/bimodal.md section 5. STRICT: applying it turns "
-    "this XPASS and the marker must then be removed."))
 def test_the_sqli_carriers_supply_enough_samples_to_survive_a_bimodal_page():
     assert sqli.BOOLEAN_BASELINE_SAMPLE_COUNT >= 3, (
         "N=2 leaves a measured 0.189 FP/attempt on a live bimodal page")
