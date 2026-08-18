@@ -931,3 +931,134 @@ forward run 1's finding that there is no wiring defect and that the coverage gap
 mission with `enable_zap=True`, not by editing code; and DELETE sub-defects 1 and 3, the three-gate
 explanation, and the "fifth unidentified cause" paragraph - all four are settled. Resolve the
 `1050` vs `2810` state conflict in the same edit.
+
+### Q-021B - persist a canonical TechnologyFact - BUILT AND WIRED. CLOSE IT, with two named residuals and a mis-specified oracle.
+
+The ticket is marked `proposed`. It is **shipped**. Every producer/consumer contract in the ticket
+body resolves to real code, and it is NOT an island.
+
+MEASURED, source (all files WORKTREE == IMAGE `fingerprint.py` md5 `82d3bee5`, confirmed identical
+inside the container before any probe ran):
+
+```
+the ONE constructor      dependency_intel.py:210  make_tech_fact(product, *, version, source,
+                                                    detector, vendor, component, ...)
+                         dependency_intel.py:262  merge_tech_facts()   (dedup by identity)
+the fact builder         fingerprint.py:286       tech_facts()  -> (facts, rejected)
+the persister            fingerprint.py:320       record_facts() -> mutates recon["technology"]
+                                                    and recon["technology_rejected"]
+WIRED INTO THE ARTERY    tools.py:3994            fp.record_facts(self.recon, final, ...) inside
+                                                    _run_fingerprint  (2,699 dispatches in the corpus)
+graph projection         asset_graph.py:610       for fact in recon.get("technology"):
+                                                    g.observe_technology(fact, ...)
+cross-mission persist    memory.py:207            "technology": sorted(recon.get("technology"))
+warm start               main.py:214              _warm_start_technology(scope, tools, prior) -> int
+                         main.py:239              merge_tech_facts(prior + current)
+tests                    tests/test_tech_fact.py, tests/test_tech_fingerprint_facts.py
+```
+
+MEASURED, tests: `docker exec -w /tmp/wt2 apolaki-agent-1 python -m pytest tests/test_tech_fact.py
+tests/test_tech_fingerprint_facts.py -q` -> **47 passed** (worktree tree copied to `/tmp/wt2`, not
+the image's `/app`).
+
+**The three MANDATORY negative controls, run verbatim and live** (worktree `fingerprint.py`):
+
+**(a) Prose is refused AND the refusal is recorded.** Fed the ticket's exact MultiJuicer body:
+
+```
+detect() still sees it (deliberately unfiltered, so the refusal ledger can name what it dropped):
+   {'name': 'a MultiJuicer Kubernetes cluste', 'source': 'powered-by text', ...}
+record_facts ->  facts admitted: 0     refusals RECORDED: 1
+   refused name='a MultiJuicer Kubernetes cluste' detector=fingerprint.body.prose
+   reason=prose_leading_stopword
+```
+
+This is the control's hard half: the ticket said "a fix that merely stops STORING them without
+recording the rejection has moved the blindness, not removed it". The rejection carries a reason AND
+names its own detector. PASS.
+
+**(b) A versionless detection stays LOW and is not CVE-eligible.**
+
+```
+Server: nginx        -> product=nginx version='' confidence=low  cve_eligible=False
+```
+
+PASS.
+
+**(c) Empty means empty, and no error.**
+
+```
+record_facts(..., {}, "", "<html><body>hello</body></html>")
+   -> facts: 0   rejected: 0   raised: no
+```
+
+PASS - a real zero is distinguishable from a broken detector, which is the Q-016 requirement applied
+here.
+
+**ORACLE 1 - a fact carries name/version/evidence: PASS. Its CONFIDENCE clause: FAILS, and the
+oracle is wrong, not the code.** MEASURED:
+
+```
+Server: Apache-Coyote/1.1 ->
+ {product: apache-coyote, version: "1.1", source: "Server header", detector: fingerprint.headers,
+  evidence: "Server: Apache-Coyote/1.1", location: http://owaspbench:8443/x, host: owaspbench:8443,
+  first_seen/last_seen: set, confidence: "low", version_confidence: "low",
+  proof_state: "version_suspected", component_status: "potentially_affected"}
+```
+
+The name, the non-empty version and the evidence quoting the exact proving byte are all there. But
+the oracle also demands `confidence in CVE_ELIGIBLE`, and `CVE_ELIGIBLE = frozenset({'high',
+'confirmed'})` while EVERY header-derived fact is `low`:
+
+```
+Server header w/ version   nginx 1.18.0    conf=low  cve_eligible=False  proof_state=version_suspected
+X-Powered-By w/ version    php   7.4.3     conf=low  cve_eligible=False  proof_state=version_suspected
+meta generator             wordpress 5.8   conf=low  cve_eligible=False  proof_state=version_suspected
+```
+
+POSITIVE CONTROL that CVE_ELIGIBLE is reachable at all, so this is a deliberate ceiling and not a
+broken ladder:
+
+```
+di.components_for_artifact("/*! jQuery JavaScript Library v1.7.1 */", ".../jquery/1.7.1/jquery.min.js")
+   -> {'name': 'jquery', 'version': '1.7.1', 'confidence': 'confirmed'}  cve_eligible=True
+```
+
+So a served-artifact reading reaches CONFIRMED and a banner never does - which is exactly what the
+ticket's own false-positive section demanded ("a fact is an OBSERVATION, so record the header
+verbatim as evidence and never call it proof"). **The ticket's oracle 1 contradicts the ticket's own
+FP-risk section.** This is the THIRD mis-specified oracle in this sweep (Q-019 (c), Q-022 (2), this).
+**Rewrite oracle 1 to require `version` non-empty and `proof_state == "version_suspected"`, and move
+the CVE-eligibility assertion onto the served-artifact path where it belongs.**
+
+**ORACLE 2 - the graph projects a component node: PASS.**
+
+```
+recon with 1 fact -> build_from_engagement("m-test", recon=..., findings=[])
+   node kinds {'component': 1, 'host': 1}
+   component:owaspbench:8443||apache-coyote|   label "Apache-Coyote 1.1"  confidence 0.3
+                                              sources [{'source': 'fingerprint'}]   enables []
+NEGATIVE CONTROL, identical call with NO technology -> node kinds {}
+```
+
+INSTRUMENT NOTE: my first attempt reported **0 nodes** and that was my apparatus, not a finding.
+`g.nodes` is a METHOD, not a container, and my minimal `recon` had no `live_hosts`. Corrected via
+`g.to_dict()` before anything was concluded. This is the "read the wrong attribute" failure the brief
+warned about, caught by the negative control disagreeing with the positive one.
+
+**RESIDUAL 1 - two of the four producers named in the ticket are still not connected.** MEASURED:
+`grep -n "make_tech_fact|record_facts|technology" agent/codeintel.py agent/browser_engine.py` ->
+**no hits**. `codeintel.harvest()`'s `out["versions"]` (`codeintel.py:236`, `name@x.y.z` mined from
+served JS) and `browser_engine.observe()`'s `framework` (`browser_engine.py:256-259`) still have no
+reader and emit no fact. The ticket's producer contract named four producers; two were done. Note
+that `codeintel`'s versions are a SERVED-ARTIFACT reading, i.e. the very path that CAN reach
+CVE_ELIGIBLE - so this residual is worth more than it looks.
+
+**RESIDUAL 2 - the component node's `enables` is empty.** `enables []` on the projected node means
+the fact reaches the durable graph but unlocks no technique. That is deliberate and documented in
+place (`tools.py:3986-3992`: "Deliberately NOT written into `self.graph` ... orchestration is
+Q-021E"), so it is not a defect - it is the precise statement of what Q-021E still has to do.
+
+**Verdict: CLOSE Q-021B.** Record the two residuals as one small follow-up ("connect the codeintel
+and browser_engine producers to make_tech_fact") rather than keeping a HIGH ticket open, and correct
+oracle 1 in the same edit so the next reader does not record a FAIL against working code.
