@@ -17,6 +17,12 @@ This is the "verify BOTH halves of a fix" rule: the READER half (mode-then-strat
 PRODUCER half did not, and no test caught it because every existing fixture supplied `mode` by hand.
 So these tests assert against a ledger built by the real producer, never a literal.
 """
+# Q-052 re-tiered the permission model: ACTIVE now means "sends payloads, READ-ONLY" and
+# INTRUSIVE means "CHANGES STATE". run_cmdi sends a payload and reads the answer, so it is
+# ACTIVE and is no longer blocked at that mode. These tests are about the DISTINCTION between
+# tier-blocked and not-selected, which is unchanged -- only the engine that demonstrates it
+# moved. run_upload_test is one of the nine that genuinely write, so it still demonstrates it.
+
 from __future__ import annotations
 
 import os
@@ -60,7 +66,7 @@ def test_tier_blocked_engines_are_counted_and_not_reported_as_unselected():
     assert not (set(gap["blocked_by_mode"]) - set(gap["not_dispatched"])), \
         "blocked_by_mode must be a SUBSET of not_dispatched"
     # A known-INTRUSIVE engine is the concrete case a reader would be misled about.
-    assert "run_sqli" in gap["blocked_by_mode"]
+    assert "run_upload_test" in gap["blocked_by_mode"]
 
 
 def test_full_mode_blocks_nothing_which_is_the_positive_control():

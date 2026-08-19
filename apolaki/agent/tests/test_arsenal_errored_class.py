@@ -154,7 +154,11 @@ def test_the_classes_still_sum_to_the_REGISTRY_DENOMINATOR():
         "classes sum to %d, registry denominator is %d" % (total, len(registered)))
     # the measured split on this mission, so a silent drift in any one class is visible
     assert (len(blocked), len(never), len(silent), len(errored), len(skipped), len(productive)) == \
-           (31, 35, 30, 1, 2, 12)
+           (13, 53, 30, 1, 2, 12)
+    # Q-052 moved 25 engines INTRUSIVE -> ACTIVE, so 18 of them left `blocked` and arrived in
+    # `never` on this mission: 31->13 and 35->53. THE SUM IS UNCHANGED AT 111, which is the
+    # invariant this test exists for -- the split is pinned underneath it so a silent drift in
+    # any one class stays visible, and re-aiming it is the deliberate cost of a taxonomy change.
 
 
 # ── both renderers, or it is a half fix ──────────────────────────────────────

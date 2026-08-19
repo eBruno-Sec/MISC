@@ -17,6 +17,15 @@ Tool-permission gating mirrors the assessment mode:
     full    → PASSIVE + ACTIVE + INTRUSIVE
 The executor still runs every step through the scoped, HITL-gated tool pipeline,
 so this module never bypasses scope or the approval gate — it only chooses order.
+
+TWO SEPARATE AXES, and Q-052 exists because they were one. See `scope.PermissionLevel`
+for what each tier MEANS; the short version is that the tier is a CONSENT axis — does
+this engine change state — and it is not a cost axis. Sending SQLi payloads is not
+expensive and is not a state change; a ZAP active scan is enormously expensive and is
+still not a state change. Gating an engine to `full` because it is SLOW is a legitimate
+budget decision, but it must be spelled with `_HEAVY_FULL_ONLY` below, never by inflating
+its permission tier — an over-declared tier makes the operator's consent decision mean
+something it does not mean, and it is what made `active` unable to test for SQL injection.
 """
 from __future__ import annotations
 
@@ -33,6 +42,23 @@ _ALLOWED = {
     "active": {PermissionLevel.PASSIVE, PermissionLevel.ACTIVE},
     "full": {PermissionLevel.PASSIVE, PermissionLevel.ACTIVE, PermissionLevel.INTRUSIVE},
 }
+
+# Q-052 — the COST gate, deliberately separate from the permission tier above.
+#
+# These three are read-only payload senders, so the tier split puts them in ACTIVE and the
+# consent question is genuinely answered "yes, an active scan may do this". They are also the
+# three engines that dominate mission wall-clock: a ZAP spider + AJAX spider + active scan per
+# host root, an `nmap -sV --script "vuln and not dos"` per host, and a deep/insane sqlmap per
+# injection-prone endpoint. Q-052 pre-registers a 2x wall-clock ceiling at `active`; before this
+# gate existed they were held out of `active` only as a SIDE EFFECT of being mis-tiered
+# INTRUSIVE, so re-tiering them silently removed a budget control that nothing had named.
+#
+# Naming it makes the tradeoff editable: an operator who wants sqlmap in an `active` mission is
+# asking a budget question, and the answer belongs here rather than in a consent tier. `full`
+# keeps them. `run_zap` additionally stays behind its own `POST /engage` check, which rejects
+# `enable_zap` unless mode == "full" — this gate is not what makes ZAP full-only, it is what
+# keeps the PLANNER from scheduling it if that check ever moves.
+_HEAVY_FULL_ONLY = {"run_sqlmap", "run_zap", "run_nmap_vuln"}
 
 # caps keep every run bounded + terminating
 CAP_HOSTS = 30          # hosts we http_probe / fingerprint
@@ -173,6 +199,15 @@ def merge_observed_params(url: str, values: dict) -> str:
 
 
 def _allowed(tool: str, mode: str) -> bool:
+    """May this mode SCHEDULE this tool — consent first, then budget.
+
+    Two independent reasons to say no, kept independent on purpose (Q-052). The tier answers
+    "would this change state"; `_HEAVY_FULL_ONLY` answers "can this mode afford it". Collapsing
+    them is the defect this ticket fixes, so a future reader who wants to make an engine
+    full-only must pick which question they are answering.
+    """
+    if mode != "full" and tool in _HEAVY_FULL_ONLY:
+        return False
     tiers = _ALLOWED.get(mode, _ALLOWED["active"])
     return TOOL_PERMISSIONS.get(tool, PermissionLevel.ACTIVE) in tiers
 
@@ -224,7 +259,7 @@ def next_batch(state: dict) -> list:
     # True when a ZAP daemon is configured (ZAP_ADDR set). When so, Full mode runs a
     # real DAST pass — ZAP is no longer left to the agentic model's discretion.
     zap_on = bool(state.get("zap"))
-    # heavyweight nmap NSE vuln scan — opt-in; INTRUSIVE gate keeps it to Full mode.
+    # heavyweight nmap NSE vuln scan — opt-in; the COST gate keeps it to Full mode.
     nmap_vuln_on = bool(state.get("nmap_vuln"))
     # heavy nuclei (full vuln template set) — opt-in, Full mode only.
     nuclei_heavy_on = bool(state.get("nuclei_heavy")) and mode == "full"
@@ -497,7 +532,8 @@ def next_batch(state: dict) -> list:
         if any(p in _CMD_PARAM for p in params_l):
             e_steps.append(_step("run_cmdi", {"url": u}, f"run_cmdi:{tag}"))
         # heavy sqlmap on the same endpoint — bounded to injection-prone endpoints at deep,
-        # full fan-out at insane. INTRUSIVE -> _allowed() gates to Full. Deferred to the end.
+        # full fan-out at insane. HEAVY -> _allowed() gates to Full on COST, not on tier
+        # (run_sqlmap is ACTIVE: it sends payloads and reads, it does not write). Deferred to the end.
         if tag in sqlmap_eps:
             sqlmap_steps.append(_step("run_sqlmap", {"url": u, "intensity": intensity},
                                       f"run_sqlmap:{tag}"))
@@ -595,9 +631,11 @@ def next_batch(state: dict) -> list:
     # ── expanded class coverage (deterministic): schedule the auth / API / logic tools
     # the planner previously left to the AI layer, so ONE Full run also exercises CSRF,
     # BFLA/BOLA, race + rate-limit, insecure deserialization, dalfox XSS confirmation,
-    # OAuth abuse, JWT weaknesses and ffuf content discovery. Bounded; the INTRUSIVE
-    # ones are gated to Full mode by fresh()/_allowed(). They run after the fast native
-    # probes + sqlmap, so they never starve the confirmations that complete the report.
+    # OAuth abuse, JWT weaknesses and ffuf content discovery. Bounded; the STATE-CHANGING
+    # ones (run_race, run_deserialization, run_bfla's method sweep) are gated to Full mode by
+    # fresh()/_allowed(); the read-only payload senders beside them (run_dalfox, run_ffuf) are
+    # ACTIVE since Q-052. They run after the fast native probes + sqlmap, so they never starve
+    # the confirmations that complete the report.
     for ep in param_eps:
         u = _ex(ep)
         tag = f"{ep['host']}{ep['path']}"
@@ -665,8 +703,10 @@ def next_batch(state: dict) -> list:
     # ── phase F2: ZAP DAST (only when a ZAP daemon is configured) ──
     # A full scope-fenced ZAP pass (spider + AJAX spider + active scan) on the
     # primary in-scope host roots, seeded with the discovered surface (incl.
-    # katana's crawl — see _run_zap). run_zap is INTRUSIVE, so fresh()/_allowed()
-    # gates it to FULL mode only; here it is also gated on ZAP actually being
+    # katana's crawl — see _run_zap). run_zap is ACTIVE (a DAST pass sends payloads
+    # and reads responses), and it is held to FULL mode by `_HEAVY_FULL_ONLY` through
+    # fresh()/_allowed() on COST — plus, independently, by `POST /engage`, which rejects
+    # `enable_zap` unless mode == "full". Here it is also gated on ZAP actually being
     # configured. It runs LATE (after the fast tools) and is capped to CAP_ZAP
     # roots because a ZAP active scan is very slow. This is what makes Full mode
     # reliably run ZAP when configured + authorized, instead of leaving it to the
@@ -683,8 +723,9 @@ def next_batch(state: dict) -> list:
 
     # ── phase F3: heavyweight nmap NSE vuln scan (opt-in) ──
     # The full `vuln` NSE category (minus DoS) on the primary in-scope host roots.
-    # run_nmap_vuln is INTRUSIVE (fresh()/_allowed() gates it to Full) and slow, so
-    # it runs late and is capped. Results are truth-first advisory leads.
+    # run_nmap_vuln is ACTIVE (version/behaviour probes, DoS scripts excluded, nothing
+    # written) but very slow, so `_HEAVY_FULL_ONLY` holds it to Full via fresh()/_allowed().
+    # It runs late and is capped. Results are truth-first advisory leads.
     if nmap_vuln_on:
         nv_steps = [_step("run_nmap_vuln", {"target": h}, f"run_nmap_vuln:{h}")
                     for h in sorted(set(roots) | set(subs))[:CAP_ZAP]]

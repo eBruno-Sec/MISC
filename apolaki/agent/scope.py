@@ -19,6 +19,49 @@ from urllib.parse import urlparse
 
 
 class PermissionLevel(Enum):
+    """What an engine DOES TO THE TARGET. The operator's consent axis, and only that.
+
+    This is the answer to "which tier does my new engine belong in", and it is decided by ONE
+    question: **does the engine change the target's state?** Not how loud it is, not how slow it
+    is, not how alarming the payload looks in a log.
+
+      PASSIVE     Observes. Sends NOTHING to the target. Third-party sources (crt.sh, wayback,
+                  DNS, GitHub), offline computation over data already in hand (hash
+                  identification, dork generation, decoding a SAMLResponse already captured).
+                  If it opens a socket to the target, it is not PASSIVE.
+
+      ACTIVE      Sends requests to the target, INCLUDING PAYLOADS, and only READS the answer.
+                  SQLi, NoSQLi, XPath, LDAP, command injection, SSRF, XXE, traversal, content
+                  discovery, parameter mining, fuzzing, DAST. This is what every mainstream
+                  scanner means by an active scan — Burp and ZAP both send SQLi payloads under
+                  this label — and it is the tier for the overwhelming majority of vulnerability
+                  detection. Authenticating, or POSTing to a login form, is ACTIVE: an auth
+                  attempt reads a decision, it does not write application data.
+
+      INTRUSIVE   CHANGES STATE. Creates, modifies, deletes or persists something on the target:
+                  uploads a file, stores a payload that another user will render, creates an
+                  object, writes across a trust boundary, poisons a shared cache, races a
+                  transaction, sends an arbitrary-method request the engine did not constrain.
+                  Reversible is not the test — `confirm_create_object_idor` deletes what it
+                  makes and is still INTRUSIVE, because between the create and the delete the
+                  target's state was not what its owner left it. INTRUSIVE rides the HITL
+                  approval gate and `auto_approve`; ACTIVE does not.
+
+    THE TEST, when a new engine is genuinely ambiguous: if the run were interrupted halfway,
+    would the target need cleaning up? Yes -> INTRUSIVE. No -> ACTIVE.
+
+    NOT this axis (Q-052 — the tier bundled these and it cost the product its SQLi surface at
+    `active` for the whole life of the project):
+      * COST. A slow engine is a budget problem. Express it in `planner._HEAVY_FULL_ONLY`,
+        which holds run_sqlmap / run_zap / run_nmap_vuln to `full` on wall-clock grounds while
+        leaving them honestly registered ACTIVE.
+      * NOISE / DETECTABILITY. Being obvious in a WAF log is not a state change.
+      * AUTHENTICATION. Whether an engine needs a session is orthogonal to all three tiers.
+
+    Mode maps onto the tiers cumulatively: `passive` = PASSIVE, `active` = PASSIVE + ACTIVE,
+    `full` = all three. Enforced in `planner._allowed` (scheduling) and `agent._run_tool` /
+    `agent._exec_internal` (dispatch + HITL).
+    """
     PASSIVE = "passive"
     ACTIVE = "active"
     INTRUSIVE = "intrusive"

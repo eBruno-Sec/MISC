@@ -160,7 +160,7 @@ TOOL_PERMISSIONS = {
     "run_whatweb": PermissionLevel.ACTIVE,
     "run_fingerprint": PermissionLevel.ACTIVE,
     "run_nmap": PermissionLevel.ACTIVE,
-    "run_nmap_vuln": PermissionLevel.INTRUSIVE,
+    "run_nmap_vuln": PermissionLevel.ACTIVE,
     "run_nuclei": PermissionLevel.ACTIVE,
     "http_probe": PermissionLevel.ACTIVE,
     "fetch_openapi": PermissionLevel.ACTIVE,
@@ -172,36 +172,36 @@ TOOL_PERMISSIONS = {
     "run_xss": PermissionLevel.ACTIVE,
     "run_form_xss": PermissionLevel.ACTIVE,
     "run_dom_trace": PermissionLevel.ACTIVE,
-    "run_encoded_cookie": PermissionLevel.INTRUSIVE,
+    "run_encoded_cookie": PermissionLevel.ACTIVE,
     "run_dom_audit": PermissionLevel.ACTIVE,
     "run_anomaly_scan": PermissionLevel.ACTIVE,
     "run_js_review": PermissionLevel.ACTIVE,
     "run_csrf": PermissionLevel.ACTIVE,
-    "run_ffuf": PermissionLevel.INTRUSIVE,
-    "run_content_discovery": PermissionLevel.INTRUSIVE,
+    "run_ffuf": PermissionLevel.ACTIVE,
+    "run_content_discovery": PermissionLevel.ACTIVE,
     "run_web_probes": PermissionLevel.INTRUSIVE,
     # Q-011. INTRUSIVE, not ACTIVE: it WRITES. Every other level is read-only or read-mostly, and a
     # mass-assignment probe necessarily persists an attribute on a real object.
     "run_mass_assign": PermissionLevel.INTRUSIVE,
-    "run_injection_probes": PermissionLevel.INTRUSIVE,
+    "run_injection_probes": PermissionLevel.ACTIVE,
     "run_bfla": PermissionLevel.INTRUSIVE,
     "run_race": PermissionLevel.INTRUSIVE,
-    "run_ssrf": PermissionLevel.INTRUSIVE,
+    "run_ssrf": PermissionLevel.ACTIVE,
     "run_deserialization": PermissionLevel.INTRUSIVE,
-    "run_exposure": PermissionLevel.INTRUSIVE,
-    "run_xxe": PermissionLevel.INTRUSIVE,
-    "run_sqli": PermissionLevel.INTRUSIVE,
-    "run_xpath": PermissionLevel.INTRUSIVE,
-    "run_ldap": PermissionLevel.INTRUSIVE,
+    "run_exposure": PermissionLevel.ACTIVE,
+    "run_xxe": PermissionLevel.ACTIVE,
+    "run_sqli": PermissionLevel.ACTIVE,
+    "run_xpath": PermissionLevel.ACTIVE,
+    "run_ldap": PermissionLevel.ACTIVE,
     "run_ssi": PermissionLevel.ACTIVE,
-    "run_auth_sqli": PermissionLevel.INTRUSIVE,
+    "run_auth_sqli": PermissionLevel.ACTIVE,
     "run_form_cmdi": PermissionLevel.INTRUSIVE,
-    "run_nosqli": PermissionLevel.INTRUSIVE,
-    "run_form_nosqli": PermissionLevel.INTRUSIVE,
+    "run_nosqli": PermissionLevel.ACTIVE,
+    "run_form_nosqli": PermissionLevel.ACTIVE,
     "run_upload_test": PermissionLevel.INTRUSIVE,
     "run_stored_xss": PermissionLevel.INTRUSIVE,
     "run_jsonp": PermissionLevel.ACTIVE,
-    "run_param_mine": PermissionLevel.INTRUSIVE,
+    "run_param_mine": PermissionLevel.ACTIVE,
     "run_cache_poison": PermissionLevel.INTRUSIVE,
     "run_cache_deception": PermissionLevel.ACTIVE,
     "run_client_checks": PermissionLevel.PASSIVE,
@@ -210,7 +210,7 @@ TOOL_PERMISSIONS = {
     "run_ws_hijack": PermissionLevel.ACTIVE,
     "run_css_injection": PermissionLevel.ACTIVE,
     "run_waf_bypass": PermissionLevel.ACTIVE,
-    "run_sqli_structural": PermissionLevel.INTRUSIVE,
+    "run_sqli_structural": PermissionLevel.ACTIVE,
     "run_session_token": PermissionLevel.ACTIVE,
     "run_username_enum": PermissionLevel.ACTIVE,
     "run_session_fixation": PermissionLevel.ACTIVE,
@@ -226,12 +226,12 @@ TOOL_PERMISSIONS = {
     "run_ntp_audit": PermissionLevel.ACTIVE,
     "run_ipmi_audit": PermissionLevel.ACTIVE,
     "run_rdp_audit": PermissionLevel.ACTIVE,
-    "run_path_sqli": PermissionLevel.INTRUSIVE,
-    "run_llm_probe": PermissionLevel.INTRUSIVE,
-    "run_cmdi": PermissionLevel.INTRUSIVE,
-    "run_zap": PermissionLevel.INTRUSIVE,
-    "run_dalfox": PermissionLevel.INTRUSIVE,
-    "run_sqlmap": PermissionLevel.INTRUSIVE,
+    "run_path_sqli": PermissionLevel.ACTIVE,
+    "run_llm_probe": PermissionLevel.ACTIVE,
+    "run_cmdi": PermissionLevel.ACTIVE,
+    "run_zap": PermissionLevel.ACTIVE,
+    "run_dalfox": PermissionLevel.ACTIVE,
+    "run_sqlmap": PermissionLevel.ACTIVE,
     # ── capability expansion (2026-07) ──
     "run_dork_gen": PermissionLevel.PASSIVE,       # offline query generation only
     "run_hash_id": PermissionLevel.PASSIVE,        # offline hash-type identification
@@ -245,14 +245,14 @@ TOOL_PERMISSIONS = {
     # natively -- run_content_discovery + run_ffuf, planner-dispatched, both carrying a soft-404
     # baseline the adapters had no equivalent of. The last argument for feroxbuster was recursion,
     # and the adapter passed --no-recursion.
-    "run_nosqlmap": PermissionLevel.INTRUSIVE,     # optional NoSQLMap adapter
-    "run_dir_harvest": PermissionLevel.INTRUSIVE,  # browsable-dir file harvest + null-byte bypass
+    "run_nosqlmap": PermissionLevel.ACTIVE,     # optional NoSQLMap adapter
+    "run_dir_harvest": PermissionLevel.ACTIVE,  # browsable-dir file harvest + null-byte bypass
     # ── LLM investigative action primitives ──
     "http_read": PermissionLevel.ACTIVE,           # scope-guarded SAFE-method request (read atom)
     "http_diff": PermissionLevel.ACTIVE,           # deterministic two-request differential (oracle substrate)
     "http_request": PermissionLevel.INTRUSIVE,     # scope-guarded ANY-method request (write atom, gated)
     "confirm_idor": PermissionLevel.ACTIVE,        # deterministic IDOR/BOLA oracle-helper (auto-confirms)
-    "enumerate_ids": PermissionLevel.INTRUSIVE,    # bounded object-id enumeration (declarative, gated)
+    "enumerate_ids": PermissionLevel.ACTIVE,    # bounded object-id enumeration (declarative, gated)
     "confirm_create_object_idor": PermissionLevel.INTRUSIVE,   # creates+deletes an owned object (bounded, cleaned up)
     "confirm_read_object_idor": PermissionLevel.ACTIVE,        # read-only cross-user BOLA (safe GETs only)
     "confirm_browser_persona_bola": PermissionLevel.ACTIVE,    # BIE runtime persona-swap BOLA (safe GETs only, #124)
@@ -563,7 +563,7 @@ CLAUDE_TOOLS = [
          "stealth": {"type": "string", "enum": ["off", "polite", "sneaky", "paranoid"]}},
          "required": ["target"]}},
     {"name": "run_nmap_vuln",
-     "description": ("INTRUSIVE: Heavyweight nmap NSE vulnerability scan — the full `vuln` script category "
+     "description": ("ACTIVE (heavy, slow): Heavyweight nmap NSE vulnerability scan — the full `vuln` script category "
                      "minus DoS, with -sV service/version detection. The script set is hard-coded (no --script "
                      "injection). Network-vuln signals are version/behaviour-based, so every hit is a truth-first "
                      "advisory LEAD, never a confirmed finding. Slow; run on primary in-scope hosts in Full mode."),
@@ -690,13 +690,13 @@ CLAUDE_TOOLS = [
                      "Pass an HTML page URL."),
      "input_schema": {"type": "object", "properties": {"url": {"type": "string"}}, "required": ["url"]}},
     {"name": "run_ffuf",
-     "description": "INTRUSIVE: Directory/endpoint fuzzing. Include FUZZ in the URL.",
+     "description": "ACTIVE: Directory/endpoint fuzzing. Include FUZZ in the URL.",
      "input_schema": {"type": "object", "properties": {
          "url": {"type": "string"}, "wordlist": {"type": "string", "default": "/usr/share/wordlists/dirb/common.txt"},
          "filter_codes": {"type": "string", "default": "404,403"}, "method": {"type": "string", "default": "GET"}},
          "required": ["url"]}},
     {"name": "run_content_discovery",
-     "description": "INTRUSIVE: Body-validated content discovery. Probes a curated + surface-derived wordlist against a base URL and only reports a path when its RESPONSE BODY matches the sensitive-content signature (defeats catch-all SPA 200s). Binary-free.",
+     "description": "ACTIVE: Body-validated content discovery. Probes a curated + surface-derived wordlist against a base URL and only reports a path when its RESPONSE BODY matches the sensitive-content signature (defeats catch-all SPA 200s). Binary-free.",
      "input_schema": {"type": "object", "properties": {
          "base_url": {"type": "string"}, "max_paths": {"type": "integer", "default": 120}}, "required": ["base_url"]}},
     {"name": "run_web_probes",
@@ -707,7 +707,7 @@ CLAUDE_TOOLS = [
          "url": {"type": "string", "description": "URL with query parameters, e.g. https://t/api?id=5&file=a.txt"},
          "lab_mode": {"type": "boolean", "default": False}}, "required": ["url"]}},
     {"name": "run_injection_probes",
-     "description": ("INTRUSIVE: Reflection-based probes on a URL — CORS misconfiguration (reflected Origin + "
+     "description": ("ACTIVE: Reflection-based probes on a URL — CORS misconfiguration (reflected Origin + "
                      "credentials), open redirect, host-header injection, and SSTI ({{7*7}} -> 49). Binary-free; "
                      "captures evidence and reports only confirmed reflections."),
      "input_schema": {"type": "object", "properties": {"url": {"type": "string"}}, "required": ["url"]}},
@@ -736,7 +736,7 @@ CLAUDE_TOOLS = [
          "verify_headers": {"type": "object", "description": "Headers for the verify request (defaults to headers)"}},
          "required": ["url"]}},
     {"name": "run_ssrf",
-     "description": ("INTRUSIVE: Server-Side Request Forgery test on a parameterized URL. Three layers: (1) regular "
+     "description": ("ACTIVE: Server-Side Request Forgery test on a parameterized URL. Three layers: (1) regular "
                      "SSRF — points URL-ish parameters at cloud metadata endpoints (AWS/GCP/Azure/Alibaba/DO) and "
                      "detects real metadata content in the response (not the echoed payload, so no false positives); "
                      "(2) blind SSRF — an internal open-vs-closed port oracle (status/timing/connect differential); "
@@ -761,14 +761,14 @@ CLAUDE_TOOLS = [
          "params": {"type": "array", "items": {"type": "string"}, "description": "Restrict to these query params (default: all)"}},
          "required": ["url"]}},
     {"name": "run_exposure",
-     "description": ("INTRUSIVE: Information-disclosure scan for exposed high-value files — .git/.svn directories, "
+     "description": ("ACTIVE: Information-disclosure scan for exposed high-value files — .git/.svn directories, "
                      ".env / wp-config backups / .aws credentials, phpinfo / server-status, .htpasswd, and DB dumps. "
                      "Each hit is confirmed by a strong content signature (so a catch-all 200 page cannot false-"
                      "positive); a readable .git yields a source-recoverable escalation."),
      "input_schema": {"type": "object", "properties": {
          "base_url": {"type": "string", "description": "Base URL, e.g. https://target/"}}, "required": ["base_url"]}},
     {"name": "run_xxe",
-     "description": ("INTRUSIVE: XML External Entity test on an endpoint that accepts XML. Sends in-band file-read "
+     "description": ("ACTIVE: XML External Entity test on an endpoint that accepts XML. Sends in-band file-read "
                      "payloads (file:///etc/passwd etc.) and confirms when the file content is reflected; if a native "
                      "OOB collaborator is configured (BBH_OOB_BASE), also sends a blind parameter-entity payload and "
                      "confirms via the server-side callback. Pass a sample XML body to graft the payload onto the "
@@ -778,7 +778,7 @@ CLAUDE_TOOLS = [
          "xml": {"type": "string", "description": "Optional sample XML body to mutate (matches the app's schema)"},
          "content_type": {"type": "string", "default": "application/xml"}}, "required": ["url"]}},
     {"name": "run_sqli",
-     "description": ("INTRUSIVE: Native SQL-injection test on a parameterized URL. Three baseline-confirmed oracles: "
+     "description": ("ACTIVE: Native SQL-injection test on a parameterized URL. Three baseline-confirmed oracles: "
                      "error-based (injects a quote, detects a DBMS error + fingerprints MySQL/Postgres/MSSQL/Oracle/"
                      "SQLite), boolean-blind (always-true vs always-false condition diff), and time-based blind "
                      "(SLEEP/pg_sleep/WAITFOR with a sleep(0) control). Read-only payloads (no stacked writes). "
@@ -789,7 +789,7 @@ CLAUDE_TOOLS = [
          "delay": {"type": "integer", "default": 5, "description": "Seconds for the time-based sleep probe"}},
          "required": ["url"]}},
     {"name": "run_auth_sqli",
-     "description": ("INTRUSIVE: Auth-bypass SQL injection on a login endpoint via the POST/JSON request BODY "
+     "description": ("ACTIVE: Auth-bypass SQL injection on a login endpoint via the POST/JSON request BODY "
                      "(e.g. a JSON {email,password} login) — the class query-string SQLi probes cannot reach. "
                      "Baselines with a benign credential, injects OR-based payloads into each credential field, and "
                      "confirms a real bypass (a session/JWT token or 401->200 flip) or a DBMS error. Non-destructive: "
@@ -833,7 +833,7 @@ CLAUDE_TOOLS = [
      "input_schema": {"type": "object", "properties": {
          "url": {"type": "string", "description": "Page/endpoint to inspect for anomalies"}}, "required": ["url"]}},
     {"name": "run_param_mine",
-     "description": ("INTRUSIVE: active PARAMETER MINING — brute-force hidden query parameters on an endpoint so "
+     "description": ("ACTIVE: active PARAMETER MINING — brute-force hidden query parameters on an endpoint so "
                      "injection probes reach inputs the crawl never saw. A candidate that reflects its canary or "
                      "changes the response vs a random-param baseline is a DISCOVERY (added to the surface; a "
                      "candidate lead, not a vulnerability). Intensity widens the wordlist."),
@@ -842,7 +842,7 @@ CLAUDE_TOOLS = [
          "words": {"type": "array", "items": {"type": "string"}, "description": "Optional extra param names"}},
          "required": ["url"]}},
     {"name": "run_nosqli",
-     "description": ("INTRUSIVE: NoSQL (MongoDB-style) operator-injection test on a parameterized URL. Appends an "
+     "description": ("ACTIVE: NoSQL (MongoDB-style) operator-injection test on a parameterized URL. Appends an "
                      "operator suffix to the param NAME (id[$ne]=, id[$regex]=) and compares against a plain "
                      "non-matching-value control — an operator response that broadens back to baseline-shaped output "
                      "confirms the parameter reaches a NoSQL query unsanitised. Also checks for driver error "
@@ -852,7 +852,7 @@ CLAUDE_TOOLS = [
          "params": {"type": "array", "items": {"type": "string"}, "description": "Params to test (default: all in the URL)"}},
          "required": ["url"]}},
     {"name": "run_llm_probe",
-     "description": ("INTRUSIVE: LLM/chatbot prompt-injection probe (CWE-1427 / OWASP LLM01). Only fires against "
+     "description": ("ACTIVE: LLM/chatbot prompt-injection probe (CWE-1427 / OWASP LLM01). Only fires against "
                      "a URL that already looks like a chat/AI endpoint (path hints: chat, assistant, copilot, "
                      "bot, llm, conversation) — never spams every endpoint. Sends a benign instruction-override "
                      "probe asking the model to emit a unique marker; CONFIRMED only on exact marker compliance. "
@@ -885,7 +885,7 @@ CLAUDE_TOOLS = [
          "action": {"type": "string", "description": "Optional explicit form action URL"}},
          "required": ["url"]}},
     {"name": "run_form_nosqli",
-     "description": ("INTRUSIVE: NoSQL auth-bypass on a login endpoint via the POST/JSON request BODY — the canonical "
+     "description": ("ACTIVE: NoSQL auth-bypass on a login endpoint via the POST/JSON request BODY — the canonical "
                      "MongoDB login bypass, replacing a credential value with an operator object like {\"$ne\": null} "
                      "instead of a string. Baselines with a benign credential, injects operator objects into each "
                      "credential field, confirms a real bypass (a session/JWT token or 401->200 flip). "
@@ -896,7 +896,7 @@ CLAUDE_TOOLS = [
                     "description": "Body field names (default: email/username + password)"}},
          "required": ["url"]}},
     {"name": "run_cmdi",
-     "description": ("INTRUSIVE: OS command-injection test on a parameterized URL. Three baseline-confirmed oracles: "
+     "description": ("ACTIVE: OS command-injection test on a parameterized URL. Three baseline-confirmed oracles: "
                      "computed-output (echo of an arithmetic product across ; | & backtick $() separators — an echoed "
                      "payload cannot false-positive), time-based blind (sleep with a sleep-0 control), and OOB (curl/"
                      "wget to the native collaborator when BBH_OOB_BASE is set). Non-destructive payloads only."),
@@ -906,7 +906,7 @@ CLAUDE_TOOLS = [
          "delay": {"type": "integer", "default": 5, "description": "Seconds for the time-based sleep probe"}},
          "required": ["url"]}},
     {"name": "run_zap",
-     "description": ("INTRUSIVE: Full OWASP ZAP DAST pass on an in-scope URL — builds a ZAP context from the mission "
+     "description": ("ACTIVE, independently gated to `full` mode: Full OWASP ZAP DAST pass on an in-scope URL — builds a ZAP context from the mission "
                      "scope, seeds it with discovered in-scope URLs, runs the spider + AJAX spider (SPA-aware) + active "
                      "scan in-scope-only, and imports ZAP alerts as findings. Requires the optional ZAP daemon "
                      "(docker compose --profile zap up); skips cleanly if ZAP_ADDR is unset."),
@@ -918,10 +918,10 @@ CLAUDE_TOOLS = [
          "oast_service": {"type": "string", "description": "Optional OAST service for out-of-band detection: BOAST or Interactsh (needs the ZAP oast add-on)"}},
          "required": ["url"]}},
     {"name": "run_dalfox",
-     "description": "INTRUSIVE: XSS scanning of a URL (requires dalfox; skips gracefully if unavailable).",
+     "description": "ACTIVE: XSS scanning of a URL (requires dalfox; skips gracefully if unavailable).",
      "input_schema": {"type": "object", "properties": {"url": {"type": "string"}}, "required": ["url"]}},
     {"name": "run_sqlmap",
-     "description": ("INTRUSIVE: SQL-injection confirmation on a URL (requires sqlmap; skips gracefully if "
+     "description": ("ACTIVE (heavy): SQL-injection confirmation on a URL (requires sqlmap; skips gracefully if "
                      "unavailable). Confirmed hits carry parsed proof (parameter, techniques, payloads, DBMS). "
                      "intensity scales depth: standard L1R1 / deep L3R2+all-techniques / insane L5R3+read-only enumeration."),
      "input_schema": {"type": "object", "properties": {
@@ -981,10 +981,10 @@ CLAUDE_TOOLS = [
          "wordlist": {"type": "string", "description": "catalog id or absolute path; defaults to the common-passwords list"}},
          "required": ["hash"]}},
     {"name": "run_nosqlmap",
-     "description": "INTRUSIVE: NoSQL-injection testing via NoSQLMap (optional; skips gracefully if unavailable). Native run_nosqli remains the default.",
+     "description": "ACTIVE: NoSQL-injection testing via NoSQLMap (optional; skips gracefully if unavailable). Native run_nosqli remains the default.",
      "input_schema": {"type": "object", "properties": {"url": {"type": "string"}}, "required": ["url"]}},
     {"name": "run_dir_harvest",
-     "description": ("INTRUSIVE: Find browsable file directories (ftp/uploads/backup/…) and harvest sensitive files "
+     "description": ("ACTIVE: Find browsable file directories (ftp/uploads/backup/…) and harvest sensitive files "
                      "(confidential docs, source/DB backups, keys). On a blocked backup file, attempts a poison "
                      "null-byte extension bypass. Scope-guarded; confirmed only when content is genuinely sensitive."),
      "input_schema": {"type": "object", "properties": {"base_url": {"type": "string"}}, "required": ["base_url"]}},
@@ -1038,7 +1038,7 @@ CLAUDE_TOOLS = [
          "app": {"type": "string"}, "specs": {"type": "array", "items": {"type": "object"}}},
          "required": ["base_url", "owner", "attacker"]}},
     {"name": "enumerate_ids",
-     "description": ("INTRUSIVE: bounded object-id enumeration on a templated URL (contains {id}). Give a numeric "
+     "description": ("ACTIVE: bounded object-id enumeration on a templated URL (contains {id}). Give a numeric "
                      "start/end (hard-capped at 50) and optional session; returns which ids are distinct "
                      "populated 200s vs a nonexistent-id baseline. Emits a lead — confirm ownership with confirm_idor."),
      "input_schema": {"type": "object", "properties": {
@@ -1705,7 +1705,7 @@ class ToolRegistry:
         return ToolResult("nosqlmap", url, True, "nosqlmap completed", leads)
 
     async def _run_dir_harvest(self, inp: dict) -> ToolResult:
-        """INTRUSIVE: find browsable file directories (ftp/uploads/backup/…) and harvest
+        """ACTIVE: find browsable file directories (ftp/uploads/backup/…) and harvest
         sensitive files; on a blocked backup file, try a poison-null-byte extension bypass.
         Scope-guarded, bounded, confirmed only when content is genuinely sensitive."""
         import httpx
@@ -4807,7 +4807,7 @@ class ToolRegistry:
         return hit
 
     async def _run_xpath(self, inp: dict) -> ToolResult:
-        """INTRUSIVE: XPath injection (CWE-643) — distilled from *Beginner Web Application Pentester*. Apps
+        """ACTIVE: XPath injection (CWE-643) — distilled from *Beginner Web Application Pentester*. Apps
         that query an XML document (often XML-backed LOGIN forms) concatenate input into an XPath expression.
         Confirms an XPath processor error, or a randomized XPath-only true/contradiction pair that changes
         auth state, protected content, or a record set. Tests GET query params AND POST form fields."""
@@ -4907,7 +4907,7 @@ class ToolRegistry:
         return ToolResult("xpath", url, True, "%d XPath injection finding(s)" % len(findings), findings)
 
     async def _run_ldap(self, inp: dict) -> ToolResult:
-        """INTRUSIVE: LDAP injection (CWE-90) — distilled from *Beginner Web Application Pentester*. Apps that
+        """ACTIVE: LDAP injection (CWE-90) — distilled from *Beginner Web Application Pentester*. Apps that
         authenticate/look up against a directory concatenate input into an LDAP search filter. Confirmed
         LDAP-SPECIFICALLY: a directory error, or a randomized true/impossible filter pair that changes auth
         state, protected content, or a record set. Tests GET query params AND POST form fields."""
@@ -5356,7 +5356,7 @@ class ToolRegistry:
                           f"{len(discovered)} hidden param(s) discovered → surface", findings)
 
     async def _run_encoded_cookie(self, inp: dict) -> ToolResult:
-        """INTRUSIVE: recursive encoded-parameter injection. A Base64 cookie/param that decodes to
+        """ACTIVE: recursive encoded-parameter injection. A Base64 cookie/param that decodes to
         JSON/query (e.g. GinAndJuice's TrackingId -> base64({"value":<SQLi>})) hides its real injection
         point behind a decode layer. Decode -> mutate an inner field -> re-encode -> resend -> confirm by
         a request-level differential (status change or boolean split). Reuses the mission session."""
@@ -9069,7 +9069,7 @@ class ToolRegistry:
         return ToolResult("waf_bypass", url, True, "%d WAF-bypass finding(s)" % len(findings), findings)
 
     async def _run_sqli_structural(self, inp: dict) -> ToolResult:
-        """INTRUSIVE: structural / ORDER BY SQL injection (CWE-89, WAHH ch9). Input placed into the query
+        """ACTIVE: structural / ORDER BY SQL injection (CWE-89, WAHH ch9). Input placed into the query
         STRUCTURE (ORDER BY / column position) is unquoted, so the quote-break engine misses it and prepared
         statements do NOT protect it. Confirmed by a subquery differential: a VALID subquery runs clean, an
         INVALID one raises a DBMS error the baseline lacks (a non-SQL context errors on both/neither -> no FP)."""
@@ -9776,7 +9776,7 @@ class ToolRegistry:
                           "%d smb finding(s)" % len(findings), findings)
 
     async def _run_path_sqli(self, inp: dict) -> ToolResult:
-        """INTRUSIVE: path-parameter SQL injection for REST/API endpoints (CWE-89). REST APIs put ids in the PATH
+        """ACTIVE: path-parameter SQL injection for REST/API endpoints (CWE-89). REST APIs put ids in the PATH
         (/users/v1/{id}), which the query-string SQLi sweep never reaches. Injects a quote into each id-like
         (numeric) path segment and confirms via the ERROR-based oracle: a DBMS error appears that the baseline
         lacked, so the segment is concatenated into SQL. FP-safe — only a matched DBMS error signature counts."""

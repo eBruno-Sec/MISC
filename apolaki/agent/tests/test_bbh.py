@@ -2635,7 +2635,10 @@ def test_auto_approve_skips_gate():
 def test_intrusive_gate_requires_and_denies():
     async def go():
         a = _make_agent("active")
-        gen = a._run_tool("run_content_discovery", {"base_url": "https://a.example.com"}, "s")
+        # Q-052: run_content_discovery is ACTIVE now (it reads, it does not write), so it no longer
+        # reaches the HITL gate and this test would pass vacuously against it. Driving one of the
+        # nine engines that genuinely CHANGE STATE keeps the gate under test.
+        gen = a._run_tool("run_upload_test", {"url": "https://a.example.com/upload"}, "s")
         first = await gen.__anext__()          # phase event
         seen = [first]
         # pull until we hit approval_required, then deny
@@ -3935,7 +3938,11 @@ def test_dir_harvest_listing_and_nullbyte():
 def test_dir_harvest_registered_intrusive():
     import tools
     from scope import PermissionLevel
-    assert tools.TOOL_PERMISSIONS["run_dir_harvest"] == PermissionLevel.INTRUSIVE
+    # Q-052 re-tiered this: dir harvesting sends many requests and CHANGES NOTHING, so it is ACTIVE
+    # under the split taxonomy (ACTIVE = sends payloads, read-only; INTRUSIVE = state-changing).
+    # The intent of this test is that the engine is registered, advertised and dispatchable, which
+    # is unchanged; only the tier it is registered UNDER moved.
+    assert tools.TOOL_PERMISSIONS["run_dir_harvest"] == PermissionLevel.ACTIVE
     assert any(s["name"] == "run_dir_harvest" for s in tools.CLAUDE_TOOLS)
     assert hasattr(tools.ToolRegistry, "_run_dir_harvest")
 
@@ -3993,7 +4000,11 @@ def test_idor_oracle_and_enumeration_registered_and_guarded():
     import asyncio, json, tools
     from scope import PermissionLevel
     assert tools.TOOL_PERMISSIONS["confirm_idor"] == PermissionLevel.ACTIVE
-    assert tools.TOOL_PERMISSIONS["enumerate_ids"] == PermissionLevel.INTRUSIVE  # gated
+    # Q-052: enumerating ids READS objects, it does not create or destroy them, so it is ACTIVE.
+    # confirm_create_object_idor -- which POSTs an object and DELETEs it -- stays INTRUSIVE, and that
+    # pairing is the taxonomy working: the reader is available at active, the writer is not.
+    assert tools.TOOL_PERMISSIONS["enumerate_ids"] == PermissionLevel.ACTIVE
+    assert tools.TOOL_PERMISSIONS["confirm_create_object_idor"] == PermissionLevel.INTRUSIVE
     specs = {s["name"] for s in tools.CLAUDE_TOOLS}
     assert {"confirm_idor", "enumerate_ids"} <= specs
     assert hasattr(tools.ToolRegistry, "_confirm_idor") and hasattr(tools.ToolRegistry, "_run_enumerate_ids")

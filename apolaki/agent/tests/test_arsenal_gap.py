@@ -12,6 +12,12 @@ engine that was NEVER DISPATCHED is a gap; and an engine that COULD NOT run at t
 permission tier was never a candidate at all. Collapsing those three is how a scanner comes to look
 thorough.
 """
+# Q-052 re-tiered the permission model: ACTIVE now means "sends payloads, READ-ONLY" and
+# INTRUSIVE means "CHANGES STATE". run_cmdi sends a payload and reads the answer, so it is
+# ACTIVE and is no longer blocked at that mode. These tests are about the DISTINCTION between
+# tier-blocked and not-selected, which is unchanged -- only the engine that demonstrates it
+# moved. run_upload_test is one of the nine that genuinely write, so it still demonstrates it.
+
 import report
 
 
@@ -33,14 +39,26 @@ def test_an_engine_that_ran_and_found_nothing_is_a_RESULT_not_a_gap():
 def test_engines_that_never_ran_are_named():
     gap = report.arsenal_gap(_ledger([{"tool": "run_sqli", "calls": 1, "findings": 0}]))
     assert gap["not_dispatched"], "the registry has more engines than one mission dispatches"
-    assert "run_cmdi" in gap["not_dispatched"], gap["not_dispatched"][:10]
+    assert "run_upload_test" in gap["not_dispatched"], gap["not_dispatched"][:10]
 
 
 def test_tier_blocked_is_reported_SEPARATELY_from_not_selected():
-    """THE distinction. run_cmdi is INTRUSIVE, so in `active` it was never a candidate -- reporting
-    that as 'not selected' would send a reader looking for a selection bug that does not exist."""
+    """THE distinction. run_upload_test is INTRUSIVE, so in `active` it was never a candidate --
+    reporting that as 'not selected' would send a reader looking for a selection bug that does not
+    exist.
+
+    Q-052 changed the EXEMPLAR, not the property. This test used run_cmdi, which was INTRUSIVE only
+    because the tier bundled 'sends payloads' with 'changes state'; it is ACTIVE now and genuinely IS
+    a candidate at `active`, so asserting it were still tier-blocked would assert the defect. The
+    exemplar is now an engine that changes state (uploads a file) and so is tier-blocked for the
+    reason the class exists."""
     gap = report.arsenal_gap(_ledger([{"tool": "run_sqli", "calls": 1, "findings": 0}], "active"))
-    assert "run_cmdi" in gap["blocked_by_mode"], gap["blocked_by_mode"][:10]
+    assert "run_upload_test" in gap["blocked_by_mode"], gap["blocked_by_mode"][:10]
+    # The negative control the re-tier makes possible: a payload-sending READ-ONLY engine must NOT be
+    # excused as tier-blocked at `active` any more -- it is a candidate, and silence about it is a
+    # selection bug the reader should be sent to look for.
+    assert "run_cmdi" not in gap["blocked_by_mode"]
+    assert "run_upload_test" in gap["not_dispatched"]
     # An ACTIVE engine is available in this mode, so it must NOT be excused as tier-blocked.
     assert "run_jwt" not in gap["blocked_by_mode"]
     assert "run_jwt" in gap["not_dispatched"]
@@ -51,7 +69,7 @@ def test_full_mode_blocks_nothing():
     anything missing is a genuine selection gap."""
     gap = report.arsenal_gap(_ledger([{"tool": "run_sqli", "calls": 1, "findings": 0}], "full"))
     assert gap["blocked_by_mode"] == [], gap["blocked_by_mode"][:10]
-    assert "run_cmdi" in gap["not_dispatched"]
+    assert "run_upload_test" in gap["not_dispatched"]
 
 
 def test_a_broken_registry_says_so_instead_of_reporting_no_gaps():
@@ -89,7 +107,9 @@ def test_the_section_reaches_the_rendered_report():
                                 tool_ledger=_ledger([{"tool": "run_sqli", "calls": 5, "findings": 0}]))
     assert "Arsenal coverage" in md
     assert "Never dispatched this mission" in md
-    assert "run_cmdi" in md, "the tier-blocked engines must be named, not just counted"
+    # Q-052: exemplar swapped to a still-INTRUSIVE engine; the property (tier-blocked engines are
+    # NAMED in the rendered document, not merely counted) is unchanged.
+    assert "run_upload_test" in md, "the tier-blocked engines must be named, not just counted"
 
 
 # ── Q-051: per-finding attribution, and the two-record cross-check ───────────
@@ -219,7 +239,7 @@ def test_the_tier_line_RENDERS_on_a_real_ledger_shape():
     gap = report.arsenal_gap(real)
     assert gap["blocked_by_mode"], (
         "the tier split is empty on a REAL ledger shape -- the guard is not firing")
-    assert "run_cmdi" in gap["blocked_by_mode"]
+    assert "run_upload_test" in gap["blocked_by_mode"]      # Q-052: exemplar, see above
     assert "Of those, unable to run at this permission tier" in "\n".join(report._arsenal_md(real))
 
 
