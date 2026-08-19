@@ -236,6 +236,53 @@ to diff the list against, so "eyeball-diff" means diffing against memory.
 already fails the gate - the recorded set only changes WHICH names get printed (the delta instead of
 all 47) and additionally catches the swap that currently passes.
 
+## 10. The mutation-gate fix, applied and controlled
+
+`_UNCOVERED_BASELINE` (46 names, MEASURED) plus `_uncovered_delta()`, and four new tests: the set
+ratchet, the provably-non-empty invariant (`len(baseline) <= ceiling`), the message in both
+directions including the branch that has nothing to name, and the swap control.
+
+Clean isolated copy: **15 passed, 1 skipped** (the skip is the opt-in `APOLAKI_MUTATION_GATE=1` full
+gate, unchanged and not something this lane weakens).
+
+Same swapped tree that passed silently in section 9, now:
+
+```
+E  AssertionError: confirmed-producing modules without a mutant: 46 (ceiling 46, recorded baseline 46)
+E    NEWLY UNCOVERED -- produces a confirmed finding, has no mutant, and is not in the recorded baseline:
+E      apolaki_new_engine.py
+E    gained a mutant since the baseline was recorded (green work, never a failure):
+E      sqli_tool.py
+FAILED ...::test_no_unguarded_confirmed_producer_appears_that_the_baseline_does_not_hold
+```
+
+**One failure, both sides named, and the count ratchet still passes** - the same signature as the
+Q-076 control.
+
+### A second defect in my own work, found by the control
+
+The first draft of `test_the_recorded_baseline_is_shaped_like_a_real_measurement` also asserted that
+no recorded entry currently has a mutant. The swap control failed it instantly, and it was right to:
+**that is a staleness test wearing a structural disguise.** `mg.MUTANTS` is live data, so the moment
+any lane adds a mutant for a recorded module their green work turns this file red - for a fact
+already reported, correctly and harmlessly, under `covered_since`. It is now structure-only.
+
+Worth recording because I had written the reasoning against exactly this in the comment directly
+above it and still wrote the test. The comment did not catch it; running the control did.
+
+## PATCHES for other lanes (not applied by this lane)
+
+None required for Q-076 - the fix is entirely in the gate. Two observations for whoever owns the
+product code:
+
+1. `agent.py:3889` (`BBHAgent._triage`) is the only raw reader outside `main.py`, and its sibling
+   four lines up at 3859 is already gated. If the split is deliberate it is now documented in
+   `_RAW_IS_CORRECT`; if it is not, gating it drops the count to 10 and this lane's ratchet reports it
+   as `resolved` rather than failing.
+2. The 10 raw sites in `main.py` are the remaining reach gap. `main.py` is held by NO lane and stays
+   free for the Coordinator. Gating any of them requires no edit here: the set ratchet reports them
+   under `resolved`, which is never a failure.
+
 ## Status
 
 - [x] baseline measured (11 sites, 11 scopes) at HEAD
