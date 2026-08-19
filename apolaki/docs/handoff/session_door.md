@@ -178,21 +178,198 @@ crawl discovered*, and the URL that `_add_urls` had already quarantined for exac
 
 ---
 
-## 2. THE FIX — applied at the two structural chokepoints
+## 2. THE FIX — one predicate, applied wherever surface becomes a request
 
-See sections 3-4 for the after-measurement. Code:
+`planner.is_session_kill_url()` / `planner.session_kill_target()` are the single predicate.
+`tools._SESSION_KILL_RE` remains the single definition of the RULE and is **imported, never
+restated** — a second copy is how one URL came to sit under two policies in the first place, and
+`test_the_rule_has_ONE_definition` fails if anyone inlines a pattern.
 
-* `planner.py` — `is_session_kill_url()` + `_session_kill_target()`, applied inside `fresh()`, the
-  ONE function every planner-emitted batch passes through. This closes both doors at once, because
-  it filters on the step's TARGET rather than on the state field that produced it.
-* `agent.py` — `_graph_primary_state` and `_forms_from_graph` no longer hand the planner a URL the
-  registry quarantined (the state stops contradicting itself), and `_execute_plan` gained
-  `_reject_session_kill_step`, an ingress guard that records the refusal — the door
-  `_graph_action_steps` uses never passes through `planner.fresh()`.
+| # | door | code | guard |
+|---|---|---|---|
+| 1 | `recon["forms"]` -> planner form loops | `planner.fresh()` | refuse the step |
+| 2 | `state["urls"]` <- graph endpoint nodes | `agent._graph_primary_state` | not promoted to probe surface; `_swallow`-recorded |
+| 2b | the form door's own rebuild | `agent._forms_from_graph` | action dropped |
+| 3 | graph-directed steps (`_graph_action_steps`) | `agent._reject_session_kill_step` | executor ingress, `_swallow`-recorded |
+| 4 | code-intel routes appended past `_add_urls` | `agent._recon_code_intelligence` | not appended; `_swallow`-recorded |
+| 5 | the planner-INDEPENDENT injection sweep | `agent.sweep_targets` | not swept |
 
-The regex is **imported, never restated**. `tools._SESSION_KILL_RE` stays the single definition; a
-second copy of the rule is how one URL came to sit under two policies in the first place.
+Doors 4 and 5 are the anti-idle sweep and they are covered in section 5 — door 5 was live and
+measured, door 4 is a structural bypass I could not get a real target to exercise.
 
-`run_session_lifecycle` is explicitly ENTITLED to a quarantined URL (it mints a sacrificial session
-and `tools._session_kill_is_safe` re-checks that as a fact). The entitlement is a named set, not an
-accident of the guard's placement.
+`planner.fresh()` filters on the step's **TARGET**, not on the state field that produced it. That is
+the whole design: it is why one predicate closes doors 1 and 2 together, and why the engine added
+next year inherits the guard instead of needing to be remembered.
+
+`run_session_lifecycle` is explicitly ENTITLED (`planner._SESSION_KILL_ENTITLED`). It mints a
+sacrificial account and `tools._session_kill_is_safe` re-checks, as a fact, that the credential it
+destroys is disjoint from every live session. Blocking it would replace a false negative with a lost
+vulnerability class (CWE-613), so the entitlement is NAMED rather than left to the accident that the
+planner does not currently schedule it.
+
+**Quarantine, not deletion** — the distinction `tools._add_urls` already makes. The logout endpoint
+stays a node in the mission graph and stays in `tools.session_kill_urls`. Only its promotion to
+PROBE SURFACE is refused.
+
+---
+
+## 3. AFTER — the same probe, the same lab, the same pairing
+
+Same `p1_door.py`, run against HEAD + my two files, `tools.py` byte-identical to the snapshot
+(verified by md5 before the run).
+
+```
+                                  BEFORE            AFTER
+steps AT THE LOGOUT URL   full      6                 0
+                          active    3                 0     <- the DEFAULT mode
+                          passive   0                 0
+steps at the ORDINARY form full     6                 6     <- NEGATIVE CONTROL, unchanged
+                          active    3                 3
+total plan size           full    113               107     <- exactly the 6, nothing else
+                          active  103               100     <- exactly the 3
+                          passive  29                29
+forms-door EMPTIED,
+residual at the kill url  full      4                 0     <- door 2, invisible to run 4
+                          active    2                 0
+kill url in tools.urls            False             False
+kill url in state['urls']          True             False   <- the state stops contradicting itself
+```
+
+### 3a. The mission-level question, driven (`p2_drive.py`, both trees)
+
+Not "does the planner emit fewer steps". **After Apolaki executes the steps its own planner
+scheduled against a discovered logout form, is the mission session still alive?** The session is
+minted AFTER planning, so it cannot influence the plan.
+
+```
+SECTION A -- mount /secure (logout_invalidates=True), i.e. any correct application
+  BEFORE  mode=full    steps=6  before=(200,True)  after=(401,False)  SESSION ALIVE=False
+          executed: http_probe, http_probe, run_csrf, run_form_cmdi, run_race, run_stored_xss
+  BEFORE  mode=active  steps=3  before=(200,True)  after=(401,False)  SESSION ALIVE=False
+          executed: http_probe, http_probe, run_csrf
+  AFTER   mode=full    steps=0                     after=(200,True)   SESSION ALIVE=True
+  AFTER   mode=active  steps=0                     after=(200,True)   SESSION ALIVE=True
+
+SECTION B -- MANDATORY NEGATIVE CONTROL, the identical procedure on the ORDINARY form
+  BEFORE  mode=full    steps=6  after=(200,True)   SESSION ALIVE=True
+  AFTER   mode=full    steps=6  after=(200,True)   SESSION ALIVE=True   <- 6 steps, still executed
+          executed: http_probe, http_probe, run_csrf, run_form_cmdi, run_race, run_stored_xss
+  AFTER   mode=active  steps=3  after=(200,True)   SESSION ALIVE=True
+```
+
+The capability is intact to the step. Not "the ordinary form still gets some steps" — it gets the
+**same six**, and `test_the_rest_of_the_plan_is_untouched` asserts the whole plan is step-for-step
+identical to one built on a surface where the logout form was never discovered.
+
+### 3b. The ingress guard, and the refusal actually recorded
+
+```
+  _reject_session_kill_step exists            : True
+  graph-directed step at the LOGOUT url       : True    <- refused
+  POSITIVE CONTROL, ordinary url              : False   <- allowed
+  ENTITLED engine (run_session_lifecycle)     : False   <- allowed
+  and the refusal is RECORDED, not silent     : 1 row(s) in tools.swallowed
+      where  = execute_plan.session_kill_step:http_probe
+      target = http://sessionlife:8080/secure/api/logout
+      error  = ValueError: planner step 'http_probe' targets the session-destroying URL ...
+```
+
+I claimed "recorded" once before verifying it and my first probe read the wrong field, printing
+`[]`. `_swallow` writes to `tools.swallowed`, not to `recon`. The row above is the corrected read.
+
+### 3c. The asset survives the quarantine
+
+```
+  logout endpoint node still in the graph     : True    <- the world model keeps it
+  logout url in tools.session_kill_urls       : True    <- run_session_lifecycle still finds it
+  logout url in the planner's state['urls']   : False
+```
+
+---
+
+## 4. TESTS — `agent/tests/test_session_kill_door.py`, 17 tests
+
+Every fixture pasted verbatim from the driven run (`_MEASURED_FORMS`, `_MEASURED_URLS`,
+`_MEASURED_BASES`, `_MEASURED_ENDPOINT_KEYS`, `_MEASURED_BODY_PARAMS`).
+
+**They fail on the unfixed tree: 12 of the first 14.** The 2 that pass on BOTH trees are
+`test_the_ordinary_form_is_still_probed_by_every_engine` and
+`test_the_world_model_still_holds_the_logout_endpoint` — the capability-preservation controls, which
+are supposed to pass before and after. That is what they are for: they encode what must NOT change.
+
+The test module carries the same instrument warning the probe does. `_drain()` exists because
+`next_batch` returns only the earliest incomplete phase, and a test that read one batch would assert
+"no steps at the logout URL" against a plan that had not reached phase E — green, vacuous, and
+indistinguishable from a fix.
+
+---
+
+## 5. ANTI-IDLE SWEEP — other doors of the same shape
+
+The question asked of every path: *does discovered surface reach a request from here without passing
+the quarantine `_add_urls` applies?*
+
+### Door 5 — `agent.sweep_targets`, LIVE and now closed (`agent.py:331`, call site `agent.py:3727`)
+
+The deterministic injection sweep, which the code itself calls **planner-independent** — so neither
+`planner.fresh()` nor the executor ingress guard reaches it. It dispatches `run_path_sqli`,
+`run_encoded_cookie`, `run_xss`, `run_dom_trace` and `run_default_creds` through `_run_tool`, all
+carrying `session_headers`.
+
+Its docstring says a form contributes its `page` and **not** its `action`. That is not what happens:
+
+```
+  form keys the shipped crawl actually produces : ['action', 'fields', 'method']
+  ...so `fm.get('page') or fm.get('action')` falls back to the ACTION every time
+  BEFORE  sweep targets : [".../secure/api/logout", ".../secure/api/change-password"]
+          KILL url is a sweep target : True
+  AFTER   sweep targets : [".../secure/api/change-password"]
+          KILL url is a sweep target : False
+          POSITIVE CONTROL ordinary form is a target : True   (unchanged)
+```
+
+A comment describing a safety property the code does not have is worse than no comment, because it
+is what stops the next reader from checking. Also guarded: the separate branch that replays the
+page's query against the ACTION, which the `page` guard does not cover.
+
+### Door 4 — `agent._recon_code_intelligence` (`agent.py:1245`), structural, guarded anyway
+
+`self.tools.urls.append(u)`. `_add_urls` is the **only** writer to that list inside `tools.py`
+(MEASURED: one `self.urls.append` in 10,558 lines, and no assignment to `.urls` anywhere in
+`agent/*.py`), which is what lets ~10 other call sites treat it as quarantine-clean. This line
+appends past it.
+
+**MEASURED: the bypass is structural — there is no filter on that path. UNVERIFIED that a real
+target yields a session-killing route.** Driving the real `codeintel.harvest`:
+
+```
+  http://juice-shop:3000    endpoints=21  routes=53  SESSION-KILL among endpoints=0 routes=0
+  http://sessionlife:8080   endpoints=0   routes=0   SESSION-KILL among endpoints=0 routes=0
+```
+
+That is a **weak negative and it is reported as one**: juice-shop's logout is client-side, and
+`harvest` mines "client routes (including unlinked/sensitive ones)" from SPA bundles, where a
+`/logout` route is unremarkable. Guarded regardless — the invariant is what the other readers depend
+on, and restoring it costs one comparison.
+
+### Checked and CLEAN, with the reason
+
+* **~10 direct `self.tools.urls` readers** in `agent.py` (lines 1392, 1640, 1903, 1937, 1956, 2190,
+  2583, 2603, 3028, 3161, 3671, 3696, 3739, 3781, 3863). Safe **by the invariant above**, not by
+  their own checking — which is exactly why door 4 was worth closing rather than arguing about.
+* **`agent._project_form_params`** — writes the graph, not the probe surface. The node is *supposed*
+  to exist (see "quarantine, not deletion"). The promotion is what is guarded, one level down.
+* **`planner`'s `run_session_lifecycle`** — never scheduled by the planner today; entitled anyway.
+* **`passive` mode** — 0 steps at the kill URL before the fix as well. Not luck: every engine on the
+  6-wide list is ACTIVE or INTRUSIVE, so `_ALLOWED` already excluded them.
+
+### NOT swept — say so rather than imply coverage
+
+* The **agentic (ReAct) path**. `_run_tool` is its dispatcher and I did not add a guard there. A
+  model that asks for `http_probe` on a logout URL is not covered by any of the six doors above.
+  `_run_tool` is in `agent.py` (mine), so this is a choice, not a blocker: the ingress guard belongs
+  at `_run_tool` to cover both executors, but every `_exec_internal` caller shares that layer and
+  `run_session_lifecycle` reaches the target through it, so the change needs its own measurement of
+  the internal-phase dispatches before it is safe. Ticket text in section 6.
+* **`browser_engine` / BIE crawl frontier** (`agent.py:3595-3628`) — it re-enters through
+  `tools._add_urls`, so it is quarantined by construction, but I did not DRIVE that claim.

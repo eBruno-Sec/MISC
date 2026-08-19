@@ -230,6 +230,12 @@ def test_the_second_door_is_closed_too():
 
 # ── the agent-side state: it stopped contradicting itself ────────────────────────────────────────
 
+async def _drain_agen(agen):
+    """Run an async generator to exhaustion, discarding its UI events."""
+    async for _ in agen:
+        pass
+
+
 def _agent():
     sc = S.ScopeEngine()
     sc.load_manual(["http://sessionlife:8080"], [], "q080")
@@ -311,6 +317,75 @@ def test_executor_ingress_refuses_a_step_the_planner_never_saw():
     rows = [e for e in (t.swallowed or []) if "session_kill_step" in str(e.get("where"))]
     assert rows and rows[0]["target"] == KILL, t.swallowed
     assert "http_probe" in rows[0]["where"], rows[0]
+
+
+# ── doors 4 and 5: surface that reaches engines WITHOUT the planner at all ──────────────────────
+
+def test_the_planner_independent_sweep_does_not_sweep_a_session_killer():
+    """`agent.sweep_targets` feeds the deterministic injection sweep, which the code calls
+    "planner-independent" -- so neither `planner.fresh()` nor the executor ingress guard reaches it.
+
+    MEASURED before the fix, driving it with the crawl's own forms dict::
+
+        form keys the shipped crawl produces : ['action', 'fields', 'method']
+        sweep targets : [".../secure/api/logout", ".../secure/api/change-password"]
+
+    The docstring says a form contributes its `page` and not its `action` -- but the forms
+    `tools._http_probe` actually produces carry NO `page` key, so `page or action` resolves to the
+    ACTION every time. The engines this sweep dispatches (run_path_sqli, run_encoded_cookie,
+    run_xss, run_dom_trace, run_default_creds) all send `session_headers`.
+    """
+    targets = agent_mod.sweep_targets(
+        [ORDINARY], list(_MEASURED_FORMS), lambda u: True, limit=25)
+    assert KILL not in targets, targets
+    assert not any(planner.is_session_kill_url(t) for t in targets), targets
+    # POSITIVE CONTROL: the ordinary form is still swept, so this is a filter and not an empty list
+    assert ORDINARY in targets, targets
+
+
+def test_the_sweep_also_guards_the_page_action_split():
+    """A form whose PAGE is ordinary and whose ACTION is the logout endpoint -- a nav-bar logout
+    form -- is not covered by the `page` guard, because `sweep_targets` separately replays the
+    page's query against the ACTION."""
+    forms = [{"page": "http://sessionlife:8080/secure/?q=1", "action": KILL,
+              "method": "POST", "fields": ["csrfmiddlewaretoken"]}]
+    targets = agent_mod.sweep_targets([], forms, lambda u: True, limit=25)
+    assert not any(planner.is_session_kill_url(t) for t in targets), targets
+
+
+def test_codeintel_mined_routes_do_not_bypass_the_quarantine():
+    """`agent.py`'s code-intelligence fold appends mined endpoints STRAIGHT to `tools.urls`,
+    bypassing `_add_urls` -- the only writer in `tools.py`, and the reason every other consumer may
+    treat that list as quarantine-clean.
+
+    The bypass is structural (MEASURED: there is no filter on that path). That a real target yields
+    a session-killing route is UNVERIFIED -- `codeintel.harvest` mined 21 endpoints / 53 routes from
+    juice-shop and zero from sessionlife with no session-kill match, and juice-shop's logout is
+    client-side, which makes that a weak negative rather than a clean bill. Guarded regardless: the
+    invariant is what the other readers depend on.
+    """
+    import codeintel
+
+    sc, t, a = _agent()
+    # `harvest`'s real return shape, driven on juice-shop: {"endpoints": [...], "routes": [...], ...}
+    # with endpoints as root-relative paths. The session-killing entry is the one addition.
+    harvest = {"target": "http://sessionlife:8080", "bundles": [], "versions": [], "exposed": [],
+               "routes": [], "sensitive_routes": [], "source_review": None, "notes": [],
+               "endpoints": ["/rest/user/whoami", "/api/logout", "/api/orders"]}
+    real = codeintel.harvest
+    codeintel.harvest = lambda *a_, **k_: harvest
+    try:
+        asyncio.get_event_loop_policy().new_event_loop().run_until_complete(
+            _drain_agen(a._recon_code_intelligence("s")))
+    finally:
+        codeintel.harvest = real
+    assert not any(planner.is_session_kill_url(u) for u in (t.urls or [])), t.urls
+    # POSITIVE CONTROL: the fold still folded — the other two mined endpoints DID enter the surface,
+    # so this asserts a filter rather than a harvest that silently did nothing.
+    assert any(u.endswith("/rest/user/whoami") for u in t.urls), t.urls
+    assert any(u.endswith("/api/orders") for u in t.urls), t.urls
+    rows = [e for e in (t.swallowed or []) if "codeintel.session_kill_route" in str(e.get("where"))]
+    assert rows, "the bypass was closed silently; tools.swallowed=%r" % (t.swallowed,)
 
 
 def test_executor_ingress_lets_everything_else_through():

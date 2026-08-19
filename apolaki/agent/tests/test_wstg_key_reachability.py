@@ -195,3 +195,42 @@ def test_the_reported_list_can_grow_and_still_not_fail_the_audit():
     a = ed.wstg_audit(**t)
     assert "csrf -> %s" % wid in a["claimed_but_unmapped"]
     assert a["ok"] is True, "a reported fault must not silently become an asserted one"
+
+
+# ── THE WIRING, PROVED BY EFFECT AND NOT BY A CALL SITE ─────────────────────────────────────────
+#
+# A guard nothing runs is the island this whole ticket family is about, and MEASURED: with
+# `wstg_audit` reachable only from this file, `deadcode_gate.scan_qualified()` put
+# `engine_descriptor.wstg_audit` in `newly_dead` and the qualified count rose 37 -> 52. The suite
+# still exited 0, because the ratchet assertion is a strict xfail owned by another lane — so the new
+# island was hiding inside someone else's known failure, which is precisely the shape that lets dead
+# code ship green. It is now called from `routing_audit()`, whose third route source is
+# `wstg_catalog.FULL[rec["wstg"]]` — the very table this audits the KEY of.
+#
+# These two tests assert the wiring by its EFFECT on the caller's verdict. A test that merely greps
+# for the call site would pass on a call whose result is discarded, which is the "registration is not
+# invocation" defect this codebase has already shipped (`run_header_trust`).
+
+def test_routing_audit_actually_runs_this_audit_and_acts_on_it():
+    """The negative control for the WIRING. A technique claiming a nonexistent WSTG id must flip
+    `routing_audit()["ok"]`, not merely appear in a nested dict nobody reads."""
+    techs = copy.deepcopy(T.TECHNIQUES)
+    techs["csrf"] = dict(techs["csrf"], wstg=FAKE_ID)
+
+    control = ed.routing_audit(techniques=copy.deepcopy(T.TECHNIQUES))
+    assert control["ok"] is True, "control: the unmodified tree must pass, or this proves nothing"
+
+    a = ed.routing_audit(techniques=techs)
+    assert a["ok"] is False, "routing_audit ignored the key audit it claims to consult"
+    assert a["wstg_key_reachability"]["claimed_ids_outside_catalog"] == ["csrf -> %s" % FAKE_ID]
+    # attributable: the pre-existing invariant did NOT fire, so `ok` moved for the new reason alone
+    assert a["phantom"] == [], a["phantom"]
+
+
+def test_routing_audit_surfaces_the_reported_list_without_asserting_it():
+    """The other half. `claimed_but_unmapped` must reach a reader through `routing_audit` and must
+    not drag its `ok` down — a reported fault that quietly becomes an asserted one would fail the
+    shipped tree for something nobody decided to enforce."""
+    a = ed.routing_audit()
+    assert a["wstg_key_reachability"]["claimed_but_unmapped"] == CLAIMED_BUT_UNMAPPED_2026_08_19
+    assert a["ok"] is True

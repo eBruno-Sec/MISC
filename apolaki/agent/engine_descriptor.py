@@ -529,7 +529,17 @@ def routing_audit(registry=None, techniques=None) -> dict:
     The test pins the exact set so the list can only be shrunk deliberately.
 
     `effect_producers_unrouted` is the Q-065 half: a technique that DECLARES an effect but has no
-    executor lets the forward search return a plan whose step cannot be run. Pure."""
+    executor lets the forward search return a plan whose step cannot be run. Pure.
+
+    `wstg_key_reachability` is Q-081's half, and it belongs HERE rather than in a module of its own
+    because the third route source below is literally `wstg_catalog.FULL[rec["wstg"]]` — this function
+    already derives engines by INDEXING a taxonomy table with a technique's declared key, and never
+    asked whether that key is a real catalog id. `wstg_audit()`'s hard fault
+    `claimed_ids_outside_catalog` therefore joins `ok`: a route derived from a claim on a test that
+    does not exist is the `run_mass_assignment` shape one level up, in the KEY instead of the value.
+    The other two hard faults and the reported list are surfaced but left out of `ok`, because they
+    are properties of `wstg_catalog` rather than of THIS derivation; `tests/test_wstg_key_reachability.py`
+    asserts those directly."""
     reg = engine_registry() if registry is None else set(registry)
     if techniques is None:
         import techniques as T
@@ -559,6 +569,7 @@ def routing_audit(registry=None, techniques=None) -> dict:
                         for e in _engine_shaped(full[wid]) - reg}
     phantom = sorted(phantom)
     unrouted = sorted(t for t in techniques if t not in r)
+    wstg = wstg_audit(techniques=techniques)
     return {
         "registry_size": len(reg),
         "registry_readable": bool(reg),
@@ -567,7 +578,8 @@ def routing_audit(registry=None, techniques=None) -> dict:
         "unrouted": unrouted,
         "phantom": phantom,
         "effect_producers_unrouted": sorted(t for t in EFFECTS if t not in r),
-        "ok": bool(reg) and not phantom,
+        "wstg_key_reachability": wstg,
+        "ok": bool(reg) and not phantom and not wstg["claimed_ids_outside_catalog"],
     }
 
 

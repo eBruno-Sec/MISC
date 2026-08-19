@@ -1086,6 +1086,47 @@ built, which is the same "bind the value at the point it is known" rule as Q-046
 
 ---
 
+### Q-082 · The report hands a client 716 FABRICATED curl reproductions for static findings · **CRITICAL** · `ready`
+
+Found by proving Q-044, and it is the only one of that lane's three findings that **reaches a reader
+today**. Live in the client-facing artifact.
+
+Mission `2fb87a3a` stored **716 source-derived findings**, and the renderer gave **716 of 716** of them
+a `curl` command to run. Those findings are `analysis=static-call-site`: they were derived by reading
+source, **no request was ever sent**, and the curl reproduces nothing. A client who runs one gets a
+result unrelated to the finding.
+
+**The store-side contract already blocks exactly this.** `_canonical_source_finding` (`main.py:392`)
+FAILS CLOSED so a source result cannot enter reports under DAST semantics, requiring
+`provenance=source-derived`, `lane=code-assisted`, `analysis=static-call-site`. The renderer then
+re-introduces DAST semantics downstream of the gate that exists to prevent it. **A guard at the store
+does not bind the presenter** - the same both-halves failure as Q-051's mode key, where the reader
+landed and the producer never did, pointed the other way.
+
+DoD: a finding whose `analysis` is `static-call-site` renders its file and line, never a request to
+replay. **Negative control:** a genuine DAST finding must KEEP its curl - a fix that strips
+reproduction from everything trades a false claim for a useless report.
+
+### Q-083 · The code-assisted lane confirms a MEDIUM inside a vendored minified bundle · **HIGH** · `ready`
+
+Same mission. A **confirmed medium** against a minified third-party library the operator does not
+maintain, reported at "line 2" because the whole bundle is line 2.
+
+**Measured**: the finding exists, the target is a vendored minified bundle, and the lane has no filter
+that would exclude it. `codeintel._SKIP_DIRS` (`codeintel.py:72`) excludes DIRECTORIES named
+`node_modules` / `vendor` / `dist` / `build`; `webapp/js/` is none of those, and there is **no
+`*.min.js` rule and no vendor-file heuristic anywhere in the walk**.
+
+**Deliberately NOT claimed** - and the lane was right to stop here: whether this particular
+`Math.random()` feeds a security-relevant value is UNKNOWN. Proving it a false positive means binding
+the value's use, which is the Q-042 discipline, and that work was not done. So this is filed as
+"reports a finding it cannot justify at that confidence in code the client does not own", not as
+"false positive".
+
+DoD: either a vendor/minified heuristic in the walk, or a confidence demotion for third-party code, or
+a measured argument that neither is right. **Negative control:** first-party code containing the same
+call must still be reported - the fix must not silence the analyser on the code that matters.
+
 ### Q-081 · `effects_audit` verifies the ENGINE three ways and never checks the KEY · **HIGH** · `ready`
 
 Found by the Q-074 lane writing its negative control FIRST, per its brief. The control found a hole in

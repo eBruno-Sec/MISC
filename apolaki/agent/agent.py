@@ -348,6 +348,7 @@ def sweep_targets(urls, forms, in_scope, limit: int = SWEEP_TARGET_CAP) -> list:
     shapes before truncation, so whatever the budget is, it is spent across the whole application.
     """
     from urllib.parse import urlparse, parse_qs
+    import planner as _planner                  # Q-080 — one predicate, imported not restated
     seen_sig, seen_paths, targets = set(), set(), []
     for u in (urls or []):
         if "?" not in u or not in_scope(u):
@@ -363,6 +364,15 @@ def sweep_targets(urls, forms, in_scope, limit: int = SWEEP_TARGET_CAP) -> list:
         page = (fm or {}).get("page") or (fm or {}).get("action")
         if not page or not in_scope(page):
             continue
+        # Q-080. THE SWEEP IS PLANNER-INDEPENDENT, SO THE PLANNER'S QUARANTINE DOES NOT REACH IT.
+        # The `page` fallback is not hypothetical: the forms `tools._http_probe` produces carry
+        # exactly {action, method, fields} and NO `page` key (MEASURED), so every form here resolves
+        # to its ACTION -- and a logout form's action, swept with the mission session, ends the scan's
+        # own session. MEASURED before this line existed: sweep_targets(urls, the crawl's real forms)
+        # returned the logout URL as a target. The engines this sweep dispatches (run_path_sqli,
+        # run_encoded_cookie, run_xss, run_dom_trace, run_default_creds) all carry `session_headers`.
+        if _planner.is_session_kill_url(page):
+            continue
         # Dedupe form pages BY PATH, including against the query targets above: the engines run their
         # form pass on whatever page they are given, so if this path is already scheduled the form is
         # already going to be parsed there. Adding it twice only spends the budget.
@@ -376,6 +386,11 @@ def sweep_targets(urls, forms, in_scope, limit: int = SWEEP_TARGET_CAP) -> list:
         # injectable. Without this the engines test a document instead of a handler.
         action = (fm or {}).get("action") or ""
         pq = urlparse(page).query
+        # Q-080: `page` and `action` are two different URLs whenever a producer records both, so the
+        # guard above does not cover this branch. A form whose PAGE is ordinary and whose ACTION is
+        # the logout endpoint is the exact shape of a nav-bar logout form.
+        if action and _planner.is_session_kill_url(action):
+            action = ""
         if action and pq and in_scope(action):
             merged = action + ("&" if urlparse(action).query else "?") + pq
             sig = (urlparse(action).path, tuple(sorted(parse_qs(pq).keys())))
@@ -1230,6 +1245,24 @@ class BBHAgent:
         for ep in (h.get("endpoints") or []):
             u = base.rstrip("/") + ep if str(ep).startswith("/") else str(ep)
             if u not in existing:
+                # Q-080. `_add_urls` is the ONLY writer to `self.tools.urls` in `tools.py`, which is
+                # what lets every consumer treat that list as quarantine-clean -- it is where a
+                # session-destroying URL is diverted into `session_kill_urls`. This line appends
+                # PAST it, so a `/logout` in a mined SPA route table would enter the surface every
+                # other reader trusts. MEASURED: the bypass is structural (there is no filter on this
+                # path); UNVERIFIED that a real target yields one -- `codeintel.harvest` on juice-shop
+                # (21 endpoints / 53 routes) and sessionlife mined zero session-kill routes, and juice
+                # shop's logout is client-side, so that is a weak negative rather than a clean bill.
+                # Filtered here regardless: restoring the invariant costs one comparison, and the
+                # alternative is a list whose guarantee depends on which producer last wrote to it.
+                import planner as _planner
+                if _planner.is_session_kill_url(u):
+                    self.tools._swallow(
+                        ValueError("code-intelligence mined the session-destroying route %r; it was "
+                                   "NOT appended to tools.urls (Q-080 -- this append bypasses "
+                                   "_add_urls, so nothing else would have quarantined it)" % u[:160]),
+                        "codeintel.session_kill_route", u)
+                    continue
                 self.tools.urls.append(u)
                 existing.add(u)
                 added += 1
