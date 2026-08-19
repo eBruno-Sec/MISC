@@ -3,6 +3,11 @@
 Lane: island-triage (Builder). Owns `agent/deadcode_gate.py`, `agent/tests/test_deadcode_gate.py`,
 new tests of its own, and this file.
 
+**Run 1** classified all 27 and built the caller-naming allowlist; a session limit killed it with four
+of its own tests red. **Run 2** finished the mechanism, and the reason those four were red is in
+[§8](#8-run-2-the-four-red-tests-and-what-each-one-was-actually-telling-us) — one of them was a
+negative control that could not fail, which is worth more than the other three put together.
+
 **Headline, MEASURED:** of the 27, **17 are REAL ISLANDS**, 9 have a caller that the qualified scan
 cannot see by construction, and **1 is a genuine false positive of the resolver with a live production
 caller** (`intel.harvest` at `agent/tools.py:1848`). Nobody may quote 27 as the island count, and
@@ -276,4 +281,218 @@ says exactly what closing each one costs.
 
 `METHOD_BASELINE` moved 13 → 14 under AST resolution. MEASURED at HEAD: `count 14, ok True,
 newly_dead [], resolved []` — the set is exact, so the one that appeared is the one the file's own
-comment names, `vault.py::Vault.is_encrypted`. Triage below.
+comment names, `vault.py::Vault.is_encrypted`.
+
+**Verdict: REAL ISLAND, and the most interesting one in either scan.**
+
+```
+grep -rn "is_encrypted" . | grep -v ^./docs/     → 9 hits in 4 files
+  agent/vault.py:19                  module docstring (prose)
+  agent/vault.py:89                  the definition
+  agent/deadcode_gate.py:617,628     this gate's own recorded baseline + its comment
+  agent/tests/test_deadcode_gate.py:181,183,185   prose, in a test ABOUT why it was hidden
+  agent/__pycache__/vault.cpython-311.pyc         a stale build artefact
+```
+
+Positive control: the same unfiltered grep — no `--include`, so `Makefile`, `Dockerfile`, `ui/` and
+`scripts/` were all in scope — did find the definition and the docstring, so the reader was looking.
+Zero callers in production, zero in tests, zero outside Python. The method is `return self._fernet is
+not None`.
+
+**What that costs, and it is not a stray accessor.** `agent/vault.py` is live — `_vault.default().put`
+at `agent/main.py:2483`, `.get` at `agent/agent.py:1623`, `1967`, `2058`. Only the protection-level
+accessor is dead. Its module docstring is a safety claim:
+
+> If `cryptography` is somehow unavailable the vault degrades to a clearly-labelled NON-encrypted store
+> that STILL enforces the redacted-reference contract — it never pretends to be encrypted.
+> `is_encrypted()` reports the true protection level.
+
+**The label is never read.** Nothing calls `is_encrypted()`, `ui/` contains the string "vault" zero
+times, and no report field carries it. So a mission that stored live credentials in the plaintext
+fallback is indistinguishable, in every artefact the operator sees, from one that encrypted them. The
+docstring is not lying about the code — the fallback really is labelled — it is lying about the
+*system*, because nothing ever asks for the label. That is the Q-077 declaration-versus-fact shape
+sitting in the credential store, which is the worst place in this codebase for it.
+
+**Patch (not this lane's files — `main.py`, `report.py`, `ui/`):** have the vault report its own
+protection level wherever a secret reference is minted or consumed.
+
+```python
+# agent/main.py, beside the put() at 2483
+vlt = _vault.default()
+snap["scan_auth_ref"] = vlt.put(...)
+snap["scan_auth_encrypted"] = vlt.is_encrypted()   # the label, finally read
+```
+
+and surface it in the run's provenance so a report can say which of the two stores held the
+credentials. That closes the island by using it for its stated purpose rather than deleting it.
+`METHOD_BASELINE` stays 14 — the method ratchet passes at 14 and this entry is **recorded, not
+excused**; it is in `METHOD_BASELINE_SET`, not in any allowlist.
+
+---
+
+## 8. Run 2 — the four red tests, and what each one was actually telling us
+
+Run 1's last words were "Count is 51, nothing unaccounted for". **MEASURED: the count is exactly 51,
+so that sentence was true** — but it was a statement about the ratchet, not about the suite, and the
+suite was red in four places. Reproduced first, on a clean `git archive HEAD` snapshot plus run 1's two
+files, before anything was changed:
+
+```
+FAILED test_the_recorded_q077_delta_excuses_nothing
+FAILED test_every_named_caller_allowlist_entry_resolves_to_a_real_caller
+FAILED test_a_fabricated_named_caller_does_not_resolve
+FAILED test_the_qualified_scan_honours_both_allowlists
+```
+
+### 8.1 Two of them were one fact: the caller is outside the mount
+
+`mitm_addon.request` / `response` name `docker-compose.yml`, which sits beside `agent/`. The suite runs
+in a container that mounts **only** `agent/` at `/app`:
+
+```
+docker run --rm apolaki-agent sh -c "ls /"
+→ app bin boot dev etc home lib lib64 media mnt opt proc root run sbin srv sys tmp usr var
+```
+
+No `docker-compose.yml`, and `/app/..` is `/`. So the resolver returned "not found" for a caller that
+is genuinely there in the repository and genuinely unreadable from inside the test container.
+
+The wrong fixes were both available and both are the defect in miniature: tolerate any unresolvable
+entry (the allowlist goes decorative again) or `pytest.skip` (SKIPPED is never a pass). What landed
+instead **separates two facts the boolean was conflating**:
+
+| status | meaning | verdict |
+|---|---|---|
+| `RESOLVED` | file opened, anchor present | the excuse is a fact |
+| `ANCHOR_MISSING` | file is here, anchor is **not** | HARD FAIL, every entry, every environment |
+| `FILE_UNREACHABLE` | the file is not in this checkout at all | a limit, not a pass — and bounded below |
+| `NOT_LISTED` | not in the allowlist | — |
+
+`ANCHOR_MISSING` and `FILE_UNREACHABLE` are different claims: the first says the excuse died, the
+second says this process cannot see far enough to judge. A limit that reports itself as a pass is the
+shape of every defect this file exists to catch.
+
+The hole is then **pinned by name, not described by a rule** — `NAMED_CALLER_OUTSIDE_CHECKOUT =
+frozenset({"mitm_addon.request", "mitm_addon.response"})`. A rule ("framework entries may be
+unverifiable") widens silently; a frozenset of two means a third unverifiable entry takes a deliberate
+edit, reviewed the way a raised ratchet would be. `test_the_unverifiable_entries_are_pinned_by_name_and_nothing_else_is`
+asserts the set is ≤ 2, that every member is kind `framework`, that no member names a path under
+`tests/` (which IS mounted, so claiming it is unreachable would be dodging), and that **every other
+entry resolves for real on this run** — MEASURED, 8 of 10 resolve against the real tree.
+
+And the state that the container cannot exercise on the real tree is exercised anyway, deterministically:
+`test_the_resolver_reads_a_file_at_the_repository_root` builds a synthetic root holding `agent/` and a
+`docker-compose.yml`, then drives **the real entry with the real anchor** through all three states —
+anchor present → `RESOLVED`, compose rewritten without the addon → `ANCHOR_MISSING`, file removed →
+`FILE_UNREACHABLE`. Without it, `FILE_UNREACHABLE` would be a state nothing ever escapes, which is a
+pass wearing a different word.
+
+### 8.2 The one that mattered: a negative control that could not fail
+
+`test_a_fabricated_named_caller_does_not_resolve` asserts that an invented caller does not resolve. It
+fabricated the entry with a single string literal:
+
+```python
+monkeypatch.setitem(dg.ALLOWED_UNUSED_NAMED_CALLER, "ghost_mod.ghost_fn",
+                    ("harness", "tests/test_deadcode_gate.py",
+                     "ghost_fn_that_nothing_anywhere_calls()", "fabricated, for the negative control"))
+assert dg.resolve_named_caller("ghost_mod.ghost_fn") is None
+```
+
+**The fabricated entry names the test file as its caller, and writing the anchor as a literal puts the
+anchor into that very file.** MEASURED:
+
+```
+resolve -> ('/app/tests/test_deadcode_gate.py', 315,
+            '"ghost_fn_that_nothing_anywhere_calls()", "fabricated, for the negative control"))')
+```
+
+Line 315 is the fabrication itself. The control's own text was the evidence it was written to prove
+absent. It is the same self-reference the whole ticket is about — prose about a call counting as the
+call — reappearing one level up, inside the control built to catch it, which is why it is recorded here
+rather than quietly fixed.
+
+Two changes, because one of them alone would leave the shape live:
+
+1. The anchor is **assembled at runtime** (`"ghost_fn_" + "nothing_anywhere_calls_this()"`), so it
+   cannot exist as a literal, and the test now **asserts its own fabrication is absent** from both
+   `deadcode_gate.py` and `tests/test_deadcode_gate.py` before using it. That assertion is the guard
+   that would have caught this, and it is the part worth copying to any other negative control that
+   searches the tree for a string it defines.
+2. `resolve_named_caller` **refuses `deadcode_gate.py` as a caller file outright**. Every anchor in the
+   allowlist is a literal in the module that declares the allowlist, so an entry naming that file would
+   prove itself. Enforced twice on purpose — in the resolver and in
+   `test_no_entry_cites_the_file_that_declares_it` — with
+   `test_the_resolver_refuses_a_self_citation` as its negative control: an entry citing
+   `deadcode_gate.py` with an anchor that genuinely IS in it must still not resolve.
+
+### 8.3 The fourth: a test named for a world with two allowlists
+
+`test_the_qualified_scan_honours_both_allowlists` asserted every allowed entry was in one of **two**
+lists; Q-078 added a third, so the scan honoured a list the test did not know about. Renamed to
+`test_the_qualified_scan_honours_all_three_allowlists` rather than left to drift — a name asserting
+"both" over three things is the rot this gate exists to catch — and strengthened, not merely widened:
+an entry excused by the third list must also not be `ANCHOR_MISSING`, and a positive control asserts
+the third list is actually reaching the scan's `allowed` set rather than merely existing.
+
+### 8.4 Mutation-tested, because a checked allowlist that cannot fail is the same as an unchecked one
+
+**Mutant 1 — a resolver that always says `RESOLVED`.** Killed by 3 tests
+(`test_a_fabricated_named_caller_does_not_resolve`, `test_the_resolver_reads_a_file_at_the_repository_root`,
+`test_the_resolver_refuses_a_self_citation`).
+
+**Mutant 2 — the real caller renamed.** `return dg.scan()` → `return dg.scan( )` in the fixture: still
+valid Python, still calls the function, no longer matches the anchor. Killed by 4 tests, each naming
+the entry and the file:
+
+```
+deadcode_gate.scan was excused by ALLOWED_UNUSED_NAMED_CALLER and its named caller is GONE from a
+file that is right here -- so either the excuse was never true or this is an island now
+```
+
+That is the property the ticket asked for, demonstrated rather than asserted: delete or rename a named
+caller and the suite goes red pointing at the entry that lied.
+
+---
+
+## 9. The arithmetic, re-measured by run 2
+
+Both numbers from `git archive HEAD` snapshots, HEAD alone versus HEAD plus this lane's two files, so
+the two live lanes editing the shared tree cannot move them.
+
+```
+HEAD           count 61  baseline 37  allowed 8
+HEAD + this    count 51  baseline 37  allowed 18
+```
+
+Set difference, `unused` at HEAD minus `unused` here — **10 entries cleared, 0 newly flagged**:
+
+```
+deadcode_gate.scan          deadcode_gate.scan_methods    deadcode_gate.scan_qualified
+description_gate.audit      engine_descriptor.effects_audit  ics_dnp3_s7._dnp3_crc_table
+mitm_addon.request          mitm_addon.response           sqli_tool.is_inconclusive
+intel.harvest
+```
+
+Nine are the caller-named allowlist. The tenth, `intel.harvest`, is the resolver fix — and the
+"0 newly flagged" column is the control that matters: widening a resolver is exactly how a gate starts
+clearing things it should not, and **this one cleared exactly the entry it was written for and nothing
+else**.
+
+| | count |
+|---|---|
+| Q-077 measurement at HEAD | **61** |
+| − `intel.harvest`, a false positive with a proven caller | 60 |
+| + `deadcode_gate.resolve_named_caller`, this ticket's own new function | 61 |
+| − 10 caller-named allowlist entries (2 framework / 1 re-export / 7 harness) | **51** |
+| ceiling | **37** |
+
+**51 > 37, so the strict xfail on `test_the_ratchet_holds` STAYS PINNED and the marker is NOT
+retired.** The ticket asks for this to be said plainly if it happens, and it happened. `QUALIFIED_BASELINE`
+was not raised, `ALLOWED_UNUSED_QUALIFIED` was not widened, and `QUALIFIED_BASELINE_SET` was not
+touched. Retiring the pin needs the 17 islands in §3.5 closed, and §4 prices each one.
+
+The one thing that did change is what the number means. 51 is **34 previously recorded + 17 named,
+evidenced islands**, and the 10 entries that left it did not leave by assertion — each names a caller a
+test opens a file to find.

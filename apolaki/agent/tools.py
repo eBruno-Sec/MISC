@@ -6756,6 +6756,27 @@ class ToolRegistry:
             "objects_created": objects_created}), findings)
 
     async def _run_web_probes(self, inp: dict) -> ToolResult:
+        """INTRUSIVE: traversal + IDOR + cookie-flag + PRNG + dangerous-method probing on one URL.
+
+        Q-052 slice 2. This engine had NO docstring, so it declared its tier nowhere in the code --
+        the Q-058 gap a contradiction-hunting gate cannot see, because silence contradicts nothing.
+
+        SEVEN checks, and THREE of them WRITE. Read-only: PRNG disclosure (reads the baseline body),
+        query-parameter traversal (GET probes + GET differential), IDOR (GET probes), and dangerous
+        methods (OPTIONS + TRACE only). State-changing: the cookie-flag check SUBMITS up to two
+        discovered forms, the POST-body traversal carrier submits them again with each payload
+        (budget 12), and the header carrier POSTs the form action (budget 8).
+
+        MEASURED against a write-observing lab, one page carrying one ordinary HTML form:
+        **28 POSTs, 28 persisted rows**, the first of them an EMPTY-body submit. The comment on the
+        cookie carrier below argues the submits are safe because only a form "the APP ITSELF
+        advertises" is sent -- but a comment box, a registration form and a feedback box are all
+        forms the app advertises, and advertising the form is how the app invites the write.
+
+        It stays INTRUSIVE for those three carriers alone. The other four would recover the traversal
+        /IDOR/cookie surface at `active` (agent.py:240 measures the cost: 56 benchmark cases booked as
+        a shortfall for an engine `active` cannot schedule), and splitting them out needs
+        `agent/agent.py` -- see Q-052-b, docs/handoff/tier_split2.md."""
         url = inp["url"]
         lab = bool(inp.get("lab_mode", False)) and self.lab_mode
         baseline = await self._http(url, capture=True)
@@ -8393,10 +8414,18 @@ class ToolRegistry:
                           f"tested {len(params)} param(s), {len(findings)} confirmed command injection", findings)
 
     async def _run_form_cmdi(self, inp: dict) -> ToolResult:
-        """POST/form-body OS command injection on a captured HTML form — the body-
+        """INTRUSIVE: POST/form-body OS command injection on a captured HTML form — the body-
         parameter class query-string cmdi never reaches (e.g. a DVWA-style exec form
         POSTing `ip`). Baselines the form, injects computed-output + time payloads into
-        each field, and reuses the cmdi oracles (an echoed payload cannot false-positive)."""
+        each field, and reuses the cmdi oracles (an echoed payload cannot false-positive).
+
+        Q-052 slice 2 — SUBMITTING THE FORM IS THE METHOD, so every probe is a write. MEASURED
+        against a write-observing lab, one page carrying one ordinary HTML form: **58 POSTs, 58
+        persisted rows, 0 findings** (the lab is not injectable; the writes are not a failure mode).
+        The discovery filter below reads `method == "POST" or fm.get("inputs")`, and the `or` makes
+        the method test vacuous -- MEASURED, a form the application declared `method="GET"` is
+        submitted as a POST anyway: 30 rows. The tier is not about whether the run finds anything;
+        it is about what the target looks like afterwards."""
         import time
         import cmdi_tool as cmdi
         import collaborator as collab

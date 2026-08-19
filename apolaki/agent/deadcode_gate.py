@@ -79,6 +79,144 @@ ALLOWED_UNUSED_QUALIFIED = {
 }
 
 
+# Entries the QUALIFIED scan cannot see a caller for BECAUSE OF WHERE THE CALLER LIVES, not because
+# there isn't one (Q-078). Each names the caller, and a test RESOLVES it against the real tree.
+#
+# WHY THIS IS NOT JUST A THIRD ALLOWLIST. An allowlist entry that says "allowed" is how a gate becomes
+# decorative -- the exact defect this whole line of work exists to prevent. So an entry here cannot say
+# "allowed": it is (kind, caller_file, anchor, why), and
+# `test_every_named_caller_allowlist_entry_resolves_to_a_real_caller` opens `caller_file`, requires
+# `anchor` to be present in it, and requires `anchor` to name either the function itself or its defining
+# module. Delete the caller, rename it, or invent one, and the suite goes red. The justification is
+# CHECKED, not merely written.
+#
+# ANCHORS ARE SUBSTRINGS, NEVER LINE NUMBERS, and that is a lesson rather than a style choice. Q-077's
+# own xfail cites `docker-compose.yml:419` for the mitmdump invocation; at HEAD that line is 399, and
+# 419 was the uncommitted working copy of a file another lane was editing. A line number into a live
+# file is rot on arrival.
+#
+# Three kinds, and the distinction matters because only one of them could ever be closed by wiring:
+#   framework -- invoked by name from outside the Python corpus. A caller in `agent/` would be a BUG.
+#   re-export -- published on another module's surface; there the import IS the use.
+#   harness   -- the function's product is a CI verdict and pytest is its scheduler. `scan_qualified`
+#                excludes tests on purpose, so "unwired" is the right answer to the question it asks
+#                and the wrong answer to the question a reader has.
+ALLOWED_UNUSED_NAMED_CALLER = {
+    "mitm_addon.request": (
+        "framework", "docker-compose.yml", "-s /addon/mitm_addon.py",
+        "mitmproxy addon hook, invoked BY NAME by mitmdump. The proxy container mounts only this file "
+        "(./agent/mitm_addon.py:/addon/mitm_addon.py:ro) and the module imports nothing from Apolaki by "
+        "design, so an in-repo caller would mean the addon was being driven in-process, which is not "
+        "how the sidecar works"),
+    "mitm_addon.response": (
+        "framework", "docker-compose.yml", "-s /addon/mitm_addon.py",
+        "the response-side half of the same mitmproxy addon contract; same invocation, same reason"),
+    "sqli_tool.is_inconclusive": (
+        "re-export", "nosqli_tool.py", "from sqli_tool import",
+        "RE-EXPORTED as the shared third-outcome convention from Q-070. The gate's rule that an import "
+        "binds a name rather than using it is right for an ordinary import and wrong for a re-export, "
+        "where the import IS the use: it publishes the symbol on nosqli_tool's surface. That the two "
+        "are one object is asserted in tests/test_boolean_oracle_stability.py"),
+    "deadcode_gate.scan": (
+        "harness", "tests/test_deadcode_gate.py", "return dg.scan()",
+        "this gate's own bare-name entry point; pytest is its scheduler and its product is a verdict"),
+    "deadcode_gate.scan_qualified": (
+        "harness", "tests/test_deadcode_gate.py", "return dg.scan_qualified()",
+        "this gate's own module-resolved entry point -- the one that produces the ratchet"),
+    "deadcode_gate.scan_methods": (
+        "harness", "tests/test_deadcode_gate.py", "return dg.scan_methods()",
+        "this gate's own method-scan entry point, the layer the other two cannot see"),
+    "description_gate.audit": (
+        "harness", "tests/test_description_gate.py", "dg.audit(_tools_source())",
+        "the description-vs-code gate's entry point, run against the live tools source every suite run"),
+    "engine_descriptor.effects_audit": (
+        "harness", "tests/test_effects_engine_fact.py", "ed.effects_audit()",
+        "Q-007's guard: does every declared effect belong to an engine that exists? A CI verdict, and "
+        "its negative half lives in tests/test_effects_negative_half.py"),
+    # This list's own resolver, flagged by this list's own gate on the first run after it was written --
+    # which is the mechanism working, not an embarrassment, so it is recorded the same way as everything
+    # else rather than special-cased out of the scan.
+    "deadcode_gate.resolve_named_caller": (
+        "harness", "tests/test_deadcode_gate.py", "dg.resolve_named_caller(entry)",
+        "resolves every entry in this list against the real tree; the test that calls it is the whole "
+        "reason an entry here cannot degrade into the word 'allowed'"),
+    "ics_dnp3_s7._dnp3_crc_table": (
+        "harness", "tests/test_ics_dnp3_s7.py", "ics._dnp3_crc_table(data)",
+        "a SECOND, INDEPENDENT implementation of the DNP3 CRC whose only purpose is to falsify the "
+        "first -- the test asserts the bitwise and table-driven results agree, which is how the CRC is "
+        "verified without trusting a memorised vector. A production caller would defeat it, and "
+        "deleting it as dead code would delete a negative control"),
+}
+
+
+# The resolver's four answers. "the caller is not there" and "the file is not here" are DIFFERENT
+# facts and conflating them is what makes a checked allowlist decorative again: the first means the
+# excuse died and the entry is now a real island, the second means this process cannot see far enough
+# to judge. One is a failure; the other is a limit, and a limit that reports itself as a pass is the
+# shape of every defect this file exists to catch.
+RESOLVED = "resolved"
+ANCHOR_MISSING = "anchor-missing"
+FILE_UNREACHABLE = "file-unreachable"
+NOT_LISTED = "not-listed"
+
+# The entries whose caller lives OUTSIDE `agent/` and so cannot be opened when the suite runs the way
+# it is always run: a container with ONLY `agent/` mounted at /app, where the repository root does not
+# exist (MEASURED -- `ls /` in the agent image has no docker-compose.yml, and `/app/..` is `/`).
+#
+# PINNED BY NAME, not described by a rule, because this is the one hole in the mechanism. A rule like
+# "framework entries may be unverifiable" lets the hole widen silently; a frozenset means a third
+# unverifiable entry cannot be added without a deliberate edit here, reviewed like a raised ratchet.
+# Everything NOT in this set must resolve for real on every run, in every environment.
+#
+# MEASURED against the real repository root, which is the half the container cannot run --
+#   docker-compose.yml:419 (399 at HEAD; the working copy carries another lane's edits)
+#   - "mkdir -p /data && chmod 0777 /data && exec mitmdump --listen-host 0.0.0.0 -p 8080
+#      -s /addon/mitm_addon.py --set termlog_verbosity=info"
+# and `test_the_resolver_reads_a_file_at_the_repository_root` exercises this entry, this anchor and all
+# three states against a synthetic root, so the apparatus is proven even where the tree is not.
+NAMED_CALLER_OUTSIDE_CHECKOUT = frozenset({"mitm_addon.request", "mitm_addon.response"})
+
+# This module DECLARES the allowlist, so every anchor in it is present in it by construction. Matching
+# here would let an entry cite its own declaration as proof of itself -- declaration-versus-fact, inside
+# the instrument built to detect it. Skipped in the resolver AND forbidden by a test, because a rule
+# worth having twice is one that would be invisible if it broke.
+_DECLARING_FILE = "deadcode_gate.py"
+
+
+def resolve_named_caller(entry: str, root: str = None):
+    """(status, path, lineno, line) for an ALLOWED_UNUSED_NAMED_CALLER entry. This is what stops the
+    list rotting into decoration -- see the note above it.
+
+      RESOLVED         the named file was opened and the anchor is in it. The excuse is a fact.
+      ANCHOR_MISSING   the file is here and the anchor is NOT. The caller was renamed or deleted, so
+                       either the entry was never true or the function is a real island now. HARD FAIL,
+                       everywhere, for every entry.
+      FILE_UNREACHABLE the named file is not in this checkout. Tolerated ONLY for the entries pinned in
+                       NAMED_CALLER_OUTSIDE_CHECKOUT, and never conflated with ANCHOR_MISSING.
+      NOT_LISTED       `entry` is not in the allowlist at all.
+
+    `root` defaults to the directory holding `agent/*.py`; the caller file is looked for there and one
+    level up, so an entry may name the test tree or the repository root."""
+    rec = ALLOWED_UNUSED_NAMED_CALLER.get(entry)
+    if not rec:
+        return (NOT_LISTED, "", 0, "")
+    _kind, caller, anchor, _why = rec
+    base = root or APP_DIR
+    opened = ""
+    for candidate in (os.path.join(base, caller), os.path.join(base, "..", caller)):
+        if not os.path.isfile(candidate) or os.path.basename(candidate) == _DECLARING_FILE:
+            continue
+        try:
+            src = open(candidate, encoding="utf8").read()
+        except Exception:
+            continue
+        opened = os.path.normpath(candidate)
+        for i, line in enumerate(src.split("\n"), 1):
+            if anchor in line:
+                return (RESOLVED, opened, i, line.strip())
+    return (ANCHOR_MISSING, opened, 0, "") if opened else (FILE_UNREACHABLE, "", 0, "")
+
+
 def _decorated(node) -> bool:
     return bool(getattr(node, "decorator_list", None))
 
@@ -306,7 +444,23 @@ def _ast_refs(tree):
 
 
 def _module_bindings(tree, known_modules):
-    """({module: {names it is bound to here}}, {(module, original, local)}) for one parsed file. Pure."""
+    """({module: {names it is bound to here}}, {(module, original, local)}) for one parsed file. Pure.
+
+    A module is bound by an `import`, and ALSO by being STASHED ON AN ATTRIBUTE (Q-078). MEASURED false
+    positive: `intel.harvest` read as dead for the entire life of this gate while
+    `agent/tools.py:1848` calls it on every scoped fetch --
+
+        tools.py:1246   self._intel_mod = _intel          # `import intel as _intel` one line above
+        tools.py:1848   self._intel_mod.harvest(material, self.intel)
+
+    The reference resolves as the pair `("self._intel_mod", "harvest")`, which never matches the import
+    alias `_intel`, so the live harvest path was reported as an island. An allowlist entry would have
+    recorded that lie permanently; the resolver is what was wrong.
+
+    DELIBERATELY NARROW. Only an assignment whose RIGHT-HAND SIDE IS ALREADY A KNOWN MODULE BINDING
+    creates a new one, so `self.foo.harvest(...)` where `self.foo` is an ordinary object still resolves
+    to nothing. Widening this to "any attribute access named `harvest`" is the type-blind rule
+    `scan_methods` uses, and it is exactly what `scan_qualified` exists NOT to do."""
     aliased, from_imported = {}, set()
     for node in ast.walk(tree):
         if isinstance(node, ast.Import):
@@ -319,6 +473,32 @@ def _module_bindings(tree, known_modules):
             if base in known_modules:
                 for al in node.names:
                     from_imported.add((base, al.name, al.asname or al.name))
+
+    # Second pass, over the WHOLE module first: an import inside a function body can appear after the
+    # assignment that re-binds it (it does, in `tools.py`), so aliases must all be known before any
+    # assignment is considered.
+    rebinds = []
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Assign):
+            continue
+        src = _dotted(node.value)
+        if not src:
+            continue
+        for tgt in node.targets:
+            dst = _dotted(tgt)
+            if dst and dst != src:
+                rebinds.append((dst, src))
+    # Fixed point, for a chain (`a = intel` then `self.m = a`). Bounded: three hops is far past
+    # anything in this tree and a cycle must not spin.
+    for _ in range(3):
+        grew = False
+        for dst, src in rebinds:
+            for names in aliased.values():
+                if src in names and dst not in names:
+                    names.add(dst)
+                    grew = True
+        if not grew:
+            break
     return aliased, from_imported
 
 
@@ -398,7 +578,8 @@ def scan_qualified(app_dir: str = None) -> dict:
     # different things at once ("unwired" vs "unwired and unexplained"). Matched on the bare name because
     # ALLOWED_UNUSED is keyed that way.
     def _justified(entry):
-        return entry.split(".")[-1] in ALLOWED_UNUSED or entry in ALLOWED_UNUSED_QUALIFIED
+        return (entry.split(".")[-1] in ALLOWED_UNUSED or entry in ALLOWED_UNUSED_QUALIFIED
+                or entry in ALLOWED_UNUSED_NAMED_CALLER)
 
     allowed = [u for u in unused if _justified(u)]
     flagged = [u for u in unused if not _justified(u)]

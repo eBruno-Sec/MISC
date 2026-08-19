@@ -247,17 +247,54 @@ EFFECTS = {
     # MEASURED, twice, on the shipped `_run_race` with a real mission session (raw output in
     # docs/handoff/effects2.md section 3):
     #   * `tools._SESSION_KILL_RE` has exactly ONE use site — `_add_urls`, which keeps a logout URL
-    #     out of the probe surface. `recon["forms"]` is a SECOND, unfiltered door, and
-    #     `planner.py:616-623` turns every POST form action in it into a `run_race` step while
-    #     `_run_race` merges `self.session_headers` into all 20-60 of its concurrent requests. Driven
-    #     end to end against a logout FORM: mission GET /api/me went (200, True) -> (401, False), and
-    #     `session_headers` still held the dead cookie afterwards.
-    #   * Re-measured on `/account/change-password`, which that regex does NOT match and could not
-    #     match without disabling the engine on the single-use actions it exists to attack: same
-    #     result. A harmless form (`/notes/add`) on the same probe left the session up, so the
-    #     instrument does not report a kill where there is none.
-    # So the effect is real and it SURVIVES the fix for the adjacent quarantine defect (that fix is
-    # still worth making; it belongs to `agent.py`/`tools.py` and is written up in the handoff).
+    #     out of the probe surface. `recon["forms"]` is a SECOND door that no session-kill filter
+    #     guards, and the planner's form loop (`planner.py:652-661` at run 4's HEAD) turns every POST
+    #     form action in it into `run_csrf` + `run_race` steps while `_run_race` merges
+    #     `self.session_headers` into all 20-60 of its concurrent requests. Driven end to end against
+    #     a logout FORM: mission GET /api/me went (200, True) -> (401, False), and `session_headers`
+    #     still held the dead cookie afterwards.
+    #     Run 4 sharpened this: the filter DID see that URL. `_http_probe`'s link regex covers
+    #     `action=`, so the same URL is correctly quarantined into `session_kill_urls` AND
+    #     simultaneously appended to `recon["forms"]` by the branch below it, which filters on
+    #     `scope.validate` alone. One registry, one URL, two contradictory policies.
+    #   * A harmless form on the same probe left the session up, so the instrument does not report a
+    #     kill where there is none.
+    #
+    # CORRECTION, Q-074 run 4, and it is the reason the paragraph above no longer ends where it used
+    # to. This comment previously claimed the effect "SURVIVES the fix for the adjacent quarantine
+    # defect", citing a re-measurement on a change-password form the regex cannot match. **That claim
+    # does not reproduce, and it was the sole ground for treating this technique differently from
+    # three others.** Re-driven against the shipped `sessionlife` lab
+    # (`/secure/api/change-password`, `change_evicts=True`, regex match False), with the body the
+    # PLANNER ACTUALLY BUILDS — `"&".join(f"{f}=1" for f in fields)`, planner.py:658:
+    #
+    #     POSITIVE CONTROL  a real change-password by A     -> 200; bystander session B (401, False)
+    #     NEGATIVE CONTROL  that planner body, sent by hand -> 403 "current password does not match"
+    #     run_race    A (200,True) B (200,True) -> A (200,True) B (200,True)   NO KILL
+    #     run_csrf / run_form_cmdi / run_stored_xss: identical, 0 of 4 killed anything
+    #     run_race handed a body that DOES rotate the credential -> B (401, False)
+    #
+    # So the engine can end a session on that form only when handed input the planner never builds.
+    # The predecessor handoffs do not record which body they used, so their second route is
+    # UNVERIFIED as stated and does not hold under planner-reachable input.
+    #
+    # WHAT THE EFFECT ACTUALLY IS, measured 4/4 with a clean 4/4 paired control (raw output in
+    # docs/handoff/effects4.md sections 1-3): the cause is the `recon["forms"]` DOOR, and the door is
+    # not this engine's. The shipped planner emits FOUR steps against a quarantined session-kill
+    # action — `run_csrf`, `run_race`, `run_form_cmdi`, `run_stored_xss` — and ALL FOUR end the
+    # mission session on a mount that invalidates on logout. `run_csrf` is ACTIVE, so it reaches this
+    # in the DEFAULT mode, where `run_race` cannot run at all.
+    #
+    # WHY THE OTHER THREE ARE NOT ADDED HERE, stated so the absence is a decision and not an
+    # oversight. `csrf`, `command_injection` and `stored_xss` are all real technique ids and
+    # `effects_audit` would accept them. They are left out because the entry would attribute a DOOR
+    # defect to three technique families whose primary engines (`run_cmdi` on query params,
+    # `run_xss`) demonstrably do not have it, in a vocabulary that cannot name the real cause — and
+    # because the fix recommended in the same handoff makes all four false at once. Writing four
+    # entries that this lane simultaneously asks to be deleted is not a more accurate model, it is
+    # the same fact recorded four times where nothing reads it. THE ONE ENTRY STAYS because it is
+    # true in shipped configuration and removing it returns the model to the empty state Q-074 exists
+    # to escape. **When the door is fixed, RE-MEASURE THIS ENTRY — it is expected to become false.**
     #
     # `establishes` is EMPTY on purpose: a race proves a limit can be bypassed, which is a finding,
     # not an observation this 17-term vocabulary can express.

@@ -1086,6 +1086,71 @@ built, which is the same "bind the value at the point it is known" rule as Q-046
 
 ---
 
+### Q-081 · `effects_audit` verifies the ENGINE three ways and never checks the KEY · **HIGH** · `ready`
+
+Found by the Q-074 lane writing its negative control FIRST, per its brief. The control found a hole in
+the guard it was written to exercise, which is the whole argument for writing it first.
+
+MEASURED on the live platform:
+
+```
+EFFECTS["csrf_token_missing"] = {"invalidates": ["authenticated"], "engine": ["run_csrf"]}
+effects_audit ok    : True     <- run_csrf is real, registered, implemented, dispatchable
+build() descriptors : 88, and 'csrf_token_missing' is NOT among them
+conflicts() rows    : 6, producers ['race_condition']   <- unchanged
+```
+
+`effects_audit` checks the declared ENGINE three independent ways and never checks that the KEY is a
+technique. `build()` walks `TECHNIQUES`, so a row keyed on a non-technique **never becomes a
+descriptor and no consumer ever sees it**. The declaration is silently inert AND passes its audit.
+
+**That is the Q-007 shape in different clothes**: a guard that confirms the part it was taught to look
+at while the part that decides reachability goes unexamined. Eleventh instance of declaration-versus-
+fact in this codebase, and the first one found by a negative control rather than by a failure.
+
+DoD: `effects_audit` validates the KEY against `TECHNIQUES` as well as the engine, so an entry that
+can never reach a consumer fails the audit instead of passing it. **Negative control:** an entry keyed
+on a real technique with a real engine must still pass - a guard that rejects everything is not a fix.
+
+### Q-080 · The DEFAULT scan mode destroys its own session by READING a page, and reports clean · **CRITICAL** · `ready`
+
+MEASURED on the running `sessionlife` lab with shipped engines on an isolated HEAD snapshot. Driven,
+not read - which matters, because reading is what produced the wrong answer twice on this ticket
+already (Q-074 named `session_lifecycle`, which does nothing of the kind).
+
+**`_run_csrf` needs no payload and no POST.** `_http(url, "GET")` merges `session_headers` through
+`_merge_identity`, so the engine **destroys the mission session by reading the page it was asked to
+audit** - a logout action. It then returns `success=True, "0 CSRF signal(s)"`.
+
+**The door is four engines wide, not one.** Driven with the exact `recon["forms"]` dict `_http_probe`
+produced, the shipped planner emits **4 steps against the quarantined URL at `mode=full`** -
+`run_csrf`, `run_race`, `run_form_cmdi`, `run_stored_xss` - and **1 at `mode=active`**. Emptying
+`recon["forms"]` and changing nothing else drops all four while **47 other steps remain**, which is
+the positive control that the rest of planning is untouched.
+
+**All four kill it, 4/4**, each on its own freshly minted session. The paired `/vuln` mount
+(`logout_invalidates=False`, one variable changed) leaves **all four alive, 4/4**. That pairing is
+what makes this a cause rather than a correlation.
+
+**`run_csrf` is ACTIVE, so this is reachable in the DEFAULT scan mode** - it does not need `full` and
+it does not need `auto_approve`.
+
+**Why this is CRITICAL rather than untidy.** Nothing in the platform's own state records the loss:
+`session_headers` still holds the dead cookie, so every authenticated probe afterwards silently tests
+as ANONYMOUS while the mission keeps running and keeps reporting. A target that is only vulnerable
+behind authentication comes back clean. It is a self-inflicted false-negative source that is
+indistinguishable, in the report, from a secure application.
+
+**And the filter is not simply absent - it SAW the URL.** `_http_probe`'s own path applies
+`_SESSION_KILL_RE`, and `recon["forms"]` is a second, unfiltered door into the same probe surface.
+One entrance is guarded and the other is not, which is why the quarantine looks like it works.
+
+DoD: the guard belongs at the DOOR, not on one engine. Every path that turns discovered surface into
+planner steps must apply the same session-kill quarantine, and the fix must be proven with the same
+4/4-versus-4/4 pairing rather than by a unit test. **Negative control, mandatory:** a form that is NOT
+a session-killer must still be probed by all four engines, or the fix trades a false negative for a
+capability loss.
+
 ### Q-079 · The DISPATCHER enforces no permission tier at all · **HIGH** · `ready` · split out of Q-052
 
 **This was the engineering half of Q-052 and it should never have been bundled with the product

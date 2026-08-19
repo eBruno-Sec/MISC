@@ -209,6 +209,257 @@ def test_the_recorded_q077_delta_excuses_nothing():
         assert "." in e and "::" not in e, e
         assert e not in dg.ALLOWED_UNUSED_QUALIFIED, "%s was quietly excused" % e
         assert e.split(".")[-1] not in dg.ALLOWED_UNUSED, "%s was quietly excused" % e
+        # Q-078 triage may excuse an entry, but ONLY through the list whose entries name a caller that a
+        # test resolves. Those two lists above take a sentence; this one takes a caller that must exist.
+        if e in dg.ALLOWED_UNUSED_NAMED_CALLER:
+            status = dg.resolve_named_caller(e)[0]
+            assert status != dg.ANCHOR_MISSING, (
+                "%s was excused by ALLOWED_UNUSED_NAMED_CALLER and its named caller is GONE from a file "
+                "that is right here -- so either the excuse was never true or this is an island now" % e)
+            assert status == dg.RESOLVED or e in dg.NAMED_CALLER_OUTSIDE_CHECKOUT, (
+                "%s could not be resolved and is not one of the entries pinned as unverifiable in this "
+                "environment" % e)
+
+
+# ── Q-078: the triage of those 27 ───────────────────────────────────────────────────────────────
+
+def test_a_module_stashed_on_an_attribute_is_still_that_module(tmp_path):
+    """MEASURED FALSE POSITIVE, and the reason this ticket touched the resolver at all.
+
+    `intel.harvest` read as dead for the whole life of this gate while `tools.py:1848` calls it on every
+    scoped fetch, because `tools.py:1246` stashes the module on `self._intel_mod` and the reference then
+    resolves as the pair `("self._intel_mod", "harvest")`, which never matches the import alias
+    `_intel`. Reproduced here with the same shape: import-as, re-bind onto an attribute, call.
+
+    An allowlist entry would have recorded the lie permanently. The resolver was what was wrong."""
+    (tmp_path / "lib.py").write_text("def work():\n    return 1\n", encoding="utf8")
+    (tmp_path / "app.py").write_text(
+        "class R:\n"
+        "    def __init__(self):\n"
+        "        import lib as _lib\n"
+        "        self._lib_mod = _lib\n\n"
+        "    def go(self):\n"
+        "        return self._lib_mod.work()\n", encoding="utf8")
+    assert "lib.work" not in set(dg.scan_qualified(str(tmp_path))["unused"]), (
+        "a module reached through an attribute it was stashed on is still that module")
+
+
+def test_attribute_rebinding_does_not_become_a_type_blind_dot_name_rule(tmp_path):
+    """NEGATIVE CONTROL for the fix above, and the failure mode that would make it worthless.
+
+    The cheap version of this fix is "any `.work()` on anything counts", which is the deliberately
+    type-blind rule `scan_methods` uses and precisely what `scan_qualified` exists NOT to do -- 90
+    function names in this codebase are defined in more than one module. Only an assignment whose
+    RIGHT-HAND SIDE IS ALREADY A KNOWN MODULE BINDING may create one, so an ordinary object with a
+    same-named method must leave the real function reading as dead."""
+    (tmp_path / "lib.py").write_text("def work():\n    return 1\n", encoding="utf8")
+    (tmp_path / "app.py").write_text(
+        "import lib\n\n\n"                      # imported, so `lib` is a known module here...
+        "class Other:\n"
+        "    def work(self):\n        return 2\n\n\n"
+        "class R:\n"
+        "    def __init__(self):\n"
+        "        self._helper = Other()\n\n"    # ...but THIS is not a module binding
+        "    def go(self):\n"
+        "        return self._helper.work()\n", encoding="utf8")
+    assert "lib.work" in set(dg.scan_qualified(str(tmp_path))["unused"]), (
+        "an attribute holding an ordinary object cleared a module function of the same name -- the "
+        "resolver has degenerated into the type-blind `.name` rule")
+
+
+def test_prose_naming_a_stashed_module_call_is_still_not_wiring(tmp_path):
+    """Q-077's negative control, re-run against the Q-078 fix. Widening the resolver is exactly when a
+    comment gets a second chance to pass for a call, so the same prose that could not clear a function
+    before must not clear it now."""
+    (tmp_path / "lib.py").write_text("def work():\n    return 1\n", encoding="utf8")
+    (tmp_path / "app.py").write_text(
+        "import lib as _lib\n\n\n"
+        "class R:\n"
+        "    def __init__(self):\n"
+        "        self._lib_mod = _lib\n\n"
+        "    def go(self):\n"
+        '        """self._lib_mod.work() is what this should call one day."""\n'
+        "        # self._lib_mod.work()\n"
+        "        return None\n", encoding="utf8")
+    assert "lib.work" in set(dg.scan_qualified(str(tmp_path))["unused"]), (
+        "a stashed-module call named only in a docstring and a comment counted as wiring")
+
+
+def test_every_named_caller_allowlist_entry_resolves_to_a_real_caller():
+    """THE MECHANISM THAT KEEPS THIS LIST FROM GOING DECORATIVE.
+
+    An allowlist entry saying "allowed" is how a gate stops being a gate. Every entry in
+    `ALLOWED_UNUSED_NAMED_CALLER` names a caller, and this opens the file and finds it. Delete the
+    caller, rename it, or invent one, and this goes red -- the justification is CHECKED, not written.
+
+    The anchor must also NAME the thing it excuses (the function or its defining module), so an entry
+    cannot point at an arbitrary line that happens to exist.
+
+    ONE environment-shaped exception, and it is pinned by name rather than by rule. The suite runs in a
+    container that mounts ONLY `agent/`, so `docker-compose.yml` -- the file that records mitmdump
+    loading the addon -- is genuinely not there to open. That is a LIMIT, not a pass: it is confined to
+    `NAMED_CALLER_OUTSIDE_CHECKOUT`, the anchor-missing state is still a hard failure for those entries,
+    and `test_the_resolver_reads_a_file_at_the_repository_root` runs the same entry and the same anchor
+    through all three states against a synthetic root."""
+    assert dg.ALLOWED_UNUSED_NAMED_CALLER, "the list emptied itself"
+    resolved_here = 0
+    for entry, rec in dg.ALLOWED_UNUSED_NAMED_CALLER.items():
+        kind, caller, anchor, why = rec
+        assert kind in ("framework", "re-export", "harness"), "%s: unknown kind %r" % (entry, kind)
+        assert len(why) > 40, "%s is excused without a real reason: %r" % (entry, why)
+        mod, fn = entry.rsplit(".", 1)
+        assert fn in anchor or mod in anchor, (
+            "%s: the anchor %r names neither the function nor its module, so it does not evidence "
+            "anything" % (entry, anchor))
+        status, path, lineno, line = dg.resolve_named_caller(entry)
+        assert status != dg.ANCHOR_MISSING, (
+            "%s claims a caller in %s containing %r. The file is right here and the anchor is NOT in it. "
+            "Either the caller was removed -- in which case this is a real island now -- or the entry "
+            "was never true." % (entry, caller, anchor))
+        if status == dg.FILE_UNREACHABLE:
+            assert entry in dg.NAMED_CALLER_OUTSIDE_CHECKOUT, (
+                "%s names a caller in %s, which is not in this checkout, and it is not one of the "
+                "entries pinned as unverifiable here. An entry that cannot be checked anywhere is the "
+                "word 'allowed' with extra steps." % (entry, caller))
+            continue
+        assert status == dg.RESOLVED, (entry, status)
+        assert os.path.isfile(path) and lineno > 0 and anchor in line
+        resolved_here += 1
+    # POSITIVE CONTROL. Without this the loop above passes an empty tree, a broken resolver, or a list
+    # every entry of which claimed to be unreachable.
+    assert resolved_here >= len(dg.ALLOWED_UNUSED_NAMED_CALLER) - len(dg.NAMED_CALLER_OUTSIDE_CHECKOUT)
+    assert resolved_here >= 8, "only %d entries actually resolved against the real tree" % resolved_here
+
+
+def test_a_fabricated_named_caller_does_not_resolve(monkeypatch):
+    """NEGATIVE CONTROL for the check above. A check that passes whatever it is given proves nothing, and
+    this file has been bitten by exactly that: `scan_methods` once reported 0 uncalled methods with every
+    test green, because `0 <= 14` passes and nothing asserted the scan could still find anything.
+
+    THE FABRICATED ANCHOR IS ASSEMBLED AT RUNTIME, and that is the whole lesson of this test rather than
+    a style tic. Written as one literal, the fabrication puts itself into this file -- and this file is
+    the very file the fabricated entry names as its caller, so the resolver finds it and the control
+    reports success while proving the opposite of what it claims. That is not hypothetical: it is the
+    bug this test shipped with. The assertion below that the string is absent from both files is the
+    guard, and it is what a negative control needs to be worth running."""
+    absent = "ghost_fn_" + "nothing_anywhere_calls_this()"
+    for fn in ("deadcode_gate.py", os.path.join("tests", "test_deadcode_gate.py")):
+        src = open(os.path.join(dg.APP_DIR, fn), encoding="utf8").read()
+        assert absent not in src, (
+            "the fabricated anchor is a literal in %s, so 'it did not resolve' would prove nothing about "
+            "the resolver -- assemble it at runtime" % fn)
+
+    # file present, anchor absent -> the excuse died. Distinct from the file being missing.
+    monkeypatch.setitem(dg.ALLOWED_UNUSED_NAMED_CALLER, "ghost_mod.ghost_fn",
+                        ("harness", "tests/test_deadcode_gate.py", absent, "fabricated, for the control"))
+    assert dg.resolve_named_caller("ghost_mod.ghost_fn")[0] == dg.ANCHOR_MISSING, (
+        "a caller that is not in the file resolved anyway -- the resolver is not reading the file")
+    # file absent -> a different answer, and no exception
+    monkeypatch.setitem(dg.ALLOWED_UNUSED_NAMED_CALLER, "ghost_mod.ghost_fn",
+                        ("harness", "tests/test_no_such_file_at_all.py", "ghost_fn", "fabricated"))
+    assert dg.resolve_named_caller("ghost_mod.ghost_fn")[0] == dg.FILE_UNREACHABLE
+    assert dg.resolve_named_caller("not.in.the.list.at.all")[0] == dg.NOT_LISTED
+
+
+def test_the_resolver_reads_a_file_at_the_repository_root(tmp_path):
+    """POSITIVE CONTROL for the one state the container cannot exercise against the real tree.
+
+    `mitm_addon.request` names `docker-compose.yml`, which sits beside `agent/` and is therefore absent
+    when the suite runs with only `agent/` mounted. Tolerating that is only honest if the apparatus is
+    proven to work when the file IS there, so this builds the real shape -- a root holding `agent/` and a
+    compose file -- and drives the REAL entry with the REAL anchor through all three states.
+
+    Without this, "file-unreachable" would be a state nothing ever escapes, which is a pass wearing a
+    different word."""
+    (tmp_path / "agent").mkdir()
+    root = str(tmp_path / "agent")
+    compose = tmp_path / "docker-compose.yml"
+    compose.write_text(
+        "  proxy:\n    command:\n"
+        '      - "mkdir -p /data && exec mitmdump -p 8080 -s /addon/mitm_addon.py --set x=1"\n',
+        encoding="utf8")
+    status, path, lineno, line = dg.resolve_named_caller("mitm_addon.request", root)
+    assert status == dg.RESOLVED, (status, path)
+    assert lineno == 3 and "mitmdump" in line, (lineno, line)
+    assert os.path.basename(path) == "docker-compose.yml"
+
+    compose.write_text("  proxy:\n    image: mitmproxy/mitmproxy\n", encoding="utf8")
+    assert dg.resolve_named_caller("mitm_addon.request", root)[0] == dg.ANCHOR_MISSING, (
+        "the addon stopped being loaded and the resolver still called the excuse good")
+    compose.unlink()
+    assert dg.resolve_named_caller("mitm_addon.request", root)[0] == dg.FILE_UNREACHABLE
+
+
+def test_the_unverifiable_entries_are_pinned_by_name_and_nothing_else_is():
+    """The hole in the mechanism, bounded and counted.
+
+    Exactly two entries cannot be checked in the environment the suite runs in. Naming them in a
+    frozenset -- rather than writing a rule like "framework entries may be unverifiable" -- means a third
+    one cannot appear by accident: it takes an edit here, reviewed the way a raised ratchet would be.
+    Every other entry must resolve against the real tree on this run."""
+    named = set(dg.ALLOWED_UNUSED_NAMED_CALLER)
+    assert dg.NAMED_CALLER_OUTSIDE_CHECKOUT <= named, sorted(dg.NAMED_CALLER_OUTSIDE_CHECKOUT - named)
+    assert len(dg.NAMED_CALLER_OUTSIDE_CHECKOUT) <= 2, sorted(dg.NAMED_CALLER_OUTSIDE_CHECKOUT)
+    for entry in dg.NAMED_CALLER_OUTSIDE_CHECKOUT:
+        kind, caller, _anchor, _why = dg.ALLOWED_UNUSED_NAMED_CALLER[entry]
+        assert kind == "framework", "%s is unverifiable here without being framework-invoked" % entry
+        assert not caller.startswith("tests/"), (
+            "%s names %s as unreachable, but the test tree is mounted -- so it IS reachable and this "
+            "entry is dodging the check" % (entry, caller))
+    for entry in named - dg.NAMED_CALLER_OUTSIDE_CHECKOUT:
+        assert dg.resolve_named_caller(entry)[0] == dg.RESOLVED, entry
+
+
+def test_no_entry_cites_the_file_that_declares_it():
+    """An anchor written into `deadcode_gate.py` is present in `deadcode_gate.py` BY CONSTRUCTION, so an
+    entry naming that file as its caller would prove itself. Declaration-versus-fact, inside the
+    instrument built to detect it -- rejected in the resolver and forbidden here, because a rule that
+    only lives in one of those two places fails silently when it breaks."""
+    for entry, rec in dg.ALLOWED_UNUSED_NAMED_CALLER.items():
+        assert os.path.basename(rec[1]) != "deadcode_gate.py", (
+            "%s cites the file that declares the allowlist as its own caller" % entry)
+
+
+def test_the_resolver_refuses_a_self_citation(monkeypatch):
+    """NEGATIVE CONTROL for the rule above: an entry citing `deadcode_gate.py`, with an anchor that IS
+    genuinely in it, must still not resolve."""
+    anchor = "ALLOWED_UNUSED_NAMED_CALLER = {"
+    assert anchor in open(os.path.join(dg.APP_DIR, "deadcode_gate.py"), encoding="utf8").read(), (
+        "positive control: the anchor must really be in the file, or refusing it proves nothing")
+    monkeypatch.setitem(dg.ALLOWED_UNUSED_NAMED_CALLER, "deadcode_gate.self_citing",
+                        ("harness", "deadcode_gate.py", anchor, "fabricated self-citation"))
+    assert dg.resolve_named_caller("deadcode_gate.self_citing")[0] != dg.RESOLVED
+
+
+def test_the_named_caller_list_does_not_overlap_the_other_two():
+    """Three lists that can excuse an entry is two too many to keep straight by hand. They must be
+    disjoint, or a reader cannot tell which justification is load-bearing -- the same reasoning that
+    keeps ALLOWED_UNUSED and ALLOWED_UNUSED_QUALIFIED separate."""
+    named = set(dg.ALLOWED_UNUSED_NAMED_CALLER)
+    assert not (named & set(dg.ALLOWED_UNUSED_QUALIFIED)), sorted(named & set(dg.ALLOWED_UNUSED_QUALIFIED))
+    bare = {e.rsplit(".", 1)[1] for e in named}
+    assert not (bare & set(dg.ALLOWED_UNUSED)), sorted(bare & set(dg.ALLOWED_UNUSED))
+
+
+def test_the_triaged_islands_are_still_counted():
+    """The 17 REAL ISLANDS from the Q-078 triage are NOT excused, and this asserts it directly.
+
+    The triage's whole risk is that "classified" quietly becomes "cleared". Being named in a handoff
+    document is not a justification; only a resolvable caller is, and these have none. See
+    docs/handoff/island_triage.md section 3.5 for the evidence per entry."""
+    islands = {
+        "api_protocols.inventory", "archive_intel.needs_validation", "bench_all.bench", "bie.observe",
+        "capability_matrix.state_rank", "cloud_iam.collect_live", "codereview_graph.hypotheses",
+        "codereview_graph.link_runtime_to_source", "exposure_tool.paths", "fingerprint.fingerprint",
+        "ics_fingerprint.finding", "report.control_ran", "saml_tool.finding", "service_router.plan",
+        "ssrf_tool.bypass_payloads", "techniques.classes", "tool_provenance.argv_hash",
+    }
+    assert len(islands) == 17
+    assert islands < dg.QUALIFIED_Q077_REVEALED, "every triaged island came from the recorded 27"
+    for e in islands:
+        assert e not in dg.ALLOWED_UNUSED_NAMED_CALLER, "%s was excused, not wired" % e
+        assert e not in dg.ALLOWED_UNUSED_QUALIFIED, e
+        assert e.rsplit(".", 1)[1] not in dg.ALLOWED_UNUSED, e
 
 
 @pytest.mark.xfail(strict=True, reason=(
@@ -351,18 +602,37 @@ def test_the_baseline_is_not_slack(qual):
         "baseline %d is stale against an actual %d — tighten it" % (q["baseline"], q["count"]))
 
 
-def test_the_qualified_scan_honours_both_allowlists(qual):
+def test_the_qualified_scan_honours_all_three_allowlists(qual):
     """A function with a written justification is unwired-but-explained, not unwired-and-unexplained.
     Counting both toward the ratchet makes the number mean two things at once.
 
-    TWO lists, deliberately. `scan()` and `scan_qualified()` disagree about what "unused" means — the
-    first counts any mention including tests, the second requires a production caller through a resolved
-    import. An entry unused-to-one and used-to-the-other makes a shared list wrong for whichever
-    disagrees, and `scan()`'s staleness check keeps flagging it."""
+    THREE lists, deliberately, and this test was called `..._both_allowlists` until Q-078 added the
+    third — a name asserting "both" over three things is the same prose-versus-fact rot the gate exists
+    to catch, so it was renamed rather than quietly left to drift.
+
+      ALLOWED_UNUSED             `scan()`'s list: a mention anywhere, tests included, counts as a use.
+      ALLOWED_UNUSED_QUALIFIED   `scan_qualified()`'s: a production caller through a resolved import.
+      ALLOWED_UNUSED_NAMED_CALLER  Q-078's: the caller exists but lives where neither scan looks, so the
+                                 entry NAMES it and a resolver opens the file and finds it.
+
+    The first two disagree about what "unused" means — an entry unused-to-one and used-to-the-other makes
+    a shared list wrong for whichever disagrees, and `scan()`'s staleness check keeps flagging it. The
+    third is a different kind of claim: not "this is fine" but "here is the caller", which is why it is
+    the only one whose justification is checked rather than read."""
     assert qual["allowed"], "the allowlists should still be catching some entries"
     for name in qual["allowed"]:
-        assert name.split(".")[-1] in dg.ALLOWED_UNUSED or name in dg.ALLOWED_UNUSED_QUALIFIED, name
+        assert (name.split(".")[-1] in dg.ALLOWED_UNUSED or name in dg.ALLOWED_UNUSED_QUALIFIED
+                or name in dg.ALLOWED_UNUSED_NAMED_CALLER), name
+        # An entry excused by the third list is excused by a FACT, so the fact is checked here too --
+        # otherwise the scan could honour a list the resolver has already stopped agreeing with.
+        if name in dg.ALLOWED_UNUSED_NAMED_CALLER:
+            assert dg.resolve_named_caller(name)[0] != dg.ANCHOR_MISSING, (
+                "%s is excused by a caller that is no longer in the file it names" % name)
     assert not (set(qual["unused"]) & set(qual["allowed"])), "an entry cannot be both"
+    # POSITIVE CONTROL: the third list must actually be doing work in the scan, not merely existing.
+    assert set(qual["allowed"]) & set(dg.ALLOWED_UNUSED_NAMED_CALLER), (
+        "no named-caller entry reached the scan's allowed list -- either the scan stopped honouring it "
+        "or every entry has been wired, in which case the list should shrink")
 
 
 def test_every_qualified_allowlist_entry_states_a_reason():
