@@ -168,3 +168,187 @@ happens to a source finding today, because `_source_finding` stamps `confidence=
 This mission added **716 rows** to a table that held **1057**. Corpus-wide counts move 1057 -> 1773 and
 `provenance=source-derived` moves 0 -> 716. Any lane re-running the Q-044 baseline query must exclude
 `mission_id='2fb87a3a'` to reproduce the pre-run numbers.
+
+---
+
+# 5. Does the stored finding SURVIVE into a report? Yes — checked, not assumed
+
+Storing a row is not the same as the row reaching a reader. `proof_schema.demote_unproven` rewrites
+`confidence` in place, so a source finding could be stored and then presented as an unproven lead.
+
+**MEASURED** — inside `apolaki-agent-1`, mission `2fb87a3a`:
+
+```
+raw: 716 gated: 716
+raw confidence:   {'confirmed': 716}
+gated confidence: {'confirmed': 716}
+gated with proof_gap: 0
+proof_kind sample: source-derived | control_status: not_applicable
+```
+
+The proof gate is length-preserving here and demotes nothing. `control_status` returns
+`not_applicable` rather than `not_recorded`, which is the correct answer for a lane where no request
+differential can exist — the source finding is not silently penalised for lacking a control it could
+never have.
+
+---
+
+# 6. ANTI-IDLE: `/codereview` still routes to the OLDER analyser — and the cost is now measured
+
+The one original Q-044 claim still standing. **MEASURED** — `agent/main.py:2255-2264`:
+
+```python
+@app.get("/codereview")
+async def code_review(path: str = ""):
+    import codeintel
+    p = path or os.environ.get("CODEREVIEW_DEFAULT", "/labsrc/juiceshop")
+    return codeintel.review(p)          # <- the OLDER analyser, not review_source_tree
+```
+
+`POST /mission/{id}/codereview` (`main.py:3269`) is a third contract again: it calls
+`codereview.review(src, name)` on a supplied source **string**, seeds the asset graph, and stores its
+output in `context["code_review"]`, never in the findings table.
+
+## 6.1 What an operator on the obvious endpoint actually gets — both analysers on the SAME tree
+
+**MEASURED** — `GET /codereview?path=/tmp/q044/BenchmarkJava` (7.2 s) and, uncapped, the same call
+with `max_hits=100000` (6.7 s):
+
+| | `GET /codereview` -> `codeintel.review` | `source_root` -> `codeintel.review_source_tree` |
+|---|---|---|
+| total | 500 (capped; **509** uncapped) | **716** |
+| rules that fire | `sql_string_build` 448, `weak_crypto` 61 | `weak_crypto` 261, `weak_random` 219, `weak_hash` 153, `trust_boundary` 83 |
+| finding keys | `confirm, file, line, rule, severity, snippet, technique, why` | full finding schema + CWE + family + oracle |
+| `provenance` / `lane` / `analysis` | **absent** | all three present |
+| `cwe` / `family` / `confidence` | **absent** | present |
+| persisted to a mission | **no** | yes — 716 rows |
+
+**The headline is not "weaker", it is DISJOINT, and that is worse.** The two analysers detect
+non-overlapping classes on the same tree:
+
+* `codeintel.review` reports **448 SQL-string-build leads**. `review_source_tree` reports **zero**
+  injection findings of any kind — `codereview.review_java` (`codereview.py:630`) has exactly four
+  rule groups: trust-boundary dataflow, crypto, hash, random. There is no injection rule in the
+  code-assisted lane at all.
+* `review_source_tree` reports 219 weak-random, 153 weak-hash and 83 trust-boundary findings.
+  `codeintel.review` reports none of those classes.
+
+So an operator gets a **mutual blind spot** depending on which door they walk through, and neither
+door tells them the other exists. This also explains the 61.1% macro figure without any appeal to
+tuning: the code-assisted lane scores 100% on crypto / hash / weakrand because those are three of its
+four rules, and 0% on every injection category because it has no rule to score with.
+
+The 500-item cap on `/codereview` is real but minor — it hides 9 of 509 on this tree.
+
+## 6.2 One more Q-044-adjacent claim that is now FALSE
+
+`docs/QUEUE.md:3351` records Q-044 as "the code-assisted lane is benchmark-only; 61.1% is not
+reachable in an engagement". Mission `2fb87a3a` reached it from `/engage` with an operator-supplied
+`source_root`. The lane is **not** benchmark-only.
+
+---
+
+# 7. A SECOND DEFECT, MEASURED: `stored_findings` can count a finding that was never stored
+
+Found while checking whether my own 716 was trustworthy. It was — but only because I queried the
+table, not because the number is sound.
+
+`_run_source_review` computes `stored = sum(1 for f in findings if db.add_finding(session_id, f))`.
+`db.add_finding` (`db.py:168`) returns `add_lead(mid, finding)` when the TRUTH invariant fires, and
+`add_lead` returns a **truthy id**. So a rerouted finding is counted as stored.
+
+**MEASURED** against the running agent, one canonical source finding with `confidence="lead"`:
+
+```
+state: {'status': 'complete', 'findings': 1, 'stored_findings': 1, 'rejected_findings': 0, 'error': ''}
+rows in findings table: 0
+leads: 1
+```
+
+`/engage` and the mission context both report a stored source-derived finding. The findings table
+holds none.
+
+**LATENT, not live.** `codereview._source_finding` (`codereview.py:594`) hard-codes
+`confidence="confirmed"`, so no production producer emits this shape today — which is exactly why it
+is cheap to fix now. `_canonical_source_finding` constrains `provenance`, `lane` and `analysis` and
+says nothing about `confidence`, so the contract that exists to fail closed does not close this door.
+
+## 7.1 PATCH (written here, NOT applied — `main.py` is another lane's file)
+
+In `main.py`, inside `_run_source_review`, replace:
+
+```python
+stored = sum(1 for finding in findings if db.add_finding(session_id, finding))
+state["stored_findings"] = stored
+if stored != len(findings):
+```
+
+with a count of what the TABLE accepted, plus an honest key for what was rerouted:
+
+```python
+before = len(db.get_findings(session_id))
+rerouted = 0
+for finding in findings:
+    if not db.add_finding(session_id, finding):
+        continue
+    if str(finding.get("confidence") or "").strip().lower() != "confirmed":
+        rerouted += 1                     # went to leads, not to the findings table
+stored = len(db.get_findings(session_id)) - before
+state["stored_findings"] = stored
+state["lead_findings"] = rerouted
+if stored != len(findings):
+```
+
+This neither drops the finding nor lies about it: a lead-confidence source finding still reaches the
+leads list, `stored_findings` still means *rows in the findings table*, and the mismatch branch that
+already exists sets `status=error` with the real numbers. The alternative — adding
+`confidence == "confirmed"` to `_canonical_source_finding` — would make the contract self-consistent
+but would silently discard a legitimate finding, which is the failure mode the ticket warns about.
+
+---
+
+# 8. Regression guard: `agent/tests/test_source_lane_persistence.py` (new, mine)
+
+There was **no test anywhere** covering `main._run_source_review`, `main._canonical_source_finding`,
+or the write into `db.findings`. The suite covered the analyser thoroughly and the persistence half
+not at all — which is precisely how the lane could be "wired" for weeks with a zero in the table.
+
+Eight tests + one strict xfail. **MEASURED** on the agent image (`python:3.12`):
+
+```
+$ docker run --rm -v ".../apolaki/agent:/app" -w /app apolaki-agent \
+      python -m pytest tests/test_source_lane_persistence.py -q
+........x                                                                [100%]
+```
+
+## 8.1 Both mutants killed by the intended assertions
+
+A test that passes proves nothing until it is shown it can fail. Two mutants, each applied to a
+**copy** of the tree in scratch, never to the repo:
+
+**M1 — `_canonical_source_finding` returns `True` unconditionally** (the evidence contract becomes
+decoration). Killed by exactly the four contract tests, and by nothing else:
+
+```
+FAILED ...::test_a_finding_missing_one_marker_is_rejected_and_nothing_is_stored[provenance]
+FAILED ...::test_a_finding_missing_one_marker_is_rejected_and_nothing_is_stored[lane]
+FAILED ...::test_a_finding_missing_one_marker_is_rejected_and_nothing_is_stored[analysis]
+FAILED ...::test_one_bad_finding_rejects_the_whole_batch
+E       AssertionError: assert 'complete' == 'error'
+```
+
+**M2 — `stored = len(findings)` with the `db.add_finding` call removed** (the exact "counted, never
+written" shape Q-044's zero was). Killed by exactly the two positive-control tests:
+
+```
+FAILED ...::test_a_real_source_tree_lands_canonical_findings_in_the_findings_table
+FAILED ...::test_the_stored_rows_are_findable_by_the_query_that_reported_zero
+E       assert 0 == 3
+```
+
+M2 is the important one: it is the mutant a suite that only tests the analyser cannot see, and it is
+the reason the positive control asserts against `db.get_findings` rather than against the returned
+count.
+
+The strict xfail pins §7 as executable evidence. When the patch lands it XPASSes, the suite goes red,
+and the marker has to be removed deliberately.
