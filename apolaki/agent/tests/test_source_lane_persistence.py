@@ -218,16 +218,13 @@ def test_an_absent_source_root_stores_nothing_and_is_not_an_error(monkeypatch):
 # 3. MEASURED LATENT DEFECT -- `stored_findings` can count a finding that is NOT stored
 # ══════════════════════════════════════════════════════════════════════════════════════
 
-@pytest.mark.xfail(strict=True, reason=(
-    "MEASURED 2026-08-18 on the report of mission 2fb87a3a: 715 of its 716 source-derived findings "
-    "render a 'Reproduction (copy-paste)' block containing "
-    "`curl -i -sS -k --path-as-is 'java/org/owasp/benchmark/testcode/BenchmarkTestNNNNN.java'` -- a "
-    "request against a FILE PATH, for a proof kind `proof_schema` defines as having no request 'even "
-    "in principle'. `report.finding_curl` (report.py:991) derives a command from `target` with no "
-    "proof-kind check, so the DAST semantics the evidence contract keeps out of the STORE walk back "
-    "in through the RENDERER. Both renderers already treat '' as 'omit the block' "
-    "(report.py:491, report.py:2582), so the fix is local and needs no renderer change. "
-    "Patch in docs/handoff/source_proof.md."))
+# Q-082 CLOSED 2026-08-19 -- the strict xfail this test carried has been removed BY DESIGN, which is
+# what the pin was for (see this module's docstring, point 3: "a fix makes the suite go red and the
+# marker has to be removed deliberately"). The measured defect was worse than the pin recorded:
+# 716 of 716 markdown findings, and 4 of 4 HTML cards, carried the fabricated request. The fix lives
+# in `report.finding_curl` (a `proof_schema.proof_kind` check) plus a `Where in the code` block in
+# BOTH renderers -- the pin's note that "the fix is local and needs no renderer change" was right
+# about the false claim and wrong about what replaces it. Full evidence: docs/handoff/reproduction.md.
 def test_a_source_derived_finding_gets_no_curl_reproduction():
     import report
     assert report.finding_curl(dict(CANONICAL)) == "", (

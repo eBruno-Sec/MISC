@@ -482,14 +482,18 @@ def generate_report(program: str, findings: list, scope: dict,
             lines += ["", "**Why This Matters (plain English)**", "",
                       f"_What it is:_ {_bi[0]}", "", f"_If left unpatched:_ {_bi[1]}", ""]
         lines += ["", "**Steps to Reproduce**", ""]
-        _rsteps = f.get("reproduction_steps") or ["Send the reproduction command below.",
-                                                  "Confirm the response matches the evidence.",
-                                                  "Compare with a benign baseline."]
+        _rsteps = reproduction_steps_for(f)
         for j, step in enumerate(_rsteps, 1):
             lines.append(f"{j}. {step}")
+        # Q-082: a source-derived finding gets the COORDINATE it was read at, never a request to
+        # replay. `finding_curl` returns "" for that proof kind, so the two branches are mutually
+        # exclusive by construction rather than by a second, drifting classification here.
         _curl = finding_curl(f)
+        _loc = source_location(f)
         if _curl:
             lines += ["", "**Reproduction (copy-paste)**", "", "```bash", _curl, "```", ""]
+        elif _loc:
+            lines += ["", "**Where in the code**", "", f"`{_loc}`", "", _SOURCE_LOCATION_NOTE, ""]
         _impact = str(f.get("impact") or "").strip() or (_bi[1] if _bi else
                   "Impact depends on how the affected input is used downstream; verify reachability.")
         lines += ["", "**Impact**", "", _impact, ""]
@@ -990,9 +994,24 @@ def clean_ai_text(text: str) -> list:
 
 def finding_curl(finding: dict) -> str:
     """A copy-paste reproduction command for a confirmed finding, from a captured
-    request if present, else derived from the target URL (and method/body)."""
+    request if present, else derived from the target URL (and method/body).
+
+    Q-082 — THE PRESENTER IS BOUND BY THE SAME CONTRACT AS THE STORE. A source-derived finding has
+    no request, *even in principle* (`proof_schema.SOURCE_DERIVED`); its `target` is a FILE PATH, not
+    a URL. Deriving a command from it manufactures a request for a proof kind that cannot have one —
+    exactly what `main._canonical_source_finding` fails closed to keep out of reports, arriving
+    through the RENDERER instead of the WRITE. Measured on mission `2fb87a3a`: 716 of 716 markdown
+    findings and 4 of 4 HTML cards carried a fabricated `--path-as-is` curl against a Java file.
+    A guard at the store does not bind the presenter, so the check lives here too.
+
+    The producer's own `curl` is still checked FIRST, and deliberately: a SAST lead later confirmed
+    by a real probe carries a real artifact, and suppressing it from its label rather than from the
+    facts would be the mirror of the bug (`proof_schema.control_status` documents the same door)."""
     if str(finding.get("curl") or "").strip():
         return finding["curl"].strip()
+    import proof_schema as _ps
+    if _ps.proof_kind(finding) == _ps.SOURCE_DERIVED:
+        return ""
     target = str(finding.get("target") or finding.get("surface") or "").strip()
     if not target:
         return ""
@@ -1006,6 +1025,54 @@ def finding_curl(finding: dict) -> str:
         parts.append(f"--data '{body}'")
     parts.append(f"'{target}'")
     return " ".join(parts)
+
+
+#: What a source-derived finding hands the reader INSTEAD of a request: the coordinate to open.
+_SOURCE_LOCATION_NOTE = ("This finding was derived by reading source, not by sending a request — there "
+                         "is no HTTP transaction to replay. Open the file at the line above and read "
+                         "the call site; the false-positive control that applies is the rule-level "
+                         "counter-example, stated below.")
+
+
+def source_location(finding: dict) -> str:
+    """`file:line` for a source-derived finding, `file` when the line is unknown, `''` otherwise.
+
+    Q-082: the replacement for the fabricated curl, not merely its removal. A fix that deleted the
+    reproduction block and put nothing there would trade a false claim for a useless report. The
+    coordinate is read from the finding's OWN fields (`file`, else `target`/`surface`, plus `line`) —
+    all 716 stored source findings carry both `file` and `line`, so nothing is invented; a finding
+    missing `line` degrades to the path rather than guessing a number."""
+    import proof_schema as _ps
+    if _ps.proof_kind(finding) != _ps.SOURCE_DERIVED:
+        return ""
+    path = str(finding.get("file") or finding.get("target") or finding.get("surface") or "").strip()
+    if not path:
+        return ""
+    line = finding.get("line")
+    try:
+        n = int(line)
+    except (TypeError, ValueError):
+        return path
+    return "%s:%d" % (path, n) if n > 0 else path
+
+
+def reproduction_steps_for(finding: dict) -> list:
+    """The steps a renderer prints, with a fallback that matches the finding's PROOF KIND.
+
+    The generic fallback tells the reader to "send the reproduction command below" — a dangling
+    instruction on a source-derived finding once Q-082 removes the command. The heading is a claim
+    and so is the step list; both renderers read this one function so they cannot disagree."""
+    steps = [str(s) for s in (finding.get("reproduction_steps") or []) if str(s).strip()]
+    if steps:
+        return steps
+    loc = source_location(finding)
+    if loc:
+        return ["Open %s" % loc,
+                "Read the call site — no runtime observation is required, and none was made",
+                "Confirm the rule's counter-example (the sibling clean call site) is absent here"]
+    return ["Send the request shown in the reproduction command below.",
+            "Observe the confirming response in the evidence block.",
+            "Compare against a benign baseline to rule out a false positive."]
 
 
 def proof_provenance(f: dict) -> str:
@@ -2534,11 +2601,9 @@ def generate_html_report(program: str, findings: list, scope: dict,
         fam = _family_of(f)
         impact = str(f.get("impact") or "").strip() or (business_impact(f)[1] if business_impact(f) else
                  "See technical detail; impact depends on how the affected input is used downstream.")
-        rsteps = f.get("reproduction_steps") or []
-        if not rsteps:
-            rsteps = ["Send the request shown in the reproduction command below.",
-                      "Observe the confirming response in the evidence block.",
-                      "Compare against a benign baseline to rule out a false positive."]
+        # Q-082: proof-kind-aware fallback, shared with the markdown renderer so the two deliverables
+        # cannot give different answers to "how do I reproduce this".
+        rsteps = reproduction_steps_for(f)
         steps = "".join(f"<li>{e(str(s))}</li>" for s in rsteps)
         ev = f"<h4>Evidence</h4><pre class='ev'>{e(str(f.get('evidence','')))}</pre>" if f.get("evidence") else ""
         # raw proof artifacts (request/response/tool log/timing) — the hard proof
@@ -2579,7 +2644,14 @@ def generate_html_report(program: str, findings: list, scope: dict,
         _ev_txt = str(f.get("evidence", ""))
         dom_confirmed = ("dom" in (f.get("tags") or [])) or ("Chromium" in _ev_txt) or ("rendered" in _ev_txt.lower())
         curl = finding_curl(f)
-        if not curl:
+        _loc = source_location(f)
+        if not curl and _loc:
+            # Q-082: the client-facing artifact gets the same treatment as the markdown one. This was
+            # once a markdown-only section and the HTML deliverable went without; a half fix here is
+            # the half a client actually reads.
+            curl_html = (f"<h4>Where in the code</h4><pre class='ev'>{e(_loc)}</pre>"
+                         f"<p class='sub'>{e(_SOURCE_LOCATION_NOTE)}</p>")
+        elif not curl:
             curl_html = ""
         elif dom_confirmed:
             curl_html = (f"<h4>Supplemental request (page load only — not the proof)</h4>"
