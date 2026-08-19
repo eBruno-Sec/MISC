@@ -1325,34 +1325,40 @@ Released files: `agent/tools.py` · `agent/cmdi_tool.py` · `agent/xss_tool.py` 
 **LEASED TO CODEX: Q-040 + B-010** from `aa8e26a`. `agent/sqli_tool.py` and its tests, plus all new
 Juliet paths, are Codex's until it returns. Claude does not spawn or resume into them.
 
-## Q-044 · The code-assisted lane is BENCHMARK-ONLY — 61.1% is not reachable in an engagement · **HIGH** · `ready`
+## Q-044 · The code-assisted lane · **HALF CLOSED** - wired since filing, still UNPROVEN in a mission · **HIGH** · `ready`
 
-**MEASURED 2026-08-13.** `codeintel.review_source_tree()` — the Java+Python call-site analyser that
-scores **crypto 100% / hash 100% / weakrand 100% at 0.0% FPR**, and the entire difference between the
-Java DAST-only 41.7% and the hybrid 61.1% — has **exactly one caller: `owasp_bench.py:231`.**
+Re-measured 2026-08-18 by the Coordinator before starting work, because five tickets this week were
+wrong in scope or existence. **Three of this ticket's four core claims are now FALSE.** It was wired
+by another lane without the ticket being updated.
 
-- `source_root` / `source_path` / `--source` appear **nowhere** in `agent/main.py` or `agent/agent.py`.
-  A mission cannot supply a source tree.
-- `GET /codereview?path=` exists and IS production-reachable, but it calls
-  `codeintel.review()` — the **older, different** general static review, not `review_source_tree()`.
-- No UI control, API parameter or planner step invokes the SAST lane.
+| the ticket said | measured now |
+|---|---|
+| `review_source_tree` has exactly ONE caller, `owasp_bench.py:231` | FALSE - also `main.py:427`, via `_run_source_review` |
+| `source_root` appears NOWHERE in `main.py` | FALSE - **10 occurrences**, including a request-model field at `main.py:106` |
+| no API parameter invokes the SAST lane | FALSE - `main.py:620` calls `_run_source_review(session_id, req.source_root)` from the engage path |
+| `/codereview` calls the OLDER `codeintel.review()` | **STILL TRUE**, and `POST /mission/{id}/codereview` likewise calls `codereview.review()` |
 
-**So the hybrid figure describes a capability no client engagement can currently invoke.** The number
-is real and honestly measured; the path to it is benchmark-only. That is the island pattern for the
-sixth time — after `chase_capability` returning `[]`, `untested("service")` empty by construction,
-the graph planner executing nothing, `run_zap` never called in 150 missions, and `recon["zap"]` as a
-dead write.
+The evidence contract is composed too: `_canonical_source_finding` (`main.py:392`) **fails closed**
+before a source result can enter reports under DAST semantics, requiring `provenance=source-derived`,
+`lane=code-assisted`, `analysis=static-call-site`.
 
-**Until this is wired, 61.1% must be described as a harness capability, not a product capability** —
-the same distinction the ledger already enforces between the 41.3% harness number and the
-2-findings whole-product number. Both ledgers and STATUS are being annotated accordingly.
+**WHAT IS STILL OPEN, and it is the half that matters.** The ticket's own DoD is "prove it with a real
+mission that produces a source-derived finding, not a harness call". Measured against the live DB:
 
-**The ticket**: give `review_source_tree` a production entry point — a mission-level source input
-and/or routing `/codereview` to it when the tree is Java/Python — and prove it with a real mission
-that produces a source-derived finding, not a harness call. Note it must compose with the proof
-gate: `proof_kind()` already returns `SOURCE_DERIVED` and `control_status()` already returns
-`NOT_APPLICABLE` for these, so the evidence contract is ready and waiting for a producer.
+```
+POSITIVE CONTROL findings scanned: 1057   (113 missions)
+provenance=source-derived: 0
+lane=code-assisted:        0
+```
 
+**The path exists and has never carried a finding.** So the correct state is HALF CLOSED, not closed:
+the wiring defect this ticket was filed for is fixed, and the capability claim it guards is still
+undemonstrated. **61.1% remains a HARNESS figure until one real mission produces a stored
+source-derived finding.**
+
+Closing this on the wiring alone would be the island pattern applied to the ticket ABOUT the island
+pattern: code that exists, is reachable, and has never run. DoD unchanged - run a mission with
+`source_root` against a Java or Python tree, and record the mission id and the finding.
 ## Q-043 · Apolaki does not honour `Retry-After` — and the Coordinator asserted that it did · **HIGH** · `ready`
 
 **MEASURED by Codex lane 4**: with `Retry-After: 2` returned by the target, both concurrency widths
