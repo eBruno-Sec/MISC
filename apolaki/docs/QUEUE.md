@@ -366,7 +366,7 @@ non-islands in an allowlist that states WHO calls them and from where. **The all
 caller** - an unexplained allowlist entry is how a gate becomes decorative, which is the defect this
 whole line of work exists to prevent.
 
-### Q-077 · A COMMENT mentioning a function makes it look alive to the dead-code gate · **HIGH** · `ready`
+### Q-077 · A COMMENT mentioning a function makes it look alive to the dead-code gate · **HIGH** · **CLOSED** `1a6de59`
 
 Found by the postMessage lane while clearing an island the gate had flagged. **The gate under counted
 its own finding.**
@@ -391,7 +391,7 @@ Related and already closed: Q-075 fixed the same file printing a slice instead o
 the other half, and the two together mean the gate was both mis reporting WHICH entries changed and
 missing entries entirely.
 
-### Q-076 · `test_proof_gate_reach` has 3 slack and names ZERO of its findings · **HIGH** · `ready`
+### Q-076 · `test_proof_gate_reach` has 3 slack and names ZERO of its findings · **HIGH** · **CLOSED** `b092a18`
 
 Found by the Q-075 anti-idle audit, and it is the worst instance of the count-instead-of-delta shape
 still live.
@@ -482,7 +482,7 @@ built in one `_run` are used by the next. **The semantics the tests were written
 unchanged; only the dependency on ambient global state is gone.** The last direct
 `asyncio.get_event_loop()` caller in the file was routed through the same helper, so there is one
 loop policy in the file instead of two.
-### Q-071 · The Q-022 fix reports "no control recorded" on the ONLY findings that have one · **HIGH** · `ready`
+### Q-071 · The Q-022 fix reports "no control recorded" on the ONLY findings that have one · **HIGH** · **CLOSED** `b2b5051`
 
 Found by the tail sweep, **independently re-measured by the Coordinator against the live database**
 before filing, because it accuses a shipped fix:
@@ -610,7 +610,7 @@ tested" from "tested, found nothing" — and "failed 10 ways" from "failed once"
 same ladder. DoD: an error COUNT at minimum, ideally a small histogram of distinct messages, without
 inflating the note into a wall of text.
 
-### Q-068 · The same target yields DIFFERENT report evidence depending on the image · **MEDIUM** · `ready`
+### Q-068 · The same target yields DIFFERENT report evidence depending on the image · **MEDIUM** · **CLOSED** `1ec46fc`
 
 Found by the Q-059 rebuild, and it is the kind of thing only a rebake could reveal. `run_metadata`
 prefers `exiftool` when installed and falls back to a native pure-python reader. Both are correct and
@@ -698,7 +698,7 @@ class, the class fills with noise and stops being read — the fate of every ala
 Recorded because it nearly went the other way: "failed 10 of 10 dispatches" is a far more exciting
 ticket than the true one, and would have sent someone to fix an engine that works.
 
-### Q-061 · The tool ledger records a WRAPPER's declaration, not the fact of dispatch · **CRITICAL** · `ready`
+### Q-061 · The tool ledger records a WRAPPER's declaration, not the fact of dispatch · **CRITICAL** · **CLOSED** `5c466a2`
 
 **This is the instrument every arsenal-coverage number is computed from, and it measures the wrong
 thing.** Independently verified by the Coordinator: `Tools.execute()` (`agent/tools.py:1227`) resolves
@@ -745,7 +745,7 @@ Meanwhile the browser world is emphatically NOT idle, and the report should say 
 cross-user finding; `run_dom_trace` 20 calls, `run_dom_audit` 18, `run_client_checks` 12,
 `run_js_review` 20 findings.
 
-### Q-063 · The Arsenal SUMMARY merges "errored" into "ran and found nothing" · **MEDIUM** · `ready`
+### Q-063 · The Arsenal SUMMARY merges "errored" into "ran and found nothing" · **MEDIUM** · **CLOSED** `4d3b51d`
 
 The per-tool table is honest and renders FAILED/SKIPPED correctly; the summary line above it is not.
 An engine that ERRORED is counted as silent, i.e. as a clean result. That is the same
@@ -812,14 +812,14 @@ discipline as Q-042/Q-046/Q-051: stamp the dispatch name onto the finding when i
 compare like with like. Note this interacts with Q-061 — fix that first, since it changes what the
 ledger contains.
 
-### Q-065 · `run_jwt` never fires on a JWT-authenticated target that the platform itself flagged · **MEDIUM** · `ready`
+### Q-065 · `run_jwt` never fires on a JWT-authenticated target that the platform itself flagged · **MEDIUM** · **CLOSED** `c04c13b`
 
 The mission's own autonomy loop wrote *"next-best actions: ... weak_secret_forgery"* while `run_jwt`
 was never dispatched against a target authenticating with JWTs. **The ranking model and the dispatch
 vocabulary do not meet** — the planner can name a technique it has no route to execute. That is the
 effects-model gap in its clearest form and is a better first case than the other 14 in class B3.
 
-### Q-060 · Two engines cannot test ANY target on a non-standard port · **HIGH** · `ready`
+### Q-060 · Two engines cannot test ANY target on a non-standard port · **HIGH** · **CLOSED** `3dca74c`
 
 MEASURED live, root-caused, and reproduced deterministically in isolation by the arsenal lane. Both
 engines were DISPATCHED, so this is not a planner gap:
@@ -850,7 +850,7 @@ of auditing the pinned origin across the entire lab fleet. Capabilities lost wit
 `agent/engine_descriptor.py:135-139`: `tls_posture`, `cookie_scope_posture`, `http_security_headers`,
 `http_methods_audit`. Fix at the caller by carrying the scheme+port through, not by widening scope.
 
-### Q-058 · Four defects the description gate surfaced, in `tools.py` · **MEDIUM** · `ready`
+### Q-058 · Four defects the description gate surfaced, in `tools.py` · **MEDIUM** · **CLOSED** `552215e`
 
 Blocked only on lane ownership of `tools.py`; all four are mechanical and none is a description edit
 (rewording the claim to fit the code is the same defect wearing a different hat).
