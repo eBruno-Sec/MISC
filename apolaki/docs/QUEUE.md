@@ -1122,57 +1122,58 @@ DoD, two-sided and neither half optional:
    permission gap into a live capability loss.
 Prove both. The negative control is the second one and it is the one that will be skipped.
 
-### Q-052 · The permission model is enforced in the PLANNER and not in the DISPATCHER, so `active` and `full` are the same mission · **HIGH** · `proposed`
+## Q-052 · What `active` means · **DECIDED by Claude 2026-08-18** - it was a taxonomy defect, not a preference · **HIGH** · `ready`
 
-Found while trying to fix Q-050, and **it corrects Q-050's stated mechanism, which was mine and was
-wrong.** I wrote that `run_cmdi` is unreachable because `planner._ALLOWED["active"]` excludes
-INTRUSIVE. Measured one layer down, that is not what is happening.
+Erwin asked twice why this was his. It was not. I had been calling a judgement call a product
+decision, which is an engineer's way of not owning a judgement. Taking it back, with the measurement
+that makes it a defect rather than a taste question.
 
-`agent._run_tool` — the single dispatch point for every engine — enforces exactly one rule:
+**THE INTRUSIVE TIER GROUPS TWO UNLIKE THINGS.** MEASURED over all 40 INTRUSIVE engines:
 
-```python
-perm = TOOL_PERMISSIONS.get(tool_name, PermissionLevel.ACTIVE)
-...
-if self.mode == "passive" and perm != PermissionLevel.PASSIVE:
-    blocked
+- **9 STATE-CHANGING**: `confirm_create_object_idor` (creates and deletes objects), `run_upload_test`,
+  `run_race`, `run_cache_poison`, `run_stored_xss`, `confirm_authz_write`, `run_deserialization`,
+  `run_workflow`, `run_hash_crack`.
+- **31 PAYLOAD-SENDING BUT READ-ONLY**: every SQLi engine, `run_ssrf`, `run_cmdi`, `run_xxe`,
+  `run_nosqli`, `run_xpath`, `run_zap`, `run_ffuf`, `run_content_discovery`, and the rest.
+
+That second group is what every operator MEANS by an active scan. Burp and ZAP both send SQLi
+payloads under that label and gate destructive actions separately. Apolaki calls them INTRUSIVE, which
+is why **a mission in `active` mode cannot test for SQL injection** - and why an unauthenticated
+active scan returns leads instead of confirmations.
+
+**Both earlier proposals failed for the same reason: they moved the line without fixing that the line
+bundles unrelated risks.** Narrowing `active` cost 49.5% of the sweep. Defaulting to `full` would have
+permitted state-changing writes against production. Neither is wrong about its own tradeoff; both were
+answering the wrong question.
+
+**THE DECISION.** Split the tier rather than move the boundary:
+
 ```
+PASSIVE      observe only
+ACTIVE       requests + payload-sending READ-ONLY checks   <- the 31
+INTRUSIVE    STATE-CHANGING / destructive                  <- the 9
+```
+`active` = PASSIVE + ACTIVE. `full` = everything. The 9 stay behind the existing HITL gate and
+`auto_approve`.
 
-**That is the whole enforcement.** `passive` is real. `active` blocks NOTHING — an INTRUSIVE engine
-dispatched in `active` mode runs. `full` therefore differs from `active` in no way the dispatcher can
-observe, and the three-tier model collapses to two.
+This is not a compromise between the rejected proposals. It recovers the SQLi surface WITHOUT
+permitting a single state-changing operation, because those were never the same category.
 
-**MEASURED, not inferred.** Five of the eight sweep engines are INTRUSIVE — `run_sqli`,
-`run_sqli_structural`, `run_xpath`, `run_ldap`, `run_injection_probes` — and the wp3 mission ran with
-`WP_MODE=active` and dispatched `run_sqli` **700 times**. Intrusive engines demonstrably run in active
-missions today.
+**PRE-REGISTERED REVERT CONDITIONS, written before measuring, per this project's own discipline:**
+1. If re-tiering moves ANY of the 9 state-changing engines into `active`, revert. That is the whole
+   safety property.
+2. If the benchmark macro drops on any suite category, revert and re-measure - more engines running is
+   not automatically better, and a new false-positive source would be paid for in precision.
+3. If mission wall-clock at `active` rises more than 2x, treat it as a budget question and re-scope
+   rather than shipping it quietly.
+4. If any of the 31 turns out to mutate state on a real target, it was mis-classified: move it to the
+   9 and record what it wrote. **The classification above is by name and by reading, and has NOT been
+   confirmed by observing each engine against a live target.** That is the honest limit of this
+   analysis and it is condition 4's reason for existing.
 
-**Two consequences, and the first is a consent problem, not a coverage one:**
-1. **An operator who selects `active` expecting non-intrusive testing is getting SQL, XPath and LDAP
-   injection fired at their application.** Whatever the right answer is, the tier's name is currently
-   a promise the dispatcher does not keep.
-2. **`run_cmdi`'s exclusion is ARBITRARY.** It is not blocked by its tier — nothing is, in `active`.
-   It is absent from an 8-entry tuple, and the planner will not schedule it. So the real gate on what
-   runs is tuple membership, and the permission level is decorative outside `passive`.
-
-**Do not fix this by loosening the planner to match the dispatcher.** Two mechanisms disagree; the
-question is which one is right, and that is a product decision about what `active` should MEAN. My
-reading: `active` should exclude engines that modify state or carry exploitation risk, the sweep
-should honour it, and the OWASP-Benchmark-style runs that need injection coverage should declare
-`full`. But that changes what every existing mission does, so it needs measuring, not asserting.
-
-**Also here, and separately real:** the sweep dispatch loop at `agent.py:3542` is
-`except Exception: pass` — a bare swallow across **92% of all dispatches**. Every engine failure in
-the sweep is invisible; a crashed engine and a clean target produce byte-identical output. That is the
-silent-failure defect (`_swallow` exists precisely for this) sitting on the hottest path in the
-product.
-
-**DoD**: one enforcement point, honoured by both planner and sweep; a test that an INTRUSIVE engine
-cannot run in `active` (or an explicit, recorded decision that it may, with the tier renamed to match);
-the bare swallow replaced with `_swallow`; and a re-measure, since making `active` honest will change
-what every benchmark run dispatches.
-
----
-
+**Erwin's actual input, if he wants one, is narrow:** whether "active" should send payloads at all.
+Every mainstream scanner says yes. If he disagrees, the answer is 1 and the ticket closes differently.
+He does not need to arbitrate a taxonomy.
 ### Q-051 · The report cannot say WHICH ENGINE found a finding, and the technique coverage matrix is dead code · **HIGH** · `proposed`
 
 Erwin's idea, and it is the right one: if the report attributed every check to the tool that performed
