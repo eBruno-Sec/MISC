@@ -150,3 +150,93 @@ More importantly: the guard checks that a declared engine is **registered and im
 cannot check that the declared effect is **true**. A negative effect declared on `run_sqli` would
 pass every one of these tests. Only a measurement can reject that, which is why section 3 exists and
 why the entry must never be extended on reasoning alone.
+
+---
+
+## 3. THE RECORDED ENTRY IS TRUE - reproduced INDEPENDENTLY, on the shipped lab
+
+DoD item 1: verify the entry against measurement, not against run 2's description of it. Run 2
+measured this against a throwaway lab it built in its own scratchpad, which is gone with the session.
+So this is not a re-read of run 2's output; it is a second measurement on a **different fixture**,
+and the fixture is not invented - it is the SHIPPED `sessionlife` lab (`labs/sessionlife/app.py`,
+compose service `sessionlife`), whose `/secure` mount already carries both behaviours in its own
+header comment:
+
+```
+/secure   logout_invalidates: True   -> the server DELETES the session record
+/secure   change_evicts:      True   -> a password change EVICTS every other session
+```
+
+Both are that lab's documented SECURE half, and both are what a real application does.
+
+MEASURED, probe `p2_race_kill.py`, driving the shipped `_add_urls` and the shipped `_run_race`:
+
+```
+HALF 0 -- POSITIVE CONTROL: the instrument CAN observe a session dying
+  freshly logged in                 : (200, True)
+  after a direct logout of that cred: (401, False)
+  NEGATIVE CONTROL, invented cookie : (401, False)
+
+HALF 1 -- the quarantine that DOES work (the door _SESSION_KILL_RE guards)
+  _SESSION_KILL_RE matches logout path: True
+  logout in tr.urls (probe surface)   : False   <- must be False
+  logout in tr.session_kill_urls      : True    <- must be True
+  /api/me reached the surface         : True    <- POSITIVE CONTROL
+
+HALF 2 -- the SECOND door: recon['forms'], which NO session-kill filter guards
+  recon['forms'] entries              : [{"action": ".../secure/api/logout", "method": "POST",
+                                          "fields": ["csrf"], "page": ".../secure/"}]
+  session_headers BEFORE              : {'Cookie': 'slsid=3fc1bf79ffc5465aaae7274966208c6b'}
+  mission /api/me BEFORE run_race     : (200, True)
+  run_race ok=True findings=1
+  mission /api/me AFTER  run_race     : (401, False)
+  tr.session_headers UNCHANGED        : {'Cookie': 'slsid=3fc1bf79ffc5465aaae7274966208c6b'}
+
+HALF 3 -- NOT an artifact of that regex: a form the regex CANNOT match
+  _SESSION_KILL_RE matches change-password: False
+  session A (raced with)  /api/me BEFORE: (200, True)
+  session B (a persona)   /api/me BEFORE: (200, True)
+  run_race ok=True findings=0
+  session A               /api/me AFTER : (200, True)
+  session B (the persona) /api/me AFTER : (401, False)   <- the loss
+  tr2._sessions STILL RECORDS IT        : {'persona_b': {'Cookie': 'slsid=2820460c...'}}
+  authenticated derivable (bool _sessions): True
+
+HALF 4 -- NEGATIVE CONTROL: same engine, same probe, a mount that does NOT evict
+  /vuln change_evicts=False
+  session A /api/me BEFORE: (200, True)  session B BEFORE: (200, True)
+  run_race ok=True findings=0
+  session A /api/me AFTER : (200, True)  session B AFTER : (200, True)
+```
+
+**VERDICT: the recorded entry is TRUE.** `race_condition` / `run_race` destroys `authenticated`,
+confirmed on a second fixture, through two independent routes, with the negative control on the same
+instrument staying alive.
+
+### 3a. HALF 3 is a stronger result than run 2 got, and it changes what the defect IS
+
+Run 2 measured "the scan is logged out and `session_headers` still holds the dead cookie" - the
+platform's state is SILENT about the loss. HALF 3 measures something worse on the exact derivation
+the platform uses. MEASURED (`agent.py:1394` passes `authenticated=bool(self.tools._sessions)` into
+`technique_planner.derive_observations`):
+
+```
+session B (the persona) /api/me AFTER  : (401, False)      <- the session is DEAD
+tr2._sessions STILL RECORDS IT         : {'persona_b': {...}}
+authenticated derivable (bool _sessions): True             <- the platform says it is ALIVE
+```
+
+**The state is not merely silent, it is WRONG.** `_sessions` is a dict of stored persona headers and
+nothing ever revalidates them, so `bool(_sessions)` stays True over a session the server has
+already destroyed. Every authenticated probe after that point tests as anonymous while the
+observation model reports `authenticated`. That is a self-inflicted false-negative source that looks
+exactly like a clean target.
+
+HALF 3 also breaks the last tie to the adjacent regex defect. `/api/change-password` is not matched
+by `_SESSION_KILL_RE` (measured False) and could not be without disabling the engine on precisely
+the single-use action a race test exists to attack. The negative control in HALF 4 is the same
+engine, the same probe, the same identity, one thing different - the mount's `change_evicts` flag -
+and it leaves both sessions up, so the instrument does not report a kill where there is none.
+
+Two independent routes to the same effect, one of which survives any fix to the quarantine. The
+`invalidates` entry is not a restatement of a fixable bug.
