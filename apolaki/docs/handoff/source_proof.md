@@ -390,7 +390,7 @@ The mission's report was rendered and read. `GET /report/2fb87a3a/md` -> 1,259,3
   `| codeintel.review_source_tree | executed | 1 | 716 | code-assisted (SAST): 716 source-derived finding(s) from 2766 Java/Python source file(s) |`
 * Report Integrity: 10 consistency checks passed.
 
-## 9.2 The defect: 715 of 716 findings carry a FABRICATED HTTP reproduction
+## 9.2 The defect: ALL 716 findings carry a FABRICATED HTTP reproduction
 
 **MEASURED** — from the rendered report:
 
@@ -411,9 +411,14 @@ The finding's own steps say no runtime observation is required, and the very nex
 reader a copy-pasteable curl against a **source file path**. Count of that exact shape in the report:
 
 ```
+$ grep -c -- "--path-as-is" report.md
+716                       # every finding in the mission
 $ grep -c "curl -i -sS -k --path-as-is 'java/" report.md
-715
+715                       # the 716th is 'webapp/js/jquery.min.js' — same shape, different prefix
 ```
+
+(My first pass wrote "715 of 716" off the `java/` prefix alone. Counting the construct instead of the
+prefix gives **716 of 716**. Corrected here rather than quietly.)
 
 `proof_schema.py:197` defines `SOURCE_DERIVED` as *"a static call site; no request exists, even in
 principle"*. `report.finding_curl` (`report.py:991`) derives a command from `target` with **no
@@ -522,3 +527,40 @@ docker exec apolaki-agent-1 python -c "import sqlite3,json; \
 docker run --rm -v "<repo>/apolaki/agent:/app" -w /app apolaki-agent \
   python -m pytest tests/test_source_lane_persistence.py -q
 ```
+
+---
+
+# 11. OBSERVATION from the real tree: the lane reviews vendored, minified third-party bundles
+
+Not asserted as a defect — flagged because it is what the lane does on a REAL source tree, and it is
+the kind of row a client reads first.
+
+**MEASURED** — the single non-Java finding of the 716:
+
+```json
+{"title": "Predictable randomness: Math.random()",
+ "target": "webapp/js/jquery.min.js", "line": 2,
+ "family": "weak_random", "cwe": "CWE-330",
+ "severity": "medium", "confidence": "confirmed",
+ "evidence": "webapp/js/jquery.min.js:2  Math.random()(Math.random())",
+ "oracle": "the source calls Math.random() — a non-cryptographic source, observed at the call site
+            and not merely named"}
+```
+
+A **confirmed medium** against a minified third-party library the operator does not maintain, at
+"line 2" because the whole bundle is line 2.
+
+**What is measured**: the finding exists, the target is a vendored minified bundle, and the lane has
+no filter that would exclude it. `codeintel._SKIP_DIRS` (`codeintel.py:72`) excludes *directories*
+named `node_modules` / `vendor` / `dist` / `build`, and `webapp/js/` is none of those; there is no
+`*.min.js` rule and no vendor-file heuristic anywhere in the walk.
+
+**What is NOT established, and I am not claiming it**: whether this particular `Math.random()` call
+feeds a security-relevant value. Proving it a false positive would mean binding the value's use, which
+is exactly the discipline Q-042 is about, and I did not do that work.
+
+**Why it is worth recording anyway**: it generalises. Any tree carrying a bundled library produces
+these rows, they arrive as `confirmed`, and `severity: medium` with `line: 2` on a file the client did
+not write is the shape that costs a report its credibility. The cheap, honest containment is a
+`*.min.js` / bundled-file exclusion in the walk, or a `third_party: true` marker on the finding — both
+are decisions for the lane's owner, not for this ticket.
