@@ -202,6 +202,33 @@ after ag.intrusive_state='approved': True          (read LIVE, not snapshotted)
 - **Anti-widening.** `test_run_tool_keeps_its_STRICTER_rule` asserts `_run_tool` does NOT consult
   `authenticated_scan` or the shared helper. Naming the union must not loosen the strictest gate.
 
+### MUTATION-KILLED — three mutants, and they kill DISJOINT sets
+
+That the two DoD halves are protected *independently* is the claim; disjoint kill sets are the
+evidence. Each mutant is a full copy of the tree with one edit, run in its own container.
+
+| mutant | edit | killed by |
+| --- | --- | --- |
+| **1** | `refusal = None` — the guard disconnected from `_dispatch_engine` | **11 tests**, all of DoD half 1 plus `test_THE_HOLE_...` |
+| **2** | unknown mode no longer exempt (reads as `passive`) — **the "strictly worse than the hole" mutant** | **11 tests, every one of them a half-2 negative control.** Half 1 still passes. |
+| **3** | `if mode == "active": return "PERMISSION BLOCK..."` — the LITERAL reading of DoD half 1, authorization ignored | **8 tests**, with the auth artery's own `confirm_create_object_idor` dispatch as the witness |
+
+**And mutant 2 does not only break my own file.** Run against the seven existing test files that
+dispatch through `.execute()`:
+
+```
+BASELINE (HEAD + my files):     green, 0 failures
+MUTANT 2 (unknown fails closed):
+  FAILED tests/test_backoff_ledger.py            (6 tests — Q-043's rate-wait accounting)
+  FAILED tests/test_finding_provenance.py        (1 — Q-051's engine binding "reaches storage")
+  FAILED tests/test_ledger_records_dispatch.py   (3 — Q-061's own dispatch ledger)
+  FAILED tests/test_stealth.py                   (1 — the mission stealth profile)
+```
+
+**11 tests across four OTHER lanes' files, none of them about permissions**, break the moment the
+guard fails closed on unknown. That is what "a live capability loss, strictly worse than the hole"
+looks like measured on the existing suite rather than argued in a handoff.
+
 ### Honest limit of the ratchet
 
 `test_every_product_registry_binds_a_mode` reasons per MODULE. `liveness_run.py` holds one bound
