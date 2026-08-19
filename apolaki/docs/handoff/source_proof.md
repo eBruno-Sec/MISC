@@ -88,4 +88,83 @@ while living in the mission's **leads list**, not the findings table. If the run
 
 ---
 
-## STATUS: measurement in progress. Next: run the mission.
+---
+
+# 4. THE ANSWER: **YES.** Mission `2fb87a3a`. The path carries findings.
+
+## 4.1 The mission
+
+Run through the **production `/engage` endpoint** on the live agent — no harness, no test double:
+
+```
+$ curl -s -m 900 -X POST http://localhost:8000/engage -H 'Content-Type: application/json' -d '{
+    "program_name": "Q-044 source-proof code-assisted lane",
+    "in_scope": ["https://owaspbench:8443/benchmark/"],
+    "mode": "active",
+    "strategy": "deterministic",
+    "source_root": "/tmp/q044/BenchmarkJava"
+  }'
+```
+
+**MEASURED** response (49.9 s wall):
+
+```json
+{"session_id":"2fb87a3a","mode":"active","strategy":"deterministic",
+ "source_review":{"status":"complete","lane":"code-assisted","label":"code-assisted (SAST)",
+                  "provenance":"source-derived","source_root":"/tmp/q044/BenchmarkJava",
+                  "files_scanned":2766,"findings":716,"stored_findings":716,
+                  "rejected_findings":0,"error":""},
+ "status":"created","started":false}
+```
+
+The source tree is the **OWASP Benchmark Java v1.2 tree** the ticket named — `src/main` lifted out of the
+`apolaki-owaspbench-1` container (`docker cp apolaki-owaspbench-1:/owasp/BenchmarkJava/src/main ...`) and
+placed at `/tmp/q044/BenchmarkJava` inside the agent container. 2763 `.java` files. It is the *same tree*
+`owasp_bench.scan_source` grades, so this is the tree behind the 61.1% figure.
+
+## 4.2 The query that proves it is STORED
+
+**MEASURED** — inside `apolaki-agent-1`, against the named-volume DB `/app/data/bbh.db`:
+
+```sql
+SELECT count(*) FROM findings WHERE mission_id = '2fb87a3a';
+```
+
+```
+AFTER findings total: 1773  (delta +716)
+findings for mission 2fb87a3a: 716
+provenance=source-derived: 716
+lane=code-assisted:        716
+analysis=static-call-site: 716
+by_cwe:    {'CWE-501': 83, 'CWE-327': 261, 'CWE-330': 219, 'CWE-328': 153}
+by_family: {'trust_boundary': 83, 'weak_crypto': 261, 'weak_random': 219, 'weak_hash': 153}
+```
+
+One stored row, verbatim from the `findings` table:
+
+```json
+{"title": "Trust boundary violation: request data written into the session",
+ "severity": "medium",
+ "target": "java/org/owasp/benchmark/testcode/BenchmarkTest00325.java",
+ "confidence": "confirmed", "family": "trust_boundary", "cwe": "CWE-501", "line": 56,
+ "provenance": "source-derived", "lane": "code-assisted", "analysis": "static-call-site",
+ "oracle": "the value reaching HttpSession.putValue at line 56 is request-derived
+           (request.getHeaders()); this is a dataflow conclusion, not a call-site match --
+           the same sink with a constant is not reported"}
+```
+
+**Q-044's DoD is met.** The code-assisted lane is no longer a path that has never carried a finding.
+
+## 4.3 The §3 hazard did NOT fire — checked, not assumed
+
+`stored_findings` reported 716 **and** the findings table holds 716 rows for that mission. Had the TRUTH
+invariant rerouted them, `add_lead` would have returned truthy ids and `stored_findings` would still have
+read 716 while the table read 0. It reads 716 in **both** places, so nothing was rerouted to leads.
+The hazard stays latent (`add_finding` really does return a truthy id from `add_lead`) but it is not what
+happens to a source finding today, because `_source_finding` stamps `confidence="confirmed"`.
+
+## 4.4 DB side effect, recorded so no later lane is surprised
+
+This mission added **716 rows** to a table that held **1057**. Corpus-wide counts move 1057 -> 1773 and
+`provenance=source-derived` moves 0 -> 716. Any lane re-running the Q-044 baseline query must exclude
+`mission_id='2fb87a3a'` to reproduce the pre-run numbers.
