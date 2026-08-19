@@ -692,6 +692,104 @@ def effects_audit(effects=None, registry=None, implementations=None, routing=Non
     }
 
 
+def wstg_audit(catalog=None, full=None, partial=None, excluded=None, techniques=None) -> dict:
+    """Q-081's predicate, one registry over: can a declared WSTG row REACH a consumer at all?
+
+    `effects_audit` interrogated a declared engine three independent ways and never asked whether the
+    KEY could reach anything, so a row that no consumer would ever read passed its own audit. The
+    fault was not in that one check — it is that a guard can validate a field of a record thoroughly
+    while nothing tests the record's reachability. The WSTG tables have the identical structure and
+    had no such check, so here it is.
+
+    THE CONSUMER, named because it is what makes these facts and not opinions.
+    `wstg_catalog.coverage()` iterates `CATALOG.items()` and buckets each id `if wid in FULL / elif
+    wid in PARTIAL / else` (with `EXCLUDED` supplying the reason). Everything below follows from that
+    one loop:
+
+      * `map_keys_outside_catalog` — a `FULL`/`PARTIAL`/`EXCLUDED` key that is not a `CATALOG` id.
+        `coverage()` never looks it up, so it changes no bucket, no tally and no percentage. It is the
+        `csrf_token_missing` row wearing a WSTG id: a declaration that reads like coverage and does
+        nothing. On `FULL` it is the worse direction, because a reader takes "a deterministic
+        confirming engine exists" from it; on `EXCLUDED` it is a safety refusal about no test at all.
+      * `maps_overlap` — an id in two maps. `coverage()`'s `if/elif` then decides the bucket by
+        STATEMENT ORDER, so the winner is a property of the code's layout rather than of anything
+        anyone declared. Nothing else in the tree records which map is meant to win.
+      * `claimed_ids_outside_catalog` — the technique registry's `wstg` column is a SECOND,
+        independent declaration of the same taxonomy fact, and `routes()` above already resolves
+        `wstg_catalog.FULL[rec["wstg"]]` to derive an engine from it. A claim on an id the catalog
+        does not define can never be confirmed or refuted by anything.
+
+    `claimed_but_unmapped` is REPORTED, not asserted — the same treatment `effects_audit` gives
+    `differs_from_derived_route` and `routing_audit` gives `unrouted`, and for the same reason. It
+    holds techniques that claim a real `CATALOG` id which sits in none of the three maps, so
+    `coverage()` reports "not yet implemented" for a test some technique says it performs. That is
+    worth seeing — it is the UNDER-report mirror of Q-011, which was `FULL` naming a technique id
+    where an engine belonged and over-claiming as a result. But `FULL` is deliberately conservative
+    ("only where a deterministic confirming engine exists"), so a technique's claim is not by itself
+    proof that such an engine exists, and failing on it would punish the more honest catalog. MEASURED
+    at 3 rows, of which two look like the TECHNIQUE record being wrong rather than the catalog. The
+    exact set is pinned in `tests/test_wstg_key_reachability.py` instead, so it can only move
+    deliberately.
+
+    `ok` requires NON-VACUITY: the catalog and the technique table both non-empty and `checked > 0`.
+    A scan over an empty set passes for free, and an unreadable fact table must fail closed rather
+    than report its own failure as a list of findings — the rule `effects_audit` learned when
+    `bool(known)` joined its non-vacuity clause.
+
+    Pure given the five tables; resolves each from the live platform when not supplied."""
+    if catalog is None or full is None or partial is None or excluded is None:
+        try:
+            import wstg_catalog as W
+            catalog = W.CATALOG if catalog is None else catalog
+            full = W.FULL if full is None else full
+            partial = W.PARTIAL if partial is None else partial
+            excluded = W.EXCLUDED if excluded is None else excluded
+        except Exception:
+            catalog = catalog or {}
+            full, partial, excluded = full or {}, partial or {}, excluded or {}
+    if techniques is None:
+        import techniques as T
+        techniques = T.TECHNIQUES
+    cat = set(catalog or ())
+
+    outside, overlap = [], []
+    for label, table in (("FULL", full), ("PARTIAL", partial), ("EXCLUDED", excluded)):
+        for wid in sorted(table or ()):
+            if wid not in cat:
+                outside.append("%s -> %s" % (label, wid))
+    for a_lbl, a_tab, b_lbl, b_tab in (("FULL", full, "PARTIAL", partial),
+                                       ("FULL", full, "EXCLUDED", excluded),
+                                       ("PARTIAL", partial, "EXCLUDED", excluded)):
+        for wid in sorted(set(a_tab or ()) & set(b_tab or ())):
+            overlap.append("%s in %s and %s" % (wid, a_lbl, b_lbl))
+
+    mapped = set(full or ()) | set(partial or ()) | set(excluded or ())
+    claimed_outside, claimed_unmapped, checked = [], [], 0
+    for tid, rec in sorted((techniques or {}).items()):
+        wid = (rec or {}).get("wstg")
+        if not wid:
+            continue
+        checked += 1
+        if wid not in cat:
+            claimed_outside.append("%s -> %s" % (tid, wid))
+        elif wid not in mapped:
+            claimed_unmapped.append("%s -> %s" % (tid, wid))
+
+    return {
+        "catalog_size": len(cat),
+        "full_size": len(full or ()), "partial_size": len(partial or ()),
+        "excluded_size": len(excluded or ()),
+        "technique_table_size": len(techniques or ()),
+        "checked": checked,
+        "map_keys_outside_catalog": sorted(outside),
+        "maps_overlap": sorted(overlap),
+        "claimed_ids_outside_catalog": sorted(claimed_outside),
+        "claimed_but_unmapped": sorted(claimed_unmapped),
+        "ok": bool(cat) and bool(techniques) and checked > 0
+              and not (outside or overlap or claimed_outside),
+    }
+
+
 def descriptor(tech: dict, preconditions: dict, always_on: dict, routing: dict = None) -> dict:
     """One engine's full contract, now including HOW IT IS DISPATCHED. Pure.
 

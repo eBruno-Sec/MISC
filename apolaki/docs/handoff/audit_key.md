@@ -337,3 +337,142 @@ absent, and an invented family absent.
 `asvs_model.py` is not this lane's file. Patch in section 9.
 
 ---
+
+## 8. WHAT THIS LANE SHIPPED: `wstg_audit()`, the S4 predicate made permanent
+
+Reporting a defect in a handoff nobody reads again is how S4 would come back. `engine_descriptor.py`
+and new tests are mine to write, and `engine_descriptor` already imports `wstg_catalog` inside
+`routes()`, so the cross-check has a home that does not touch another lane's file.
+
+`engine_descriptor.wstg_audit(catalog, full, partial, excluded, techniques)` — all five injectable so
+the controls need no monkeypatching. THREE HARD FAULTS, each derived from `coverage()`'s one loop and
+each fired deliberately by a control before the shipped zero was allowed to mean anything:
+
+| field | what it catches | why it is inert without it |
+|---|---|---|
+| `map_keys_outside_catalog` | a `FULL`/`PARTIAL`/`EXCLUDED` key that is not a `CATALOG` id | `coverage()` iterates `CATALOG.items()`, so it changes no bucket, tally or percentage |
+| `maps_overlap` | an id in two maps | `coverage()`'s `if/elif` decides the bucket by STATEMENT ORDER; nothing records which map should win |
+| `claimed_ids_outside_catalog` | a technique's `wstg` field naming an id the catalog does not define | `routes()` resolves `FULL[rec["wstg"]]`; a claim on a nonexistent test can never be confirmed or refuted |
+
+and ONE REPORTED field, `claimed_but_unmapped`, deliberately outside `ok` for the reason
+`differs_from_derived_route` and `routing_audit()["unrouted"]` are: `FULL` is conservative by design,
+so a technique's claim is not proof a confirming engine exists.
+
+`ok` also requires non-vacuity — catalog non-empty, technique table non-empty, `checked > 0` — so an
+unreadable fact table fails closed instead of reporting its own failure as 47 findings.
+
+### 8a. The tests failed before the guard existed
+
+```
+tests/test_wstg_key_reachability.py against UNMODIFIED HEAD -> 11 of 12 failed
+  (the one that passed is `test_control_the_fake_id_is_really_absent`, the premise the rest rest on)
+with wstg_audit()                                           -> 12 passed
+```
+
+### 8b. Mutation-killed in BOTH directions, which is the point
+
+A new guard has two ways to be useless, and this project has paid for both. Each mutant was
+grep-confirmed in the source before pytest was allowed to run.
+
+```
+MUTANT A - the REPORTED term wrongly asserted into `ok` (the guard rejects too much)
+  sed 'and not (outside or overlap or claimed_outside),'
+   -> 'and not (outside or overlap or claimed_outside or claimed_unmapped),'     grep 1
+  4 failed: a_clean_table_still_passes, a_newly_added_clean_row_passes_too,
+            the_claimed_but_unmapped_set_is_exactly_the_measured_one,
+            the_reported_list_can_grow_and_still_not_fail_the_audit
+
+MUTANT B - the fault clause neutered (the guard accepts everything)
+  sed 'and not (outside or overlap or claimed_outside),' -> 'and True,'          grep 1
+  5 failed: exactly the five hard-fault negative controls, and nothing else
+```
+
+**Neither the "rejects everything" nor the "passes everything" failure can happen silently.** DoD 2
+asks for the first half specifically, and `test_a_newly_added_clean_row_passes_too` strengthens it:
+the guard accepts a clean row it has never seen, so `ok` is not passing because the shipped tables
+happen to be memorised.
+
+---
+
+## 9. PATCHES FOR FILES THIS LANE DOES NOT OWN. Not applied.
+
+### 9a. The `csrf` re-key (DoD 4) — 1 line of mine + 8 pin sites in 4 files that are not
+
+The EFFECTS line, to go directly after `race_condition` in `agent/engine_descriptor.py`:
+
+```python
+    # Q-081. Same DOOR as `race_condition` above and the same measurement (effects4.md §1-3): all four
+    # engines the `recon["forms"]` loop emits end the mission session on a mount that invalidates on
+    # logout, 4/4 with a clean 4/4 paired control on the `logout_invalidates=False` mount. `run_csrf` is
+    # this technique's ONLY route, so unlike `command_injection` (run_cmdi) and `stored_xss` (run_xss)
+    # there is no primary engine here that lacks the behaviour, and the entry mis-attributes nothing.
+    # It matters MORE than the race row: run_csrf is ACTIVE and run_race is not, so without this the
+    # model records the FULL-mode session killer and omits the DEFAULT-mode one.
+    # WHEN THE FORMS DOOR IS FIXED, RE-MEASURE — this is expected to become false, exactly as the
+    # race row is.
+    "csrf":                    {"establishes": [], "invalidates": ["authenticated"],
+                                "engine": ["run_csrf"]},
+```
+
+The pins it moves, with the measured replacement values so nobody re-derives them
+(`conflicts()` 6 -> 12 rows, producers `{'csrf', 'race_condition'}`, csrf's six consumers identical
+to race's six because both invalidate `authenticated`):
+
+```
+tests/test_effects_negative_half.py:129   negative == ["race_condition"]
+                                       -> ["csrf", "race_condition"]              (it is sorted())
+tests/test_effects_negative_half.py:150   {p for p,_,_ in rows} == {"race_condition"}
+                                       -> {"csrf", "race_condition"}
+tests/test_effects_negative_half.py:149   [c for _,_,c in rows] == AUTHENTICATED_CONSUMERS
+                                       -> AUTHENTICATED_CONSUMERS * 2  (conflicts() sorts by
+                                          producer, so csrf's six precede race's six)
+tests/test_engine_descriptor.py:79        [t for t,e in EFFECTS.items() if e.get("invalidates")]
+                                          == ["race_condition"]   <- INSERTION order, not sorted:
+                                       -> ["race_condition", "csrf"] if appended after it
+tests/test_engine_descriptor.py:80        {t for t,_,_ in cf} -> {"csrf", "race_condition"}
+tests/test_engine_descriptor.py:96        {"fake_rotator", "race_condition"}
+                                       -> {"csrf", "fake_rotator", "race_condition"}
+tests/test_engine_descriptor.py:141       ef["conflict_count"] == len(ef["conflicts"]) == 6  -> 12
+tests/test_engine_descriptor.py:142       {c["technique"] for c in ef["conflicts"]}
+                                       -> {"csrf", "race_condition"}
+tests/test_effects_engine_fact.py:174     {p for p,_,_ in cf} -> {"csrf", "race_condition"}
+tests/test_effects_key_is_a_technique.py:132  {r[0] for r in ed.conflicts()}
+                                       -> {"csrf", "race_condition"}
+```
+
+Unchanged by the patch, MEASURED, so the reviewer knows what should NOT move:
+`build()` 88 descriptors, `chains()` 46 rows, `effects_audit()["differs_from_derived_route"]` still
+the single `sqli_structural` row, `unregistered`/`unimplemented`/`unknown_technique` all empty.
+
+### 9b. `agent/asvs_model.py` — the six `violated_by` families nothing produces (S6)
+
+Each of these makes its objective unable to read `failed`, always in the flattering direction. This
+is the Q-048 defect, and Q-048's own fix is the template: find the family the engine ACTUALLY emits
+and point `violated_by` at that exact string, rather than at the plausible one.
+
+```
+ATHZ-00   "broken_access_control"   -> the producer census has "access_control" and "bfla"
+ATHZ-00,
+ATHZ-02   "privilege_escalation"    -> census has "bfla" (BFLA is the privilege-escalation oracle)
+AUTHN-04  "cleartext_transport"     -> census has "insecure_cookie" / transport families; needs the
+                                       transport-posture producer read before choosing
+COMM-03   "information_disclosure"  -> census has "sensitive_exposure" / "exposure"
+VAL-07    "ldap"                    -> census has "ldap_injection"
+VAL-07    "xpath"                   -> census has "xpath_injection"
+```
+
+**Do not apply this from the table above.** Four of the six have an obvious candidate and two do not,
+and the correct move for each is to read the producer that owns the objective's engine and copy the
+literal it writes — the same discipline that made Q-048's fix correct. The value here is the LIST and
+the measurement, not the guesses.
+
+### 9c. `agent/wstg_catalog.py` / the `wstg` column — the three S4 rows
+
+A lead, not a patch, and deliberately so: two of the three look like the technique record is wrong
+rather than the catalog (`csti` claiming "Cross Site Script Inclusion"; `crlf_injection` claiming
+WSTG-INPV-16 while routing to no engine), and deciding that needs evidence about what `run_dom_audit`
+and the CRLF sweep actually confirm — evidence this lane did not gather. The set is now pinned by
+`test_the_claimed_but_unmapped_set_is_exactly_the_measured_one`, so whichever way it is resolved, it
+moves on purpose.
+
+---

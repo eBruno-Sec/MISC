@@ -64,6 +64,15 @@ before `/run` is ever called. The source lane therefore runs at mission-creation
 require the DAST scan to execute. A real, persisted mission created through the production `/engage`
 endpoint exercises the whole path synchronously.
 
+**STATED LIMIT of this measurement, so nobody reads more into it than is there.** Mission `2fb87a3a`
+was created and its source lane ran to completion; **`POST /run` was never called**, so the DAST half
+never executed and the mission sits at `status=created`. That is sufficient for Q-044's DoD — the lane
+runs *inside* `/engage`, at `main.py:620`, before `/run` exists as an option — and it was a deliberate
+choice: an active scan of 2740 benchmark cases would run for hours against a lab fleet three other
+lanes are using. The report in §5 and §9 renders fine from a mission in this state. What this proof
+does **not** cover is any interaction between the source lane and a DAST pass running in the same
+mission; see §9.3 for the one place that matters.
+
 ## 3. The path, read end to end (static, before running it)
 
 | step | file:line | what must hold |
@@ -86,7 +95,6 @@ from `add_lead` when the TRUTH invariant reroutes a finding. `_run_source_review
 while living in the mission's **leads list**, not the findings table. If the run reports
 `stored_findings > 0` and the findings table still shows 0, this is the boundary.
 
----
 
 ---
 
@@ -234,11 +242,24 @@ non-overlapping classes on the same tree:
   `codeintel.review` reports none of those classes.
 
 So an operator gets a **mutual blind spot** depending on which door they walk through, and neither
-door tells them the other exists. This also explains the 61.1% macro figure without any appeal to
-tuning: the code-assisted lane scores 100% on crypto / hash / weakrand because those are three of its
-four rules, and 0% on every injection category because it has no rule to score with.
+door tells them the other exists.
 
 The 500-item cap on `/codereview` is real but minor — it hides 9 of 509 on this tree.
+
+## 6.1a CORRECTION to an inference I nearly shipped
+
+I first wrote that §6.1 "explains the 61.1% macro figure". **It does not**, and the check that caught it
+is `docs/handoff/breaker.md:562,584`: **61.1% is the HYBRID number — DAST + code-assisted SAST, macro
+over all 11 Java suite categories with trustbound = 0.** The injection categories are scored by the DAST
+half, not by this lane. What is true and measured is narrower: the code-assisted lane's CONTRIBUTION to
+that hybrid is exactly the code-level categories no black-box scanner can observe (crypto / hash /
+weakrand, each at 100%), and the lane has no injection rule at all. A Coordinator citation is a claim,
+not evidence — and so is mine.
+
+**OPEN QUESTION, not investigated, recorded so it is not lost.** The lane emits **83 `trust_boundary`
+(CWE-501) findings** on this tree; `owasp_bench.py:87` maps `"trustbound": {"trust_boundary"}`
+correctly; and `breaker.md:584` records **trustbound = 0** in the official macro. So that zero is **not**
+a vocabulary mismatch. Cause unknown, out of scope for Q-044, and deliberately not guessed at.
 
 ## 6.2 One more Q-044-adjacent claim that is now FALSE
 
