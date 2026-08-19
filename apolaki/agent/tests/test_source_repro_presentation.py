@@ -254,6 +254,63 @@ def test_a_source_derived_finding_that_carries_a_producer_curl_still_wins():
     assert "http://app:8080/x?p=1" in md
 
 
+# --- 4. THE SWEEP: the other two places the presenter asserted a request that never happened -----
+#
+# MEASURED on the same 716 rows, AFTER the curl fix landed:
+#   proof_and_retest()['retest']  -> 716/716 "Operator-driven: re-run the original confirming request"
+#   validation_line()             -> 716/716 "Re-run the exact reproduction above"
+# Both are the Q-082 defect one section lower, and the first is a BOTH-HALVES failure inside a single
+# function: `proof_and_retest` returns two claims, and only `negative_control` was proof-kind-aware.
+
+def test_the_retest_half_of_proof_and_retest_is_bound_to_the_proof_kind_too():
+    pr = report.proof_and_retest(dict(SOURCE_FINDING))
+    assert "re-run the original confirming request" not in pr["retest"].lower(), (
+        "the retest claim still asserts a confirming request that never existed")
+    assert "no replayable http(s) target" not in pr["retest"], (
+        "the retest reason still blames a missing replayable target rather than a missing request")
+    assert "BenchmarkTest00325.java:56" in pr["retest"], "the retest lost the coordinate to re-read"
+    # the OTHER half must be unchanged -- it was already correct
+    assert "NOT APPLICABLE to this proof kind" in pr["negative_control"]
+
+
+def test_validation_after_fix_does_not_tell_the_reader_to_re_run_a_request():
+    v = report.validation_line(dict(SOURCE_FINDING))
+    assert "Re-run the exact reproduction above" not in v
+    assert "BenchmarkTest00325.java:56" in v
+
+
+def test_a_source_derived_finding_in_a_dast_shaped_family_is_still_bound():
+    """`_FAMILY_VALIDATION` is entirely request instructions. A source-derived finding whose family
+    happens to be `sqli` must not be told to re-send a payload -- the proof-kind branch has to sit
+    BEFORE the family map, not after it."""
+    src_sqli = dict(SOURCE_FINDING, family="sqli", cwe="CWE-89")
+    v = report.validation_line(src_sqli)
+    assert "Re-send the confirming payloads" not in v, "the family map overrode the proof kind"
+    assert "call site" in v
+
+
+# NEGATIVE CONTROLS for the sweep: the behavioural texts must be byte-for-byte what they were.
+
+def test_behavioural_findings_keep_their_request_based_retest_and_validation():
+    for fx in (DAST_EXPLICIT_CURL, DAST_DERIVED_CURL):
+        pr = report.proof_and_retest(dict(fx))
+        low = pr["retest"].lower()
+        assert ("re-request" in low or "re-run the original confirming request" in low), (
+            "a DAST finding lost its request-based retest: %r" % pr["retest"])
+        assert "derived by reading source" not in low
+    assert report.validation_line(dict(DAST_EXPLICIT_CURL)).startswith(
+        "Re-send the confirming payloads"), "the sqli family validation text changed"
+    assert "Re-run the exact reproduction above" in report.validation_line(dict(DAST_DERIVED_CURL)), (
+        "the generic behavioural validation text changed")
+
+
+def test_a_producer_supplied_validation_still_wins_over_the_proof_kind_branch():
+    """Same door as the producer `curl`: the presenter constrains what it INVENTS, never what a
+    producer actually stated."""
+    own = dict(SOURCE_FINDING, validation="Run `mvn verify -Pcrypto-lint` and assert zero findings.")
+    assert report.validation_line(own) == "Run `mvn verify -Pcrypto-lint` and assert zero findings."
+
+
 def test_each_source_marker_alone_is_enough_to_suppress_the_command():
     """`proof_schema._SOURCE_MARKERS` classifies on ANY ONE of the three markers, on purpose. The
     presenter must inherit that, not require all three -- a lane adopting part of the vocabulary

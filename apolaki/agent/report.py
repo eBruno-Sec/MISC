@@ -899,6 +899,19 @@ def validation_line(finding: dict) -> str:
     v = str(finding.get("validation") or finding.get("regression_test") or "").strip()
     if v:
         return v
+    # Q-082 sweep: the same defect as the fabricated curl, one section lower. EVERY entry in
+    # `_FAMILY_VALIDATION` is a request instruction ("Re-send", "Replay", "Reload"), and so is the
+    # generic fallback — MEASURED at 716/716 on mission 2fb87a3a: "Re-run the exact reproduction
+    # above" over a finding that has no reproduction above and never had a request. The proof-kind
+    # branch sits BEFORE the family map on purpose: a source-derived `sqli` finding must not be told
+    # to re-send a payload just because its family usually has one. A producer's own `validation`
+    # still wins, above.
+    import proof_schema as _ps
+    if _ps.proof_kind(finding) == _ps.SOURCE_DERIVED:
+        return ("Re-read %s and confirm the call site no longer matches the rule (and that the rule's "
+                "counter-example sibling still does not match it). The fix is proven at the call site, "
+                "not by a request. Add a SAST/lint rule for this sink so the pattern cannot return."
+                % (source_location(finding) or "the call site"))
     return _FAMILY_VALIDATION.get(_family_of(finding),
                                   "Re-run the exact reproduction above and confirm the confirming condition no "
                                   "longer occurs; then add an automated regression test for this input at this sink.")
@@ -1486,6 +1499,7 @@ def proof_and_retest(finding: dict) -> dict:
     before; the routing lives in one function so the surfaces cannot drift apart again.
     """
     import retest as _rt
+    import proof_schema as _ps
     nc = negative_control_claim(finding)["text"]
     rp = _rt.plan(finding)
     if rp.get("retestable"):
@@ -1494,6 +1508,17 @@ def proof_and_retest(finding: dict) -> dict:
                "reflects": "the crafted payload still reflects unencoded"}.get(rp["oracle"], "the oracle still fires")
         retest = "Re-request %s %s: OPEN if %s, CLOSED once the fix removes it (Apolaki auto-retests this)." % (
             rp["method"], rp["url"], how)
+    elif _ps.proof_kind(finding) == _ps.SOURCE_DERIVED:
+        # Q-082 sweep: BOTH HALVES OF THIS FUNCTION MAKE A CLAIM, and only one of them was bound.
+        # `negative_control_claim` above is proof-kind-aware; the retest half was not, so all 716
+        # source findings of mission 2fb87a3a were told to "re-run the original confirming request"
+        # — a request the finding's own `analysis=static-call-site` says never existed. The
+        # parenthetical reason made it worse by naming the cause as a missing *replayable* target,
+        # when the truth is that no request exists even in principle.
+        retest = ("Re-read %s after the fix: CLOSED once the call site no longer matches the rule, "
+                  "and the rule's counter-example sibling still does not match it. There is no "
+                  "confirming request to re-run — this finding was derived by reading source."
+                  % (source_location(finding) or "the call site"))
     else:
         retest = "Operator-driven: re-run the original confirming request + oracle (%s)." % rp.get("reason", "")
     return {"negative_control": nc, "retest": retest}
