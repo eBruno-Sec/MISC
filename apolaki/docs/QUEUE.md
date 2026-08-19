@@ -1086,6 +1086,42 @@ built, which is the same "bind the value at the point it is known" rule as Q-046
 
 ---
 
+### Q-079 · The DISPATCHER enforces no permission tier at all · **HIGH** · `ready` · split out of Q-052
+
+**This was the engineering half of Q-052 and it should never have been bundled with the product
+question.** Q-052 asks what `active` should MEAN to an operator, which is a consent decision. This
+asks where the answer is ENFORCED, which is a defect with a right answer.
+
+MEASURED:
+
+```
+planner._ALLOWED        filters what gets SCHEDULED  (passive={PASSIVE}, active={PASSIVE,ACTIVE})
+agent.py:572 / :674     blocks only when mode == "passive", plus a separate INTRUSIVE HITL gate
+tools.Tools.execute()   NO permission check of any kind
+```
+
+`ToolRegistry.__init__(scope, mission_id, lab_mode, ...)` **does not receive the mission mode**, so the
+dispatcher structurally cannot enforce a tier. That is a missing parameter rather than an oversight,
+and it is why the check lives one level up.
+
+**LATENT, NOT LIVE - and say so rather than dramatising it.** Q-061 established that 10 of 12
+`self.tools.execute(` sites bypass `_run_tool`. All five distinct engines reaching that path are
+ACTIVE: `acquire_session`, `browser_navigate`, `http_probe`, `http_read`, `run_dom_audit`. **Nothing
+INTRUSIVE escapes today.** The hole is one new call site away, which is worth a guard and is not worth
+a panic.
+
+**The design tension, stated because it decides the whole ticket.** There are 4 product construction
+sites and **87 test ones**. A REQUIRED `mode` parameter breaks 87 tests. A DEFAULTED one leaves the
+guard opt-in, and a guard most callers skip is the declaration-not-fact pattern this project has hit
+nine times - the exact thing the guard exists to prevent.
+
+DoD, two-sided and neither half optional:
+1. An INTRUSIVE engine dispatched through `Tools.execute()` in `active` mode is REFUSED, with a reason.
+2. **Every currently-working dispatch still works.** A guard that fails closed on an unknown mode and
+   thereby blocks the 5 ACTIVE engines above is strictly worse than the hole - it converts a latent
+   permission gap into a live capability loss.
+Prove both. The negative control is the second one and it is the one that will be skipped.
+
 ### Q-052 · The permission model is enforced in the PLANNER and not in the DISPATCHER, so `active` and `full` are the same mission · **HIGH** · `proposed`
 
 Found while trying to fix Q-050, and **it corrects Q-050's stated mechanism, which was mine and was
