@@ -359,6 +359,97 @@ def test_run_tool_keeps_its_STRICTER_rule_and_is_not_widened_by_the_shared_helpe
         "_run_tool now uses the UNION rule; that widens the strictest gate in the product")
 
 
+# ── COMPOSITION: a REAL agent over a REAL registry, no fakes on either side ──
+#
+# Every existing `_run_tool` test in the suite drives a `_Tools` stand-in whose `execute` is a
+# recorder (tests/test_permission_tiers.py), so no test has ever proven that the wrapper gate and
+# the dispatcher gate COMPOSE. A guard that only works when called directly is an island.
+
+def _agent_over_real_registry(mode="active", **kw):
+    reg = _registry(engines=UNGATED_PATH_ENGINES + INTRUSIVE_SAMPLES)
+    ag = agent_mod.BBHAgent(_scope(), reg, asyncio.Event(), mode=mode,
+                            strategy="deterministic", mission_id=None, **kw)
+    return ag, reg
+
+
+def _drive_run_tool(ag, tool_name):
+    events = []
+
+    async def run():
+        agen = ag._run_tool(tool_name, {"url": "https://x.t/a"}, "")
+        async for ev in agen:
+            events.append(ev.get("type") or "_content")
+            if ev.get("type") == "approval_required":
+                await agen.aclose()
+                return
+
+    asyncio.run(run())
+    return events
+
+
+def test_THE_HOLE_a_direct_execute_on_a_REAL_agents_registry_is_now_refused():
+    """The eleventh call site, written out. This is what the ticket means by "one new call site
+    away": someone adds `await self.tools.execute("run_upload_test", ...)` beside the nine that
+    already exist, it passes review because its nine neighbours look identical, and it uploads a
+    file to the target in a mission where nobody consented to a state change. Same line, today,
+    against a real agent's real registry."""
+    ag, reg = _agent_over_real_registry(mode="active")
+    res = asyncio.run(ag.tools.execute("run_upload_test", {"url": "https://x.t/a"}, ""))
+    assert _is_refusal(res), (
+        "the hole is still open: a direct dispatch on a real agent's registry ran an INTRUSIVE "
+        "engine with no authorization: %r" % (getattr(res, "error", None),))
+    assert reg.admitted == []
+
+
+def test_the_wrapper_gate_and_the_dispatcher_gate_COMPOSE_on_an_authorised_run():
+    """No double-refusal. An autonomous run pre-authorises the intrusive phase; `_run_tool` converts
+    that into `intrusive_state = "approved"` BEFORE dispatching, and the dispatcher reads the same
+    live state. If the two gates disagreed, an `auto_approve` mission would refuse its own
+    engines."""
+    ag, reg = _agent_over_real_registry(mode="active")
+    ag.auto_approve = True
+    events = _drive_run_tool(ag, "run_upload_test")
+    assert "approval_required" not in events, events
+    assert reg.admitted == ["run_upload_test"], (
+        "an auto_approve mission could not run its own INTRUSIVE engine — the two gates disagree: "
+        "events=%r admitted=%r" % (events, reg.admitted))
+
+
+def test_the_wrapper_still_refuses_FIRST_so_the_dispatcher_is_only_ever_a_backstop():
+    """Ordering, asserted. `_run_tool` must refuse a denied gate before `execute` is reached, so the
+    operator-facing refusal is the wrapper's (which can yield a `scope_block` event the UI shows)
+    and not the dispatcher's silent one."""
+    ag, reg = _agent_over_real_registry(mode="active")
+    ag.intrusive_state = "denied"
+    events = _drive_run_tool(ag, "run_upload_test")
+    assert "scope_block" in events, events
+    assert reg.admitted == [], reg.admitted
+
+
+def test_exec_internal_composes_with_the_dispatcher_on_an_authenticated_scan():
+    """The auth artery's real shape: `authenticated_scan=True`, no HITL gate answered, INTRUSIVE
+    engine. `confirm_authz_write` and `confirm_create_object_idor` run exactly like this today
+    (agent.py:2277, :2302), and losing them is losing the two-user authz matrix."""
+    ag, reg = _agent_over_real_registry(mode="active", authenticated_scan=True)
+    res = asyncio.run(ag._exec_internal("confirm_create_object_idor", {"url": "https://x.t/a"}, ""))
+    assert not _is_refusal(res), (
+        "the auth artery's own INTRUSIVE dispatch was refused by the backstop: %r"
+        % (getattr(res, "error", None),))
+    assert reg.admitted == ["confirm_create_object_idor"]
+
+
+@pytest.mark.parametrize("engine", UNGATED_PATH_ENGINES)
+def test_a_real_agent_at_active_still_runs_every_ungated_ACTIVE_engine(engine):
+    """DoD half 2 at the composition level, over a REAL agent and a REAL registry — the shape the
+    product actually has. The nine direct call sites in `agent.py` dispatch precisely these five."""
+    ag, reg = _agent_over_real_registry(mode="active")
+    res = asyncio.run(ag.tools.execute(engine, {"url": "https://x.t/a"}, ""))
+    assert not _is_refusal(res), (
+        "%s was refused in a real `active` mission: the authenticated re-crawl, the persona logins "
+        "and the DOM audit all stop here. %r" % (engine, getattr(res, "error", None)))
+    assert reg.admitted == [engine]
+
+
 # ── THE RATCHET: the answer to "a defaulted parameter is an opt-in guard" ─────
 #
 # A guard most callers skip is the declaration-not-fact pattern this codebase has hit eleven times.
