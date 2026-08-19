@@ -34,7 +34,9 @@ from urllib.parse import parse_qsl, urlencode, urlparse, urlunparse
 import dns_recon
 import surface as surface_mod
 from scope import PermissionLevel
-from tools import TOOL_PERMISSIONS
+# _SESSION_KILL_RE is IMPORTED, not restated. See `is_session_kill_url` — a second copy of this rule
+# is how one URL came to sit under two contradictory policies, which is the defect Q-080 closes.
+from tools import TOOL_PERMISSIONS, _SESSION_KILL_RE
 
 # per-mode allowed permission tiers
 _ALLOWED = {
@@ -216,6 +218,91 @@ def _step(tool: str, inp: dict, key: str) -> dict:
     return {"tool": tool, "input": inp, "key": key}
 
 
+# ── Q-080: the session-kill quarantine, at the DOOR ──────────────────────────────────────────────
+#
+# `tools._add_urls` keeps a session-destroying endpoint OUT of `tools.urls` and parks it in
+# `tools.session_kill_urls`, where only `_run_session_lifecycle` may reach it — and only with a
+# sacrificial session it minted itself. That quarantine was overruled by every OTHER route from
+# discovered surface to a scheduled step, and there were TWO of them, both fed by the same response
+# body the quarantine had already read:
+#
+#   * `recon["forms"]` — `tools._http_probe` appends every in-scope form action to it, filtered on
+#     `scope.validate` and nothing else, so the URL `_add_urls` had just quarantined re-entered as
+#     probe surface for the form loops below.
+#   * `state["urls"]` — `agent._project_form_params` mints that same form action as a graph ENDPOINT
+#     node, and `agent._graph_primary_state` turns every endpoint node into a planner URL. This one
+#     is worse: it re-admits the URL to EVERY url-driven engine, not to the form loop's four.
+#
+# MEASURED on the running `sessionlife` lab at HEAD 29d00d2, driving the shipped path end to end
+# (raw output in docs/handoff/session_door.md):
+#
+#     mode=full    113 steps, 6 at the logout URL: http_probe x2, run_csrf, run_race,
+#                  run_form_cmdi, run_stored_xss
+#     mode=active  103 steps, 3 at the logout URL: http_probe x2, run_csrf   <- the DEFAULT mode
+#     mode=passive  29 steps, 0
+#
+# and a per-engine census on freshly minted sessions: 6/6 ended the mission session on the mount
+# that invalidates at logout, 0/6 on the paired mount whose ONLY difference is that it does not, and
+# 0/6 on an ordinary change-password form served by the same page. Every one reported success=True,
+# and `session_headers` kept the dead cookie, so every authenticated probe afterwards silently tested
+# as anonymous while the mission went on reporting.
+#
+# WHY THE GUARD IS HERE and not in the four engines, or in a better filter on `recon["forms"]`:
+# `fresh()` is the ONE function every planner-emitted batch passes through, and it filters on the
+# step's TARGET rather than on the state field that produced it. That is what makes it close both
+# measured doors with one predicate, and what makes the engine added next year inherit it.
+#
+# It is deliberately NOT a second copy of the regex. `tools._SESSION_KILL_RE` remains the single
+# definition of "this URL ends a session"; this module imports it.
+_SESSION_KILL_ENTITLED = frozenset({
+    # The one engine that is SUPPOSED to reach a quarantined URL: it mints a sacrificial account and
+    # `tools._session_kill_is_safe` re-checks, as a fact, that the credential it is about to destroy
+    # is disjoint from every live session. The entitlement is named rather than left to the accident
+    # that the planner does not currently schedule it.
+    "run_session_lifecycle",
+})
+# The step-input keys that name a REQUEST TARGET. Same two scalar keys `_addressable` guards, plus
+# `target` (run_nuclei/run_nmap_vuln) and the `urls` LIST that run_js_review/run_saml fetch.
+_TARGET_KEYS = ("url", "base_url", "target")
+_TARGET_LIST_KEYS = ("urls",)
+
+
+def is_session_kill_url(u) -> bool:
+    """True when this URL is a session-destroying action (logout/signout/…).
+
+    The single predicate for the quarantine, built on `tools._SESSION_KILL_RE` so the rule has one
+    definition. Path AND query are tested, because `?action=logout` is as fatal as `/logout`.
+    """
+    if not u or not isinstance(u, str):
+        return False
+    try:
+        p = urlparse(u)
+    except Exception:
+        return False
+    return bool(_SESSION_KILL_RE.search((p.path or "") + ("?" + p.query if p.query else "")))
+
+
+def session_kill_target(step: dict) -> str:
+    """The session-destroying URL this step would request, or "" when there is none.
+
+    Public because `agent._execute_plan` applies the same rule at the executor ingress — steps the
+    graph produces (`_graph_action_steps`) never pass through `fresh()`, so a guard that lived only
+    here would leave that door open.
+    """
+    if (step or {}).get("tool") in _SESSION_KILL_ENTITLED:
+        return ""
+    inp = (step or {}).get("input") or {}
+    for k in _TARGET_KEYS:
+        v = inp.get(k)
+        if isinstance(v, str) and is_session_kill_url(v):
+            return v
+    for k in _TARGET_LIST_KEYS:
+        for v in (inp.get(k) or []):
+            if isinstance(v, str) and is_session_kill_url(v):
+                return v
+    return ""
+
+
 def _addressable(step: dict) -> bool:
     """False when a step carries a `url`/`base_url` that is not an absolute http(s) URL with a host.
 
@@ -341,6 +428,13 @@ def next_batch(state: dict) -> list:
             if k in done or k in seen or not _allowed(s["tool"], mode):
                 continue
             if not _addressable(s):
+                continue
+            # Q-080: a session-destroying target is never scheduled, whichever state field produced
+            # it. `recon["forms"]` and `state["urls"]` both re-admitted URLs that `tools._add_urls`
+            # had quarantined; filtering on the TARGET here closes both with one rule. Dropped
+            # silently on purpose — the planner is pure and records nothing; the executor ingress
+            # (`agent._reject_session_kill_step`) is what makes each refusal visible in the mission.
+            if session_kill_target(s):
                 continue
             seen.add(k)
             out.append(s)

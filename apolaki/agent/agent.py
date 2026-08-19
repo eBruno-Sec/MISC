@@ -3103,7 +3103,8 @@ class BBHAgent:
         # `https:///path`. Anything that cannot be resolved to a host is DROPPED and RECORDED naming
         # the producer — a silently dropped bad URL is the same invisible failure that hid this for
         # weeks, so `_swallow` carries the count and the first offenders into the mission record.
-        eps, _seen, _unresolved = [], set(), []
+        eps, _seen, _unresolved, _quarantined = [], set(), [], []
+        import planner as _planner
         for n in g.nodes("endpoint"):
             u = self._endpoint_url(n.get("key"), bases)
             if not u:
@@ -3111,8 +3112,36 @@ class BBHAgent:
                 continue
             if u in _seen:
                 continue
+            # Q-080. THE GRAPH MAY KNOW A LOGOUT ENDPOINT; THE PROBE SURFACE MAY NOT CONTAIN IT.
+            #
+            # `tools._add_urls` keeps a session-destroying URL out of `tools.urls` and parks it in
+            # `session_kill_urls`. `_project_form_params` then mints that same URL as an endpoint
+            # NODE from the form action, and this loop turned every endpoint node into a planner
+            # URL -- so `kill url in tools.urls` read False while `kill url in state["urls"]` read
+            # True, and the planner aimed http_probe, run_form_cmdi and run_upload_test at it.
+            # MEASURED: emptying `recon["forms"]` (the door Q-080 was filed for) left FOUR steps on
+            # the logout URL standing, all of them arriving through here.
+            #
+            # The node STAYS in the graph. It is a real asset and the world model should hold it --
+            # `run_session_lifecycle` needs a logout URL to exist, and dropping the node would be
+            # the blindness `_add_urls` deliberately avoided when it chose quarantine over discard.
+            # What is refused is its promotion to PROBE SURFACE.
+            if _planner.is_session_kill_url(u):
+                _quarantined.append(u)
+                continue
             _seen.add(u)
             eps.append(u)
+        if _quarantined:
+            try:
+                self.tools._swallow(
+                    ValueError("%d graph endpoint node(s) name a session-destroying action and were "
+                               "NOT promoted to the planner's probe surface (Q-080: probing them with "
+                               "the mission session logs the scan out and every later authenticated "
+                               "probe then silently tests as anonymous). First: %s"
+                               % (len(_quarantined), ", ".join(_quarantined[:3]))),
+                    "graph_primary_state.session_kill_quarantine", _quarantined[0])
+            except Exception:
+                pass
         if _unresolved:
             try:
                 self.tools._swallow(
@@ -3179,10 +3208,20 @@ class BBHAgent:
             nm = pnode.get("label")
             if nm and nm not in slot["fields"]:
                 slot["fields"].append(nm)
+        import planner as _planner
         out = []
         for ep_key, slot in sorted(by_ep.items()):
             action = self._endpoint_url(ep_key, bases)
             if not action:            # no host recorded -> not a target (Q-019)
+                continue
+            # Q-080: this list IS the probe surface for run_csrf / run_race / run_form_cmdi /
+            # run_stored_xss / run_auth_sqli / run_form_nosqli / run_xxe, every one of which sends
+            # its requests carrying `session_headers`. A logout form's action is a real form and a
+            # real body-parameter set -- and probing it ends the mission session (MEASURED: 4/4 on
+            # the mount that invalidates at logout, 0/4 on the paired mount that does not). It is
+            # quarantined here rather than filtered in each consumer, for the same reason the guard
+            # in `planner.fresh()` is at the door: the seventh consumer must inherit it.
+            if _planner.is_session_kill_url(action):
                 continue
             out.append({"action": action, "method": slot["method"], "fields": slot["fields"]})
         return out
@@ -3354,6 +3393,40 @@ class BBHAgent:
             return True
         return False
 
+    def _reject_session_kill_step(self, step: dict) -> bool:
+        """Ingress guard on the planner→executor boundary: refuse a step aimed at a session-destroying
+        URL, and RECORD it. Returns True when the step is refused.
+
+        Q-080. `planner.fresh()` already declines to SCHEDULE one, but not every step reaching this
+        loop came from the planner: `_graph_action_steps` builds steps straight off the mission
+        graph's ranked actions and never passes through `fresh()`. A guard that lived only in the
+        planner would close the two measured doors and leave that third one open — and this project's
+        recorded failure shape is exactly a guard that checks the entrance someone already thought of.
+
+        It is a guard *and* a recorder, for the reason `_reject_hostless_step` gives: the cost of this
+        defect was never the wasted request, it was that nothing anywhere said the session had died.
+        A silent drop here would keep that half of the bug. The refusal goes through `_swallow` with
+        the producing tool attached.
+
+        `run_session_lifecycle` is entitled to a quarantined URL and is exempt — the entitlement lives
+        in `planner._SESSION_KILL_ENTITLED`, one list, consulted by both guards.
+        """
+        import planner as _planner
+        u = _planner.session_kill_target(step)
+        if not u:
+            return False
+        try:
+            self.tools._swallow(
+                ValueError("planner step %r targets the session-destroying URL %r; refused at the "
+                           "executor ingress (Q-080: it carries the mission session, so running it "
+                           "logs the scan out and every later authenticated probe silently tests as "
+                           "anonymous while still reporting success)"
+                           % (step.get("tool"), u[:160])),
+                "execute_plan.session_kill_step:%s" % step.get("tool"), u)
+        except Exception:
+            pass
+        return True
+
     async def _execute_plan(self, session_id: str):
         """Drive the planner through the SAME scoped, HITL-gated tool pipeline — but GRAPH-FIRST
         (CHAD): each step projects engagement state into the mission graph, then derives the planner's
@@ -3452,6 +3525,8 @@ class BBHAgent:
                         return
                     done.add(step["key"])
                     if self._reject_hostless_step(step):
+                        continue
+                    if self._reject_session_kill_step(step):     # Q-080 — incl. graph-directed steps
                         continue
                     steps += 1
                     _act, _found = step.get("_action"), 0
