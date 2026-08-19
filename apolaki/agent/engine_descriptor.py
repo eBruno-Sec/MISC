@@ -560,7 +560,8 @@ def engine_implementations() -> set:
         return set()
 
 
-def effects_audit(effects=None, registry=None, implementations=None, routing=None) -> dict:
+def effects_audit(effects=None, registry=None, implementations=None, routing=None,
+                  techniques=None) -> dict:
     """Q-007's guard. Does every DECLARED EFFECT belong to an engine that EXISTS?
 
     This is the check that had to fail on a phantom, so it is built out of facts and never out of the
@@ -572,6 +573,17 @@ def effects_audit(effects=None, registry=None, implementations=None, routing=Non
       * `unregistered` — a declared name outside `tools.TOOL_PERMISSIONS`.
       * `unimplemented` — a declared name with no `ToolRegistry._<name>`; an independent table from the
         one above, so a name has to appear in both to pass.
+      * `unknown_technique` — a KEY that is not an id in `techniques.TECHNIQUES`. Q-074 run 4 MEASURED
+        this hole by writing the negative control before trusting the guard: an entry
+        `{"csrf_token_missing": {"invalidates": ["authenticated"], "engine": ["run_csrf"]}}` — a
+        plausible-looking name that is not a technique, pointed at a REAL registered and implemented
+        engine — returned `ok=True` from every check above, because all three of them interrogate the
+        ENGINE and none of them interrogates the KEY. It is worse than merely untidy: `build()` walks
+        `TECHNIQUES`, so the row never becomes a descriptor (`build()` stayed at 88 descriptors, the key
+        absent) and `conflicts()` stayed at 6 rows with `race_condition` its only producer. **The entry
+        is silently inert and passes.** That is the Q-007 shape wearing different clothes — a
+        declaration nothing can act on, recorded as if it were a fact — and this project has shipped a
+        guard that checks a declaration instead of a fact ten times. The failure is loud now.
     `differs_from_derived_route` is REPORTED, not asserted — the same treatment `routing_audit()` gives
     `unrouted`, and for the same reason. Where `routes()` independently derives engines from `ALWAYS_ON`
     prose or `wstg_catalog.FULL`, a declaration that shares nothing with the derivation is worth seeing;
@@ -585,12 +597,16 @@ def effects_audit(effects=None, registry=None, implementations=None, routing=Non
     `ok` requires NON-VACUITY: both fact tables non-empty and `checked > 0`. A scan over an empty set
     passes for free, and a guard that passes for free is the defect, not the fix.
 
-    Pure given `effects`, `registry`, `implementations` and `routing`; resolves each from the live
-    platform when not supplied."""
+    Pure given `effects`, `registry`, `implementations`, `routing` and `techniques`; resolves each from
+    the live platform when not supplied."""
     eff = EFFECTS if effects is None else effects
     reg = engine_registry() if registry is None else set(registry)
     impl = engine_implementations() if implementations is None else set(implementations)
     routing = routes() if routing is None else routing
+    if techniques is None:
+        import techniques as _T
+        techniques = _T.TECHNIQUES
+    known = set(techniques or ())
 
     def _derived(tid):
         # Only the routes the OTHER sources produced. A route whose only source is this very table
@@ -598,7 +614,12 @@ def effects_audit(effects=None, registry=None, implementations=None, routing=Non
         return {e for e, s in (routing.get(tid) or {}).items() if [x for x in s if x != "effect_engine"]}
 
     no_engine, unregistered, unimplemented, differs, verified = [], [], [], [], {}
+    unknown_technique = []
     for tid, spec in sorted(eff.items()):
+        # Checked BEFORE the `continue` below, so a key that is both unknown AND engineless reports
+        # both faults instead of only the first one the loop happens to reach.
+        if tid not in known:
+            unknown_technique.append(tid)
         declared = list((spec or {}).get("engine") or ())
         if not declared:
             no_engine.append(tid)
@@ -618,14 +639,19 @@ def effects_audit(effects=None, registry=None, implementations=None, routing=Non
         "checked": len(eff),
         "registry_size": len(reg),
         "implementations_size": len(impl),
+        "technique_table_size": len(known),
         "cross_checked_against_derived_route": sum(1 for tid in eff if _derived(tid)),
         "no_engine_declared": no_engine,
         "unregistered": sorted(unregistered),
         "unimplemented": sorted(unimplemented),
+        "unknown_technique": sorted(unknown_technique),
         "differs_from_derived_route": sorted(differs),
         "verified": verified,
-        "ok": bool(reg) and bool(impl) and len(eff) > 0
-              and not (no_engine or unregistered or unimplemented),
+        # `bool(known)` joins the other two fact tables in the non-vacuity clause: an unreadable
+        # technique table would otherwise make EVERY key "unknown", and a guard whose instrument
+        # failed must fail closed rather than report the failure as a finding.
+        "ok": bool(reg) and bool(impl) and bool(known) and len(eff) > 0
+              and not (no_engine or unregistered or unimplemented or unknown_technique),
     }
 
 
