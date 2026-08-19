@@ -240,3 +240,106 @@ and it leaves both sessions up, so the instrument does not report a kill where t
 
 Two independent routes to the same effect, one of which survives any fix to the quarantine. The
 `invalidates` entry is not a restatement of a fixable bug.
+
+---
+
+## 4. WHAT THE PLANNER DOES DIFFERENTLY: **NOTHING**. The entry is TRUE and INERT.
+
+DoD item 2, answered with the consumer graph rather than with the value delta, because the value
+delta is not the question. Run 2 reported that `conflicts()`, `breaks()` and
+`frontier()["consequences"]` all change while `plan()` does not, and called that the answer. It is
+half of it: **a value that changes in a function nobody calls has not changed anything.**
+
+### 4a. The value delta reproduces exactly
+
+MEASURED, probe `p3_consumers.py`, shipped table vs the same table with the race row deleted (which
+is byte-for-byte the pre-Q-074 model), observations `{has_login, authenticated, serves_js}`:
+
+| consumer | before | after |
+|---|---|---|
+| `conflicts()` | 0 | **6** |
+| `breaks(d, obs, race_condition)` | empty | **the 6 consumers of `authenticated`** |
+| `frontier()["consequences"]` | 7 keys | **8** (`race_condition` added) |
+| `frontier()["always_on_with_effects"]` | 2 | **3** |
+| `chains()` | 46 | unchanged |
+| `frontier()["applicable_now"]` | 16 | unchanged |
+| `plan(-> authenticated)` | `sqli_auth_bypass` | unchanged |
+| `plan(-> credentials_exposed)` | `exposed_files_harvest` | unchanged |
+| `frontier()["reachable_goals"]` | 4 | unchanged |
+
+Run 2's table reproduces. `plan()` being unchanged is arithmetic and not a defect: `_plan_core`
+records a candidate only when the goal appears in a successor state, and `race_condition`
+establishes nothing, so a negative-only action can never shorten a plan.
+
+### 4b. The consumer graph, and this is the part that decides it
+
+**INSTRUMENT ERROR, the second one, caught by its own implausibility.** My first consumer sweep
+walked every `ast.Name` node and reported `frontier` read at `agent.py:1879`, `intel.py:184` and
+`natas_ladder.py:398`. Those are LOCAL VARIABLES named `frontier`; those files do not import the
+module at all. Recorded because a bare-name AST match is exactly "a wrong field name" from the
+Coordinator's list of instrument-not-code failures, and it would have produced the flattering
+answer. Redone by resolving the module ALIAS from each file's own import statements and counting
+only qualified access on it, plus `from <mod> import <name>` bindings.
+
+MEASURED, probe `p4_consumers_tight.py` - the COMPLETE production consumer graph of the effects
+model, every `.py` in `/app`:
+
+```
+main.py   aliases={'ED': 'engine_descriptor', 'ES': 'effect_search'}
+    main.py:1342  engine_descriptor.build           \
+    main.py:1344  engine_descriptor.chains           >  POST /orchestration/audit
+    main.py:1344  engine_descriptor.conflicts       /
+    main.py:1426  engine_descriptor.build           \
+    main.py:1429  effect_search.frontier             >  POST /orchestration/reachability
+    main.py:1432  effect_search.plan                /
+
+scan_scope.py:116        engine_descriptor.build          <- not the negative half
+technique_planner.py:58  engine_descriptor.routing_audit  <- not the negative half
+technique_planner.py     from engine_descriptor import OBSERVATIONS, PRECONDITIONS, ALWAYS_ON
+
+NEGATIVE CONTROL -- the two files that decide what a scan RUNS:
+  agent.py      aliases={}  from-imports={}  qualified reads=[]
+                raw substring 'effect_search' present: False | 'engine_descriptor': False
+  planner.py    aliases={}  from-imports={}  qualified reads=[]
+                raw substring 'effect_search' present: False | 'engine_descriptor': False
+POSITIVE CONTROL that the analyser can see an alias: main.py resolves both.
+```
+
+Three facts follow, and they are measurements:
+
+1. **`breaks()` and `successor()` have NO production reader.** They are the two functions that
+   express the negative half, and the entry's whole effect on them is invisible outside tests.
+2. **`agent.py` and `planner.py` import neither module** - not by alias, not by substring. The
+   mission runner and the step planner cannot consult the effects model, so no value in it can
+   change what a scan does.
+3. The model's **PRECONDITION half IS wired** (`technique_planner.py` imports `PRECONDITIONS`,
+   `OBSERVATIONS`, `ALWAYS_ON` and calls `routing_audit`). The **EFFECTS half reaches production at
+   exactly two places, both read-only HTTP reporting endpoints.**
+
+### 4c. VERDICT, stated the way the ticket demands
+
+**The planner does nothing differently. `race_condition`'s `invalidates` entry changes the JSON of
+`POST /orchestration/audit` (`conflict_count` 0 -> 6) and of `POST /orchestration/reachability`
+(`consequences` gains a key), and changes nothing a scan does.**
+
+It is **not** decoration in the sense Q-074 feared - the entry is TRUE, measured on two fixtures
+through two independent routes, and an operator reading `/orchestration/audit` now sees a real cost
+where the field previously read `0` because the model was empty. That is a genuine gain in the
+honesty of a published number.
+
+It **is inert**, and calling it a planner improvement would be false. Q-007 removed a false entry and
+Q-074 added a true one; both made the model more accurate and **neither changed Apolaki's behaviour,
+because the effects half of the model is not connected to the scanner.** That structural fact is
+larger than Q-074 and it is measured above, not inferred.
+
+**The consequence for this ticket: `EFFECTS` is now correct on the evidence available, and making it
+CONSEQUENTIAL is not an effects-table problem.** It needs `planner.py` to consult `breaks()` before
+scheduling a state-changing step, or `tools.py` to revalidate `_sessions` after one. Both are files
+this lane must not touch; the patch and the ticket text are in section 7.
+
+**What I deliberately did NOT do.** The tempting move is to add a function to `effect_search.py` that
+consumes the negative half - a "safe ordering" helper, a session-risk report. Nothing in `agent.py`
+or `planner.py` could call it, so it would be an ISLAND: a new unreachable function declared to
+close a gap it cannot reach. This project has shipped that defect repeatedly and the dead-code
+ratchet exists because of it. An inert entry honestly labelled is worth more than a second unwired
+mechanism.
