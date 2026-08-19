@@ -313,12 +313,12 @@ There was **no test anywhere** covering `main._run_source_review`, `main._canoni
 or the write into `db.findings`. The suite covered the analyser thoroughly and the persistence half
 not at all — which is precisely how the lane could be "wired" for weeks with a zero in the table.
 
-Eight tests + one strict xfail. **MEASURED** on the agent image (`python:3.12`):
+Eight tests + two strict xfails (the second is §9). **MEASURED** on the agent image (`python:3.12`):
 
 ```
 $ docker run --rm -v ".../apolaki/agent:/app" -w /app apolaki-agent \
       python -m pytest tests/test_source_lane_persistence.py -q
-........x                                                                [100%]
+........xx                                                               [100%]
 ```
 
 ## 8.1 Both mutants killed by the intended assertions
@@ -350,5 +350,154 @@ M2 is the important one: it is the mutant a suite that only tests the analyser c
 the reason the positive control asserts against `db.get_findings` rather than against the returned
 count.
 
-The strict xfail pins §7 as executable evidence. When the patch lands it XPASSes, the suite goes red,
+Each strict xfail pins a measured defect (§7, §9) as executable evidence. When a patch lands it XPASSes, the suite goes red,
 and the marker has to be removed deliberately.
+
+---
+
+# 9. A THIRD DEFECT, and it is the ticket's own failure mode arriving through the renderer
+
+The mission's report was rendered and read. `GET /report/2fb87a3a/md` -> 1,259,303 bytes.
+
+## 9.1 What the report gets RIGHT
+
+* Every source finding carries the correct proof-kind prose: *"NOT APPLICABLE to this proof kind: a
+  source-derived (static call-site) finding has no request, no baseline and no mutation ... The
+  control that DOES apply is the rule-level counter-example"*, with the family's real sibling
+  (`Cipher.getInstance("AES/GCM/NoPadding")`, `SecureRandom()`, `MessageDigest.getInstance("SHA-256")`).
+* The tool ledger names the lane honestly:
+  `| codeintel.review_source_tree | executed | 1 | 716 | code-assisted (SAST): 716 source-derived finding(s) from 2766 Java/Python source file(s) |`
+* Report Integrity: 10 consistency checks passed.
+
+## 9.2 The defect: 715 of 716 findings carry a FABRICATED HTTP reproduction
+
+**MEASURED** — from the rendered report:
+
+```
+**Steps to Reproduce**
+
+1. Open java/org/owasp/benchmark/testcode/BenchmarkTest00325.java at line 56
+2. Read the call site — no runtime observation is required
+
+**Reproduction (copy-paste)**
+
+```bash
+curl -i -sS -k --path-as-is 'java/org/owasp/benchmark/testcode/BenchmarkTest00325.java'
+```
+```
+
+The finding's own steps say no runtime observation is required, and the very next block hands the
+reader a copy-pasteable curl against a **source file path**. Count of that exact shape in the report:
+
+```
+$ grep -c "curl -i -sS -k --path-as-is 'java/" report.md
+715
+```
+
+`proof_schema.py:197` defines `SOURCE_DERIVED` as *"a static call site; no request exists, even in
+principle"*. `report.finding_curl` (`report.py:991`) derives a command from `target` with **no
+proof-kind check**:
+
+```python
+target = str(finding.get("target") or finding.get("surface") or "").strip()
+if not target:
+    return ""
+method = str(finding.get("method") or "GET").upper()
+if method == "GET" and not body:
+    return f"curl -i -sS -k --path-as-is '{target}'"
+```
+
+**This is the exact failure `_canonical_source_finding` was written to prevent — a source result
+presented under DAST semantics — arriving through the RENDERER instead of the STORE.** The store-side
+contract fails closed and holds; the report layer has no equivalent check, so it manufactures a
+request for a proof kind that cannot have one. A client reading this report would run 715 curls
+against file paths and conclude the tool is broken, or worse, believe the finding was observed over
+HTTP.
+
+### PATCH (written here, NOT applied)
+
+`report.py`, in `finding_curl`, before deriving anything from `target`:
+
+```python
+def finding_curl(finding: dict) -> str:
+    if str(finding.get("curl") or "").strip():
+        return finding["curl"].strip()
+    # A source-derived finding has no request, even in principle (proof_schema.SOURCE_DERIVED).
+    # Deriving one from `target` turns a FILE PATH into a URL and presents a static call site under
+    # DAST semantics — the same confusion `main._canonical_source_finding` refuses at the store.
+    import proof_schema as _ps
+    if _ps.proof_kind(finding) == _ps.SOURCE_DERIVED:
+        return ""
+    target = str(finding.get("target") or finding.get("surface") or "").strip()
+    ...
+```
+
+Both renderers already treat `""` as *omit the block* (`report.py:491` `if _curl:` and
+`report.py:2582` `if not curl:`), so nothing downstream changes. A producer that sets `curl`
+explicitly still wins, which keeps the door open for a SAST lead later confirmed by a probe.
+
+Pinned as a strict xfail: `test_a_source_derived_finding_gets_no_curl_reproduction`.
+
+## 9.3 A weaker observation, recorded but NOT called a defect
+
+The report header reads **`Total Findings: 716`** with a severity table of `Medium | 716`, and the
+strings `code-assisted` / `SAST` appear exactly **once** in 34,000 lines — in the tool ledger row.
+The executive summary therefore quotes a source-derived count with no lane qualifier, on a mission
+whose DAST half ran nothing. `codereview.py:588` states the rule this brushes against: *"This number
+cannot be quoted next to a DAST figure."*
+
+It is recorded as an OBSERVATION rather than a defect because nothing in this report presents it *as*
+a DAST figure — the ledger attributes all 716 to `codeintel.review_source_tree`, and the DAST row is
+absent rather than misreported. Whether the summary needs a per-lane split is a product decision, not
+a correctness one, so it is not being asserted as a bug. It does mean **a mission that ran both lanes
+would sum them into one headline**, which is worth a decision before that mission is run for a client.
+
+---
+
+# 10. Verdict on Q-044
+
+| the ticket's DoD | state |
+|---|---|
+| a real mission produces a stored source-derived finding | **DONE** — `2fb87a3a`, 716 rows, `provenance=source-derived` |
+| mission id recorded | **DONE** — `2fb87a3a` |
+| the query that shows it recorded | **DONE** — §4.2 |
+| `/codereview` still routes to the older analyser | **STILL TRUE**, and the cost is now measured (§6) |
+
+**Q-044's outcome is (1) — it works.** 61.1% is no longer a harness-only figure: the lane runs from the
+production `/engage` endpoint, the evidence contract admits the findings, the write chokepoint stores
+them, the proof gate does not demote them, and the report renders them with the correct proof-kind
+prose. **The half that matters is proven.**
+
+Three things fall out that were not visible before the mission ran, in descending order of severity:
+
+1. **§9 — 715 fabricated curl reproductions.** Live, in the client-facing artifact. The only one of the
+   three that reaches a reader today.
+2. **§6 — the two source analysers are DISJOINT.** `/codereview` sees 448 SQL-injection leads the
+   code-assisted lane cannot see; the code-assisted lane sees 455 crypto/hash/random/trust-boundary
+   findings `/codereview` cannot see. There is no injection rule in `codereview.review_java` at all.
+   Neither endpoint tells the operator the other exists.
+3. **§7 — `stored_findings` can count a finding the table never accepted.** Latent, and the reason
+   §4.2's 716 was verified against the table rather than against the returned number.
+
+## Reproducing any of this
+
+```bash
+# the mission
+curl -s -X POST http://localhost:8000/engage -H 'Content-Type: application/json' \
+  -d '{"program_name":"...","in_scope":["https://owaspbench:8443/benchmark/"],
+       "mode":"active","strategy":"deterministic","source_root":"/tmp/q044/BenchmarkJava"}'
+
+# the source tree, into the agent container (it is NOT vendored in the repo)
+docker cp apolaki-owaspbench-1:/owasp/BenchmarkJava/src/main ./benchjava_main
+docker cp ./benchjava_main apolaki-agent-1:/tmp/q044/BenchmarkJava
+
+# the proof — note the DB lives in the named volume, so this MUST run inside the agent container
+docker exec apolaki-agent-1 python -c "import sqlite3,json; \
+  rows=sqlite3.connect('/app/data/bbh.db').execute( \
+    \"select data from findings where mission_id='2fb87a3a'\").fetchall(); \
+  print(len(rows), sum(1 for (d,) in rows if json.loads(d).get('provenance')=='source-derived'))"
+
+# the tests
+docker run --rm -v "<repo>/apolaki/agent:/app" -w /app apolaki-agent \
+  python -m pytest tests/test_source_lane_persistence.py -q
+```

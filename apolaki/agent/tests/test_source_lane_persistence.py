@@ -219,6 +219,22 @@ def test_an_absent_source_root_stores_nothing_and_is_not_an_error(monkeypatch):
 # ══════════════════════════════════════════════════════════════════════════════════════
 
 @pytest.mark.xfail(strict=True, reason=(
+    "MEASURED 2026-08-18 on the report of mission 2fb87a3a: 715 of its 716 source-derived findings "
+    "render a 'Reproduction (copy-paste)' block containing "
+    "`curl -i -sS -k --path-as-is 'java/org/owasp/benchmark/testcode/BenchmarkTestNNNNN.java'` -- a "
+    "request against a FILE PATH, for a proof kind `proof_schema` defines as having no request 'even "
+    "in principle'. `report.finding_curl` (report.py:991) derives a command from `target` with no "
+    "proof-kind check, so the DAST semantics the evidence contract keeps out of the STORE walk back "
+    "in through the RENDERER. Both renderers already treat '' as 'omit the block' "
+    "(report.py:491, report.py:2582), so the fix is local and needs no renderer change. "
+    "Patch in docs/handoff/source_proof.md."))
+def test_a_source_derived_finding_gets_no_curl_reproduction():
+    import report
+    assert report.finding_curl(dict(CANONICAL)) == "", (
+        "a static call-site finding was given an HTTP reproduction command")
+
+
+@pytest.mark.xfail(strict=True, reason=(
     "MEASURED 2026-08-18 against the running agent. `db.add_finding` returns a TRUTHY id from "
     "`add_lead` when the TRUTH invariant reroutes a lead-confidence finding to the mission's leads "
     "list, and `_run_source_review` counts `sum(1 for f in findings if db.add_finding(...))`. A "
