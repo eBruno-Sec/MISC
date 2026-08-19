@@ -154,13 +154,141 @@ unchecked and now cannot.
 
 ---
 
-## 4. Status
+## 4. What landed (commit `118e858`)
+
+| file | change |
+| --- | --- |
+| `agent/tools.py` | `ToolRegistry.__init__(..., mission_mode: str = None)` + `self.intrusive_authorized = None`; new `ToolRegistry._permission_refusal(tool_name)`; two lines at the top of `_dispatch_engine` that consult it |
+| `agent/agent.py` | `BBHAgent.mode` is now a property whose setter writes through to `tools.mission_mode`; `__init__` installs `tools.intrusive_authorized = self._intrusive_authorized`; new `BBHAgent._intrusive_authorized()`; `_exec_internal` calls it instead of restating the expression |
+| `agent/tests/test_dispatch_permission_guard.py` | new — 47 tests |
+
+**MEASURED** — the refusal matrix, driven through the real `_permission_refusal`:
+
+```
+unbound + INTRUSIVE                    -> None                      (admitted)
+active + INTRUSIVE, no auth            -> 'PERMISSION BLOCK: run_upload_test is INTRUSIVE ...'
+active + INTRUSIVE, approved           -> None                      (admitted)
+full   + INTRUSIVE, no auth            -> 'PERMISSION BLOCK: ...'
+passive + ACTIVE                       -> 'PERMISSION BLOCK: http_probe is ACTIVE and this mission is PASSIVE ...'
+passive + PASSIVE                      -> None                      (admitted)
+active + ACTIVE                        -> None                      (admitted)
+bogus mode ("Active") + INTRUSIVE      -> None                      (admitted — unknown, see §2)
+```
+
+**MEASURED** — the binding, through a real `BBHAgent` over a real `ToolRegistry`:
+
+```
+mission_mode after construct: active
+intrusive_authorized bound: True   -> False        (no gate answered yet)
+after ag.mode='passive':  passive                  (write-through)
+after ag.mode='garbage':  active | ag.mode: active (both sides normalise identically)
+after ag.intrusive_state='approved': True          (read LIVE, not snapshotted)
+```
+
+### The controls, named
+
+- **Positive (DoD half 1).** 5 INTRUSIVE engines × refused at `active` with no authorization, driven
+  through the real `execute()`, with `reg.admitted == []` proving the engine BODY never ran.
+- **Negative (DoD half 2).** The five ungated-path ACTIVE engines dispatch **bound** (`active`) and
+  **unbound** (`None`) — 10 assertions — plus 5 more proving an unbound registry does not refuse even
+  an INTRUSIVE engine, which is what keeps `owasp_bench` and 89 test registries working.
+- **Control ON the negative control.** `test_the_apparatus_can_observe_a_refusal_at_all` uses the
+  same factory, the same `_dispatch`, the same `_is_refusal` and asserts a refusal IS seen. Without
+  it, four parametrised "nothing was refused" tests would pass just as happily if `_is_refusal` were
+  broken. **Every zero in this file has a positive control behind it.**
+- **Control on the ratchet.** `test_the_census_finds_the_product_registry_sites_at_all` fails if the
+  AST walk finds nothing — a silent-empty walker is how a guard that checks a declaration passes
+  what it exists to catch.
+- **Anti-widening.** `test_run_tool_keeps_its_STRICTER_rule` asserts `_run_tool` does NOT consult
+  `authenticated_scan` or the shared helper. Naming the union must not loosen the strictest gate.
+
+### Honest limit of the ratchet
+
+`test_every_product_registry_binds_a_mode` reasons per MODULE. `liveness_run.py` holds one bound
+registry (line 76 → `BBHAgent` line 78) and one unbound (line 84), and passes on the strength of the
+bound one. **MEASURED**: 0 of the 3 product modules that construct a `ToolRegistry` contain any
+`.execute(` call, so no unbound registry can currently dispatch. That measured fact is frozen by
+`test_no_product_module_both_builds_a_registry_and_dispatches_through_it`; the day a module does
+both, name-based reasoning stops being sufficient and a human has to look.
+
+---
+
+## 5. ANTI-IDLE — what the other unlogged `tools.execute(` sites bypass besides the tier
+
+Q-061 fixed the LEDGER half of these sites. The question nobody had asked is what OTHER per-dispatch
+policy they skip.
+
+**MEASURED** — AST over `agent.py`, every `self.tools.execute(` call:
+
+```
+self.tools.execute( sites: 11        (Q-061 counted 12; `run_jsonp` has since moved to _exec_internal)
+  line 693   <variable>   -- _run_tool      (gated wrapper)
+  line 779   <variable>   -- _exec_internal (gated wrapper)
+  line 991   run_dom_audit
+  line 1609  acquire_session
+  line 1982  http_probe
+  line 2006  http_read
+  line 2011  browser_navigate
+  line 2039  http_read
+  line 2070  acquire_session
+  line 2207  acquire_session
+  line 2233  browser_navigate
+```
+
+9 direct sites, 5 distinct engines, all ACTIVE — the ticket's premise re-confirmed at HEAD.
+
+`_run_tool` performs **nine** things around a dispatch. The 9 direct sites perform **one** of them
+(the dispatch). Here is each, with whether it matters, MEASURED rather than asserted:
+
+| skipped policy | matters? |
+| --- | --- |
+| **1. permission tier** | **CLOSED by this ticket.** Was the whole of Q-079. |
+| **2. INTRUSIVE authorization** | **CLOSED by this ticket** — a direct site can no longer dispatch an unauthorized INTRUSIVE engine. The interactive MODAL still cannot be raised from the dispatcher (it yields no events); a direct site gets a refusal, not a prompt. Correct: a code path that never asks must not be able to act. |
+| **3. `_stamp_dispatch` (Q-064)** | **No loss, measured.** 8 of the 9 skip it, but all 8 DISCARD the `ToolResult` — they are called for their side effects on `tools.urls` / `tools._sessions` / harvested forms. The one site whose findings ARE persisted (`run_dom_audit`, line 991) already calls `_stamp_dispatch` explicitly at line 1000. |
+| **4. `_auto_store` (Q-054)** | **One site, compensated — UNVERIFIED whether fully.** Of the 5 engines on this path only `run_dom_audit` is in `_AUTO_STORE_TOOLS`. Its findings are collected into `dom_findings` and persisted by the candidate pipeline as promoted candidates. Whether the pipeline persists EVERY finding `_auto_store` would have is not measured here. |
+| **5. phase tracking (`_set_phase`)** | Cosmetic. These dispatches never advance `current_phase`, so an authenticated re-crawl does not move the phase indicator. |
+| **6. the LIVE UI event stream** | **Real and open.** Q-061 fixed the persisted ledger; the live feed is built from the events `_run_tool` YIELDS, and these 9 sites yield nothing. An operator watching a mission sees the whole authenticated re-crawl and persona-login phase as dead air. Not a correctness defect; it is why "the scan looks hung" reports exist. |
+| **7. `scope_block` vs `tool_error` classification** | Follows from 6. |
+| **8. `store_finding` dedup** | n/a — none of these five is `store_finding`. |
+| **9. stop-event honouring** | Each direct site does its own `self.stop_event.is_set()` check; verified at 991, 1982 and the crawl loops. |
+
+### And the finding that is NOT about the tier at all
+
+**MEASURED** — the exception handler wrapping each direct site:
+
+```
+  line 1609  acquire_session      BARE swallow (pass)
+  line 2011  browser_navigate     BARE swallow (pass)
+  line 2070  acquire_session      BARE swallow (pass)
+  line 991   run_dom_audit        BARE swallow (continue)
+  line 1982  http_probe           RECORDED via _swallow
+  line 2233  browser_navigate     BARE swallow (pass)
+  line 2006  http_read            BARE swallow (pass)
+  line 2039  http_read            BARE swallow (pass)
+  line 2207  acquire_session      BARE swallow (pass)
+```
+
+**8 of 9 dissolve their failures; 1 of 9 records.** This is Q-052 slice 1's defect (nine bare
+swallows in the sweep) in a second location that the slice did not cover. It matters more here than
+in the sweep, because these five engines are the AUTHENTICATION ARTERY: line 2233 is the
+browser-driven login fallback, and a raise there produces a mission with no personas, no authz
+matrix and no explanation anywhere — the run reads as "the target has no authenticated surface".
+`ToolRegistry._swallow` exists for exactly this and the one site that uses it (1982) is the pattern
+to copy.
+
+**Not fixed under this ticket** — it is a separate defect with its own DoD (each converted handler
+needs a test that a raise is RECORDED, and a negative control that a clean run records nothing) and
+this lane's remit was the tier. Filed here as the next slice.
+
+---
+
+## 6. Status
 
 - [x] Measured the premise at HEAD
 - [x] Resolved the design tension
-- [ ] Implement the guard + binding
-- [ ] DoD half 1 (positive control)
-- [ ] DoD half 2 (negative control — the five ACTIVE engines, bound AND unbound)
-- [ ] Ratchet test for the opt-in half
-- [ ] Full suite
-- [ ] ANTI-IDLE: audit the other 10 unlogged `tools.execute(` sites
+- [x] Implement the guard + binding — `118e858`
+- [x] DoD half 1 (positive control)
+- [x] DoD half 2 (negative control — the five ACTIVE engines, bound AND unbound)
+- [x] Ratchet test for the opt-in half, with its own positive control
+- [x] ANTI-IDLE: audited all 9 unlogged `tools.execute(` sites
+- [ ] Full suite (running against an isolated snapshot of HEAD)
