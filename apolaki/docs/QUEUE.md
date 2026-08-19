@@ -328,6 +328,31 @@ rebuild** — that is now the gate's most valuable output, not an aside.
 
 
 
+### Q-077 · A COMMENT mentioning a function makes it look alive to the dead-code gate · **HIGH** · `ready`
+
+Found by the postMessage lane while clearing an island the gate had flagged. **The gate under counted
+its own finding.**
+
+`scan_qualified` regex matches the bare name anywhere in the defining module, **comments included**.
+`find_message_listeners` and `wm_scan_hint` were BOTH uncalled and both absent from the failure list,
+because both are named in an explanatory comment. The island was **seven functions, not five**.
+
+That is the declaration versus fact pattern living inside the instrument built to detect it: prose
+about a function counts as a use of the function. It also means the recorded baselines (35 qualified,
+13 method) are floors rather than truths, and any module carrying a well commented helper is
+systematically under reported.
+
+The lane's own new tests read identifiers **off the AST**, so a comment cannot pass for wiring. That
+is the fix shape, applied to the gate itself.
+
+DoD: `scan_qualified` and `scan_methods` resolve references from the AST rather than by regex over
+source text, then re baseline both sets and record the delta. **Negative control:** a function
+mentioned ONLY in a comment must appear as dead; a function actually called must not.
+
+Related and already closed: Q-075 fixed the same file printing a slice instead of a delta. This is
+the other half, and the two together mean the gate was both mis reporting WHICH entries changed and
+missing entries entirely.
+
 ### Q-076 · `test_proof_gate_reach` has 3 slack and names ZERO of its findings · **HIGH** · `ready`
 
 Found by the Q-075 anti-idle audit, and it is the worst instance of the count-instead-of-delta shape
@@ -3262,3 +3287,26 @@ rather than a defect), and **Q-044**, still held because it touches seven files 
 which the findings-gate lane holds this cycle.
 
 **Q-052 remains Erwin's and nothing this cycle touched it.**
+
+---
+
+## LANE OWNERSHIP - cycle 14, 2026-08-18. Three lanes, disjoint by file.
+
+| lane | owns (WRITE) | ticket |
+|---|---|---|
+| gate-truth | `agent/deadcode_gate.py`, `agent/tests/test_deadcode_gate.py`, `docs/handoff/gate_truth.md` | Q-077 - a COMMENT mentioning a function makes it look alive, so both baselines are floors not truths |
+| proof-reach | `agent/tests/test_proof_gate_reach.py`, `docs/handoff/proof_reach.md` | Q-076 - 11 raw sites vs ceiling 14, slack 3, names ZERO of them while holding every file:line |
+| tech-intel | `agent/intel_registry.py`, `agent/intel_extractor.py`, `agent/archive_intel.py`, `docs/handoff/tech_intel2.md` | Q-021D (ingest reaches candidate, production stays 0, advance has no caller outside tests), Q-021E (re-scoped DOWN: Q-021B already emits has_versions, only the consumer is missing), Q-021F |
+
+Two of the three are the SAME defect shape in different instruments: a gate that reports a count or a
+slice instead of naming what changed. Q-075 closed the first instance and `liveness.py::evaluate()`
+has had the right shape all along, so this is convergence on a pattern the project already owns
+rather than three inventions.
+
+`agent/main.py` is held by NO lane this cycle and stays free for the Coordinator. The tech-intel lane
+hands over any `main.py` patch rather than taking it.
+
+**Still open after these:** Q-004, Q-005 (the postMessage lane already checked Q-005 before anyone
+starts it - read its handoff first), the re-scoped Q-030/Q-036, Q-035, and Q-044.
+
+**Q-052 remains Erwin's.**
