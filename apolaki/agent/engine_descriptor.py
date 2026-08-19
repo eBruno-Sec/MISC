@@ -277,7 +277,16 @@ EFFECTS = {
 
 # Files that DESCRIBE the platform rather than run it. A mention here is prose, not wiring — which is
 # exactly how `graphql_argument_injection` came to be declared reachable via a function nobody called.
-_PROSE_FILES = {"techniques.py", "engine_descriptor.py"}
+_PROSE_FILES = {"techniques.py", "engine_descriptor.py",
+                # Q-075 turned this into a prose file without anyone noticing. It now records
+                # QUALIFIED_BASELINE_SET / METHOD_BASELINE_SET as STRING LITERALS naming
+                # functions, so a name here is a record that something is DEAD -- the exact
+                # opposite of wiring. Left in, `verify_always_on` read "bie.resolve_locator"
+                # off that baseline and concluded the function was wired, which silently
+                # disarmed its own negative control (test_the_verifier_catches_an_unwired_reason
+                # asserts ok is False and got True). Same shape as the scan_methods self-read:
+                # a gate that reads a registry of dead things and counts the entries as alive.
+                "deadcode_gate.py"}
 
 
 def _identifiers(reason: str) -> set:
