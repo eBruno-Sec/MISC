@@ -280,6 +280,34 @@ to copy.
 needs a test that a raise is RECORDED, and a negative control that a clean run records nothing) and
 this lane's remit was the tier. Filed here as the next slice.
 
+### A FOURTH permission mechanism, and it is an island
+
+Found while establishing where consent is enforced. `agent/action_envelope.py` implements a full
+approval contract — "An INTRUSIVE action without a valid approval is rejected before it can run"
+(module docstring), with `PERMISSIONS = ("PASSIVE", "ACTIVE", "INTRUSIVE")`, `make_envelope`,
+`authorize` and `validate_before_execute`.
+
+**MEASURED** — every consumer of it in the tree:
+
+```
+$ grep -rn "action_envelope" agent/*.py | grep -v ^agent/action_envelope.py
+agent/deadcode_gate.py:327:    "action_envelope.mark", ...            (a dead-code allowlist entry)
+agent/main.py:1531:async def action_envelope_mint(payload: dict):   (POST /intel/action-envelope)
+agent/main.py:1536:    import action_envelope as ae
+```
+
+It is reachable ONLY from an HTTP endpoint an operator would have to call by hand. **No engine, no
+dispatcher and no wrapper ever mints or validates an envelope**, so the sentence "an INTRUSIVE action
+without a valid approval is rejected before it can run" is true of nothing the product does. Q-079's
+subject is exactly *where* the answer is enforced, and the honest count is now: `planner._ALLOWED`
+(scheduling), `agent._run_tool` / `_exec_internal` (wrappers), `ToolRegistry._permission_refusal`
+(dispatcher, new) — three live mechanisms and one that is documentation with an import path.
+
+Not this lane's file to fix, and not obviously a defect worth fixing rather than deleting: the
+envelope's replay-safe hash contract may be the right thing to wire, or the three live layers may
+already be the whole answer and the module is a Codex-tier artifact that never landed. **Deciding
+that is a ticket, not a patch.**
+
 ---
 
 ## 6. Status
