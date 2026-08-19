@@ -11,6 +11,7 @@ from collections import Counter
 import intel_sources as _src
 
 _STORE: dict = {}          # rec_id -> record (carries validation_state, evidence, history)
+_LAST_PASS: dict = {}      # the last corroborate() result, so an empty registry can say WHY
 
 _CONF = {"candidate": 0.3, "validating": 0.35, "validated": 0.55, "fixture_backed": 0.7,
          "reviewed": 0.85, "production": 0.95, "rejected": 0.0}
@@ -18,6 +19,7 @@ _CONF = {"candidate": 0.3, "validating": 0.35, "validated": 0.55, "fixture_backe
 
 def reset():
     _STORE.clear()
+    _LAST_PASS.clear()
 
 
 def _rid(rec: dict) -> str:
@@ -141,6 +143,8 @@ def corroborate(snapshots=None) -> dict:
         # "0 validated" here without this status would read exactly like "nothing corroborated".
         res.update(status="no_witness_snapshot",
                    note="no local CISA KEV snapshot on disk; nothing examined, nothing advanced")
+        _LAST_PASS.clear()
+        _LAST_PASS.update(res)
         return res
     for rec in list(_STORE.values()):
         state = rec["validation_state"]
@@ -172,6 +176,8 @@ def corroborate(snapshots=None) -> dict:
             rec["witness"] = dict(stamp, cve=cve, product=product,
                                   ransomware=bool((hit or {}).get("ransomware")))
             res["validated"] += 1
+    _LAST_PASS.clear()
+    _LAST_PASS.update(res)
     return res
 
 
@@ -216,5 +222,32 @@ def production() -> list:
 
 
 def stats() -> dict:
-    return {"total": len(_STORE),
-            "by_state": dict(Counter(r["validation_state"] for r in _STORE.values()))}
+    """Registry census, and WHY it reads the way it does. Served by `GET /intel/registry`.
+
+    `{'total': 0, 'by_state': {}}` is the exact output that made three separate readings of this
+    module conclude the trust ladder was broken. It was never wrong, it was mute: a store that is
+    empty because every source is switched off looks identical to one that fetched and found
+    nothing, and both look identical to one that lost its contents at the last restart. The three
+    fields below make an empty registry state which of those it is - the labelled-empty contract, so
+    a consumer cannot read silence as a clean result.
+
+      store            the persistence honesty. This IS a per-process in-memory dict; it does not
+                       survive a restart, and saying so beats implying durability it does not have.
+      state            populated / cold / disabled.
+      last_pass        the last `corroborate()` result, or {} if the promotion pass has never run in
+                       this process. `validated: 0` next to `catalog: 0` means the witness catalogue
+                       was missing, which is a different fact from 'nothing corroborated'."""
+    counts = dict(Counter(r["validation_state"] for r in _STORE.values()))
+    enabled = _src.enabled_sources()
+    if _STORE:
+        state, why = "populated", "%d records ingested in this process" % len(_STORE)
+    elif not enabled:
+        state, why = "disabled", ("every intel source is disabled (the default), so nothing has been "
+                                  "fetched; this is a configuration state, not a clean result")
+    else:
+        state, why = "cold", ("sources are enabled but nothing has been fetched into this process "
+                              "yet; the store does not survive a restart")
+    return {"total": len(_STORE), "by_state": counts,
+            "store": "in-memory, per-process; NOT persisted across a restart",
+            "state": state, "why": why, "enabled_sources": enabled,
+            "last_pass": dict(_LAST_PASS)}

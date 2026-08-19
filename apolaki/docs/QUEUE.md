@@ -328,6 +328,44 @@ rebuild** — that is now the gate's most valuable output, not an aside.
 
 
 
+### Q-078 · Triage the 27 entries Q-077 made visible · **HIGH** · `ready`
+
+Q-077 switched the dead-code resolver from regex over source text to AST resolution, so comments and
+string literals stopped counting as calls. **The count went 35 to 61 against a ceiling of 37.** The
+code did not rot; the measurement got honest, and 27 entries that were always dead became visible.
+
+**The ceiling was NOT raised.** Raising 37 to 61 would be weakening a ratchet to make a change pass.
+The ratchet is pinned by a STRICT xfail carrying the measurement, and it XPASSes the day a triaged
+baseline lands.
+
+**The real island count is LOWER than 27, and nobody may quote 27 as it.** At least four are resolver
+blind spots rather than dead code:
+
+- `deadcode_gate.scan`, `scan_methods`, `scan_qualified` - the gate EXCLUDES ITS OWN FILE (correctly,
+  to avoid the self-read that took the method count to 0), so its own public API reads as uncalled
+  while tests and `scripts/liveness.sh` call it.
+- `mitm_addon.request`, `mitm_addon.response` - framework callbacks. The proxy container mounts
+  `mitm_addon.py` and **mitmdump invokes them by name** (`docker-compose.yml:419`); no Python code in
+  `agent/` calls them and none should.
+- `sqli_tool.is_inconclusive` - re-exported by `nosqli_tool` as the shared third-outcome convention
+  from Q-070, so the caller reaches it through the other module.
+- `description_gate.audit` - called by its own test file, which the resolver does not scan.
+
+The full 27: `api_protocols.inventory`, `archive_intel.needs_validation`, `bench_all.bench`,
+`bie.observe`, `capability_matrix.state_rank`, `cloud_iam.collect_live`, `codereview_graph.hypotheses`,
+`codereview_graph.link_runtime_to_source`, `deadcode_gate.scan`, `deadcode_gate.scan_methods`,
+`deadcode_gate.scan_qualified`, `description_gate.audit`, `engine_descriptor.effects_audit`,
+`exposure_tool.paths`, `fingerprint.fingerprint`, `ics_dnp3_s7._dnp3_crc_table`,
+`ics_fingerprint.finding`, `intel.harvest`, `mitm_addon.request`, `mitm_addon.response`,
+`report.control_ran`, `saml_tool.finding`, `service_router.plan`, `sqli_tool.is_inconclusive`,
+`ssrf_tool.bypass_payloads`, `techniques.classes`, `tool_provenance.argv_hash`.
+
+DoD: classify every one as REAL ISLAND, FRAMEWORK ENTRY POINT (called by something outside `agent/`),
+or RESOLVER BLIND SPOT, each with the evidence. Then either wire the real islands or record the
+non-islands in an allowlist that states WHO calls them and from where. **The allowlist must name the
+caller** - an unexplained allowlist entry is how a gate becomes decorative, which is the defect this
+whole line of work exists to prevent.
+
 ### Q-077 · A COMMENT mentioning a function makes it look alive to the dead-code gate · **HIGH** · `ready`
 
 Found by the postMessage lane while clearing an island the gate had flagged. **The gate under counted

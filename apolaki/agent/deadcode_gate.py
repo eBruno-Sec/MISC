@@ -25,6 +25,16 @@ caller while `scan()` reported nothing, because `coverage` and `describe` collid
 functions in `main.py`, `report.py`, `wstg_catalog.py` and `stealth.py`. Following that thread found
 `graphql_argument_injection` running on paper only.
 
+**AND EVERY SCAN HERE USED TO READ COMMENTS AS CODE (Q-077).** All three resolvers matched a bare name
+by REGEX OVER RAW SOURCE, so prose about a function counted as a use of it. Measured on a clean HEAD
+snapshot: switching `scan_qualified` and `scan_methods` to resolve references off the AST took the
+qualified count 35 -> 62 and the method count 13 -> 14, with ZERO entries resolved in the other
+direction. Of the 27 newly-visible qualified entries, **22 were cleared by a string (20 of them
+docstring prose), 5 by a comment, and 0 by a real reference.** Three of the 27 are `scan`,
+`scan_qualified` and `scan_methods` themselves -- this module's own docstring, the one you are reading,
+was the only thing keeping its own entry points off the list. That is the declaration-versus-fact
+pattern living inside the instrument built to detect it.
+
 `scan_qualified()` is the honest check: module-resolved, import-alias-aware, production-only. It reports
 substantially more, and those extras are CANDIDATES, not proven-dead — several will be reachable through
 patterns it does not model. So it ships as a RATCHET (`QUALIFIED_BASELINE`) rather than a blocking gate:
@@ -134,6 +144,13 @@ def scan(app_dir: str = None) -> dict:
 # argument functions into live paths; 40 once the check started honouring ALLOWED_UNUSED, which removed
 # six entries that already carried a written justification; 37 after wiring saml_tool.harvest/plan_leads and allowlisting the operator-gated intrusive half. Lower it whenever the real number drops, so
 # the ratchet stays tight enough to catch the next regression.
+#
+# **THIS NUMBER IS STALE BY MEASUREMENT AND IS DELIBERATELY NOT BEING RAISED (Q-077).** Every value in
+# the history above was produced by a resolver that read comments and docstrings as calls. The true
+# count under AST resolution is 62. Raising 37 to 62 would be weakening a ratchet to make a change
+# pass, which is the one thing this file must never do, so the ratchet FAILS and names the 27 entries
+# it was previously blind to. Triage -- deciding which of the 27 to wire, delete or justify -- is a
+# separate ticket; only that triage may move this number, and only downward as entries are resolved.
 QUALIFIED_BASELINE = 37
 
 # The baseline as a SET, which is a different thing from the number above and exists for a different
@@ -159,6 +176,15 @@ QUALIFIED_BASELINE = 37
 #     shows up in `resolved` and can never invent a false `newly_dead`. There is deliberately no hard
 #     staleness test: this set moves whenever any lane wires anything, and failing their green work to
 #     force an edit to a file they do not own is how a gate earns the distrust that gets it silenced.
+#
+# Q-077 DELIBERATELY DOES NOT FOLD ITS 27 NEW ENTRIES IN HERE, and the reason is the whole point of
+# Q-075. `newly_dead` is `flagged - THIS SET`. Recording all 62 would make `newly_dead` empty, drop the
+# message into its "the names are not available" branch, and hand the next reader a failure that names
+# nothing -- re-creating, in one edit, exactly the defect Q-075 closed. So this stays the 35 measured
+# under the OLD resolver, the 27 are recorded separately in QUALIFIED_Q077_REVEALED below, and the
+# ratchet's failure text names all 27 every time it runs. The invariant
+# `len(QUALIFIED_BASELINE_SET) <= QUALIFIED_BASELINE` also survives, which is what guarantees the
+# message is non-empty at all.
 QUALIFIED_BASELINE_SET = frozenset({
     "action_envelope.mark", "archive_intel.mark_validated", "bench_all.scan_via_mission",
     "bie.har_response_for", "bie.resolve_locator", "candidate_pipeline.plan_targets",
@@ -173,6 +199,35 @@ QUALIFIED_BASELINE_SET = frozenset({
     "stealth.describe", "technique_store.dedup_key", "technique_store.stats",
     "techniques.techniques_for_lab", "waf_bypass_tool.pad", "web_security.is_url_in_scope",
     "xxe_tool.looks_like_xml",
+})
+
+# The 27 entries the regex resolver could not see (Q-077). MEASURED on a clean `git archive HEAD`
+# snapshot: count 35 with the old resolver, 62 with the AST one, `resolved` empty both ways.
+#
+# This is a RECORD OF THE DELTA, not a second allowlist and not a threshold. Nothing here is excused
+# from the ratchet -- all 27 count toward the 62 that fails it. It exists so the next reader can tell a
+# Q-077 revelation from a genuinely new island someone added afterwards, which the count alone cannot
+# distinguish.
+#
+# TRIAGE, from reading each definition and its importers (see docs/handoff/gate_truth.md section 4):
+#   * FRAMEWORK-INVOKED, not islands (2): mitm_addon.request/response are mitmproxy addon hooks. The
+#     proxy container mounts mitm_addon.py and mitmdump calls them by name (docker-compose.yml:419),
+#     so there is no in-repo caller BY DESIGN -- the same category as a FastAPI route, but undecorated,
+#     so the structural rule cannot see it.
+#   * GATE ENTRY POINTS called from outside the scanned corpus (4): deadcode_gate.scan /
+#     scan_qualified / scan_methods and description_gate.audit. Reached by tests and liveness scripts;
+#     `scan_qualified` excludes tests on purpose, so "unwired" is the correct verdict for what it
+#     measures, and the honest fix is a production caller, not an allowlist entry.
+#   * REAL ISLANDS, no reference of any kind anywhere in production (21). Every other entry below.
+QUALIFIED_Q077_REVEALED = frozenset({
+    "api_protocols.inventory", "archive_intel.needs_validation", "bench_all.bench", "bie.observe",
+    "capability_matrix.state_rank", "cloud_iam.collect_live", "codereview_graph.hypotheses",
+    "codereview_graph.link_runtime_to_source", "deadcode_gate.scan", "deadcode_gate.scan_methods",
+    "deadcode_gate.scan_qualified", "description_gate.audit", "engine_descriptor.effects_audit",
+    "exposure_tool.paths", "fingerprint.fingerprint", "ics_dnp3_s7._dnp3_crc_table",
+    "ics_fingerprint.finding", "intel.harvest", "mitm_addon.request", "mitm_addon.response",
+    "report.control_ran", "saml_tool.finding", "service_router.plan", "sqli_tool.is_inconclusive",
+    "ssrf_tool.bypass_payloads", "techniques.classes", "tool_provenance.argv_hash",
 })
 
 
@@ -202,6 +257,54 @@ def _ratchet_message(kind, count, baseline, newly, resolved, recorded):
     return msg
 
 
+def _dotted(node):
+    """`a`, `a.b`, `a.b.c` for a pure Name/Attribute chain; None for anything else (`f().x`, `d[k].x`).
+
+    None matters: it is what keeps `x.lib.work` from resolving as the module `lib`, which is the job the
+    old `(?<![\\w.])` lookbehind did in the regex."""
+    if isinstance(node, ast.Name):
+        return node.id
+    if isinstance(node, ast.Attribute):
+        base = _dotted(node.value)
+        return base + "." + node.attr if base else None
+    return None
+
+
+def _ast_refs(tree):
+    """(names, qualified, attrs, strings) for one parsed module. Pure. THE Q-077 FIX.
+
+    Every reference is read off the AST, so a name that appears only in a COMMENT or a DOCSTRING is not a
+    reference to anything. The old resolvers ran a regex over raw source text, which made prose about a
+    function count as a use of it -- the declaration-versus-fact pattern living inside the instrument
+    built to detect it. MEASURED by the postMessage lane: `find_message_listeners` and `wm_scan_hint` were
+    both uncalled and both absent from the failure list because both were named in an explanatory comment.
+
+      * `names`      -- bare `ast.Name` ids. A module-level function used in its own module, or through
+                        `from x import f`, appears here. An `import` statement does NOT: importing a name
+                        binds it, it does not use it, and the old regex counted the import line itself as
+                        the use it was looking for.
+      * `qualified`  -- (receiver-path, attribute) pairs, so `L.work` resolves to the module bound as `L`.
+      * `attrs`      -- every attribute name on any receiver, for the method scan's deliberately
+                        type-blind `.name` rule.
+      * `strings`    -- WHOLE string-constant values, for the method scan's string-dispatch rule
+                        (`getattr(self, "_" + tool_name)`). Whole values, not a substring search: a
+                        docstring is one Constant holding prose, so it can no longer smuggle a name in
+                        the way `["']_?name["']` over raw text could.
+    """
+    names, qualified, attrs, strings = set(), set(), set(), set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Name):
+            names.add(node.id)
+        elif isinstance(node, ast.Attribute):
+            attrs.add(node.attr)
+            base = _dotted(node.value)
+            if base:
+                qualified.add((base, node.attr))
+        elif isinstance(node, ast.Constant) and isinstance(node.value, str):
+            strings.add(node.value)
+    return names, qualified, attrs, strings
+
+
 def _module_bindings(tree, known_modules):
     """({module: {names it is bound to here}}, {(module, original, local)}) for one parsed file. Pure."""
     aliased, from_imported = {}, set()
@@ -229,18 +332,20 @@ def scan_qualified(app_dir: str = None) -> dict:
     Tests are deliberately excluded. A function only its own test calls is exercised, not wired, and that
     distinction is the one `scan()` cannot make.
 
+    References are resolved from the AST (`_ast_refs`), never by regex over source text. A name that
+    appears only in a comment or a docstring is prose, not wiring (Q-077).
+
     Returns {unused, count, baseline, ok}. `ok` is the RATCHET: count must not exceed the baseline."""
     app = app_dir or APP_DIR
-    srcs, trees = {}, {}
+    trees = {}
     for fn in sorted(os.listdir(app)):
         if not fn.endswith(".py"):
             continue
         try:
-            s = open(os.path.join(app, fn), encoding="utf8").read()
-            trees[fn] = ast.parse(s)
-            srcs[fn] = s
+            trees[fn] = ast.parse(open(os.path.join(app, fn), encoding="utf8").read())
         except Exception:
             continue
+    refs = {fn: _ast_refs(t) for fn, t in trees.items()}
 
     modules = {fn[:-3]: {n.name for n in trees[fn].body
                          if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef))
@@ -261,26 +366,28 @@ def scan_qualified(app_dir: str = None) -> dict:
 
     unused = []
     for mod, funcs in sorted(modules.items()):
-        own = srcs.get(mod + ".py", "")
+        own_names = refs.get(mod + ".py", (frozenset(),))[0]
         for f in sorted(funcs):
-            # Own module: any mention other than the definition itself. NOT requiring a call, because a
-            # function placed in a dispatch table is referenced as a value.
-            body = re.sub(r"^\s*(async\s+)?def\s+%s\s*\(" % re.escape(f), "", own, flags=re.M)
-            if re.search(r"(?<![\w.])%s\b" % re.escape(f), body):
+            # Own module: any REFERENCE other than the definition itself. NOT requiring a call, because a
+            # function placed in a dispatch table is referenced as a value -- `RULES = [rule_a]` is an
+            # `ast.Name`, so it counts, while `def rule_a(...)` is a FunctionDef and never can.
+            if f in own_names:
                 continue
             hit = False
             for other in sorted(importers.get(mod, ())):
                 if other == mod + ".py":
                     continue
-                src = srcs[other]
+                other_names, other_qualified, _attrs, _strings = refs[other]
                 aliased, from_imported = bindings[other]
-                for name in aliased.get(mod, ()):
-                    if re.search(r"(?<![\w.])%s\.%s\b" % (re.escape(name), re.escape(f)), src):
-                        hit = True
-                        break
-                if hit:
+                # `import probe_selection as ps` + `ps.pairwise(...)`, resolved as a (receiver, attr) pair
+                # rather than by matching the text `ps.pairwise`.
+                if any((name, f) in other_qualified for name in aliased.get(mod, ())):
+                    hit = True
                     break
-                if any(m == mod and orig == f and re.search(r"(?<![\w.])%s\b" % re.escape(local), src)
+                # `from probe_selection import pairwise` + a bare use of `pairwise`. The import statement
+                # itself is NOT a use: `ImportFrom` binds an alias and produces no `ast.Name`, where the
+                # old regex searched the raw source and matched the import line it had just read.
+                if any(m == mod and orig == f and local in other_names
                        for (m, orig, local) in from_imported):
                     hit = True
                     break
@@ -324,13 +431,21 @@ METHOD_BASELINE = 14
 # it was printing `unused[-5:]`, a slice of a sorted list, with no set to diff against. Measured on the
 # same clean `git archive HEAD` snapshot: 13 entries against a baseline of 14. Diagnostic reference only;
 # METHOD_BASELINE stays the ratchet. See QUALIFIED_BASELINE_SET for why there is no staleness test.
+#
+# RE-BASELINED to 14 by the Q-077 AST rewrite, which added exactly one entry and resolved none:
+# `vault.py::Vault.is_encrypted`. Its docstring reads "pretends to be encrypted. is_encrypted() reports
+# the true protection level" -- and the old `\.\s*name` rule cannot tell the FULL STOP ending the
+# previous sentence from an attribute access, so `. is_encrypted` counted as a call. Unlike the
+# qualified set this one is folded in, because 14 <= METHOD_BASELINE: the method ratchet still passes,
+# so recording it keeps the set a true measurement without emptying any failure message.
 METHOD_BASELINE_SET = frozenset({
     "asset_graph.py::AssetGraph.add_enable", "asset_graph.py::AssetGraph.enabling",
     "asset_graph.py::AssetGraph.mark_consumed", "asset_graph.py::AssetGraph.plan_next",
     "browser_engine.py::TargetRatePolicy.reset_stats", "budget.py::MissionBudget.exhausted",
     "investigation.py::InvestigationState.get_var", "personas.py::PersonaManager.headers_for",
     "personas.py::PersonaManager.prove_privileged", "scope.py::ScopeEngine._extract_host",
-    "scope.py::ScopeEngine.to_rules", "vault.py::Vault.list_refs", "vault.py::Vault.purge",
+    "scope.py::ScopeEngine.to_rules", "vault.py::Vault.is_encrypted", "vault.py::Vault.list_refs",
+    "vault.py::Vault.purge",
 })
 
 
@@ -365,17 +480,26 @@ def scan_methods(app_dir: str = None) -> dict:
 
     Returns {unused, allowed, count, baseline, ok, methods_examined, newly_dead, resolved, message}."""
     app = app_dir or APP_DIR
-    srcs, trees = {}, {}
+    trees = {}
     for fn in sorted(os.listdir(app)):
+        # SELF-EXCLUSION, preserved verbatim through the Q-077 AST rewrite. See the paragraph above: a
+        # record of what a checker found must never be readable BY that checker. The Coordinator
+        # reproduced the silencing by mutation -- delete this one clause and the scan reports
+        # `count 0, ok True` with every other test in the file still green.
         if not fn.endswith(".py") or fn == os.path.basename(__file__):
             continue
         try:
-            s = open(os.path.join(app, fn), encoding="utf8").read()
-            trees[fn] = ast.parse(s)
-            srcs[fn] = s
+            trees[fn] = ast.parse(open(os.path.join(app, fn), encoding="utf8").read())
         except Exception:
             continue
-    corpus = "\n".join(srcs.values())
+    # ONE walk of the whole corpus, not one regex pass per method over the joined source (Q-077). Every
+    # receiver's attribute name, and every whole string-constant value -- both read off the AST, so a
+    # method named only in a comment is no longer indistinguishable from one that is called.
+    corpus_attrs, corpus_strings = set(), set()
+    for tree in trees.values():
+        _names, _qualified, attrs, strings = _ast_refs(tree)
+        corpus_attrs |= attrs
+        corpus_strings |= strings
 
     methods = []
     for fn, tree in trees.items():
@@ -406,15 +530,14 @@ def scan_methods(app_dir: str = None) -> dict:
     unused = []
     for fn, cls, name in sorted(methods):
         stem = name.lstrip("_")
-        # Strip definitions of this name so `def name(` never counts as a use.
-        body = re.sub(r"^\s*(async\s+)?def\s+%s\s*\(" % re.escape(name), "", corpus, flags=re.M)
-        # NO lookbehind before the dot. The first version used `(?<![\w])\.name`, which rejects the
-        # ordinary `self.tools.execute(...)` — the character before the dot is `s`, a word char — and so
-        # flagged `ToolRegistry.execute` as uncalled. A checker whose obvious false positives are that
-        # visible gets ignored wholesale, which is worse than not having it.
-        used = (re.search(r"self\s*\.\s*%s\b" % re.escape(name), body)
-                or re.search(r"\.\s*%s\b" % re.escape(name), body)
-                or re.search(r"[\"']_?%s[\"']" % re.escape(stem), body))
+        # An attribute access on ANY receiver counts, the type is not inferred -- `self.tools.execute(...)`
+        # and `c.used()` resolve the same way. That subsumes the old pair of regexes: `self.name` was
+        # always a subset of `.name`, and the first version's `(?<![\w])\.name` lookbehind rejected
+        # `self.tools.execute(...)` outright because the character before the dot is `s`.
+        # A definition can never count: `def name(...)` is a FunctionDef, not an Attribute, so the old
+        # "strip the def line first" step has no AST equivalent to need.
+        used = (name in corpus_attrs
+                or stem in corpus_strings or ("_" + stem) in corpus_strings)
         if not used and not _is_override(fn, cls, name):
             unused.append("%s::%s.%s" % (fn, cls, name))
 

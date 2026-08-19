@@ -201,3 +201,39 @@ def test_entry_is_still_always_candidate_even_when_the_pass_would_validate(monke
     R.ingest([r])
     assert R.production() == []
     assert R.by_state("validating")[0]["_history"][0][0] == "candidate"
+
+
+# ── labelled emptiness: an empty registry must say WHICH kind of empty it is ───────────────────
+def test_an_empty_registry_distinguishes_disabled_from_cold_from_clean(monkeypatch):
+    """`{'total': 0, 'by_state': {}}` was mute: switched-off, restarted-and-lost, and
+    fetched-and-found-nothing all rendered identically, and all three read as clean."""
+    R.reset()
+    monkeypatch.setattr(S, "enabled_sources", lambda *a, **k: [])
+    st = R.stats()
+    assert st["state"] == "disabled" and "configuration state, not a clean result" in st["why"]
+    assert st["last_pass"] == {}                       # the pass has never run in this process
+
+    monkeypatch.setattr(S, "enabled_sources", lambda *a, **k: ["nvd"])
+    assert R.stats()["state"] == "cold"
+
+    R.ingest([_rec(WITNESSED)])
+    assert R.stats()["state"] == "populated"
+
+
+def test_the_endpoint_can_tell_a_missing_catalogue_from_a_catalogue_that_matched_nothing():
+    R.reset()
+    R.ingest([_rec(WITNESSED)])
+    R.corroborate({})                                   # no snapshot on disk
+    lp = R.stats()["last_pass"]
+    assert lp["status"] == "no_witness_snapshot" and lp["catalog"] == 0 and lp["validated"] == 0
+
+    R.reset(); R.ingest([_rec(UNWITNESSED)])
+    R.corroborate(KEV)                                  # real catalogue, no match
+    lp = R.stats()["last_pass"]
+    assert lp["status"] == "ok" and lp["catalog"] == 3 and lp["validated"] == 0
+    assert lp["examined"] == 1 and lp["unwitnessed"] == 1
+
+
+def test_the_store_never_claims_durability_it_does_not_have():
+    R.reset()
+    assert "NOT persisted" in R.stats()["store"]
