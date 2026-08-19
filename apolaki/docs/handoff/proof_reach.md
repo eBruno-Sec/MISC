@@ -178,6 +178,64 @@ independent reasons, both asserted:
 Positive control that the scan can still find something: `count > 0` on the real tree, sites located
 in `main.py`, every key well-formed.
 
+## 9. ANTI-IDLE: `test_mutation_gate.py` - VERDICT, it needs the same treatment
+
+The audit graded it MILD. On the NAMING axis that grade is right; on the SWAP axis it is the same
+defect as Q-076, and I measured both rather than reading for them.
+
+**State, MEASURED on the isolated snapshot:**
+
+```
+producers        53
+mutant modules   11   bie, blind_benchmark, cookie_flags, dependency_intel, ics_dnp3_s7,
+                      mass_assign_tool, prng_disclosure, proof_schema, transport_posture,
+                      web_security, ws_tool
+uncovered        46
+ceiling          46
+slack             0
+```
+
+Four of the eleven mutant modules (`bie`, `blind_benchmark`, `dependency_intel`, `proof_schema`) are
+NOT confirmed-producers - they are oracle modules. So only 7 of the 53 producers are covered, and
+53 - 7 = 46. **Slack is 0**, which is better than Q-076 started at and means a pure ADDITION already
+fires.
+
+**Correction to the audit's description.** It reports that the file "already keeps a partial recorded
+set of 8". It does not. `named_uncovered` is asserted as `named_uncovered <= producers` - a VACUITY
+guard proving the producer scan has not stopped detecting anything. It never enters the ratchet diff
+and is not a baseline. The file has no recorded set at all, which is why the swap below is invisible.
+
+**NEGATIVE CONTROL 1 - the swap, constant count.** On a snapshot copy: register a mutant for
+`sqli_tool.py` (one of the uncovered) AND add `apolaki_new_engine.py`, a brand-new module emitting
+`{"confidence": "confirmed"}` with no mutant.
+
+```
+producers 54  covered 12  uncovered 46  ceiling 46
+new engine uncovered? True     sqli now covered? True
+
+tests/test_mutation_gate.py::test_confirmed_producers_without_a_mutant_never_grow
+.                                                                        [100%]
+```
+
+**PASSES.** A new confirmed-producing engine shipped with no mutant and the ratchet said nothing,
+because a different module was covered in the same run. Identical in kind to the Q-076 defect.
+
+**NEGATIVE CONTROL 2 - the same addition WITHOUT the compensating mutant.** It fires, which is what
+makes control 1 attributable to the swap and not to a broken scan:
+
+```
+E  AssertionError: confirmed-producing modules without a mutant rose to 47 (measured ceiling 46):
+   ['apolaki_new_engine.py', 'cache_deception_tool.py', 'client_checks_tool.py', ... 47 names ...]
+```
+
+The delta IS in that list - and it is one name among 47, sorted alphabetically. It landed first here
+only because it is called `apolaki_*`; a module named `zzz_tool.py` would sort last. There is nothing
+to diff the list against, so "eyeball-diff" means diffing against memory.
+
+**Verdict: apply the same treatment.** It costs no new friction, because at slack 0 an addition
+already fails the gate - the recorded set only changes WHICH names get printed (the delta instead of
+all 47) and additionally catches the swap that currently passes.
+
 ## Status
 
 - [x] baseline measured (11 sites, 11 scopes) at HEAD
