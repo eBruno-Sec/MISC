@@ -2261,10 +2261,28 @@ def report_integrity_check(findings: list, chains: list = None, candidate_valida
       • severity and CVSS band agree, or a rationale explains the gap;
       • a chain's narrative does not say 'prove/execute' while it is labelled unverified;
       • every candidate row is self-consistent (no confirmed-with-no-validator; unsupported reconciles);
-      • no generic impact text is reused across unrelated families."""
+      • no generic impact text is reused across unrelated families;
+      • a SOURCE-DERIVED finding does not render a request, and does name a code location (Q-082).
+
+    THE LAST ONE EXISTS BECAUSE THIS GATE DID NOT CATCH Q-082. MEASURED: fed a source-derived finding
+    carrying a fabricated `curl -i -sS -k --path-as-is 'java/Foo.java'`, this function returned only
+    an unrelated CVSS complaint — the ten checks above say nothing about proof kind, so the gate that
+    runs live at report time watched 716 fabricated reproductions go out. It checks what the renderer
+    ACTUALLY PRINTS (`finding_curl`), not which fields are present, because a guard that checks a
+    declaration passes what it exists to catch."""
+    import proof_schema as _ps
     issues, findings = [], findings or []
     kevset = {str(x).upper() for x in (kev_cves or [])}
     for f in findings:
+        if _ps.proof_kind(f) == _ps.SOURCE_DERIVED:
+            _rendered = finding_curl(f)
+            if _rendered and not re.search(r"https?://", _rendered):
+                issues.append("source-derived finding renders an HTTP reproduction against a non-URL "
+                              "target — a request that cannot exist for a static call site: %s"
+                              % f.get("title"))
+            if not source_location(f):
+                issues.append("source-derived finding names no file/line, so the report can tell the "
+                              "reader neither how to reproduce it nor where to look: %s" % f.get("title"))
         title = f.get("title")
         sev = str(f.get("severity") or "").lower()
         conf = str(f.get("confidence") or "")

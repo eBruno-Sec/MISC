@@ -311,6 +311,42 @@ def test_a_producer_supplied_validation_still_wins_over_the_proof_kind_branch():
     assert report.validation_line(own) == "Run `mvn verify -Pcrypto-lint` and assert zero findings."
 
 
+# --- 5. THE GATE THAT MISSED IT ------------------------------------------------------------------
+#
+# MEASURED: `report_integrity_check` runs live at report time and has ten semantic checks, none about
+# proof kind. Fed a source-derived finding carrying a fabricated curl it returned only an unrelated
+# CVSS complaint, so it watched 716 fabricated reproductions go out. These tests pin both halves of
+# the new check AND prove the gate was capable of firing all along (the positive control).
+
+def test_the_integrity_gate_now_catches_a_fabricated_request_on_a_source_finding():
+    fabricated = dict(SOURCE_FINDING, curl="curl -i -sS -k --path-as-is 'java/Foo.java'")
+    hits = [i for i in report.report_integrity_check([fabricated])
+            if "cannot exist for a static call site" in i]
+    assert len(hits) == 1, report.report_integrity_check([fabricated])
+
+
+def test_the_integrity_gate_catches_a_source_finding_with_nowhere_to_look():
+    nowhere = {k: v for k, v in SOURCE_FINDING.items() if k not in {"file", "target", "line"}}
+    hits = [i for i in report.report_integrity_check([nowhere]) if "names no file/line" in i]
+    assert len(hits) == 1, report.report_integrity_check([nowhere])
+
+
+def test_the_integrity_gate_positive_control_it_could_always_fire():
+    """The zero below needs this: the gate DOES produce violations, so 'no proof-kind violation on
+    the real findings' is a real zero and not an apparatus that was never looking."""
+    assert any("without reproduction steps" in i for i in
+               report.report_integrity_check([dict(SOURCE_FINDING, reproduction_steps=[])]))
+
+
+def test_the_integrity_gate_does_not_fire_on_the_shapes_that_are_honest():
+    # the 716 as stored, and the genuine DAST findings, and the legitimate SAST-lead-confirmed-by-probe
+    probe_confirmed = dict(SOURCE_FINDING, curl="curl -i -sk 'http://app:8080/x?p=1'")
+    for f in (SOURCE_FINDING, DAST_EXPLICIT_CURL, DAST_DERIVED_CURL, probe_confirmed):
+        bad = [i for i in report.report_integrity_check([dict(f)])
+               if "static call site" in i or "names no file/line" in i]
+        assert bad == [], (f.get("title"), bad)
+
+
 def test_each_source_marker_alone_is_enough_to_suppress_the_command():
     """`proof_schema._SOURCE_MARKERS` classifies on ANY ONE of the three markers, on purpose. The
     presenter must inherit that, not require all three -- a lane adopting part of the vocabulary
