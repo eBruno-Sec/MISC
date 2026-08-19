@@ -97,6 +97,87 @@ fails). Here the polarity is inverted because the baseline records what is RAW:
 
 `len(BASELINE) <= CEILING` is asserted, which is what makes a firing alarm provably non-empty.
 
+## 6. NEGATIVE CONTROL - MEASURED, and the old gate falsified beside it
+
+Method: `git archive HEAD apolaki/agent` into an isolated snapshot (179 modules), never the shared
+tree. Mutation applied inside a throwaway container and verified by grep before any run.
+
+**Mutation A - the exact defect: gate one site, add another, CONSTANT COUNT.**
+`main.py:4023` rewritten to `db.get_findings_gated(`, and a new raw reader appended to
+`security.py`. Verified landed: `main.py:4023` now gated, `security.py:105 def apolaki_smuggled_reader`.
+
+The pre-Q-076 file (`git show HEAD~1:...`) was restored beside it and run on the SAME mutated tree:
+
+```
+########## OLD GATE (pre-Q-076) on the mutated tree ##########
+.....                                                                    [100%]
+```
+
+**5 passed. Completely silent.** That is the ticket's claim proven rather than asserted: at constant
+count the old gate is structurally incapable of noticing, and it was not a near miss - it had nothing
+to compare against.
+
+The new gate on the identical tree, count ratchet and set ratchet run together (`F.`):
+
+```
+E   AssertionError: raw db.get_findings() call sites: 11 (ceiling 11, recorded baseline 11)
+E     NEWLY RAW -- present in this tree, not in the recorded baseline:
+E       security.py::apolaki_smuggled_reader         security.py:108
+E     resolved since the baseline was recorded (green work, never a failure):
+E       main.py::backup
+E   assert not ['security.py::apolaki_smuggled_reader']
+FAILED tests/test_proof_gate_reach.py::test_no_raw_site_appears_that_the_recorded_baseline_does_not_hold
+```
+
+**Count 11 -> 11, the count ratchet PASSED (the `.`), and the set ratchet named BOTH sides** - the
+added site with its `file:line`, and the gated one under `resolved`. DoD item 2 satisfied.
+
+Whole-file re-run after the control fix in section 7: **exactly one failure**, the set ratchet.
+
+**Mutation B - pure addition, no site gated.** A raw reader appended to `report.py`:
+
+```
+E   AssertionError: raw db.get_findings() call sites: 12 (ceiling 11, recorded baseline 11)
+E     NEWLY RAW -- present in this tree, not in the recorded baseline:
+E       report.py::apolaki_new_export                report.py:3630
+FAILED ...::test_the_number_of_ungated_presentation_readers_never_grows
+FAILED ...::test_no_raw_site_appears_that_the_recorded_baseline_does_not_hold
+```
+
+Both ratchets fire, and the COUNT ratchet now names the site too. The old text for this same event
+was `raw db.get_findings() call sites rose to 12 (tracked ceiling 14)` and stopped there - that is
+"names ZERO of its findings", fixed on the count path as well as the set path.
+
+## 7. A defect in my own control, found by running it
+
+The first mutation run turned both control tests into `StopIteration`, not a result:
+
+```
+victim = next(s for s in before["sites"] if s["key"] == key)
+E       StopIteration
+```
+
+`_gate_one_site` pinned the victim to the literal `main.py::backup`, and mutation A gates exactly
+that site - so **the control broke on the one tree state it exists to simulate.** It now selects the
+victim from what the tree actually holds, preferring that key while it exists. Worth recording
+because it is the same class as the bug being fixed: a hardcoded name standing in for a measurement.
+
+## 8. Self-read check (the Q-075 near-miss), MEASURED
+
+Q-075's recorded set nearly silenced a different ratchet because `scan_methods()` read its own source
+and matched its own baseline literals. Checked here rather than assumed, and it cannot happen for two
+independent reasons, both asserted:
+
+- The scan lists only top-level `agent/*.py`; this file is in `agent/tests/`. Asserted that no scanned
+  filename starts with `test_`.
+- The scan matches AST `Call` nodes, so a name inside a string or a comment is not a call. Asserted by
+  copying THIS FILE into a temp dir as a top-level module and scanning it: **count 0**, and by a decoy
+  module holding `"main.py::get_status"` and `"db.get_findings(mid)"` as text: **count 0**, with a real
+  call in the same directory still found (**count 1**).
+
+Positive control that the scan can still find something: `count > 0` on the real tree, sites located
+in `main.py`, every key well-formed.
+
 ## Status
 
 - [x] baseline measured (11 sites, 11 scopes) at HEAD

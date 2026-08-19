@@ -427,17 +427,26 @@ def real_tree_copy(tmp_path):
     return str(tmp_path)
 
 
-def _gate_one_site(tree, key):
-    """Rewrite one recorded site to the gated accessor, the way a migrating lane would. Returns the key."""
+def _gate_one_site(tree, prefer=None):
+    """Rewrite one recorded site to the gated accessor, the way a migrating lane would.
+
+    The victim is chosen from what the tree ACTUALLY holds, not from a hardcoded name. An earlier draft
+    pinned `main.py::backup`, and the first mutation run -- which gates exactly that site -- turned both
+    controls into StopIteration instead of a result. A control that breaks when the thing it simulates
+    really happens is not a control. `prefer` keeps the run deterministic while the site exists.
+
+    Returns (scan_before, victim_key)."""
     before = _scan_raw_sites(tree)
-    victim = next(s for s in before["sites"] if s["key"] == key)
+    recorded = [s for s in before["sites"] if s["key"] in _RAW_BASELINE]
+    assert recorded, "no recorded raw site left to gate; the baseline is fully stale"
+    victim = next((s for s in recorded if s["key"] == prefer), recorded[0])
     path = os.path.join(tree, victim["file"])
     lines = open(path, encoding="utf8").read().split("\n")
     assert "db.get_findings(" in lines[victim["line"] - 1], lines[victim["line"] - 1]
     lines[victim["line"] - 1] = lines[victim["line"] - 1].replace(
         "db.get_findings(", "db.get_findings_gated(")
     open(path, "w", encoding="utf8").write("\n".join(lines))
-    return before
+    return before, victim["key"]
 
 
 def test_a_gated_site_and_a_new_raw_site_in_the_same_run_are_both_named(real_tree_copy):
@@ -453,7 +462,7 @@ def test_a_gated_site_and_a_new_raw_site_in_the_same_run_are_both_named(real_tre
     Everything is measured as a DELTA against `before` rather than against `_RAW_BASELINE` directly. The
     literals in this file go stale the moment another lane gates a reader, and a control that demanded an
     exact match would then fail for their reason instead of mine."""
-    before = _gate_one_site(real_tree_copy, "main.py::backup")
+    before, gated = _gate_one_site(real_tree_copy, prefer="main.py::backup")
     assert before["count"] > 0, "positive control: the scan must see the real tree at all"
 
     open(os.path.join(real_tree_copy, "security.py"), "a", encoding="utf8").write(
@@ -470,18 +479,19 @@ def test_a_gated_site_and_a_new_raw_site_in_the_same_run_are_both_named(real_tre
 
     island = "security.py::apolaki_deliberate_raw_reader"
     assert set(after["newly_raw"]) - set(before["newly_raw"]) == {island}, after["newly_raw"]
-    assert set(after["resolved"]) - set(before["resolved"]) == {"main.py::backup"}, after["resolved"]
+    assert set(after["resolved"]) - set(before["resolved"]) == {gated}, after["resolved"]
     assert not after["ok"], "the set ratchet must FAIL where the count ratchet cannot"
 
     msg = after["message"]
     assert island in msg, "the added site is not named: %s" % msg
-    assert "main.py::backup" in msg, "the gated site is not named: %s" % msg
+    assert gated in msg, "the gated site is not named: %s" % msg
     assert "security.py:" in msg, "the message must locate the new site: %s" % msg
 
     # And the innocents stay out of the NEWLY RAW block. The old message named nothing; a message that
     # names the wrong thing is the Q-075 failure in the other direction, and equally distrusted.
     newly_block = msg.split("NEWLY RAW")[1].split("resolved since")[0]
-    for innocent in ("main.py::get_status", "main.py::technique_plan", "agent.py::BBHAgent._triage"):
+    for innocent in [k for k in ("main.py::get_status", "main.py::technique_plan",
+                                 "agent.py::BBHAgent._triage") if k != gated]:
         assert innocent not in after["newly_raw"], innocent
         assert innocent not in newly_block, "%s is not the delta and must not be named" % innocent
 
@@ -490,11 +500,11 @@ def test_gating_a_site_alone_is_never_a_failure(real_tree_copy):
     """Rot runs ONE WAY. Another lane migrating a reader leaves a stale name in `_RAW_BASELINE`; that must
     surface as `resolved` and must NOT fail their green work, or this gate becomes the obstacle it was
     built to remove. This is why there is deliberately no staleness test on the recorded baseline."""
-    before = _gate_one_site(real_tree_copy, "main.py::backup")
+    before, gated = _gate_one_site(real_tree_copy, prefer="main.py::backup")
     res = _scan_raw_sites(real_tree_copy)
 
     assert res["count"] == before["count"] - 1, (before["count"], res["count"])
-    assert set(res["resolved"]) - set(before["resolved"]) == {"main.py::backup"}, res["resolved"]
+    assert set(res["resolved"]) - set(before["resolved"]) == {gated}, res["resolved"]
     assert res["regressions"] == before["regressions"], "gating a reader invented a regression"
     if not before["regressions"]:
         assert res["ok"], "a resolved site must never fail the gate: %s" % res["message"]
