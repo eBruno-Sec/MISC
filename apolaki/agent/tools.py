@@ -1194,10 +1194,36 @@ def _pick_hash_candidate(cands: list, want: str):
 
 class ToolRegistry:
     def __init__(self, scope: ScopeEngine, mission_id: str = None, lab_mode: bool = False,
-                 session_headers: dict = None, intensity: str = "standard", stealth: str = "off"):
+                 session_headers: dict = None, intensity: str = "standard", stealth: str = "off",
+                 mission_mode: str = None):
         self.scope = scope
         self.mission_id = mission_id
         self.lab_mode = lab_mode
+        # ── Q-079: the dispatcher's permission context ───────────────────────
+        #
+        # `mission_mode` is the operator's consent decision for THIS mission, and `None` means
+        # UNKNOWN -- a registry nobody bound a mission to. It is emphatically NOT a synonym for
+        # `passive` or for `active`: see `_permission_refusal` for why unknown fails OPEN.
+        #
+        # WHY A DEFAULTED PARAMETER IS NOT AN OPT-IN GUARD HERE. There are 4 product construction
+        # sites and 89 test ones; a REQUIRED parameter breaks the 89, and a DEFAULTED one that each
+        # caller must remember is the declaration-not-fact pattern this codebase has hit eleven
+        # times. Neither is what happens: `BBHAgent` BINDS both fields onto the registry it is
+        # handed (`agent.BBHAgent.__init__`, beside the pre-existing `self.tools.stop_event` and
+        # `self.tools.zap_policy` pushes), so every product mission is bound without any call site
+        # having to pass anything -- including `main.py`, which builds the registry and hands it
+        # straight to the agent. The opt-in half is closed by a RATCHET instead of by a default:
+        # `tests/test_dispatch_permission_guard.py::test_every_product_registry_binds_a_mode` walks
+        # the AST of every non-test module and fails on a product registry that is neither bound to
+        # an agent nor on an allowlist whose entries are themselves fact-checked for having no
+        # `.execute(` call at all.
+        self.mission_mode = mission_mode
+        # Live HITL/authorization read, installed by the agent as a BOUND METHOD rather than a bool
+        # because `intrusive_state` mutates mid-mission (None -> approved/denied). A snapshot taken
+        # here would answer with state from before the operator answered the gate. `None` = no
+        # authority was ever installed, which reads as "not authorized" -- but only ever matters
+        # once a mission_mode is bound, because an unbound registry is not checked at all.
+        self.intrusive_authorized = None
         # SWALLOWED-ERROR LEDGER. A scanner's worst failure mode is a check that crashed, because it
         # produces no finding and no finding is indistinguishable from a clean target. Defensive
         # `except: pass` around an optional probe is reasonable; SILENT defensive handling is not.
@@ -1397,7 +1423,76 @@ class ToolRegistry:
         self._ledger_outcome(session_id, tool_name, res, rate_wait=rate_wait)
         return res
 
+    # ── Q-079: the permission backstop, at the dispatcher ────────────────────
+    #
+    # THE DEFECT. `planner._ALLOWED` filters what gets SCHEDULED; `agent._run_tool` and
+    # `agent._exec_internal` gate what they DISPATCH. `ToolRegistry.execute` -- the one function
+    # every engine actually goes through -- enforced scope and nothing else. Q-061 measured that 10
+    # of the 12 `self.tools.execute(` sites in `agent.py` bypass both wrappers entirely. All five
+    # distinct engines on that path are ACTIVE (`acquire_session`, `browser_navigate`, `http_probe`,
+    # `http_read`, `run_dom_audit`), so NOTHING INTRUSIVE escapes today: the hole is LATENT, one new
+    # call site away, and this is a guard rather than an incident.
+    #
+    # A BACKSTOP MUST NEVER BE STRICTER THAN THE LAYER IT BACKS. This is the whole design, and it is
+    # why the rule below is not "refuse INTRUSIVE when mode == active". MEASURED: four product sites
+    # dispatch INTRUSIVE engines in an `active` mission today and are meant to --
+    # `_exec_internal("run_stored_xss")` (agent.py:1046), `("run_bfla")` (:1062),
+    # `("confirm_authz_write")` (:2277), `("confirm_create_object_idor")` (:2302) -- plus the whole
+    # agentic path, because `_exec_internal` admits INTRUSIVE at `active` on HITL approval,
+    # `auto_approve` OR `authenticated_scan`, and `_run_tool` admits it on HITL approval. Q-052's
+    # decision says so in as many words: the state-changing tier "stays behind the existing HITL
+    # gate and `auto_approve`" -- an AUTHORIZATION gate, not a mode gate. A dispatcher that refused
+    # on the mode alone would refuse four measured call sites in exactly the missions where the
+    # operator had already said yes: a latent permission gap traded for a LIVE capability loss,
+    # which is strictly worse than the hole.
+    #
+    # So the rule is the UNION of what the two wrappers permit -- the weakest necessary condition --
+    # and it can only ever refuse a dispatch that NO gated path would have made:
+    #
+    #   mission_mode unknown/unrecognised            -> allow  (nothing bound a mission; see below)
+    #   mission_mode == "passive", tier != PASSIVE   -> REFUSE
+    #   tier == INTRUSIVE, not intrusive_authorized  -> REFUSE
+    #   otherwise                                    -> allow
+    #
+    # UNKNOWN FAILS OPEN, DELIBERATELY, and this is the half that would have been skipped. 89 test
+    # registries, `owasp_bench.scan` and `liveness_run._run_one` all construct a bare registry. A
+    # guard that failed closed on unknown would refuse the five ACTIVE engines named above and every
+    # bench dispatch -- the exact capability loss the previous paragraph rejects. The opt-in risk
+    # that this creates is closed by the AST ratchet in
+    # `tests/test_dispatch_permission_guard.py`, not by tightening this default.
+    #
+    # PLACED INSIDE `_dispatch_engine`, so `execute`'s Q-061 ledger brackets a refusal exactly as it
+    # brackets a `SCOPE BLOCK`. A refused dispatch is VISIBLE in the tool ledger; a guard that
+    # refused silently would be a new false-clean, which is the failure mode this project spends
+    # most of its time hunting.
+    def _permission_refusal(self, tool_name: str) -> Optional[str]:
+        """The reason this dispatch is refused, or None to admit it."""
+        mode = self.mission_mode
+        if mode not in ("passive", "active", "full"):
+            return None                     # UNKNOWN: no mission bound, nothing to enforce
+        perm = TOOL_PERMISSIONS.get(tool_name, PermissionLevel.ACTIVE)
+        if mode == "passive" and perm != PermissionLevel.PASSIVE:
+            return (f"PERMISSION BLOCK: {tool_name} is {perm.value.upper()} and this mission is "
+                    f"PASSIVE, which permits observation only.")
+        if perm == PermissionLevel.INTRUSIVE:
+            auth = self.intrusive_authorized
+            try:
+                ok = bool(auth()) if callable(auth) else bool(auth)
+            except Exception:
+                ok = False                  # an authority that cannot answer has not authorized
+            if not ok:
+                return (f"PERMISSION BLOCK: {tool_name} is INTRUSIVE (it changes state on the "
+                        f"target) and this {mode.upper()} mission carries no operator "
+                        f"authorization — no approved HITL gate, no auto_approve, no "
+                        f"authenticated_scan.")
+        return None
+
     async def _dispatch_engine(self, tool_name: str, tool_input: dict, session_id: str) -> ToolResult:
+        refusal = self._permission_refusal(tool_name)
+        if refusal:
+            return ToolResult(tool_name, str(tool_input.get("url") or tool_input.get("target")
+                                             or tool_input.get("domain") or ""),
+                              False, "", [], refusal)
         if tool_name == "store_finding":
             return await self._store_finding(tool_input)
         if tool_name == "generate_playbook":

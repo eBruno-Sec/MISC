@@ -468,7 +468,14 @@ class BBHAgent:
         self.enable_nmap_vuln = bool(enable_nmap_vuln)
         # heavy nuclei (full vuln template set) — opt-in, Full mode only
         self.enable_nuclei_heavy = bool(enable_nuclei_heavy)
-        self.mode = mode if mode in ("passive", "active", "full") else "active"
+        # Q-079. Normalisation now lives in the `mode` SETTER (below), which also writes the value
+        # through to `self.tools.mission_mode` — so this assignment binds the dispatcher's
+        # permission context as a side effect, and so does every later `agent.mode = ...`.
+        self.mode = mode
+        # The live authorization read for the dispatcher backstop. A BOUND METHOD, not a bool: the
+        # HITL state mutates mid-mission (None -> approved/denied), and a snapshot taken here would
+        # answer with state from before the operator answered the gate.
+        self.tools.intrusive_authorized = self._intrusive_authorized
         self.auto_approve = auto_approve
         self.mission_id = mission_id
         self.recon_cycles = max(1, min(int(recon_cycles or 1), 3))
@@ -538,6 +545,57 @@ class BBHAgent:
                 self.client = anthropic.AsyncAnthropic(**kwargs)
         except Exception:
             self.client = None
+
+    # ── Q-079: the mission mode, bound to the dispatcher it governs ──────────
+    #
+    # WHY A PROPERTY. `ToolRegistry.execute` had no permission check of any kind because the
+    # registry never received the mission mode -- a missing parameter, not an oversight. The mode
+    # could not simply become a constructor argument: REQUIRED breaks 89 test construction sites,
+    # DEFAULTED leaves the guard opt-in at every call site, and an opt-in guard is the
+    # declaration-not-fact pattern this codebase has hit eleven times.
+    #
+    # The third option is the one taken: the registry LEARNS the mode from the object that already
+    # knows it. `main.py` builds a `ToolRegistry` and hands it to `BBHAgent(..., mode=req.mode)`
+    # three lines later, and this class ALREADY pushes mission configuration onto that registry
+    # (`self.tools.stop_event`, `self.tools.zap_policy/zap_speed/zap_aggression` above). This is the
+    # same push, so every product mission is bound without one call site changing.
+    #
+    # It is a PROPERTY rather than one line in `__init__` because `agent.mode` is REASSIGNED after
+    # construction -- several helpers in `tests/test_permission_tiers.py` do exactly that -- and a
+    # snapshot taken in `__init__` would then describe a mission the agent is no longer running.
+    # A stale permission context is worse than none: it would refuse or admit on the wrong answer.
+    # One writer, so it cannot be forgotten.
+    @property
+    def mode(self) -> str:
+        return getattr(self, "_mode", "active")
+
+    @mode.setter
+    def mode(self, value: str) -> None:
+        self._mode = value if value in ("passive", "active", "full") else "active"
+        reg = getattr(self, "tools", None)
+        if reg is not None:
+            try:
+                reg.mission_mode = self._mode
+            except Exception:
+                pass          # a registry stand-in that refuses attributes must not break a scan
+
+    def _intrusive_authorized(self) -> bool:
+        """Does this mission carry an operator authorization for STATE-CHANGING engines?
+
+        ONE definition of the rule, read live. It is `_exec_internal`'s existing expression verbatim
+        -- HITL approved, OR `auto_approve` (which `_run_tool`/`_exec_internal` convert into
+        `intrusive_state = "approved"` before dispatching), OR `authenticated_scan`, the operator's
+        explicit opt-in to state-changing AUTHENTICATED testing. Two copies of one policy is how one
+        URL came to sit under two contradictory rules in Q-080, so `_exec_internal` calls this
+        instead of restating it, and so does the dispatcher backstop in `ToolRegistry`.
+
+        NOT `_run_tool`'s rule, which is narrower (approved gate only, no `authenticated_scan`
+        clause). `_run_tool` keeps its own stricter check: widening a gate is as much a defect as
+        narrowing one, and the dispatcher backstop must be the UNION of what the wrappers permit or
+        it would refuse dispatches a wrapper legitimately made.
+        """
+        return (getattr(self, "intrusive_state", None) == "approved"
+                or bool(getattr(self, "authenticated_scan", False)))
 
     # ── HITL approval API (called by main.py) ────────────────────
     def resolve_approval(self, approval_id: str, approved: bool) -> bool:
@@ -701,7 +759,9 @@ class BBHAgent:
         if perm == PermissionLevel.INTRUSIVE:
             if self.intrusive_state is None and self.auto_approve:
                 self.intrusive_state = "approved"
-            authorized = (self.intrusive_state == "approved") or bool(getattr(self, "authenticated_scan", False))
+            # Q-079: the same expression this line always was, named once in `_intrusive_authorized`
+            # so the dispatcher backstop and this wrapper cannot drift into two different rules.
+            authorized = self._intrusive_authorized()
             if not authorized:
                 return _tm.ToolResult(tool_name, "", True,
                                       json.dumps({"ran": False, "blocked": "intrusive tool not authorized (HITL)"}), [])
