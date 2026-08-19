@@ -39,8 +39,20 @@ def test_the_statement_refuses_to_let_untested_read_as_clean(monkeypatch):
 
 
 def test_report_section_names_each_untested_class(monkeypatch):
+    """Simulates a run missing capabilities and asserts the report NAMES what it could not test.
+
+    Q-062: the headless-browser row no longer reads an env var. It asks `bie.available()`, the same
+    check the browser engines themselves gate on, because the old predicate reported the capability
+    MISSING whenever CDP_BROWSER_URL was unset while the platform went on confirming DOM XSS through
+    a local Playwright chromium. Deleting the variable therefore no longer simulates "no browser",
+    and this test has to patch the real dependency instead. That is the simulation catching up with
+    the code, not a loosened assertion: the report must still name a class it genuinely could not
+    test, which is exactly what is asserted below.
+    """
     monkeypatch.delenv("BBH_OOB_BASE", raising=False)
     monkeypatch.delenv("CDP_BROWSER_URL", raising=False)
+    import bie
+    monkeypatch.setattr(bie, "available", lambda: (False, "patched: no browser in this run"))
     md = cp.report_section()
     assert "COULD NOT TEST" in md
     assert "blind XXE" in md and "DOM XSS" in md

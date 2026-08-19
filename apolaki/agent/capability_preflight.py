@@ -48,7 +48,28 @@ _CAPABILITIES = (
      "Some targets block outbound HTTP but resolve DNS. Without a DNS collaborator those paths are "
      "invisible."),
     ("headless_browser",
-     lambda: bool(_env("CDP_BROWSER_URL")),
+     # Q-062. This used to read `bool(_env("CDP_BROWSER_URL"))`, which advertised the capability from
+     # a variable whose consumer has NO CALLER: `cdp.collect` is never invoked by product code, and
+     # every browser engine in this tree drives a LOCAL chromium via `pw.chromium.launch()`.
+     #
+     # MEASURED both ways: with the variable set the row read available=True, and with it unset the
+     # row read available=False -- while the platform CONFIRMS DOM XSS in real Chromium either way
+     # (Q-003 did exactly that through the Playwright path). So the claim was right for the wrong
+     # reason when set, and a FALSE NEGATIVE when unset: an operator would be told DOM XSS, CWE-602
+     # and persona-swap BOLA were unavailable and would either skip the target or stand up a sidecar
+     # they do not need.
+     #
+     # Base it on the thing that actually delivers the capability. The sidecar remains a separate
+     # question (Q-062 asks whether to route to it or stop shipping it); that decision must not be
+     # able to silently change what this row claims.
+     # Ask the ENGINES' own check, not a guess about the environment. `bie.available()` is what the
+     # browser engines themselves gate on, so this row can no longer disagree with what the platform
+     # will actually do. (A first attempt at this fix used shutil.which("chromium") and was WRONG:
+     # chromium is not on PATH in this image, Playwright ships its own under
+     # PLAYWRIGHT_BROWSERS_PATH=/opt/pw-browsers, and the guess would have kept reporting False while
+     # the engines drove a real browser.) The sidecar variable still counts, because a remote CDP
+     # endpoint is a genuine second way to have one.
+     lambda: bool(__import__("bie").available()[0]) or bool(_env("CDP_BROWSER_URL")),
      ("DOM XSS", "client-side prototype pollution", "runtime persona-swap BOLA",
       "client-side-only authorization (CWE-602)", "SPA-rendered attack surface"),
      "docker compose --profile browser up -d headless-chrome",
