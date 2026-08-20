@@ -1179,19 +1179,39 @@ Caught. The same lane also took the third audit item: `test_engine_reachability.
 
 **Two of four one-file guards are now honest, one was already aligned** (`test_session_identity.py`, whose narrow scope genuinely matches its mechanism). That closes the audit Q-085's third DoD item asked for.
 
-### Q-085 · A guard that parses ONE file made that file's boundary the boundary of compliance · **HIGH** · **PARTIAL** `8a59a96` `e9e253a` · breach closed, ratchet 25/13 -> 8/8
+### Q-085 · A guard that parses ONE file made that file's boundary the boundary of compliance · **CLOSED** `8a59a96` `e9e253a` `388fa8b` · 25/13 -> **0/0**
 
-**Found by the Codex lane while auditing Q-085's siblings.** `test_zap_target_drivers_remain_inside_one_guarded_function()` slices only the body of `tools.ToolRegistry._run_zap` and asserts that `zap.access_url`, `zap.spider`, `zap.ajax_start` and `zap.ascan` each occur there. **It never scans outside that body.** Its name claims those drivers "remain inside" the guarded function; its assertion proves they are present in it. **A duplicate unguarded ZAP target driver in another function or another module leaves it green.**
+#### Closed 2026-08-20. Every target transport in the tree goes through the shared rate policy.
 
-The current production fact was checked separately and is clean -- all four calls live at `tools.py:10340/10369/10383/10432` and nowhere else -- **so this is a false assurance rather than a live breach.** That distinction is the ticket: the repository happens to be compliant, and the named guard cannot preserve it.
+    ungated target-call sites   25 -> 21 -> 8 -> 0
+    modules bypassing           13 -> 12 -> 8 -> 0
 
-This is the Q-085 family, third form. Q-085 was *a guard with too narrow a SCOPE*; this is *a guard asserting the wrong PROPERTY*. Both pass everything they exist to catch, and both are descended from the recorded lesson that a guard checking a declaration passes what it exists to catch.
+The strict xfail `test_every_target_transport_uses_the_shared_rate_policy` is **retired**, in the
+commit where it XPASSed.
 
-**Definition of done**: a repository-wide AST ABSENCE check, on the `_target_traffic_bypasses` pattern Q-085 already landed. **The Codex lane deliberately did not build it**, and the reason is worth keeping: deciding which receiver aliases count requires `zap_client.py` and the production call contract, and it declined to land a noisy grep guard in a shared tree. Fold this into the next ZAP lease.
+**A retirement is the claim that needs the most checking, not the least**, because a strict xfail
+that XPASSes because the DEFECT WAS FIXED and one that XPASSes because the MEASUREMENT DRIFTED are
+indistinguishable in a green suite. Coordinator mutation, verified as landed before the result was
+believed: an ungated `httpx.Client` planted in an existing production module fails **two** tests --
+the ratchet, and the retired-xfail test now running live:
 
-**And check the fourth guard family generally**: `test_session_identity.py`'s narrow scope was audited and found ALIGNED with its stated mechanism, and `test_engine_reachability.py` was found to prove *possible invocability*, not *deterministic scheduling* -- a weaker claim than its name implies, and a partial false assurance of its own. Neither is fixed. Q-085's third DoD item was to ask "what does this guard actually parse, and what does it actually assert?" of every guard in the tree; two of four have now been answered and the answers were not reassuring.
+    FAILED test_repository_wide_rate_policy_inventory_is_non_vacuous_and_ratcheted
+    FAILED test_every_target_transport_uses_the_shared_rate_policy
 
-### Q-085 · A guard that parses ONE file made that file's boundary the boundary of compliance · **HIGH** · **PARTIAL** `8a59a96` · breach closed, ratchet pinned at 21/12
+So the retirement is a fixed defect. The final eight were gated in the files that had been outside
+every earlier lease: `agent.py`, `auth.py`, `authz.py`, `bwapp_solvers.py`, `codeintel.py`,
+`mutillidae_solvers.py`, `register.py`, `replay.py`.
+
+**The whole arc, because the shape is the lesson.** This began as Q-043 -- "Apolaki does not honour
+`Retry-After`" -- and the interesting part was never the missing feature. It was that **both AST
+guards parsed `tools.__file__` and nothing else**, so `tools.py` was 100% compliant and every other
+module drifted freely. The guard's scope had become the boundary of compliance. Widening the guard
+turned one clean file into 25 real violations across 13 modules, none of which were new.
+
+**Also closed by the same arc**: the live no-DoS breach (ten concurrent `threading.Thread` workers
+posting to `/rest/products/reviews` ungated), Q-086 (a guard proving presence and calling it
+absence), and the bare-429 half of Q-043 -- honoured now, with the ledger recording whether a
+cooldown was `header`-supplied or `inferred`.
 
 #### Landed 2026-08-20 by an external Codex lane, on its own branch, merged after ownership verification
 

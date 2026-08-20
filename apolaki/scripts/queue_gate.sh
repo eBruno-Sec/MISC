@@ -148,6 +148,7 @@ for id in $ids; do
   same="$(printf '%s\n' "$headers" | grep -E "^[0-9]+:#{1,3} $id( |\$)" || true)"
   [ "$(printf '%s\n' "$same" | wc -l | tr -d ' ')" -lt 2 ] && continue
   n_dup=$((n_dup + 1))
+  dup_ids="${dup_ids:-} $id"
   closed=$(printf '%s\n' "$same" | grep -ci 'CLOSED' || true)
   open=$(printf '%s\n'   "$same" | grep -ciE '`(ready|proposed|in flight)`' || true)
   if [ "$closed" -gt 0 ] && [ "$open" -gt 0 ]; then
@@ -157,6 +158,21 @@ for id in $ids; do
   fi
 done
 
+# NAME the duplicated ids rather than counting them. MEASURED MISS, 2026-08-20: this line read
+# "6 ids with >1 header" for hours while one of those six was an ACCIDENT -- an orphan `### Q-085`
+# heading sitting on top of Q-086's stale open body, which still said "Definition of done: a
+# repository-wide AST ABSENCE check" for work that was already done. Check 2 did not fail, and was
+# right not to: both headers said PARTIAL, so they AGREED, and control D exists precisely to stop
+# agreeing duplicates being flagged as noise.
+#
+# The information was here the whole time and I skimmed past it, because a bare integer invites
+# skimming and a list of names does not. A gate that reports a number nobody investigates is doing
+# half its job. Still not a FAILURE -- a long file legitimately carries a summary line and a body --
+# but now it is legible.
+if [ -n "${dup_ids:-}" ]; then
+  echo "queue_gate: ids with more than one header (allowed when the states agree; check they are deliberate):"
+  echo "$dup_ids" | tr ' ' '\n' | sed '/^$/d' | sed 's/^/    /'
+fi
 echo "queue_gate: $n_hdr headers, $n_hash distinct hashes cited, $n_dup ids with >1 header"
 if [ "$violations" -gt 0 ]; then
   echo "queue_gate: FAIL ($violations violation(s))"
