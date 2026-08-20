@@ -437,3 +437,112 @@ BASELINE IDENTICAL TO MISSION 2fb87a3a: True
 category by category so a swap cannot hide inside a stable total.** The one intended row is still
 the one intended row. No benchmark path, ID or filename is named anywhere in this change either;
 `review()` is not on the scored path at all, and `review_source_tree`'s behaviour is unchanged.
+
+---
+
+## 7. ANTI-IDLE — run 1's unfinished question: does the DAST side have the same blind spot?
+
+**Yes. Thirteen rows, one engine, and one of them is the same jQuery bundle that raised this
+ticket.** Not in `codeintel.py`, so this lane reports it rather than fixing it.
+
+The question needed sharpening first. "A finding against a third-party asset" is not by itself a
+defect on the DAST side: a served bundle IS the client's attack surface even when they did not
+write it, and telling them their AngularJS is end-of-life is the product working. The ticket's
+actual complaint transfers as: **does a runtime finding point the operator at a LOCATION they
+cannot act on, in code they do not maintain, without saying so?**
+
+### 7.1 Apparatus
+
+```
+POSITIVE CONTROL findings=1773 missions=154 tool_call=29945
+provenance: [('<none>', 1057), ('source-derived', 716)]
+runtime findings=1057, of which carry a target=1054
+```
+
+Matches the brief's control exactly. Every count below is a measured count.
+
+### 7.2 The first number was wrong, and the correction is the interesting part
+
+A text search for vendored-asset names across all runtime fields returned **112 of 1057 (10.6%)**.
+That number does not survive inspection: 46 of the 112 are `CRLF / response-header injection on
+'category'`, whose target is `https://ginandjuice.shop/catalog?category=...` — a first-party
+endpoint. The asset name appears only because the *response body* references a script. The regex
+matched the page, not the finding's location.
+
+Re-measured on the field that actually points the operator somewhere (`url` / `target`):
+
+```
+RUNTIME findings whose OWN target/url IS a vendored script: 69 of 1057 (6.5%)
+   of those, SCA / 'vulnerable component' rows (correct by design) : 56
+   of those, NOT SCA -- a finding LOCATED in code the client does
+                       not maintain, with no marker                : 13
+```
+
+The 56 are `Vulnerable component: angular@1.7.7 (CVE-2023-26118, +3 more)` and friends, tagged
+`['sca','dependency','angular']`. Those are the product working.
+
+### 7.3 The 13
+
+```
+--- the NOT-SCA rows, by title + cwe + confidence ---
+    13  Credential exposed in a source comment     CWE-615   confirmed
+
+--- the assets they point at, and the LINE they cite ---
+   ginandjuice.shop/resources/js/angular_1-7-7.js          line=101  sev=high  tags=['secrets','comment','source-disclosure']
+   ginandjuice.shop/resources/js/react-dom.development.js  line=23   sev=high  ...
+   owaspbench:8443/benchmark/js/jquery.min.js              line=4    sev=high  ...   (x6)
+   juice-shop:3000/chunk-QDZ6R7S6.js                       line=4    sev=high  ...
+```
+
+**One engine, `agent/codereview.py:1493` (`scan_comment_secrets` inside `review()`).** All 13 are
+HIGH and hardcoded `"confidence": "confirmed"` — and that hardcode is notable in context, because
+the three sibling scanners in the very same function (`scan_secrets`, `scan_sinks`,
+`scan_weak_crypto`) all emit `"candidate"`. It is the one row in that function that claims
+certainty, and it is the one landing on minified bundles.
+
+`owaspbench:8443/benchmark/js/jquery.min.js` at **line 4** is the same jQuery bundle as
+`webapp/js/jquery.min.js:2`. **Q-083 was filed from the SAST side; the DAST side was reporting the
+same file the whole time and nobody looked.**
+
+### 7.4 Two claims about those rows, stated at the confidence each deserves
+
+MEASURED, and checkable from the row's own text: the finding says *"comment at line 101"*, and the
+bytes it quotes from line 101 of `angular_1-7-7.js` are
+`"},\n post:ja(wc),put:ja(wc),patch:ja(wc)},xsrfCookieName:"XSRF-TOKEN",...` — **minified library
+source, not a comment.** For `jquery.min.js` it cites line 4 of a four-line minified file. The
+row's stated basis is contradicted by the row's own evidence field.
+
+NOT CLAIMED: that these are false positives. Nobody has bound what those values do, exactly as with
+the `Math.random()` that started this. The defect that IS established is the ticket's, verbatim:
+**a confidence asserted without basis, at a location the operator cannot act on, in code they do
+not maintain.**
+
+### 7.5 The vocabulary split, which is why this will happen again
+
+```
+--- does ANY runtime finding carry codeintel's marker vocabulary? ---
+   source_kind key            : 0
+   'not-maintained-source' tag: 0
+   'dependency'/'sca' tag     : 56
+```
+
+**Zero of 1057 runtime findings carry the marker this lane built.** The DAST side is not silent
+about dependencies — it has 56 rows tagged `dependency`/`sca` — it just says it with a different
+word, in a different engine, and only for the SCA class. `codeintel.not_maintained_source` is a
+pure function over `(rel, text)` and a fetched script body is exactly that input, so the classifier
+already generalises; nothing consumes it outside `codeintel.py`.
+
+**Recommended ticket (not filed here — `docs/QUEUE.md` belongs to another lane):** run
+`scan_comment_secrets`' 13 rows through `codeintel.not_maintained_source(url_path, body)` and mark
+them, and separately explain why one scanner in `codereview.review()` hardcodes `confirmed` while
+its three siblings hardcode `candidate`.
+
+### 7.6 One measured zero worth naming as a limit, not a result
+
+```
+B. runtime findings naming a third-party CDN HOST : 0 of 1057
+```
+
+Zero — but every corpus in that DB is a self-hosted lab (`ginandjuice.shop`, `juice-shop:3000`,
+`owaspbench:8443`), so no scan has ever met a CDN-hosted asset. **That zero is a property of the
+corpus, not evidence that the cross-origin case is handled.** It is untested, not clean.
