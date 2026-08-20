@@ -154,3 +154,80 @@ that reports 2-4 s on the rows above. The zeros mean "no wait", not "no instrume
 **Clause 3 (bare 429) fails identically on both paths** — 0.027 s browser, 0.003 s `_http`. This is
 the one real gap, and it is symmetric, which is the good news: one fix in `TargetRatePolicy.observe`
 covers both transports. See §4.
+
+---
+
+## 4. The bare-429 "gap" — it was a DESIGNED boundary, not an oversight
+
+Run 1 recorded clause 3 as **FAIL** and told run 2 to "land the fix". Run 2 checked whether it was
+an oversight before patching it. **It is not.** The behaviour is held by a named negative control
+that an earlier Q-043 commit (`9c37ced`) deliberately landed:
+
+    agent/tests/test_backoff_bounds.py:173
+    def test_a_response_without_retry_after_is_never_recorded_as_a_wait():
+        """The other negative control: a 429 the server did not annotate must not manufacture one."""
+        assert policy.observe("https://a.example/x", 429, {}) is None
+        assert policy.observe("https://a.example/x", 429, {"retry-after": "banana"}) is None
+
+Two defensible positions collide:
+
+| position | argument |
+|---|---|
+| the ticket's | a 429 **is** the server saying slow down. nginx `limit_req` and Cloudflare both return one with no `Retry-After`, so honouring only the annotated case misses the **common** shape. |
+| the existing control's | a cooldown we invented is indistinguishable in the ledger from one the target actually asked for. A scanner must not fabricate evidence about a target. |
+
+Deleting the control to satisfy the ticket would be **weakening an oracle**, which this lane does
+not do. So the fix does neither: the fallback is **configurable and ships OFF**.
+
+    RATE_POLICY_BARE_DEFAULT_SECONDS = 0.0        # agent/browser_engine.py
+    BBH_RETRY_AFTER_BARE_SECONDS                  # env knob, bounded by BBH_RETRY_AFTER_MAX_SECONDS
+
+At `0.0`, `observe()` returns `None` exactly as before, counts no observation, and leaves the
+ledger note byte-for-byte identical — the existing control stays green **unmodified**. Setting it
+opts in. Every unusable value (`banana`, `""`, `-1`, `nan`, `inf`) resolves to the safe default,
+because this knob's failure mode is a parked mission and a malformed env var must not be what
+parks it.
+
+**The default is a POLICY DECISION, and it is the Coordinator's, not mine.** I implemented the
+mechanism and left the number at today's behaviour. Flipping it is a one-line change to
+`RATE_POLICY_BARE_DEFAULT_SECONDS` plus an update to the `9c37ced` control that asserts the
+opposite — and that control must be updated *deliberately*, by whoever owns the ticket, not
+silently by whoever happens to be editing.
+
+### 4a. Test that fails first — MEASURED, both directions
+
+    # against the UNMODIFIED snapshot
+    docker run --rm --network apolaki_default -v "$SNAP:/app" -w /app apolaki-agent \
+      python -m pytest tests/test_rate_policy_bare_429.py -p no:cacheprovider
+    ...
+    E  TypeError: TargetRatePolicy.__init__() got an unexpected keyword argument 'bare_retry_seconds'
+    16 failed, 6 passed in 2.48s
+
+The **6 that passed are the point**: they are the "default is unchanged" controls, which must pass
+before *and* after. A file where everything went red would not have distinguished "the feature is
+missing" from "the test file is broken".
+
+    # after the change, with every pre-existing rate-policy test alongside it
+    docker run --rm --network apolaki_default -v "$SNAP:/app" -w /app apolaki-agent \
+      python -m pytest tests/test_rate_policy_bare_429.py tests/test_backoff_bounds.py \
+        tests/test_rate_policy.py tests/test_backoff_ledger.py -p no:cacheprovider
+    62 passed, 3 warnings in 8.76s
+
+### 4b. MEASURED through a real browser, not only through unit tests
+
+Same probe as §3, same real Chromium, `BBH_RETRY_AFTER_BARE_SECONDS=2` under a 4 s ceiling:
+
+    B1  delta-seconds  status=429->200  server_gap=2.065s
+    B2  HTTP-date +3s  status=429->200  server_gap=2.893s
+    B2b HTTP-date PAST status=429->200  server_gap=0.022s   <- still clamps to zero
+    B3  bare 429       status=429->200  server_gap=2.038s   <- was 0.027s
+    B3b bare 503       status=503->200  server_gap=2.022s   <- was 0.028s
+    B5  absurd 86400   status=429->200  server_gap=4.029s   <- still capped
+    NEG 200+RA:5       status=200->200  server_gap=0.023s   <- still exempt
+    NEG RA banana      status=429->200  server_gap=2.027s   <- now parks, by design
+
+Three rows are load-bearing as **negative** controls of the knob itself: B2b proves the fallback
+does not resurrect a past date into a wait, NEG 200 proves it does not leak onto non-limiting
+statuses, and B5 proves it is still bounded by the same ceiling. `NEG RA banana` deliberately
+changes meaning when the knob is on — an unparseable hint is a limit whose hint is unusable, not a
+limit that never happened.

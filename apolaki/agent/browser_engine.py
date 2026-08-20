@@ -34,6 +34,23 @@ RATE_POLICY_DEFAULT_MAX_SECONDS = 30.0
 RATE_POLICY_HARD_MAX_SECONDS = 300.0
 _RETRY_STATUSES = frozenset({429, 503})
 
+# Q-043 GAP-2, the bare 429. MEASURED (docs/handoff/rate_policy.md §3/§4): a 429 or 503 carrying no
+# usable `Retry-After` produces 0.003 s of backoff on the `_http` path and 0.027 s on the browser
+# path -- i.e. none, on both. That is not an oversight. It is a DESIGNED boundary held by a named
+# negative control from an earlier Q-043 commit (9c37ced):
+#
+#   test_backoff_bounds.py::test_a_response_without_retry_after_is_never_recorded_as_a_wait
+#   "a 429 the server did not annotate must not manufacture one"
+#
+# The ticket wants the opposite, and both positions are defensible: nginx `limit_req` and Cloudflare
+# routinely return 429 with no Retry-After, so honouring only the annotated case misses the common
+# shape; but a cooldown we invented is indistinguishable in the ledger from one the target asked
+# for. Resolving that by deleting the control would be weakening an oracle, so the fallback is
+# CONFIGURABLE and ships OFF. Zero keeps today's behaviour byte-for-byte and keeps the control
+# green; setting it opts in, bounded by the same ceiling as a header-supplied delay.
+# The choice of default belongs to whoever owns the ticket, not to this constant.
+RATE_POLICY_BARE_DEFAULT_SECONDS = 0.0
+
 # Q-043 GAP-1. The cap in `observe()` bounds ONE HEADER; it never bounded the WAIT. The origin
 # deadline is extend-only and shared, so a sibling worker meeting a fresh 429 pushes the deadline
 # out from under a caller that is already parked on it. MEASURED: eight such extensions, each one
@@ -139,8 +156,9 @@ class TargetRatePolicy:
     """
 
     def __init__(self, max_wait=None, clock=None, wall_clock=None,
-                 async_sleep=None, sync_sleep=None):
+                 async_sleep=None, sync_sleep=None, bare_retry_seconds=None):
         self._explicit_max_wait = max_wait
+        self._explicit_bare_retry = bare_retry_seconds
         self._clock = clock or time.monotonic
         self._wall_clock = wall_clock or time.time
         self._async_sleep = async_sleep or asyncio.sleep
@@ -162,6 +180,25 @@ class TargetRatePolicy:
             value = RATE_POLICY_DEFAULT_MAX_SECONDS
         return min(value, RATE_POLICY_HARD_MAX_SECONDS)
 
+    def _bare_wait(self):
+        """Fallback cooldown for a rate limit the server did not annotate. 0.0 disables it.
+
+        Every unusable setting -- unparseable, negative, NaN, inf -- resolves to the SAFE default
+        rather than to something large, because this knob's failure mode is a parked mission and a
+        malformed env var must not be the thing that parks it. Bounded by `_max_wait()` so the
+        invented delay can never outlive a header-supplied one."""
+        value = self._explicit_bare_retry
+        if value is None:
+            value = os.environ.get("BBH_RETRY_AFTER_BARE_SECONDS",
+                                   RATE_POLICY_BARE_DEFAULT_SECONDS)
+        try:
+            value = float(value)
+        except (TypeError, ValueError):
+            return RATE_POLICY_BARE_DEFAULT_SECONDS
+        if not math.isfinite(value) or value < 0:
+            return RATE_POLICY_BARE_DEFAULT_SECONDS
+        return min(value, self._max_wait())
+
     def clear(self, url=None):
         origin = _origin(url) if url else ""
         with self._lock:
@@ -181,8 +218,15 @@ class TargetRatePolicy:
         lowered = {str(k).lower(): v for k, v in dict(headers or {}).items()}
         delay = retry_after_seconds(lowered.get("retry-after"), now=self._wall_clock())
         origin = _origin(url)
-        if delay is None or not origin:
+        if not origin:
             return None
+        if delay is None:
+            # The limit carried no usable hint. `_bare_wait()` is 0.0 unless someone opted in, and
+            # at 0.0 this returns None exactly as it always has -- the unannotated 429 manufactures
+            # nothing, no observation is counted, and the ledger note stays byte-for-byte identical.
+            delay = self._bare_wait()
+            if delay <= 0:
+                return None
         capped = delay > self._max_wait()
         delay = min(delay, self._max_wait())
         deadline = self._clock() + delay
