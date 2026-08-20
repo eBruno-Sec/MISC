@@ -88,6 +88,164 @@ def _run(awaitable):
     return asyncio.run(awaitable)
 
 
+# Q-085: the original bypass controls below parsed ``tools.__file__`` only.  That made
+# tools.py clean while every sibling module was invisible.  Inventory raw target-capable
+# transports from every production Python module; explicit control-plane calls are recorded
+# here by owner so adding a new module cannot inherit an exemption by accident.
+_RAW_HTTP_CALLS = {
+    "httpx.Client", "httpx.AsyncClient", "httpx.request", "httpx.get", "httpx.post",
+    "httpx.put", "httpx.patch", "httpx.delete", "httpx.head", "httpx.options",
+    "requests.Session", "requests.request", "requests.get", "requests.post", "requests.put",
+    "requests.patch", "requests.delete", "requests.head", "requests.options",
+    "urllib.request.urlopen", "aiohttp.ClientSession", "urllib3.PoolManager",
+    "http.client.HTTPConnection", "http.client.HTTPSConnection",
+}
+
+_CONTROL_PLANE_CALLS = {
+    ("benchmark_assert.py", "_get", "urllib.request.urlopen"),
+    ("browser_engine.py", "drive", "httpx.post"),
+    ("cdp.py", "collect", "httpx.post"),
+    ("ci_summary.py", "_get_json", "urllib.request.urlopen"),
+    ("cloud_iam.py", "_linode_get", "urllib.request.urlopen"),
+    ("dns_recon.py", "doh", "httpx.AsyncClient"),
+    ("intel_connectors.py", "_default_http", "httpx.get"),
+    ("intel_extractor.py", "_call_llm", "urllib.request.urlopen"),
+    ("intel_feeds.py", "fetch", "urllib.request.urlopen"),
+    ("labs.py", "_http_json", "urllib.request.urlopen"),
+    ("main.py", "blind_benchmark_run", "httpx.AsyncClient"),
+    ("zap_client.py", "_call", "httpx.AsyncClient"),
+}
+
+_POLICY_CHOKEPOINT_CALLS = {
+    ("browser_engine.py", "rate_limited_async_client", "httpx.AsyncClient"),
+    ("browser_engine.py", "rate_limited_sync_client", "httpx.Client"),
+    ("browser_engine.py", "rate_limited_goto", "page.goto"),
+}
+
+
+def _dotted(node):
+    if isinstance(node, ast.Name):
+        return node.id
+    if isinstance(node, ast.Attribute):
+        left = _dotted(node.value)
+        return (left + "." if left else "") + node.attr
+    return ""
+
+
+def _canonical_call(node, aliases):
+    name = _dotted(node.func)
+    head, dot, tail = name.partition(".")
+    if head in aliases:
+        name = aliases[head] + (dot + tail if dot else "")
+    if name.endswith(".goto"):
+        return "page.goto"
+    return name
+
+
+def _raw_transport_inventory(paths=None):
+    root = Path(tools.__file__).resolve().parent
+    paths = sorted(root.glob("*.py")) if paths is None else [Path(p) for p in paths]
+    rows = []
+    for path in paths:
+        source = path.read_text(encoding="utf8")
+        tree = ast.parse(source, filename=str(path))
+        parents = {}
+        aliases = {}
+        for parent in ast.walk(tree):
+            for child in ast.iter_child_nodes(parent):
+                parents[child] = parent
+            if isinstance(parent, ast.Import):
+                for item in parent.names:
+                    if item.asname:
+                        aliases[item.asname] = item.name
+                    elif "." not in item.name:
+                        aliases[item.name] = item.name
+            elif isinstance(parent, ast.ImportFrom) and parent.module:
+                for item in parent.names:
+                    aliases[item.asname or item.name] = parent.module + "." + item.name
+
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.Call):
+                continue
+            call = _canonical_call(node, aliases)
+            if call not in _RAW_HTTP_CALLS and call != "page.goto":
+                continue
+            owner = node
+            while owner in parents and not isinstance(owner, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                owner = parents[owner]
+            fn = owner.name if isinstance(owner, (ast.FunctionDef, ast.AsyncFunctionDef)) else "<module>"
+            # The browser bootstrap navigates to a local blank document, not to the assessment target.
+            if call == "page.goto" and node.args and isinstance(node.args[0], ast.Constant) \
+                    and node.args[0].value == "about:blank":
+                continue
+            rows.append({"path": path, "module": path.name, "function": fn,
+                         "call": call, "line": node.lineno, "owner": owner})
+    return rows
+
+
+def _is_locally_wrapped(row):
+    """A raw send is acceptable only when the same function gates before and observes after it."""
+    owner = row["owner"]
+    if not isinstance(owner, (ast.FunctionDef, ast.AsyncFunctionDef)):
+        return False
+    calls = [(_dotted(n.func), n.lineno) for n in ast.walk(owner) if isinstance(n, ast.Call)]
+    waits = [line for name, line in calls if name.endswith(("target_rate_policy.wait_sync",
+                                                            "target_rate_policy.wait_async"))]
+    observations = [line for name, line in calls if name.endswith("target_rate_policy.observe")]
+    return any(line < row["line"] for line in waits) and any(line > row["line"] for line in observations)
+
+
+def _target_traffic_bypasses(paths=None):
+    rows = _raw_transport_inventory(paths)
+    exemption_use = {}
+    bypasses = []
+    for row in rows:
+        key = (row["module"], row["function"], row["call"])
+        if key in _POLICY_CHOKEPOINT_CALLS or _is_locally_wrapped(row):
+            continue
+        if key in _CONTROL_PLANE_CALLS:
+            # Every exemption names one measured call site. A second raw call in the same function is
+            # drift, not a free extension of the exemption.
+            exemption_use[key] = exemption_use.get(key, 0) + 1
+            if exemption_use[key] == 1:
+                continue
+        bypasses.append("%s:%d:%s:%s" %
+                        (row["module"], row["line"], row["function"], row["call"]))
+    return sorted(bypasses)
+
+
+def test_repository_wide_rate_policy_inventory_is_non_vacuous_and_ratcheted():
+    bypasses = _target_traffic_bypasses()
+    modules = {row.split(":", 1)[0] for row in bypasses}
+    # Measured at 256ed8e: 39 target-capable raw calls after the one literal ``about:blank``
+    # bootstrap is excluded. Keep the full denominator visible rather than asserting only on misses.
+    assert len(_raw_transport_inventory()) >= 39, "the repository-wide transport census loaded too little"
+    assert len(bypasses) <= 25, "ungated target-call sites rose above the measured Q-085 baseline: %s" % bypasses
+    assert len(modules) <= 13, "modules bypassing the target policy rose above the measured baseline: %s" % sorted(modules)
+
+
+@pytest.mark.xfail(strict=True, reason=(
+    "Q-085 LIVE GAP: repository-wide AST census measures 25 ungated target calls across 13 modules; "
+    "registration is not compliance, and SKIPPED/NOT SEEN is not a pass"))
+def test_every_target_transport_uses_the_shared_rate_policy():
+    assert _target_traffic_bypasses() == []
+
+
+def test_repository_wide_guard_catches_a_new_previously_invisible_module(tmp_path):
+    dirty = tmp_path / "brand_new_engine.py"
+    dirty.write_text("import httpx\n\ndef send(url):\n    return httpx.AsyncClient(base_url=url)\n",
+                     encoding="utf8")
+    safe = tmp_path / "brand_new_guarded_engine.py"
+    safe.write_text("import browser_engine\nimport httpx\n\ndef send(url):\n"
+                    "    return browser_engine.rate_limited_async_client(httpx, base_url=url)\n",
+                    encoding="utf8")
+
+    assert _target_traffic_bypasses([dirty]) == [
+        "brand_new_engine.py:4:send:httpx.AsyncClient"
+    ]
+    assert _target_traffic_bypasses([safe]) == []
+
+
 def test_http_engine_path_starts_zero_requests_inside_the_retry_window(monkeypatch):
     """The negative control: removing `_http`'s policy call makes this fail."""
     monkeypatch.setenv("BBH_RETRY_AFTER_MAX_SECONDS", "0.08")
