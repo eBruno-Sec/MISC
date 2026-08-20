@@ -347,6 +347,46 @@ def test_the_integrity_gate_does_not_fire_on_the_shapes_that_are_honest():
         assert bad == [], (f.get("title"), bad)
 
 
+# --- 6. THE SAME HALF-FIX, ONE RENDERER OVER ------------------------------------------------------
+#
+# MEASURED over the 392 `confidence=lead` rows in the findings table: the HTML renderer badges every
+# card "LEAD — unproven (demoted by the proof gate)"; the markdown report printed them under
+# `## Findings` with the strings LEAD / unproven / demoted appearing ZERO times. `_confirmed`'s own
+# docstring records this exact bug being fixed in the HTML card and nowhere else.
+
+def test_markdown_states_the_proof_gate_demotion_the_html_badge_already_showed():
+    demoted = dict(DAST_DERIVED_CURL, confidence="lead")     # the real stored shape: a lead row
+    md = _md([demoted])
+    assert "**Confidence:** LEAD — unproven" in md, (
+        "markdown still presents a proof-gate-demoted row as if it were confirmed")
+    assert "demoted by the proof gate" in md
+
+
+def test_the_demotion_reason_is_the_specific_one_when_the_gate_named_it():
+    demoted = dict(DAST_DERIVED_CURL, confidence="lead", proof_gap=["oracle", "control"])
+    md = _md([demoted])
+    assert "proof gate: missing oracle, control" in md
+    # and the HTML badge reads the SAME reason -- one definition, two renderings
+    assert "proof gate: missing oracle, control" in report._conf_badge(demoted)
+
+
+def test_a_confirmed_finding_gets_no_confidence_line_in_markdown():
+    """NEGATIVE CONTROL: the point is to state a demotion, not to stamp a second CONFIRMED next to
+    the severity on every row. A fix that labelled everything would be noise, not honesty."""
+    for fx in (DAST_EXPLICIT_CURL, SOURCE_FINDING):
+        assert report.confidence_label(dict(fx)) == "", fx.get("title")
+        assert "**Confidence:**" not in _md([fx]), fx.get("title")
+
+
+def test_the_html_badge_markup_is_unchanged_by_the_shared_reason_helper():
+    """The reason string moved into `_proof_gap_reason`; the badge's rendered markup must not move
+    with it, or an HTML fix would be paid for with an HTML regression."""
+    assert report._conf_badge(dict(DAST_EXPLICIT_CURL)) == '<span class="tag-conf">CONFIRMED</span>'
+    lead = report._conf_badge(dict(DAST_DERIVED_CURL, confidence="lead"))
+    assert lead == ("<span class='tag-conf' style='background:#c98a2b;color:#fff;border-color:#c98a2b' "
+                    "title='demoted by the proof gate'>LEAD &mdash; unproven</span>"), lead
+
+
 def test_each_source_marker_alone_is_enough_to_suppress_the_command():
     """`proof_schema._SOURCE_MARKERS` classifies on ANY ONE of the three markers, on purpose. The
     presenter must inherit that, not require all three -- a lane adopting part of the vocabulary

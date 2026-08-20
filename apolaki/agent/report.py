@@ -52,14 +52,37 @@ def _oracle_of(f: dict) -> str:
         return ""
 
 
+def _proof_gap_reason(f: dict) -> str:
+    """WHY the proof gate demoted this row — the one definition, rendered two ways below.
+    Kept separate from the markup so the badge and the markdown line cannot fork a third time."""
+    gap = ", ".join(str(x) for x in (f.get("proof_gap") or [])[:3])
+    return ("proof gate: missing %s" % gap) if gap else "demoted by the proof gate"
+
+
 def _conf_badge(f: dict) -> str:
     """The confidence chip on a finding card. Amber LEAD when the proof gate demoted this row."""
     if _confirmed(f):
         return '<span class="tag-conf">CONFIRMED</span>'
-    gap = ", ".join(str(x) for x in (f.get("proof_gap") or [])[:3])
-    title = _html.escape("proof gate: missing %s" % gap) if gap else "demoted by the proof gate"
     return ("<span class='tag-conf' style='background:#c98a2b;color:#fff;border-color:#c98a2b' "
-            "title='%s'>LEAD &mdash; unproven</span>" % title)
+            "title='%s'>LEAD &mdash; unproven</span>" % _html.escape(_proof_gap_reason(f)))
+
+
+def confidence_label(f: dict) -> str:
+    """The markdown twin of `_conf_badge`: a plain-text demotion notice, or `''` when confirmed.
+
+    Q-082 sweep. `_confirmed`'s own docstring records that the HTML card once "stamped a hardcoded
+    CONFIRMED on every row — so the proof gate demoted a finding and the report un-demoted it two
+    function calls later". That was fixed in the HTML renderer and never in the markdown one, where
+    the fix took its SILENT form: MEASURED over the 392 `confidence=lead` rows in the findings table,
+    the markdown report prints them under `## Findings` with the strings LEAD / unproven / demoted
+    appearing ZERO times, while the HTML badges every card. Same defect, opposite renderer, and the
+    exact half-fix shape this ticket is about.
+
+    Empty for a confirmed finding on purpose: the report should say nothing rather than stamp a
+    second, redundant CONFIRMED next to the severity."""
+    if _confirmed(f):
+        return ""
+    return "LEAD — unproven (%s)" % _proof_gap_reason(f)
 
 
 def _counts(findings: list) -> dict:
@@ -452,6 +475,11 @@ def generate_report(program: str, findings: list, scope: dict,
             f"**Severity:** {sev}",
             f"**Target:** `{f.get('target', '')}`",
         ]
+        # Q-082 sweep: the proof gate's demotion is a fact about how well this was proven, and the
+        # markdown renderer was the surface that dropped it. Printed only when it says something.
+        _cl = confidence_label(f)
+        if _cl:
+            lines.append(f"**Confidence:** {_cl}")
         # Q-051: WHICH ENGINE FOUND THIS. Bound at the ToolResult boundary, so it is the producer's
         # own name for itself rather than something inferred here. Printed only when present -- a
         # finding stored before the binding landed says nothing rather than guessing, and "unknown"

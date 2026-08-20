@@ -301,6 +301,136 @@ def load_properties(root: str, max_files: int = 200) -> dict:
 _SOURCE_EXTS = (".java", ".py", ".pyw", ".js", ".mjs", ".cjs", ".jsx", ".ts", ".tsx")
 
 
+# ══════════════════════════════════════════════════════════════════════════════════════════════
+# NOT-MAINTAINED SOURCE — evidence that a file is a dependency or a build artifact (Q-083)
+# ══════════════════════════════════════════════════════════════════════════════════════════════
+# Mission 2fb87a3a shipped a client a CONFIRMED MEDIUM against `webapp/js/jquery.min.js` at
+# "line 2", because the whole bundle is line 2. Nothing about that row is known to be FALSE --
+# whether that `Math.random()` feeds a security-relevant value is still unknown, and proving it
+# either way means binding the value's use. The defect is narrower and certain: the lane asserted
+# a confidence it had no basis for, at a location the operator cannot act on, in code they do not
+# maintain.
+#
+# What each signal below actually EVIDENCES, which is not the same for all of them:
+#
+#   * `.min.js` name / minified geometry / sourceMappingURL  ->  THIS IS NOT THE MAINTAINED SOURCE.
+#     Provable from the file alone. It is also precisely what makes `line 2` meaningless: the line
+#     does not exist in anything anyone can edit.
+#   * a preserved licence banner naming a project AND a version, or an `@license`/`@preserve`
+#     pragma                                                 ->  THIRD PARTY.
+#
+# Everything here was calibrated against REAL files pulled from the running labs, and two of them
+# exist specifically to stop a lazier rule:
+#
+#   * `*.min.js` IS NOT A VENDOR HEURISTIC. Juice Shop's 35 bundles are `main.js`, `polyfills.js`,
+#     `chunk-<HASH>.js` -- not one ends in `.min.js`. A filename rule catches the 2015 jQuery
+#     convention and misses every esbuild/webpack/Vite output.
+#   * A BARE `/*!` IS NOT A LICENCE BANNER. OWASP's own first-party
+#     `webapp/js/testsuiteutils.js` opens `/*! Test suite JavaScript util functions */`. Requiring
+#     a version token alongside the licence claim separates it from `/*! jQuery v2.1.4 | (c) 2005,
+#     2015 jQuery Foundation, Inc. | jquery.org/license */` -- measured on both files, not assumed.
+#
+# The consequence is a DEMOTION plus the evidence, never a deletion. A file wrongly marked here
+# loses `confirmed` and keeps its row; a file wrongly excluded from the walk vanishes with no
+# trace in the report. Those are not symmetric errors, and the asymmetry is why this is a marker.
+
+#: Minifier output naming: `x.min.js`, `x-min.js`, `x_min.js` (+ .mjs/.cjs).
+_MINIFIED_NAME_RX = re.compile(r"[.\-_]min\.(?:js|mjs|cjs)$", re.I)
+
+#: Terser/uglify preserve these through minification; both are build-tool pragmas, not prose.
+_LICENCE_PRAGMA_RX = re.compile(r"@(?:licen[cs]e|preserve)\b", re.I)
+
+#: A bang-comment banner: what a minifier keeps at the top of a bundled dependency.
+_BANG_BANNER_RX = re.compile(r"^\s*/\*!(.{0,400}?)\*/", re.S)
+
+#: A released-library version token -- `v2.1.4`, `2.1.3`. Present in a dependency's banner, absent
+#: from the hand-written first-party banner this rule had to be taught to leave alone.
+_BANNER_VERSION_RX = re.compile(r"\bv?\d+\.\d+(?:\.\d+)?\b")
+_BANNER_LICENCE_RX = re.compile(r"(?i)licen[cs]e|copyright|\(c\)\s*\d{4}|"
+                                r"\b(?:MIT|Apache|BSD|GPL|LGPL|MPL|ISC)\b")
+
+#: Generated output declares where its real source went.
+_SOURCEMAP_RX = re.compile(r"^//[#@]\s*sourceMappingURL=", re.M)
+
+#: Dependency directories. `node_modules`/`vendor`/`dist`/`build` are already pruned by
+#: `_SKIP_DIRS` during the walk; they are repeated here so a tree ROOTED INSIDE one is still
+#: classified. `vendors` (plural) is the one this list adds that the walk misses -- DVWA ships
+#: `external/phpids/0.6/lib/IDS/vendors/htmlpurifier/`, found in a real tree, not guessed.
+_VENDOR_PATH_SEG = {"node_modules", "bower_components", "jspm_packages", "webjars", "vendor",
+                    "vendors", "third_party", "third-party", "thirdparty", "site-packages",
+                    "dist-packages"}
+
+#: Geometry of machine-generated code. MEASURED separation, not a round number picked by feel:
+#:   first-party max observed   maxline  901 (juice-shop lib/insecurity.ts), meanline  51
+#:   benchmark Java max observed maxline 163 (2763 files),                   meanline ~45
+#:   minified specimens          maxline 8471..219830,                       meanline 391..121231
+#: The conjunction is deliberate: ONE long line (an embedded blob, a long i18n string) does not
+#: make a file generated, so the MEAN has to move too.
+_MINIFIED_MAX_LINE = 2000
+_MINIFIED_MEAN_LINE = 200
+
+
+def not_maintained_source(rel: str, text: str) -> tuple:
+    """Classify a source file as a dependency or a build artifact, ON EVIDENCE.
+
+    Returns `(kind, evidence)` where kind is `"third-party"`, `"generated"` or `""` (no evidence).
+    `evidence` quotes what was actually observed, so a reader can overrule the call -- a
+    medium-reliability signal is only safe when it shows its work. Pure; no I/O.
+    """
+    name = (rel or "").rsplit("/", 1)[-1]
+    segs = set((rel or "").split("/")[:-1])
+
+    # ── THIRD PARTY: the file, or the directory holding it, names its origin ──
+    seg = segs & _VENDOR_PATH_SEG
+    if seg:
+        return "third-party", "dependency directory: %s/" % sorted(seg)[0]
+    banner = _BANG_BANNER_RX.match(text or "")
+    if banner:
+        head = banner.group(1).strip()
+        if _BANNER_VERSION_RX.search(head) and _BANNER_LICENCE_RX.search(head):
+            return "third-party", "preserved licence banner: /*! %s */" % head[:120]
+    head4k = (text or "")[:4096]
+    m = _LICENCE_PRAGMA_RX.search(head4k)
+    if m:
+        line = head4k[head4k.rfind("\n", 0, m.start()) + 1:head4k.find("\n", m.start())].strip()
+        return "third-party", "licence pragma in file header: %s" % line[:120]
+
+    # ── GENERATED: not the maintained source, whoever wrote the original ──
+    if _MINIFIED_NAME_RX.search(name):
+        return "generated", "minifier output naming convention: %s" % name
+    if _SOURCEMAP_RX.search(text or ""):
+        return "generated", "declares a sourceMappingURL: the maintained source is elsewhere"
+    lines = (text or "").splitlines() or [""]
+    maxline = max(len(ln) for ln in lines)
+    meanline = len(text or "") / len(lines)
+    if maxline >= _MINIFIED_MAX_LINE and meanline >= _MINIFIED_MEAN_LINE:
+        return "generated", ("minified geometry: longest line %d chars, mean %d chars over %d "
+                             "line(s)" % (maxline, meanline, len(lines)))
+    return "", ""
+
+
+def _mark_not_maintained(f: dict, kind: str, evidence: str) -> None:
+    """Demote one finding that landed in a dependency or a build artifact.
+
+    `confidence` moves to `lead`, which is `proof_schema.UNPROVEN_CONFIDENCE` -- the ONE vocabulary
+    every surface that renders, counts, scores or exports a finding already consults, so the report
+    stops calling it confirmed without a second private definition of the word.
+
+    SEVERITY IS LEFT ALONE ON PURPOSE. Severity describes the class's impact if real; confidence
+    describes whether this instance is proven. The ticket's complaint is the second one. Rewriting
+    the first would be asserting something new about the bug rather than retracting a claim about
+    the proof.
+    """
+    f["source_kind"] = kind
+    f["source_kind_evidence"] = evidence
+    f["confidence"] = "lead"
+    tag = "third-party" if kind == "third-party" else "generated-source"
+    f["tags"] = list(dict.fromkeys((f.get("tags") or []) + [tag, "not-maintained-source"]))
+    f["proof_gap"] = list(dict.fromkeys((f.get("proof_gap") or []) + [
+        "call site is in %s code (%s); the reported line does not identify a location in source "
+        "the operator maintains" % (kind, evidence)]))
+
+
 def review_source_tree(root: str, max_file_bytes: int = 2_000_000) -> dict:
     """CODE-ASSISTED (SAST) review of an operator-supplied source tree (Java and Python).
 
@@ -347,9 +477,18 @@ def review_source_tree(root: str, max_file_bytes: int = 2_000_000) -> dict:
     # Deliberately not cached across calls: a summary computed from a different tree is a summary
     # about different code.
     summaries = cr.merge_summaries([cr.summarize_units(text, rel) for rel, text in sources])
+    # Q-083. The file is still READ and still ANALYSED -- the row survives, carrying the evidence
+    # for why it is not a confirmed result. Dropping the file here instead would delete the only
+    # place the operator learns the tree ships `jQuery v2.1.4`, and would do it invisibly.
+    not_maintained = {}
     for rel, text in sources:
+        kind, evidence = not_maintained_source(rel, text)
+        if kind:
+            not_maintained[rel] = {"kind": kind, "evidence": evidence}
         for f in cr.review_source(text, rel, props, summaries):
             f["file"] = rel
+            if kind:
+                _mark_not_maintained(f, kind, evidence)
             findings.append(f)
     by_cwe, by_file = {}, {}
     for f in findings:
@@ -357,7 +496,12 @@ def review_source_tree(root: str, max_file_bytes: int = 2_000_000) -> dict:
         by_file.setdefault(f["file"], []).append(f["cwe"])
     return {"lane": "code-assisted", "provenance": "source-derived", "root": root, "error": "",
             "files_scanned": len(files), "files": files, "properties_resolved": len(props),
-            "findings": findings, "by_cwe": by_cwe, "by_file": by_file}
+            "findings": findings, "by_cwe": by_cwe, "by_file": by_file,
+            # The SPLIT, reported rather than implied: a consumer that wants only the code the
+            # operator maintains can filter on it, and one that wants the dependency inventory has
+            # it without re-deriving the classification.
+            "not_maintained_files": not_maintained,
+            "not_maintained_findings": sum(1 for f in findings if f.get("source_kind"))}
 
 
 def review(root: str, max_hits: int = 500, max_file_bytes: int = 1_000_000) -> dict:

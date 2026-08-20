@@ -1,0 +1,6 @@
+/*! Test suite JavaScript util functions */
+
+$(document).ready(function() {
+    // Add listeners for Jersey Ajax w/XML forms (and possibly others)
+    if (!!document.getElementById("login-btn")) {
+        document.getEle
