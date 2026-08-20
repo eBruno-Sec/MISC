@@ -214,7 +214,9 @@ declaration-vs-fact defect the code keeps producing, and it is the one artifact 
 
 ---
 
-### Q-054 · `run_workflow` is a FINDING SINK, two sinks deep · **HIGH** · `IN FLIGHT`
+### Q-054 · `run_workflow` is a FINDING SINK, two sinks deep · **CLOSED** `4bb5d2b` `fd26118`
+Pinned by `agent/tests/test_truthful_workflow_findings.py`, green on a HEAD snapshot 2026-08-19.
+`IN FLIGHT` was the state of a lane that finished; nothing updated the header for it.
 
 MEASURED by the islands lane. Same engine, same live target, two paths: `enumerate_ids` over
 `/api/Products/{id}` emits an `idor` lead on a direct call and **nothing** through `workflow.run`,
@@ -227,7 +229,8 @@ alone changes nothing. **DoD: both sinks fixed, proven by a finding surviving a 
 and do NOT wire the engine before that, or it spends real requests on real attacks and reports
 nothing.**
 
-### Q-055 · `run_metadata` reports clean on a file proven to leak GPS · **MEDIUM** · `IN FLIGHT`
+### Q-055 · `run_metadata` reports clean on a file proven to leak GPS · **CLOSED** `07710fc` `fd26118`
+Pinned by `agent/tests/test_truthful_metadata.py`, green on a HEAD snapshot 2026-08-19.
 
 MEASURED: 59°25'16.17"N 24°48'4.32"E decoded by hand from the GPS IFD of the Juice Shop geo-stalking
 photo; the engine returned "No sensitive metadata". Two causes compose — exiftool is absent from the
@@ -1228,7 +1231,18 @@ DoD, two-sided and neither half optional:
    permission gap into a live capability loss.
 Prove both. The negative control is the second one and it is the one that will be skipped.
 
-## Q-052 · What `active` means · **DECIDED by Claude 2026-08-18** - it was a taxonomy defect, not a preference · **HIGH** · `ready`
+## Q-052 · What `active` means · **CLOSED** `e6a9561` `280ce13` `29d00d2` · it was a taxonomy defect, not a preference
+`INTRUSIVE` had grouped two unlike things: engines that CHANGE STATE and engines that merely SEND A
+PAYLOAD and read the answer. Sending a payload is how you determine whether an application is
+susceptible; it is not a state change. 25 engines moved INTRUSIVE -> ACTIVE, 15 remain INTRUSIVE.
+Measured: engines selectable at `active` 71 -> 96 of 111, tier-blocked 31 -> 13, class sum unchanged
+at 111, and **zero state-changing engines leaked** into ACTIVE. Slice 2 settled the classification by
+COUNTING WRITES rather than reading descriptions, which caught six of my own misclassifications
+(`http_request`, `run_mass_assign`, `test_numeric_abuse`, `run_bfla`, `run_form_cmdi`,
+`run_web_probes` all write). Enforcement was split out as Q-079 because re-tiering a table does
+nothing if the dispatcher never consults it; Q-079 is closed separately. Pinned by
+`agent/tests/test_permission_tiers.py` and `agent/tests/test_tier_write_facts.py`, green on a HEAD
+snapshot 2026-08-19.
 
 Erwin asked twice why this was his. It was not. I had been calling a judgement call a product
 decision, which is an engineer's way of not owning a judgement. Taking it back, with the measurement
@@ -1280,7 +1294,14 @@ permitting a single state-changing operation, because those were never the same 
 **Erwin's actual input, if he wants one, is narrow:** whether "active" should send payloads at all.
 Every mainstream scanner says yes. If he disagrees, the answer is 1 and the ticket closes differently.
 He does not need to arbitrate a taxonomy.
-### Q-051 · The report cannot say WHICH ENGINE found a finding, and the technique coverage matrix is dead code · **HIGH** · `proposed`
+### Q-051 · The report cannot say WHICH ENGINE found a finding, and the technique coverage matrix is dead code · **CLOSED** `bc60727` `93ca3dd` `6493417`
+The reader half (`arsenal_gap` preferring `mode` then `strategy`) shipped first and the PRODUCER half
+did not, so `blocked_by_mode` was permanently empty and every tier-blocked engine was reported to the
+client as "available but not selected" -- the report asserting the planner had declined engines the
+permission tier had barred outright. `main._tool_ledger()` now emits `mode`. Pinned by
+`agent/tests/test_ledger_mode_binding.py`, which builds its ledger from the REAL producer rather than
+a literal, because every earlier fixture supplied `mode` by hand and that is exactly why no test
+caught it. Green on a HEAD snapshot 2026-08-19.
 
 Erwin's idea, and it is the right one: if the report attributed every check to the tool that performed
 it, an unused tool would be **visible in the artifact** instead of requiring a database audit. Q-050
