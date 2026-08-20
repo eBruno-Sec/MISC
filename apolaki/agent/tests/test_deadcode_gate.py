@@ -1125,3 +1125,157 @@ def test_reading_the_corpus_does_not_re_report_another_file_s_warning(tmp_path):
     assert not [w for w in caught if issubclass(w.category, SyntaxWarning)], (
         "reading the corpus re-reported another file's SyntaxWarning: %s"
         % [str(w.message) for w in caught])
+
+
+# ── Q-078 run 5, the island hunt: a dead function's reference launders its helpers ────────────────
+
+def _delete_top_level(path, names):
+    """Cut the named top-level functions out of a module, bottom-up so the line numbers hold."""
+    text = open(path, encoding="utf8").read()
+    lines = text.split("\n")
+    for lo, hi in sorted(((n.lineno, n.end_lineno) for n in ast.parse(text).body
+                          if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef)) and n.name in names),
+                         reverse=True):
+        del lines[lo - 1:hi]
+    open(path, "w", encoding="utf8").write("\n".join(lines))
+
+
+def _callerless(res):
+    """Every entry `scan_qualified` found unreachable that has NO caller of any kind.
+
+    `ALLOWED_UNUSED_NAMED_CALLER` is subtracted, and that subtraction is the whole difference between a
+    measurement and a scare: those ten entries DO have callers -- pytest, mitmdump, `nosqli_tool` -- so
+    deleting them falsely orphans their helpers. MEASURED: the first version of this experiment deleted
+    them and reported 20 "new" islands, most of them helpers of mitmdump's addon hooks and of this
+    gate's own pytest entry points. Correcting the seed took it to 11."""
+    return {e for e in set(res["unused"]) | set(res["allowed"])
+            if e not in dg.ALLOWED_UNUSED_NAMED_CALLER}
+
+
+def _transitive_callerless(work, rounds=8):
+    """(single_pass, fixed_point, per_round) -- iteratively delete every callerless function and
+    re-resolve, so a function whose only references came from code already proven dead becomes visible.
+
+    Destructive, so `work` must be a COPY. Converges in 3 rounds on this tree."""
+    first = _callerless(dg.scan_qualified(work))
+    seen, per_round = set(first), []
+    for _ in range(rounds):
+        by_mod = {}
+        for e in seen:
+            m, _sep, f = e.rpartition(".")
+            by_mod.setdefault(m, set()).add(f)
+        for m, funcs in by_mod.items():
+            p = os.path.join(work, m + ".py")
+            if os.path.isfile(p):
+                _delete_top_level(p, funcs)
+        new = _callerless(dg.scan_qualified(work)) - seen
+        per_round.append(sorted(new))
+        if not new:
+            break
+        seen |= new
+    return first, seen, per_round
+
+
+# MEASURED on a clean `git archive HEAD` snapshot (5d72aa3), fixed point reached in 3 rounds:
+#
+#   single pass  59 callerless      fixed point  74      transitive-only  15
+#
+# Each of these has NO caller that is itself reachable. They are invisible to every scan in this
+# repository because `scan_qualified` counts ANY reference inside the defining module as life, and does
+# not ask whether the referring function is itself dead. So a recorded island conceals its own helpers,
+# and the count is a floor for a second reason on top of Q-077's.
+#
+# Every entry names the ALREADY-RECORDED island it hangs off, which is the "name the caller" rule
+# pointed the only direction it can point for a genuinely dead function -- name the dead thing that
+# reaches it:
+#
+#   security.is_valid_target          <- security.validate_targets      (ALLOWED_UNUSED)
+#   bench_all.aggregate               <- bench_all.bench                (QUALIFIED_BASELINE_SET, 3.5)
+#   bie._css_quote/locator_chain/
+#      locator_quality                <- bie.observe                    (QUALIFIED_BASELINE_SET, 3.5)
+#   saml_tool.strip_signatures        <- saml_tool.finding / confirm_bypass
+#   ics_fingerprint.is_write_frame    <- the ics_fingerprint cluster    (3.5)
+#   cvss4.is_valid, mission_export.validate   <- a round-0 dead function in their own module
+#   web_security._is_host_rule, _rule_matches_url, _host_matches_rule,
+#      _looks_like_host_identifier, _path_matches_rule, _is_path_rule
+#                                     <- web_security.is_url_in_scope   (QUALIFIED_BASELINE_SET)
+#
+# The web_security six are the find. `is_url_in_scope` is ONE line in QUALIFIED_BASELINE_SET and it
+# conceals a six-function private cluster -- the host/path-aware scope matcher, lines 123-220. Its
+# producer `ScopeEngine.to_rules` is likewise dead (METHOD_BASELINE_SET), and `scope.py:8` and
+# `scope.py:267` both declare in prose that `to_rules` is "consumed by web_security.is_url_in_scope".
+# Producer and consumer are both dead, each documented as feeding the other, and the only thing that
+# runs the pipeline is a test. Scope IS still enforced -- `ScopeEngine.validate()` is called at ~20
+# sites in agent.py -- by the coarser host check, not by this one. That distinction is the difference
+# between a finding and a false alarm and is stated rather than left to the reader.
+TRANSITIVE_ONLY = frozenset({
+    "bench_all.aggregate", "bie._css_quote", "bie.locator_chain", "bie.locator_quality",
+    "cvss4.is_valid", "ics_fingerprint.is_write_frame", "mission_export.validate",
+    "saml_tool.strip_signatures", "security.is_valid_target", "web_security._host_matches_rule",
+    "web_security._is_host_rule", "web_security._is_path_rule",
+    "web_security._looks_like_host_identifier", "web_security._path_matches_rule",
+    "web_security._rule_matches_url",
+})
+
+
+@pytest.fixture
+def disposable_tree_copy(tmp_path_factory):
+    """A copy of the real tree that this test is allowed to DESTROY, and deliberately not
+    `real_tree_copy`.
+
+    `real_tree_copy` is `scope="module"` and shared with two other tests. Both of those mutate one file
+    and restore it in a `finally`; the fixed point below deletes dozens of functions across dozens of
+    modules and cannot put them back. Reusing it would have left whichever tests ran afterwards
+    measuring a tree this one had hollowed out -- a green suite reporting on a corpus that no longer
+    exists. Function-scoped, so every run starts from the real bytes."""
+    dst = str(tmp_path_factory.mktemp("transitive"))
+    for fn in os.listdir(dg.APP_DIR):
+        if fn.endswith(".py"):
+            shutil.copyfile(os.path.join(dg.APP_DIR, fn), os.path.join(dst, fn))
+    return dst
+
+
+def test_a_dead_function_s_reference_launders_its_helpers(disposable_tree_copy):
+    """A RECORDED MEASUREMENT of what no scan in this repository can see, and a ratchet on it.
+
+    This is NOT a raised ceiling: `QUALIFIED_BASELINE` is untouched and this number never feeds it. It
+    is a new, previously unmeasured quantity, recorded at the value it was found at.
+
+    Run on a COPY because it deletes functions to find the next layer."""
+    single, fixed, per_round = _transitive_callerless(disposable_tree_copy)
+    # POSITIVE CONTROL: the scan saw a real tree, not an empty directory.
+    assert len(single) > 40, "only %d callerless entries; the scan is not reading the tree" % len(single)
+    assert per_round and not per_round[-1], "the fixed point did not converge: %s" % per_round
+
+    extra = fixed - single
+    new = sorted(extra - TRANSITIVE_ONLY)
+    gone = sorted(TRANSITIVE_ONLY - extra)
+    assert not new, (
+        "functions with no reachable caller that NO scan here reports -- their only references come "
+        "from code already proven dead. Triage each one and add it to TRANSITIVE_ONLY with the island "
+        "it hangs off, or wire it: %s" % new)
+    assert not gone, (
+        "these were transitively dead and are not any more, which is the good direction -- confirm each "
+        "was WIRED rather than deleted, then remove it from TRANSITIVE_ONLY: %s" % gone)
+
+
+def test_the_transitive_pass_measures_laundering_and_not_something_else(tmp_path):
+    """NEGATIVE CONTROL for the test above, on a tree small enough to reason about completely.
+
+    `helper` is referenced exactly once, from `island`, which nothing calls. The single pass must clear
+    `helper` -- that IS the blind spot -- and the fixed point must catch it. Without this, the recorded
+    set above is a list of names with no demonstrated mechanism behind it."""
+    (tmp_path / "a.py").write_text(
+        "def helper():\n    return 1\n\n\ndef island():\n    return helper()\n", encoding="utf8")
+    single, fixed, _rounds = _transitive_callerless(str(tmp_path))
+    assert single == {"a.island"}, single
+    assert fixed == {"a.island", "a.helper"}, fixed
+
+    # PAIR: a helper reached from a LIVE function must survive the fixed point, or the pass would
+    # simply be deleting the whole tree one layer at a time.
+    (tmp_path / "b.py").write_text(
+        "import a\n\n\ndef used():\n    return a.helper()\n", encoding="utf8")
+    (tmp_path / "c.py").write_text(
+        "import b\n\n\ndef go():\n    return b.used()\n\n\nENTRY = go\n", encoding="utf8")
+    single2, fixed2, _r2 = _transitive_callerless(str(tmp_path))
+    assert "a.helper" not in single2 and "a.helper" not in fixed2, (single2, fixed2)

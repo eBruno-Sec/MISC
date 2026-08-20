@@ -77,13 +77,46 @@ APP_DIR = os.path.dirname(os.path.abspath(__file__))
 _FRAMEWORK_PREFIX = re.compile(r"^(main$|test_|_?__)")
 
 # Known-unused, deliberately kept. Each entry must say WHY, or it does not belong here.
+#
+# THE REASONS WERE AUDITED IN Q-078 RUN 5 AND FOUR OF THE SIX WERE ASSERTING A REACHABILITY THAT DOES
+# NOT EXIST. "operator-driven path", "operator/API-facing", "used by operators", "for API callers" --
+# an unfiltered whole-repo grep (.py, .html, .yml, .sh, Makefile, Dockerfile, tests, ui/, compose;
+# excluding only __pycache__ and docs/) returns EXACTLY SIX LINES for these six names, and every one is
+# the function's own `def`. There is no CLI, no endpoint and no script that reaches any of them. That is
+# the Q-077 declaration-versus-fact shape sitting in the allowlist -- the one place the ticket says it
+# costs most, because an entry whose stated reason is a caller nobody can find is how a list rots
+# invisibly. Rewritten to say what is true: zero callers, why it is kept anyway, and what would make it
+# live. The `"<module>: "` prefix is load-bearing (see ALLOWED_UNUSED_OWNER) and is preserved.
 ALLOWED_UNUSED = {
-    "build_error_xml": "xxe_tool: error-based XXE variant kept for the operator-driven path; not auto-fired",
-    "extract_script_srcs": "dependency_intel: alternate extraction path retained for non-HTML inputs",
-    "is_ics_ot": "service_router: safety predicate kept available to any future ICS caller; trivially correct",
-    "payloads_for": "wordlists: operator/API-facing helper",
-    "seclists_available": "wordlists: environment probe used by operators to check SecLists presence",
-    "validate_targets": "security: batch validator kept beside is_valid_target for API callers",
+    "build_error_xml": (
+        "xxe_tool: error-based XXE variant. ZERO references anywhere (MEASURED Q-078 run 5) -- there is "
+        "no operator path in this repository that fires it. Kept because its two siblings ARE wired "
+        "(build_inband_xml at 5 sites, build_oob_xml at 3), so the family is 2 of 3 and this is the "
+        "unbuilt third, not a stray. Wiring the error-based branch beside them retires this entry"),
+    "extract_script_srcs": (
+        "dependency_intel: alternate extraction path for non-HTML inputs. ZERO references anywhere "
+        "(MEASURED Q-078 run 5); the live path calls fingerprint_js_content and fingerprint_url "
+        "directly. Retained as the non-HTML entry point a future non-HTML source would need"),
+    "is_ics_ot": (
+        "service_router: safety predicate, kept available to any FUTURE ICS caller and trivially "
+        "correct. ZERO references anywhere (MEASURED Q-078 run 5) -- the only entry here whose original "
+        "reason already said so rather than naming a caller class that does not exist"),
+    "payloads_for": (
+        "wordlists: payload set for a classified finding class. ZERO references anywhere (MEASURED "
+        "Q-078 run 5). It was recorded as an 'operator/API-facing helper' and it is NEITHER -- main.py "
+        "exposes wl.catalog, wl.get_words, wl.target_credentials and wl.target_paths and never this. "
+        "It is also the entry that proved the anti-rot check was reading prose as calls"),
+    "seclists_available": (
+        "wordlists: environment probe for SecLists presence. ZERO references anywhere (MEASURED Q-078 "
+        "run 5); get_words does the same check inline as `root = _seclists_root()` at wordlists.py:43, "
+        "so this is the accessor form of a test the live path already performs"),
+    "validate_targets": (
+        "security: batch splitter into (valid, rejected). ZERO references anywhere (MEASURED Q-078 run "
+        "5) -- there are no 'API callers'; the only production import of this module anywhere is "
+        "`from security import safe_flags` at tools.py:4161. AND IT LAUNDERS is_valid_target: that "
+        "function's only non-test reference is at security.py:87 INSIDE this dead function, which is "
+        "why no scan here reports it. Proven by mutation -- delete this function and the qualified "
+        "count goes 51 -> 52 with security.is_valid_target the exact delta. See TRANSITIVE_ONLY"),
 }
 
 # Which MODULE each ALLOWED_UNUSED justification was written about, read off the reason itself (Q-078,

@@ -751,3 +751,168 @@ docker run ... pytest tests/test_client_request_source.py -q
   11 passed
   tests/test_client_request_source.py:95: SyntaxWarning: invalid escape sequence '\w'
 ```
+
+---
+
+## 12. Run 5 — the island hunt: a dead function's reference launders its helpers
+
+The ticket says finding a real island is the point, not clearing the number. This is the find, and it is
+a defect in the INSTRUMENT as well as a list of names.
+
+### 12.1 The mechanism, proven by mutation on one entry first
+
+`scan_qualified` clears a function when it is referenced anywhere inside its own module — "any REFERENCE
+other than the definition itself", which is right for a dispatch table and wrong here, because it never
+asks whether the REFERRING function is itself dead.
+
+`security.is_valid_target` is the concrete case. Its only non-test reference is `security.py:87`, inside
+`security.validate_targets`, which is on `ALLOWED_UNUSED` and has no caller at all. MEASURED, on a
+`git archive HEAD` copy, deleting only that one function:
+
+```
+BEFORE  count 51  | is_valid_target not-in-unused | validate_targets ALLOWED
+AFTER   count 52  | is_valid_target FLAGGED       | validate_targets not-in-unused
+delta unused: ['security.is_valid_target']   gone: []
+```
+
+Exact delta, nothing else moved, nothing resolved. The dead function was the only thing keeping the live
+scan from seeing the second one.
+
+### 12.2 The fixed point, and the apparatus error caught on the way
+
+Iterate: delete every callerless function, re-resolve, repeat. Converges in 3 rounds.
+
+```
+round 0  callerless 59            (51 flagged + 18 allowed, MINUS the 10 named-caller entries)
+round 1  + 11        round 2  + 3        round 3  + 1        round 4  + 0
+FIXED POINT 74        TRANSITIVE-ONLY 15
+```
+
+**The first run of this experiment was wrong and the correction is the useful part.** It seeded the
+deletion with everything `scan_qualified` reported unreachable — including
+`ALLOWED_UNUSED_NAMED_CALLER`, whose ten entries DO have callers (pytest, mitmdump, `nosqli_tool`).
+Deleting those falsely orphaned their helpers and it reported **20** new islands, most of them helpers
+of mitmdump's addon hooks (`mitm_addon._match`, `_redact`, `_trim`, `_load_rules`, `_write_flow`) and of
+this gate's own pytest entry points (`deadcode_gate._ast_refs`, `_decorated`, `_module_bindings`,
+`_ratchet_message`). Every one of those is live. Correcting the seed took 20 → 11 in round 1 and 27 → 15
+overall. A transitive analysis is only as honest as the set it starts from, and starting from
+"unreachable by this scan" instead of "has no caller of any kind" manufactures islands out of framework
+entry points.
+
+### 12.3 The 15, each naming the recorded island it hangs off
+
+"Name the caller" points the only direction it can for a genuinely dead function: name the dead thing
+that reaches it.
+
+| transitively dead | hangs off | already recorded as |
+|---|---|---|
+| `security.is_valid_target` | `security.validate_targets` | `ALLOWED_UNUSED` |
+| `bench_all.aggregate` | `bench_all.bench` | `QUALIFIED_BASELINE_SET`, §3.5 |
+| `bie._css_quote`, `bie.locator_chain`, `bie.locator_quality` | `bie.observe` | `QUALIFIED_BASELINE_SET`, §3.5 |
+| `saml_tool.strip_signatures` | `saml_tool.finding` / `confirm_bypass` | §3.5 + `ALLOWED_UNUSED_QUALIFIED` |
+| `ics_fingerprint.is_write_frame` | the `ics_fingerprint` cluster | §3.5 |
+| `cvss4.is_valid`, `mission_export.validate` | a round-0 dead function in their own module | — |
+| `web_security._is_host_rule`, `_rule_matches_url`, `_host_matches_rule`, `_looks_like_host_identifier`, `_path_matches_rule`, `_is_path_rule` | `web_security.is_url_in_scope` | `QUALIFIED_BASELINE_SET` |
+
+### 12.4 The web_security six, which is the actual find
+
+`web_security.is_url_in_scope` is **one line** in `QUALIFIED_BASELINE_SET` and it conceals a
+**six-function private cluster** — the host/path-aware scope matcher, `web_security.py:123-220`. Its
+producer is dead too: `ScopeEngine.to_rules` is in `METHOD_BASELINE_SET`. And both ends are documented
+as feeding each other, in prose, in two places:
+
+```
+agent/scope.py:8     "...structured-rules view for web_security.is_url_in_scope."
+agent/scope.py:267   """Structured rules view consumed by web_security.is_url_in_scope
+                        (host/path aware) ... so _rule_matches_url binds host AND path together
+                        (no cross-host path bleed)."""
+```
+
+Producer dead, consumer dead, six helpers dead, and the only thing that runs the pipeline is
+`tests/test_scope_path.py`. `scope.py:270` even names `_rule_matches_url` — a private function in a
+different module — in a docstring, which is precisely the prose-as-wiring shape Q-077 closed for the
+qualified scan and which `scan()`'s bare-name resolver still honours.
+
+**NOT A FALSE ALARM AND NOT A CRISIS, and the difference is stated rather than left to the reader.**
+Scope IS enforced: `ScopeEngine.validate()` is called at roughly twenty sites in `agent.py` (996, 1296,
+1864, 1889, 1909, 2007, 2067, 2073, 2094, 2120, 2151, 2158, 2827, 2853, 2866, 2913, 3140, 3373 …). What
+is dead is the **host/path-aware** matcher and the rules view built to feed it, so path-pinned scope —
+"this host but only under /api" — is written, tested, documented as wired, and not in the execution
+path. Whether any engagement has relied on path-pinned scope is UNVERIFIED by this lane.
+
+### 12.5 The other security-relevant one
+
+`security.is_valid_target` is the argv-safety predicate for a TARGET string — `tests/test_bbh.py:59-61`
+assert it rejects `-oG` (its own comment says "arg injection"), `a;rm -rf /` and `a.com|b`. Nothing in
+production calls it. At `agent/tools.py:4152-4164` `_run_nmap` filters `flags` through `safe_flags` and
+passes `target` **straight into the argv**:
+
+```python
+flag_tokens = safe_flags(flags, ("-s", "-p", "-T", "--top-ports", "-Pn", "-n", "--open") + ...)
+out, err = await self._cmd(["nmap"] + flag_tokens + ["-oX", "-", target], timeout=360)
+```
+
+The flags argument is guarded; the target argument is not. `_cmd` takes a list argv, so shell
+metacharacters are inert — but a target beginning with `-` is read by nmap as an option, which is the
+case `is_valid_target` was written for and the case the tests assert it catches. **UNVERIFIED by this
+lane:** whether an operator- or planner-supplied target beginning with `-` can reach `_run_nmap`. That
+needs `agent.py` and `main.py`, which this lane does not own, and a live probe to prove.
+
+`agent/security.py` overall: four public functions, and the only production import of the module
+anywhere is `from security import safe_flags` at `tools.py:4161`. `expand_cidr` is already in
+`QUALIFIED_BASELINE_SET`, `validate_targets` is on `ALLOWED_UNUSED`, `is_valid_target` is invisible.
+**Three of four are dead and the module reads as live.**
+
+### 12.6 What landed for it
+
+`TRANSITIVE_ONLY`, a frozenset of the 15, plus `test_a_dead_function_s_reference_launders_its_helpers`,
+which runs the fixed point on a disposable copy and fails in BOTH directions — a new entry must be
+triaged and named, a departed entry must be confirmed WIRED rather than deleted before it leaves.
+
+**This is not a raised ceiling.** `QUALIFIED_BASELINE` is untouched, this number feeds nothing, and it is
+a new quantity recorded at the value it was found at.
+
+`test_the_transitive_pass_measures_laundering_and_not_something_else` is its negative control on a tree
+small enough to reason about completely: `helper` referenced once, from an `island` nothing calls — the
+single pass must clear `helper` (that IS the blind spot) and the fixed point must catch it. Paired with
+the opposite case, a helper reached from a live chain, which must survive; without that pair the fixed
+point could simply be peeling the tree one layer at a time and would look identical.
+
+**A hazard avoided, recorded because the next person will reach for the same fixture.** The obvious
+fixture is `real_tree_copy` — and it is `scope="module"` and shared with two other tests. Those mutate
+one file and restore it in a `finally`; the fixed point deletes dozens of functions across dozens of
+modules and cannot put them back. Reusing it would have left whichever tests ran afterwards measuring a
+tree this one had hollowed out — a green suite reporting on a corpus that no longer exists. Hence
+`disposable_tree_copy`, function-scoped.
+
+### 12.7 The allowlist reasons, audited
+
+Four of the six `ALLOWED_UNUSED` justifications asserted a reachability that does not exist:
+"operator-driven path", "operator/API-facing", "used by operators", "for API callers". MEASURED — the
+unfiltered whole-repo grep in §11.2 returns six lines for six names and every one is a `def`. There is
+no CLI, no endpoint and no script that reaches any of them. All six reasons are rewritten to state zero
+callers, why the function is kept anyway, and what would make it live; the `"<module>: "` prefix that
+`ALLOWED_UNUSED_OWNER` parses is preserved and re-verified (six owners, all resolving, count unmoved at
+51, `allowed` unmoved at 18).
+
+### 12.8 The ratchet, unchanged and still pinned
+
+```
+scan_qualified   count 51   baseline 37   ok False   unaccounted []   allowed 18
+scan_methods     count 14   ok True       newly []   resolved []
+```
+
+**51 > 37, so the strict xfail on `test_the_ratchet_holds` STAYS PINNED and the marker is NOT retired.**
+Run 5 changed nothing about that and did not try to: closing it needs the 17 islands of §3.5 wired or
+deleted in files this lane does not own, and §12 has just added 15 more functions that go with them —
+`web_security.is_url_in_scope` alone now costs seven, not one. The honest count did not get worse; the
+honest picture got larger, which is the only direction this ticket was ever going to move it.
+
+### 12.9 Anti-idle: the method scan's 14th entry was already discharged
+
+The brief asks for the `scan_methods` 13 → 14 entry to be triaged. **It already was — §7, by run 2**:
+`vault.py::Vault.is_encrypted`, verdict REAL ISLAND, with the reason it matters (the vault's
+protection-level label is never read, so a plaintext-fallback run is indistinguishable from an encrypted
+one in every artefact an operator sees) and a priced patch in `main.py`/`report.py`/`ui/`. Re-measured
+here at clean HEAD and unchanged: `count 14, ok True, newly_dead [], resolved []`. Recorded as
+discharged rather than repeated.
