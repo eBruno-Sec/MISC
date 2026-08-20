@@ -1378,7 +1378,16 @@ class ToolRegistry:
                 db.add_log(session_id, "tool_backoff",
                            {"tool": tool_name, "seconds": round(float(rate_wait["seconds"]), 3),
                             "waits": rate_wait["waits"], "truncated": rate_wait["truncated"],
-                            "origins": rate_wait["origins"][:8]})
+                            "origins": rate_wait["origins"][:8],
+                            # Q-043/Q-085. WHERE the cooldown came from: "header" when the target
+                            # sent a usable Retry-After, "inferred" when it returned a bare 429/503
+                            # and Apolaki chose the delay. This is the field that made turning the
+                            # bare-429 fallback ON defensible: without it, a cooldown we invented
+                            # reads in the ledger exactly like one the target asked for, and two
+                            # lanes correctly refused to ship that. `.get` with a list default
+                            # because an older box shape has no key -- and an ABSENT source must
+                            # read as "not recorded", never as "header".
+                            "sources": list(rate_wait.get("sources") or [])})
             if err:
                 # A SCOPE BLOCK is correct enforcement, not a failure. `_tool_ledger` splits on
                 # exactly this, and `_run_tool` classified it the same way before this moved here.

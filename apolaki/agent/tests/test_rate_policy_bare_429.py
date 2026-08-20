@@ -20,6 +20,45 @@ recorded as a deliberate choice rather than an accident -- see docs/handoff/rate
 
 Every test here that asserts a wait also has the paired assertion that the default does NOT wait,
 so a regression that flips the default on is caught by this file, not just by the other one.
+
+===============================================================================================
+THE DEFAULT WAS FLIPPED ON, 2026-08-20, AND THIS FILE CAUGHT IT. UPDATED DELIBERATELY.
+===============================================================================================
+
+The design above is correct and it worked exactly as written: the Coordinator changed
+`RATE_POLICY_BARE_DEFAULT_SECONDS` from 0.0 to 2.0 and twelve tests in this file went red,
+including six that exist purely as the paired assertion. That is the sentence at the top of this
+docstring doing its job, and it is why the change is being recorded here rather than quietly
+absorbed.
+
+**The premise moved, not the standard.** The reason for OFF was, verbatim above: "an invented
+number is indistinguishable from a measured one in the ledger". That is no longer true.
+`TargetRatePolicy.observe()` now tags every cooldown `header` or `inferred`, the wait box carries
+`sources`, and `tools.py::_ledger_outcome()` writes it into the durable typed `tool_backoff` row --
+measured end to end:
+
+    INFERRED (bare 429)      box.sources=['inferred']   row={'seconds': 2.0, 'sources': ['inferred']}
+    HEADER (Retry-After: 1)  box.sources=['header']     row={'seconds': 1.0, 'sources': ['header']}
+
+With the two distinguishable in the durable record, the objection dissolves and the safety argument
+wins: nginx `limit_req` and Cloudflare both return bare 429s, and a tool that sends payloads at
+other people's systems must not ignore an explicit stop signal because it lacked a duration.
+
+**What this file now guards instead**, keeping the paired-assertion design intact -- every test that
+asserts a wait is still paired with one asserting a case that must NOT wait:
+
+  * the shipped default WAITS, and the wait is labelled `inferred`, never `header`;
+  * `bare_retry_seconds=0.0` still manufactures nothing, so the opt-out cannot rot;
+  * a non-limiting status still manufactures nothing, whatever the knob says;
+  * a malformed knob falls back to the module default.
+
+**That last one flipped direction and the reason is worth stating.** It used to fall back to 0.0
+because "a malformed env var must not be the thing that parks a mission". Now it falls back to 2.0.
+Both are defensible; they trade opposite failures. Falling back to 0.0 means a typo in
+`BBH_RETRY_AFTER_BARE_SECONDS` SILENTLY DISABLES a safety feature, and nothing in the ledger says
+so. Falling back to 2.0 means a typo costs a bounded 2 seconds per rate-limited origin, clamped by
+`_max_wait()`. A knob that fails toward safety is the right choice for a knob whose purpose is
+safety, and neither direction can park a mission because the ceiling is unchanged.
 """
 from __future__ import annotations
 
@@ -38,27 +77,55 @@ def _policy(**kwargs):
     return browser.TargetRatePolicy(**kwargs)
 
 
-# ---------------------------------------------------------------- the default is unchanged
+# ------------------------------------------------- the default WAITS, and says who asked for it
 @pytest.mark.parametrize("status", [429, 503])
 @pytest.mark.parametrize("headers", [{}, {"retry-after": "banana"}, {"retry-after": ""}])
-def test_by_default_an_unannotated_limit_still_manufactures_nothing(status, headers):
-    """The existing negative control, restated here so this file also guards it.
-
-    If a future change makes the bare backoff default to non-zero, this fails."""
+def test_by_default_an_unannotated_limit_is_honoured_and_labelled_inferred(status, headers):
+    """The shipped path. All three header shapes are the same case: the limit carried no USABLE
+    hint, so Apolaki supplies the delay -- and must say so."""
+    clock = [0.0]
     policy = browser.TargetRatePolicy(
-        sync_sleep=lambda d: pytest.fail("waited on a %s that carried no Retry-After" % status))
+        clock=lambda: clock[0], sync_sleep=lambda d: clock.__setitem__(0, clock[0] + d))
+    assert policy.observe("https://a.example/x", status, headers) == pytest.approx(2.0)
+
+    with browser.rate_wait_scope() as box:
+        policy.wait_sync("https://a.example/x")
+    assert box["waits"] == 1
+    assert box["sources"] == ["inferred"], (
+        "a cooldown Apolaki invented must never read as one the target requested; got %r"
+        % (box["sources"],))
+    assert policy.stats()["observations"] == 1
+
+
+@pytest.mark.parametrize("status", [429, 503])
+@pytest.mark.parametrize("headers", [{}, {"retry-after": "banana"}, {"retry-after": ""}])
+def test_the_opt_out_still_manufactures_nothing(status, headers):
+    """THE PAIRED ASSERTION, which is the design this file was built around: every case that now
+    waits has a sibling that must not. Flipping a default must never remove the ability to turn the
+    behaviour off, and this is the exact assertion the old default carried, kept where it is still
+    true."""
+    policy = browser.TargetRatePolicy(
+        bare_retry_seconds=0.0,
+        sync_sleep=lambda d: pytest.fail("waited on a %s with the fallback disabled" % status))
     assert policy.observe("https://a.example/x", status, headers) is None
 
     with browser.rate_wait_scope() as box:
         policy.wait_sync("https://a.example/x")
     assert box["waits"] == 0
+    assert box["sources"] == []
     assert policy.stats()["waits"] == 0
     assert policy.stats()["observations"] == 0
 
 
-def test_the_bare_default_is_zero_and_that_is_the_shipped_value():
-    assert browser.RATE_POLICY_BARE_DEFAULT_SECONDS == 0.0
-    assert browser.TargetRatePolicy()._bare_wait() == 0.0
+def test_the_bare_default_is_two_seconds_and_that_is_the_shipped_value():
+    """The shipped constant, asserted so the flip is a deliberate edit and never a drift.
+
+    2.0 is a CONVENTION, not a measurement -- nobody has measured how long a real unannotated 429
+    wants, and the constant's comment says so. What is argued is that zero ignores an explicit stop
+    signal, and that this value is bounded by `_max_wait()` and overridable back to 0.0.
+    """
+    assert browser.RATE_POLICY_BARE_DEFAULT_SECONDS == 2.0
+    assert browser.TargetRatePolicy()._bare_wait() == 2.0
 
 
 # ---------------------------------------------------------------- opting in
@@ -103,12 +170,26 @@ def test_the_bare_backoff_is_read_from_the_environment(monkeypatch):
 
 
 @pytest.mark.parametrize("raw", ["banana", "", "-1", "nan", "inf"])
-def test_an_unusable_bare_setting_falls_back_to_the_safe_default(monkeypatch, raw):
-    """A malformed knob must not become an unbounded wait, and must not crash the policy."""
+def test_an_unusable_bare_setting_falls_back_to_the_module_default(monkeypatch, raw):
+    """A malformed knob must not become an unbounded wait, and must not crash the policy.
+
+    THE FALLBACK DIRECTION FLIPPED WITH THE DEFAULT, and that was the deliberate half of the change.
+    It used to resolve to 0.0 on the reasoning that "a malformed env var must not be the thing that
+    parks a mission". Both directions are defensible and they trade opposite failures:
+
+        fall back to 0.0   a typo SILENTLY DISABLES a safety feature, and nothing says so
+        fall back to 2.0   a typo costs a bounded 2s per rate-limited origin
+
+    A knob whose purpose is safety should fail toward safety, and neither direction can park a
+    mission because `_max_wait()` is unchanged. What both directions still guarantee, and what this
+    test really exists for, is that no unusable value becomes a LARGE one.
+    """
     monkeypatch.setenv("BBH_RETRY_AFTER_BARE_SECONDS", raw)
     policy = _policy(max_wait=10)
-    assert policy._bare_wait() == 0.0
-    assert policy.observe("https://a.example/x", 429, {}) is None
+    assert policy._bare_wait() == browser.RATE_POLICY_BARE_DEFAULT_SECONDS
+    assert policy._bare_wait() <= 10, "an unusable setting resolved to something unbounded"
+    assert policy.observe("https://a.example/x", 429, {}) == pytest.approx(
+        browser.RATE_POLICY_BARE_DEFAULT_SECONDS)
 
 
 # ---------------------------------------------------------------- bounded

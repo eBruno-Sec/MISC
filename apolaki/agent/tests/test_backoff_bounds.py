@@ -165,14 +165,56 @@ def test_a_dispatch_that_met_no_rate_limiting_records_nothing():
     with browser.rate_wait_scope() as box:
         policy.wait_sync("https://clean.example/a")
 
-    assert box == {"waits": 0, "seconds": 0.0, "truncated": 0, "origins": []}
+    # Q-043/Q-085 added `sources`. The guarantee this test protects is about the LEDGER NOTE, which
+    # is unchanged and asserted below; the box is an internal accumulator and gaining a field is not
+    # the thing being guarded. Asserting it exactly is still right -- it catches a stray key -- so
+    # the expected shape is updated rather than the assertion loosened, and `sources: []` is now
+    # pinned too: a dispatch that never waited must record no provenance either, which is a
+    # guarantee the old shape could not express.
+    assert box == {"waits": 0, "seconds": 0.0, "truncated": 0, "origins": [], "sources": []}
     assert browser.describe_wait(box) == ""
     assert browser.describe_wait(None) == ""
 
 
-def test_a_response_without_retry_after_is_never_recorded_as_a_wait():
-    """The other negative control: a 429 the server did not annotate must not manufacture one."""
+def test_a_response_without_retry_after_is_recorded_as_an_INFERRED_wait():
+    """UPDATED DELIBERATELY, Q-043/Q-085, not deleted.
+
+    This test used to assert that a 429 the server did not annotate must not manufacture a wait,
+    and that was correct while nothing could tell an invented cooldown from a requested one. Two
+    lanes refused to flip the default for exactly that reason, and they were right to.
+
+    The blocker is now solved rather than overruled: the wait box and the typed `tool_backoff` row
+    carry `sources`, so the ledger distinguishes the two. With that in place the safety argument
+    wins -- nginx `limit_req` and Cloudflare both return bare 429s, and a tool that sends payloads
+    at other people's systems must not ignore an explicit stop signal because it lacked a duration.
+
+    What the test still pins is the thing the original was really protecting: an invented wait must
+    never be able to pass itself off as one the target asked for.
+    """
+    slept = []
+    policy = browser.TargetRatePolicy(sync_sleep=slept.append)
+    assert policy.observe("https://a.example/x", 429, {}) == pytest.approx(2.0)
+    # An unparseable header is not a hint; the 429 still stands on its own.
+    assert policy.observe("https://a.example/x", 429, {"retry-after": "banana"}) == pytest.approx(2.0)
+
+    with browser.rate_wait_scope() as box:
+        policy.wait_sync("https://a.example/x")
+    assert box["waits"] == 1
+    assert box["sources"] == ["inferred"], (
+        "an invented cooldown must be labelled as invented; %r would let it read as one the target "
+        "requested" % (box["sources"],))
+    assert sum(slept) > 0
+
+
+def test_the_opt_out_still_manufactures_nothing():
+    """The behaviour the original control pinned, kept where it is still true.
+
+    Flipping a default must not remove the ability to turn it off, and this is the exact assertion
+    that used to guard the shipped path -- relocated to the explicit-config case rather than
+    dropped, so nothing about it went unproven.
+    """
     policy = browser.TargetRatePolicy(
+        bare_retry_seconds=0.0,
         sync_sleep=lambda d: pytest.fail("waited on a 429 that carried no Retry-After"))
     assert policy.observe("https://a.example/x", 429, {}) is None
     assert policy.observe("https://a.example/x", 429, {"retry-after": "banana"}) is None
@@ -180,7 +222,59 @@ def test_a_response_without_retry_after_is_never_recorded_as_a_wait():
     with browser.rate_wait_scope() as box:
         policy.wait_sync("https://a.example/x")
     assert box["waits"] == 0
+    assert box["sources"] == []
     assert policy.stats()["waits"] == 0
+
+
+def test_a_non_limiting_status_still_manufactures_nothing():
+    """The half of the original control that must NEVER change.
+
+    The fallback fires on an explicit rate-limit status. A 200, a 404 or a 500 is not one, and if
+    flipping the default ever made an ordinary response park the mission, that is a self-inflicted
+    denial of service rather than politeness.
+    """
+    policy = browser.TargetRatePolicy(
+        sync_sleep=lambda d: pytest.fail("waited on a response that was not a rate limit"))
+    for status in (200, 204, 301, 404, 418, 500, 502):
+        assert policy.observe("https://a.example/x", status, {}) is None, status
+    with browser.rate_wait_scope() as box:
+        policy.wait_sync("https://a.example/x")
+    assert box["waits"] == 0
+    assert policy.stats()["waits"] == 0
+
+
+def test_a_header_supplied_wait_is_labelled_header_not_inferred():
+    """POSITIVE CONTROL on the provenance itself.
+
+    If `sources` reported "inferred" for everything, the test above would pass while the field was
+    useless. This is the other half: an annotated 429 must be attributable to the target.
+    """
+    policy = browser.TargetRatePolicy(sync_sleep=lambda d: None)
+    assert policy.observe("https://b.example/x", 429, {"retry-after": "1"}) == pytest.approx(1.0)
+    with browser.rate_wait_scope() as box:
+        policy.wait_sync("https://b.example/x")
+    assert box["waits"] == 1
+    assert box["sources"] == ["header"]
+
+
+def test_provenance_survives_the_wait_it_describes():
+    """The bug this nearly shipped with, pinned so it cannot come back.
+
+    `_next_wait` calls `remaining()`, which POPS an origin the moment its deadline expires. The
+    first draft read `_deadline_sources` inside `_record_wait`, i.e. AFTER the sleep loop -- so
+    every wait that ran to completion recorded an EMPTY `sources` and only truncated waits recorded
+    anything. That is worse than not having the field: it looks like a working feature and is blank
+    exactly when it matters. Provenance is now sampled before the loop.
+    """
+    clock = {"t": 0.0}
+    policy = browser.TargetRatePolicy(clock=lambda: clock["t"],
+                                      sync_sleep=lambda d: clock.__setitem__("t", clock["t"] + d))
+    policy.observe("https://c.example/x", 429, {})          # inferred, 2.0s
+    with browser.rate_wait_scope() as box:
+        waited = policy.wait_sync("https://c.example/x")
+    assert waited == pytest.approx(2.0), "the wait did not run to completion, so this proves nothing"
+    assert box["sources"] == ["inferred"], (
+        "sources was lost by the wait it describes -- sampled after remaining() popped the origin")
 
 
 def test_process_wide_stats_count_observations_and_clamps():

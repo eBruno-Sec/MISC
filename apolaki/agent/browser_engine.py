@@ -49,7 +49,22 @@ _RETRY_STATUSES = frozenset({429, 503})
 # CONFIGURABLE and ships OFF. Zero keeps today's behaviour byte-for-byte and keeps the control
 # green; setting it opts in, bounded by the same ceiling as a header-supplied delay.
 # The choice of default belongs to whoever owns the ticket, not to this constant.
-RATE_POLICY_BARE_DEFAULT_SECONDS = 0.0
+#
+# COORDINATOR RULING, 2026-08-20, Q-043/Q-085. Turned ON. The objection above -- "a cooldown we
+# invented is indistinguishable in the ledger from one the target asked for" -- was real and was
+# correctly treated as blocking by two lanes. It is now SOLVED rather than overruled: the wait box
+# and the typed `tool_backoff` row both carry `sources`, so a reader can tell a header-supplied
+# cooldown from an inferred one. With the two distinguishable, the safety argument wins outright.
+# nginx `limit_req` and Cloudflare both return bare 429s, and ignoring an explicit stop signal
+# because it lacked a duration is indefensible for a tool that sends payloads at other people's
+# systems -- "no DoS" is a promise this platform makes in its own documentation.
+#
+# THE VALUE 2.0 IS A CONVENTION, NOT A MEASUREMENT, and saying so is part of shipping it. Nothing
+# here measured how long a real unannotated 429 wants. What IS argued: zero is wrong because it
+# ignores an explicit signal, the value is bounded by `_max_wait()` so it can never park a mission,
+# and `BBH_RETRY_AFTER_BARE_SECONDS` overrides it including back to 0.0. What would change it is a
+# measurement of real recovery windows against a rate-limiting target, which nobody has taken.
+RATE_POLICY_BARE_DEFAULT_SECONDS = 2.0
 
 # Q-043 GAP-1. The cap in `observe()` bounds ONE HEADER; it never bounded the WAIT. The origin
 # deadline is extend-only and shared, so a sibling worker meeting a fresh 429 pushes the deadline
@@ -78,7 +93,13 @@ _wait_scope = contextvars.ContextVar("apolaki_rate_wait_scope", default=None)
 
 
 def _new_wait_box():
-    return {"waits": 0, "seconds": 0.0, "truncated": 0, "origins": []}
+    # Q-043/Q-085. `sources` records WHERE each wait came from: "header" when the target sent a
+    # usable Retry-After, "inferred" when it returned a bare 429/503 and we supplied the delay
+    # ourselves. Without it a cooldown WE invented is indistinguishable in the ledger from one the
+    # target asked for -- and that objection is the only thing that kept the bare-429 default at
+    # 0.0 through two lanes. A LIST rather than a set, so the typed ledger row stays
+    # JSON-serialisable without a conversion the writer could forget.
+    return {"waits": 0, "seconds": 0.0, "truncated": 0, "origins": [], "sources": []}
 
 
 @contextlib.contextmanager
@@ -164,6 +185,10 @@ class TargetRatePolicy:
         self._async_sleep = async_sleep or asyncio.sleep
         self._sync_sleep = sync_sleep or time.sleep
         self._deadlines = {}
+        # Q-043/Q-085. Which kind of observation set the deadline currently standing for an origin.
+        # Keyed the same as `_deadlines` and cleared with it, so the two can never disagree about
+        # whether an origin is parked.
+        self._deadline_sources = {}
         self._lock = threading.Lock()
         self._stats = {"observations": 0, "capped": 0, "waits": 0,
                        "seconds": 0.0, "truncated": 0}
@@ -204,8 +229,10 @@ class TargetRatePolicy:
         with self._lock:
             if origin:
                 self._deadlines.pop(origin, None)
+                self._deadline_sources.pop(origin, None)
             else:
                 self._deadlines.clear()
+                self._deadline_sources.clear()
 
     def observe(self, url, status, headers):
         """Record a target cooldown and return the bounded delay, or None when not applicable."""
@@ -220,10 +247,12 @@ class TargetRatePolicy:
         origin = _origin(url)
         if not origin:
             return None
+        source = "header"
         if delay is None:
-            # The limit carried no usable hint. `_bare_wait()` is 0.0 unless someone opted in, and
-            # at 0.0 this returns None exactly as it always has -- the unannotated 429 manufactures
-            # nothing, no observation is counted, and the ledger note stays byte-for-byte identical.
+            # The limit carried no usable hint, so WE choose the delay. `_bare_wait()` reads the
+            # configurable default; at 0.0 this returns None exactly as it did before Q-043, and
+            # the unannotated 429 manufactures nothing.
+            source = "inferred"
             delay = self._bare_wait()
             if delay <= 0:
                 return None
@@ -231,7 +260,16 @@ class TargetRatePolicy:
         delay = min(delay, self._max_wait())
         deadline = self._clock() + delay
         with self._lock:
-            self._deadlines[origin] = max(deadline, self._deadlines.get(origin, 0.0))
+            # The deadline is extend-only and SHARED, so several observations can contribute to the
+            # one a caller ends up parked on. Record every kind that is still standing rather than
+            # only the last: a wait that a header and an inference both justify is honestly BOTH,
+            # and collapsing it to one would be the same overclaim in the other direction.
+            previous = self._deadlines.get(origin, 0.0)
+            if deadline > previous:
+                self._deadlines[origin] = deadline
+                self._deadline_sources[origin] = {source}
+            elif deadline == previous:
+                self._deadline_sources.setdefault(origin, set()).add(source)
             self._stats["observations"] += 1
             self._stats["capped"] += 1 if capped else 0
         return delay
@@ -246,6 +284,10 @@ class TargetRatePolicy:
             remaining = max(0.0, deadline - now)
             if not remaining and origin in self._deadlines:
                 self._deadlines.pop(origin, None)
+                # Q-043/Q-085. Drop the provenance with the deadline it belonged to. Leaving it
+                # behind would let an expired origin keep attributing waits it no longer causes,
+                # and a stale attribution is worse than none: it reads as evidence.
+                self._deadline_sources.pop(origin, None)
         return remaining
 
     def _next_wait(self, url, waited, iterations):
@@ -264,7 +306,23 @@ class TargetRatePolicy:
             return None, ""
         return min(remaining, cap - waited), ""
 
-    def _record_wait(self, url, waited, truncation):
+    def _pending_sources(self, url):
+        """Which kinds of observation justify the deadline standing for `url` RIGHT NOW.
+
+        Read at the START of a wait, never at the end. `_next_wait` calls `remaining()`, which pops
+        an origin the moment its deadline expires -- so by the time `_record_wait` runs, the normal
+        case (waited the cooldown out in full) has already discarded the provenance. Sampling
+        afterwards would have produced an empty `sources` on exactly the waits that matter and a
+        populated one only on the truncated ones, which is worse than not recording it at all: it
+        would look like a working feature.
+        """
+        origin = _origin(url)
+        if not origin:
+            return []
+        with self._lock:
+            return sorted(self._deadline_sources.get(origin) or ())
+
+    def _record_wait(self, url, waited, truncation, sources=()):
         """Make the wait OBSERVABLE. A silent sleep and a slow engine are the same picture."""
         if waited <= 0 and not truncation:
             return
@@ -281,24 +339,33 @@ class TargetRatePolicy:
         origin = _origin(url)
         if origin and origin not in box["origins"]:
             box["origins"].append(origin)
+        # Q-043/Q-085. Attribute the wait from the snapshot taken BEFORE the sleep loop ran.
+        for kind in sources or ():
+            if kind not in box["sources"]:
+                box["sources"].append(kind)
 
     async def wait_async(self, url):
+        # Sampled BEFORE the loop: `_next_wait` -> `remaining()` pops the origin as soon as its
+        # deadline expires, so reading provenance afterwards is empty on every wait that ran to
+        # completion. See `_pending_sources`.
+        sources = self._pending_sources(url)
         waited, iterations = 0.0, 0
         while True:
             step, truncation = self._next_wait(url, waited, iterations)
             if step is None:
-                self._record_wait(url, waited, truncation)
+                self._record_wait(url, waited, truncation, sources)
                 return waited
             await self._async_sleep(step)
             waited += step
             iterations += 1
 
     def wait_sync(self, url):
+        sources = self._pending_sources(url)
         waited, iterations = 0.0, 0
         while True:
             step, truncation = self._next_wait(url, waited, iterations)
             if step is None:
-                self._record_wait(url, waited, truncation)
+                self._record_wait(url, waited, truncation, sources)
                 return waited
             self._sync_sleep(step)
             waited += step
