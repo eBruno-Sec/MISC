@@ -148,6 +148,47 @@ _CHAT_SINK = _re.compile(
 _LOGIN_PATHS = ("/rest/user/login", "/api/login", "/api/auth/login", "/login",
                 "/api/authenticate", "/auth/login", "/user/login", "/api/sessions")
 
+# Q-050. A real-time transport endpoint the mission OBSERVED. `tools.py:604` recorded that
+# `run_ws_hijack` was "implemented, permission-registered and reachable from NOTHING", and held it
+# out of the sweep deliberately, pending a measurement -- putting a brand-new confirming engine on
+# every mission's always-on path is what produced Q-047's false positive. This is that measurement's
+# answer, and the reason the trigger is an observation rather than a probe:
+#
+#   * Driven live against four labs, `_run_ws_hijack({"url": <root>})` returns "no WebSocket endpoint
+#     advertised" on ALL FOUR -- including Juice Shop, which genuinely speaks socket.io. Its
+#     index.html is an Angular shell and `main.js` carries 8 `socket.io` references but ZERO `ws://`
+#     literals, because a socket.io client builds the URL at runtime. So scheduling it on page
+#     content would have bought one wasted GET per page and zero coverage on the whole fleet.
+#   * The mission ALREADY observes the endpoint by its HTTP long-polling URL: 262 captured exchanges
+#     to `/socket.io/?EIO=4&transport=polling...`, and 6 of the 3,216 recorded endpoint assets are
+#     `<host>/socket.io/...`, on the three Juice Shop hosts and NOWHERE ELSE in the corpus.
+#
+# `ws_tool.COMMON_WS_PATHS` stays the single owner of the transport knowledge (socket.io needs
+# `?EIO=4&transport=websocket`); this only decides WHICH of those transports the mission saw.
+CAP_WS_ENDPOINTS = 3    # mirrors tools.ToolRegistry._WS_MAX_ENDPOINTS
+
+
+def _ws_candidate(u: str) -> str:
+    """The ws:// upgrade URL for a real-time endpoint the mission OBSERVED, or "" for anything else.
+
+    Deliberately NOT a `ws://`-literal search and NOT a default-path probe: the input is an
+    http(s) URL the crawl actually recorded, so the transport is a fact about the target rather
+    than a guess about it."""
+    import ws_tool as _wst
+    try:
+        pr = urlparse(u or "")
+    except Exception:
+        return ""
+    if not pr.netloc or pr.scheme not in ("http", "https"):
+        return ""
+    seg = ((_path(u).strip("/").split("/") or [""])[0]).lower()
+    if not seg:
+        return ""
+    for cand in _wst.COMMON_WS_PATHS:
+        if cand.strip("/").split("/")[0].split("?")[0].lower() == seg:
+            return "%s://%s%s" % ("wss" if pr.scheme == "https" else "ws", pr.netloc, cand)
+    return ""
+
 
 def _host(u: str) -> str:
     try:
@@ -755,6 +796,22 @@ def next_batch(state: dict) -> list:
             if base and base not in chat_seen:
                 chat_seen.add(base)
                 e_steps.append(_step("run_llm_probe", {"url": base}, f"run_llm_probe:{base}"))
+    # Q-050: Cross-Site WebSocket Hijacking, on a real-time endpoint this mission OBSERVED. See
+    # `_ws_candidate` for the measurement behind the precondition. `ws_urls` is passed explicitly,
+    # so the engine skips its own content-discovery fetch entirely and sends nothing beyond the
+    # handshake and its cookie-stripped negative control.
+    ws_seen = set()
+    for u in urls:
+        cand = _ws_candidate(u)
+        if not cand or cand in ws_seen:
+            continue
+        ws_seen.add(cand)
+        if len(ws_seen) > CAP_WS_ENDPOINTS:
+            break
+        import ws_tool as _wst
+        e_steps.append(_step("run_ws_hijack",
+                             {"url": _wst.http_origin_of(cand) + "/", "ws_urls": [cand]},
+                             f"run_ws_hijack:{cand}"))
     for ep in inv:
         base = (_b_url(ep.get("example")) or (_b(ep['host']) + ep['path'])).split("?")[0]
         if _LOGIN_SINK.search(_path(base)) and base not in auth_seen:

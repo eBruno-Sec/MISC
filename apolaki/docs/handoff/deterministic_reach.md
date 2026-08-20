@@ -448,3 +448,145 @@ required — this is an upgrade in accuracy, not a correction of a falsehood. `e
 needs nothing: its only mention is a comment recording a rejected route, and that rejection is still
 right.
 
+## 4. Slice 4 — `run_ws_hijack`: the hold was deliberate, so the work was the MEASUREMENT
+
+### 4.1 A correction that changes what "fixing" this one means
+
+The ticket lists `run_ws_hijack` as NAMED NOWHERE outside `tools.py`. True. But it was **not an
+oversight**, and the code says so at `tools.py:604`, above the tool spec:
+
+> ADVERTISED HERE AND DELIBERATELY NOT ADDED TO THE ALWAYS-ON DETERMINISTIC SWEEP. The engine was
+> implemented, permission-registered and reachable from NOTHING [...] putting a brand-new confirming
+> engine into every mission's always-on path is the move that produced a measured false positive
+> this week (Q-047), so that step waits for a measurement.
+
+So the honest work here is **to take that measurement**, not to wire it blind.
+
+**And a second finding fell out of checking it.** `docs/handoff/realtime.md:157` states: *"The engine
+is dispatched from `ToolRegistry._run_client_checks`, which `agent.py` already fires on every HTML
+page [...] That is a real always-on path and needs no agent.py change to work."* **That is false.**
+MEASURED — `_run_client_checks` (`tools.py:8955`) does reverse-tabnabbing and crossdomain.xml and
+nothing else; there is no `self._run_ws_hijack` call site anywhere in `tools.py`:
+
+```
+$ grep -n "self\._run_ws_hijack" agent/tools.py     ->   (no output)
+```
+
+That handoff also ticks `[x] Wiring: dispatcher, CLAUDE_TOOLS, permission, engine_descriptor,
+wstg_catalog`. **Registration is not invocation** — Q-011's irony, third instance, and this time in
+a handoff rather than in a catalogue. `tools.py:605` had already caught it; the doc was never
+corrected.
+
+### 4.2 MEASURED: the engine cannot find a WebSocket on ANY lab in the fleet
+
+`_run_ws_hijack({"url": <root>})` driven live inside `apolaki-agent` on `apolaki_default`:
+
+```
+juice-shop   status=200  bodylen=9903    advertised=[]  -> "no WebSocket endpoint advertised"
+dvwa         status=200  bodylen=1523    advertised=[]  -> "no WebSocket endpoint advertised"
+mutillidae   status=200  bodylen=3339    advertised=[]  -> "no WebSocket endpoint advertised"
+bwapp        status=200  bodylen=43      advertised=[]  -> "no WebSocket endpoint advertised"
+```
+
+**Including Juice Shop, which genuinely speaks socket.io.** Why:
+
+```
+scripts on the index page: ['polyfills.js', 'scripts.js', 'main.js']
+polyfills.js  len=34585    discover=[]  /socket.io/ hits=0  ws://-literals=0
+scripts.js    len=20700    discover=[]  /socket.io/ hits=0  ws://-literals=0
+main.js       len=783793   discover=[]  /socket.io/ hits=8  ws://-literals=0
+```
+
+Its `index.html` is an Angular shell, and `main.js` carries the socket.io **client library** but
+**zero `ws://` literals**, because a socket.io client builds the URL at runtime from the page origin.
+`ws_tool.discover_ws_urls` looks for `ws://`/`wss://` strings, so it correctly finds nothing.
+
+**Wiring this engine to page content would have bought one wasted GET per page and zero coverage on
+the entire lab fleet.** That is the Q-002 hold's concern, confirmed with numbers.
+
+### 4.3 The signal the mission ALREADY records, which is the whole slice
+
+socket.io negotiates over HTTP long-polling before upgrading, and Apolaki has been capturing that
+all along:
+
+```
+exchanges 9691 | .js URLs 5 | bodies/urls mentioning socket.io 262
+   146 http://juice-shop:3000/socket.io/?EIO&sid&t&transport
+    44 http://js-bench:3000/socket.io/?EIO&sid&t&transport
+    39 http://juice-shop-bench:3000/socket.io/?EIO&sid&t&transport
+
+endpoint assets 3216 | realtime-path hits {'/socket.io': 6}
+   js-bench:3000/socket.io/...   juice-shop-bench:3000/socket.io/...   juice-shop:3000/socket.io/...
+```
+
+**6 of 3,216 recorded endpoint assets, on the three Juice Shop hosts and NOWHERE ELSE in 154
+missions.** That is precise, it is already in the surface the planner reads, and it is an
+observation about the target rather than a guess about it — so this one IS a `planner.next_batch`
+branch, unlike slice 3.
+
+`planner._ws_candidate(url)` maps an observed http(s) URL's first path segment onto
+`ws_tool.COMMON_WS_PATHS` and returns the ws:// upgrade URL. **`ws_tool` stays the single owner of
+the transport knowledge** (that socket.io needs `?EIO=4&transport=websocket`); the planner only
+decides which transport was seen. `ws_urls` is passed explicitly, so the engine skips its own
+content-discovery fetch and sends nothing but the handshake and its negative control.
+
+### 4.4 THE DISPATCH, SHOWN — planner driven to exhaustion, then EXECUTED live
+
+```
+juice-shop (observed socket.io)    TOTAL STEPS 64  distinct tools 29  run_ws_hijack 1
+  {"tool": "run_ws_hijack",
+   "input": {"url": "http://juice-shop:3000/",
+             "ws_urls": ["ws://juice-shop:3000/socket.io/?EIO=4&transport=websocket"]},
+   "key": "run_ws_hijack:ws://juice-shop:3000/socket.io/?EIO=4&transport=websocket"}
+
+dvwa (NEGATIVE CONTROL)            TOTAL STEPS 52  distinct tools 29  run_ws_hijack 0
+  positive control for the apparatus: urls delivered = 4 | other per-url steps emitted = 1
+
+passive mode run_ws_hijack: 0 | total steps 8
+```
+
+Then the planner's **own step input**, executed against the live container:
+
+```
+LIVE EXECUTION of the planner's own step input:
+  input   = {"url": "http://juice-shop:3000/", "ws_urls": ["ws://juice-shop:3000/socket.io/?EIO=4&transport=websocket"]}
+  success = True | output = '1 WebSocket endpoint(s) handshaked, 1 finding(s)/lead(s)' | error = None
+  -> [info/lead] WebSocket handshake accepts a foreign Origin (no authenticated data observed)
+     negative_controls = [{"kind": "cookie-stripped handshake", ...,
+       "result": "ALSO upgraded, and the frame it received was: 0{\"sid\":\"3OvqLo5WkYNHFCBFAAHm\",...}"}]
+     evidence = ws://juice-shop:3000/socket.io/?EIO=4&transport=websocket upgraded a raw HTTP/1.1
+       handshake presenting a foreign `Origin: http://apolaki-cswsh.invalid` (HTTP 101, RFC 6455
+       accept verified against the key we sent)
+```
+
+**A real HTTP 101 from a real server, and correctly graded a LEAD rather than a finding**, because
+the cookie-stripped control ALSO upgraded — so the upgrade proves nothing about authorization. That
+is the engine's own truth discipline holding on live traffic, and it is the direct answer to the
+Q-047 false-positive concern that caused the hold: this engine cannot manufacture a confirmation
+from a 101.
+
+### 4.5 The negative control has a specific trap in it
+
+`NO_WS_URLS` contains `/wsdl/service.wsdl` and `/wsimport` **on purpose**. A prefix match on `/ws`
+takes both, and a WebSocket handshake against a WSDL document is a wasted request on every SOAP app
+in existence. `_ws_candidate` matches whole first path segments, so both are declined — and the
+test names them rather than trusting the regex to be read correctly.
+
+### 4.6 What is now true, and the one thing that is still not
+
+* Reachable deterministically on any target whose surface shows `/socket.io/`, `/ws`, `/websocket`,
+  `/wss` or `/cable` — MEASURED live on Juice Shop.
+* **Still unreachable on an app whose ONLY evidence of a WebSocket is a runtime `new WebSocket(...)`
+  the crawler never records as a URL.** `realtime.md` section 5 named this correctly:
+  `agent/browser_engine.py:498` folds `obs["runtime_ws"]` into `has_api` and throws the URL list
+  away, and the browser sensor is the only component that sees those. **`browser_engine.py` belongs
+  to the external Codex lane this cycle, so that one-line persistence patch is theirs, not mine.**
+  The engine already accepts an explicit `ws_urls` list, so it needs no change in `ws_tool.py` or
+  `tools.py` when that lands.
+
+### 4.7 For the owner of `docs/handoff/realtime.md`
+
+Section 5's claim that the engine "is dispatched from `ToolRegistry._run_client_checks`" is false and
+should be struck; the checklist line `[x] Wiring` should read `[x] Registration` — it was never
+invocation. As of this commit the engine IS dispatched, from `planner.py`, on an observed signal.
+

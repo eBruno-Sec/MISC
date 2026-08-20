@@ -521,3 +521,79 @@ def test_a_target_with_no_disclosed_hashes_gets_no_dispatch_at_all(mission_db):
 def test_a_mission_with_no_exchanges_is_not_an_error(mission_db):
     a = _mission_agent(mission_db, [])
     assert _drive_hash_id(a) == []
+
+
+# ── slice 4: `run_ws_hijack`, held OUT of the sweep on purpose until a measurement ────
+#
+# `tools.py:604` recorded the hold in the code itself: the engine was "implemented,
+# permission-registered and reachable from NOTHING", and putting a brand-new confirming engine on
+# every mission's always-on path is the move that produced Q-047's false positive, "so that step
+# waits for a measurement". `docs/handoff/deterministic_reach.md` section 4 is that measurement.
+#
+# The short version, because it decides the shape of the trigger: driven live against four labs,
+# `_run_ws_hijack({"url": <root>})` answered "no WebSocket endpoint advertised" on ALL FOUR --
+# including Juice Shop, which genuinely speaks socket.io, because its index.html is an Angular
+# shell and `main.js` holds 8 `socket.io` references and ZERO `ws://` literals. Page content is
+# therefore the wrong signal. The mission already observes the endpoint by its HTTP long-polling
+# URL, which is a fact about the target rather than a guess about it.
+
+SIO = "/socket.io/?EIO=4&transport=polling&t=P-Q_HRn"
+WS_URLS = [BASE + "/", BASE + SIO, BASE + "/socket.io/docs/v3/migrating-from-2-x-to-3-0",
+           BASE + "/rest/products/search?q=a"]
+# A target with no real-time transport anywhere. `/wsdl/service.wsdl` is here on purpose: a prefix
+# match on "/ws" would take it, and a WSDL document is not a WebSocket.
+NO_WS_URLS = [BASE + "/", BASE + "/login.php", BASE + "/vulnerabilities/xss_r/?name=a",
+              BASE + "/wsdl/service.wsdl", BASE + "/wsimport"]
+
+
+def _ws_steps(state):
+    return [s for s in _drive(state) if s["tool"] == "run_ws_hijack"]
+
+
+def test_an_observed_realtime_endpoint_is_actually_scheduled():
+    """THE CLAIM: the planner, driven to exhaustion over graph-built state, emits the step. It also
+    emits exactly ONE despite two observed `/socket.io/...` URLs, because the transport is the unit
+    of work, not the URL."""
+    steps = _ws_steps(_state(_Tools(spec=None, urls=WS_URLS)))
+    assert len(steps) == 1, [s["input"] for s in steps]
+    assert steps[0]["input"] == {
+        "url": "http://vampi.local:5000/",
+        "ws_urls": ["ws://vampi.local:5000/socket.io/?EIO=4&transport=websocket"]}, steps[0]
+
+
+def test_the_transport_string_is_ws_tools_and_not_a_second_copy():
+    """`ws_tool.COMMON_WS_PATHS` owns the knowledge that socket.io needs `?EIO=4&transport=websocket`.
+    A duplicated literal in the planner would drift the day that protocol detail changes."""
+    import ws_tool as wst
+    got = _ws_steps(_state(_Tools(spec=None, urls=WS_URLS)))[0]["input"]["ws_urls"][0]
+    assert got.replace("ws://vampi.local:5000", "") in wst.COMMON_WS_PATHS, got
+
+
+def test_a_target_with_no_realtime_endpoint_gets_no_step():
+    """THE NEGATIVE CONTROL. `/wsdl/service.wsdl` and `/wsimport` are in this list precisely because
+    a prefix match on `/ws` would take both -- and a handshake against a WSDL document is a wasted
+    request on every SOAP app in the world."""
+    st = _state(_Tools(spec=None, urls=NO_WS_URLS))
+    steps = _drive(st)
+    assert not [s for s in steps if s["tool"] == "run_ws_hijack"], \
+        [s["input"] for s in steps if s["tool"] == "run_ws_hijack"]
+    # positive control for the apparatus: those URLs DID reach the planner on this same run.
+    assert len({s["tool"] for s in steps}) > 10, sorted({s["tool"] for s in steps})
+    assert [s for s in steps if s["tool"] == "run_xss"], sorted({s["tool"] for s in steps})
+
+
+def test_the_candidate_builder_declines_everything_that_is_not_a_transport():
+    """The precondition on its own, so a future reader can see the boundary without reading a plan."""
+    assert planner._ws_candidate("http://h:3000/socket.io/?EIO=4&transport=polling") == \
+        "ws://h:3000/socket.io/?EIO=4&transport=websocket"
+    assert planner._ws_candidate("https://h/ws") == "wss://h/ws"          # scheme carries through
+    assert planner._ws_candidate("http://h/cable") == "ws://h/cable"
+    for not_a_transport in ("http://h/wsdl/service.wsdl", "http://h/wsimport", "http://h/",
+                            "http://h/rest/products", "ws://h/ws", "", "not a url"):
+        assert planner._ws_candidate(not_a_transport) == "", not_a_transport
+
+
+def test_it_stays_out_of_passive_mode():
+    """`run_ws_hijack` is ACTIVE: it opens a socket to the target. Reach must not widen consent."""
+    assert not _ws_steps(_state(_Tools(spec=None, urls=WS_URLS), mode="passive"))
+    assert _ws_steps(_state(_Tools(spec=None, urls=WS_URLS), mode="active"))
