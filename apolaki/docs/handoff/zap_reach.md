@@ -273,6 +273,89 @@ the evidence is not.
 
 ---
 
+## Where ZAP's alerts actually go: leads, not findings — and I nearly filed that as a defect
+
+A second durable mission was run to close the producer→consumer chain, against `clientauthz` — a lab
+**ZAP had never touched**, so the before/after is clean rather than confounded by the shared daemon.
+Baseline captured *before* the pass, not reconstructed after:
+
+```
+BEFORE  sites: ["apolaki-zap-lane7-live:42888", "domsource:8080"]     clientauthz alerts: 0
+AFTER   sites: ["clientauthz:8080", "apolaki-zap-lane7-live:42888", "domsource:8080"]
+                                                                       clientauthz alerts: 18
+```
+
+Mission `0c3a2aa4`, `status: complete, phase: report`:
+
+```
+tool_call   run_zap  policy=passive  http://clientauthz:8080
+tool_result count=16 "…16 ZAP alert(s) [passive] (from 17 current raw) [1 retained alert(s) excluded]"
+```
+
+**My first read of this was wrong and nearly became a filed defect.** Querying the `findings` table
+gave `total findings: 5, zap-sourced: 0` — sixteen alerts, zero findings, which looks exactly like a
+broken auto-store. It is not. The alerts landed as **leads**:
+
+```
+0c3a2aa4: lead events = 22,  zap-sourced leads = 12
+  "ZAP: Missing Anti-clickjacking Header"                       medium  http://clientauthz:8080
+  "ZAP: Content Security Policy (CSP) Header Not Set"           medium  http://clientauthz:8080
+  "ZAP: Server Leaks Version Information via Server header"     low     http://clientauthz:8080
+  "ZAP: X-Content-Type-Options Header Missing"                  low     http://clientauthz:8080
+  "ZAP: Missing Anti-clickjacking Header"                       medium  http://clientauthz:8080/login
+  …
+```
+
+and the mission API reports `"leads": 17` for it. This is **correct by design**:
+`zap_client.alert_to_finding` grades every alert `candidate`, and a candidate is a lead, not a
+finding. The producer→consumer chain works end to end and is durable. Anyone re-checking Q-023 by
+counting rows in `findings` will reach the same wrong conclusion I did — **count leads.**
+
+**An independent oracle corroborates ZAP on this lab.** The 5 stored findings all came from
+Apolaki's own `transport_posture` engine, at `confidence: confirmed`:
+
+| Apolaki `transport_posture` (confirmed) | ZAP lead (candidate) |
+|---|---|
+| Page can be framed by any origin — medium | ZAP: Missing Anti-clickjacking Header — medium |
+| No Content-Security-Policy — low | ZAP: CSP Header Not Set — medium |
+| MIME sniffing not disabled — info | ZAP: X-Content-Type-Options Header Missing — low |
+
+Two independent engines, one deterministic and one third-party, agreeing on three controls at a lab
+neither had seen before. That is a stronger true-positive signal than either alone — and it also shows
+ZAP's marginal value here is thin on the passive header class, where Apolaki already has a confirming
+oracle. ZAP's case rests on the classes Apolaki does **not** cover, which remain unmeasured.
+
+Corpus-wide `run_zap` rows after both missions: **4** (two tool_call, two tool_result). Was 0.
+
+---
+
+## Full suite — no regression
+
+One snapshot, one run: `git archive HEAD apolaki/agent` plus only my two files, in an isolated
+container on `apolaki_default`.
+
+```
+3378 passed · 11 skipped · 13 xfailed · 0 failed · 0 errors     EXIT=0
+```
+
+**The `-q` summary line did not survive into the log**, so rather than report a truncated run the
+counts were reconstructed from pytest's per-test progress characters (48 progress lines, one character
+per test): `{'.': 3378, 'x': 13, 's': 11}`, total 3402, and **zero `F` or `E`** — corroborated by
+`EXIT=0`, which pytest returns only when nothing failed or errored.
+
+Reconciled against the `505ed1c` baseline of 3366 / 11 / 12 / 0 — the delta is fully accounted for and
+nothing was lost:
+
+```
+tests/test_username_enum_stability.py  (another lane, committed at HEAD)  ┐
+tests/test_zap_harness_contract.py     (mine, 9 tests)                    ┘ → "...x........."
+                                                                            = 12 passed + 1 xfailed
+
+3366 + 12 = 3378 passed ✓     12 + 1 = 13 xfailed ✓     11 skipped, unchanged ✓
+```
+
+---
+
 ## False-positive risk: a first data point, and an explicit ceiling on what it proves
 
 Q-023 warns that enabling ZAP introduces "a new false-positive source into the report that has never
@@ -624,7 +707,7 @@ point only if the ZAP entry from P2 is added.
 
 ## What I got wrong, recorded because the corrections are the useful part
 
-Three of my own claims were wrong and were caught by re-measuring rather than by review:
+Four of my own claims were wrong and were caught by re-measuring rather than by review:
 
 1. **"The ZAP daemon is unreachable."** Nine endpoints returned `RemoteProtocolError`. The daemon was
    fine; ZAP 2.17 drops unauthorised API connections without a response body, and I had omitted
@@ -636,8 +719,17 @@ Three of my own claims were wrong and were caught by re-measuring rather than by
    pass-cursor correctly refuses to re-claim alerts. I wrote the second one immediately after warning
    about the first.
 
-The common shape is the ticket's own: **an absence observed through a channel nobody validated.** The
-positive control is not ceremony — it caught me three times in one session.
+4. **"ZAP ran but its alerts are never stored."** `findings` held 5 rows and none were ZAP's, which
+   looks precisely like a broken auto-store — and I was one commit from filing it. The 16 alerts were
+   in `leads`, where a `candidate`-graded alert belongs by design.
+
+The common shape is the ticket's own — and mine, four times over: **an absence observed through a
+channel nobody validated.** Every one of the four was a zero that came from asking the wrong table,
+the wrong consumer, or the wrong endpoint. The positive control is not ceremony.
+
+The general lesson for this queue, since Q-062 and Q-023 are now the same story twice: **before
+reporting that something never happened, state how you would have seen it happen, then prove that
+channel is live.** Both tickets were filed by someone who checked one table and stopped.
 
 ## Anti-idle follow-on filed as evidence, not as a patch
 
