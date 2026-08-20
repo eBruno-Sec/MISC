@@ -147,9 +147,44 @@ Same island question one layer down. Measured over all `tool_call` / `finding` /
 
 (External, in-scope: `ginandjuice.shop` 48 missions.)
 
-**Twelve standing lab containers have never been the target of a single mission.** `webgoat` has
-additionally been `unhealthy` for 7 days and nobody noticed, because nothing has ever pointed at it.
-That is the same cost-with-no-capability shape as the ZAP ticket, and it is larger.
+### CORRECTION to my own number, before anyone quotes it
+
+I first wrote "twelve containers have never been targeted". **That figure is overstated and I am
+retracting it.** It counted only one consumer. Missions are not the only thing that uses a lab — the
+liveness gate drives several directly, and a lab exercised by the gate is doing its job.
+
+Re-measured against the authoritative `missions.scope` column (not my log-regex) and against
+`liveness.CHECKS`:
+
+```
+liveness CHECKS: 17 checks over 9 labs
+  conpot 4 · domsource 3 · smb 2 · dvga 2 · clientauthz 2 · owaspbench 1 · dnp3 1 · snmpd 1 · openldap 1
+```
+
+| lab | missions (scope column) | liveness checks | verdict |
+|---|---|---|---|
+| juice-shop | 61 | 0 | used |
+| vampi | 15 | 0 | used |
+| juice-shop-bench | 14 | 0 | used |
+| owaspbench | 8 | 1 | used |
+| dvga | 4 | 2 | used |
+| dvwa | 3 | 0 | used |
+| bwapp | 1 | 0 | thin, but used |
+| domsource | **1 (this lane's)** | 3 | used |
+| conpot / dnp3 / snmpd / smb / openldap / clientauthz | **0** | **1–4 each** | **used — by the GATE, not by missions. Not a defect.** |
+| **webgoat** | **0** | **0** | **consumed by nothing** |
+| **mutillidae** | **0** | **0** | **consumed by nothing** |
+| **benchmarkpython** | **0** | **0** | **consumed by nothing** |
+| **sessionlife** | **0** | **0** | **consumed by nothing** (`labs/sessionlife/` is untracked — likely a lane in flight, so check before touching) |
+
+**The honest number is four, not twelve.** Three of those four are unambiguous: `webgoat`,
+`mutillidae` and `benchmarkpython` are reachable, cost RAM continuously, and no mission and no gate
+consumes them. `webgoat` is additionally `unhealthy` and returns **404 at `/`** — it has been broken
+for 7 days and nothing noticed, because nothing looks at it.
+
+The ZAP lesson applies exactly: the interesting question was never "is it running" but "who consumes
+it". Five containers looked idle and were not; four looked fine and are idle. `docker ps` answers
+neither question.
 
 ---
 
