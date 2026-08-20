@@ -140,6 +140,7 @@ def harvest(base_url: str, timeout: int = 15) -> dict:
     then gets the static sink review). No source folder, nothing handed over: recon-phase pure
     automation that feeds PoC / deeper testing / exploitation."""
     try:
+        import browser_engine
         import httpx
     except Exception:
         return {"error": "httpx unavailable", "target": base_url}
@@ -147,8 +148,9 @@ def harvest(base_url: str, timeout: int = 15) -> dict:
     out = {"target": base, "bundles": [], "endpoints": [], "routes": [], "sensitive_routes": [],
            "versions": [], "exposed": [], "source_review": None, "notes": []}
     try:
-        c = httpx.Client(base_url=base, timeout=timeout, follow_redirects=True,
-                         headers={"User-Agent": "apolaki-codeintel"})
+        c = browser_engine.rate_limited_sync_client(
+            httpx, base_url=base, timeout=timeout, follow_redirects=True,
+            headers={"User-Agent": "apolaki-codeintel"})
     except Exception as e:
         return {"error": str(e), "target": base}
     try:

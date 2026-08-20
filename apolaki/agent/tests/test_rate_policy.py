@@ -256,8 +256,8 @@ def test_repository_wide_rate_policy_inventory_is_non_vacuous_and_ratcheted():
     assert len(_production_python_paths(root)) >= 179, \
         "the repository-wide production-module census loaded too little"
     assert _raw_transport_inventory(), "the transport inventory is vacuous"
-    assert len(bypasses) <= 8, "ungated target-call sites rose above the measured Q-085 ratchet: %s" % bypasses
-    assert len(modules) <= 8, "modules bypassing the target policy rose above the measured ratchet: %s" % sorted(modules)
+    assert len(bypasses) == 0, "ungated target-call sites remain: %s" % bypasses
+    assert len(modules) == 0, "modules bypassing the target policy remain: %s" % sorted(modules)
 
 
 def test_every_rate_policy_exemption_is_named_and_matches_exactly_one_call_site():
@@ -271,9 +271,6 @@ def test_every_rate_policy_exemption_is_named_and_matches_exactly_one_call_site(
         "rate-policy exemptions must identify one measured call site: %s" % counts)
 
 
-@pytest.mark.xfail(strict=True, reason=(
-    "Q-085 LIVE GAP: 8 ungated target calls remain across 8 modules outside this lease; "
-    "registration is not compliance, and SKIPPED/NOT SEEN is not a pass"))
 def test_every_target_transport_uses_the_shared_rate_policy():
     assert _target_traffic_bypasses() == []
 
@@ -311,6 +308,16 @@ def test_owned_q085_call_sites_route_every_target_send_through_the_policy():
     bypasses = [row for row in _target_traffic_bypasses()
                 if row.startswith(("bie.py:", "main.py:"))]
     assert bypasses == [], "owned Q-085 target transports remain ungated: %s" % bypasses
+
+
+def test_q087_owned_modules_have_no_target_transport_bypass():
+    owned = {
+        "agent.py", "auth.py", "authz.py", "bwapp_solvers.py", "codeintel.py",
+        "mutillidae_solvers.py", "register.py", "replay.py",
+    }
+    bypasses = [row for row in _target_traffic_bypasses()
+                if row.split(":", 1)[0] in owned]
+    assert bypasses == [], "Q-087 leased target transports remain ungated: %s" % bypasses
 
 
 def test_sync_client_waits_and_observes_at_the_shared_chokepoint():
@@ -806,6 +813,39 @@ def test_specialized_async_client_observes_and_waits_without_call_site_wiring():
     _run(exercise())
     assert starts == [0, 2]
     assert custom_hooks == ["request", "response", "request", "response"]
+
+
+def test_credentialed_async_send_is_waited_after_but_never_retried():
+    """A 429 protects the next send; it must not replay an in-flight credential submission."""
+    clock = [0.0]
+    starts = []
+    requests = []
+    statuses = [429, 200]
+
+    async def sleep(delay):
+        clock[0] += delay
+
+    def send(request):
+        starts.append(clock[0])
+        requests.append((request.method, request.url.path, request.content))
+        status = statuses.pop(0)
+        headers = {"retry-after": "2"} if status == 429 else {}
+        return httpx.Response(status, headers=headers, request=request)
+
+    policy = _policy(max_wait=5, clock=lambda: clock[0], async_sleep=sleep)
+
+    async def exercise():
+        async with browser.rate_limited_async_client(
+                httpx, transport=httpx.MockTransport(send), rate_policy=policy) as client:
+            first = await client.post(
+                "https://a.example/login", content=b"username=a&password=secret")
+            second = await client.get("https://a.example/account")
+            return first.status_code, second.status_code
+
+    assert _run(exercise()) == (429, 200)
+    assert starts == [0.0, 2.0]
+    assert [row[:2] for row in requests] == [("POST", "/login"), ("GET", "/account")]
+    assert requests[0][2] == b"username=a&password=secret"
 
 
 def test_browserless_navigation_result_starts_the_same_origin_cooldown(monkeypatch):

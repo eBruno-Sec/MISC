@@ -122,6 +122,11 @@ _AUTO_STORE_TOOLS = {
     # write, confirms the privileged attribute persisted on a separate re-read, and reports CLEAN --
     # the false-clean shape, arriving through the second half of a fix whose first half shipped.
     "run_mass_assign", "run_ws_hijack",
+    # Q-087: these four can be dispatched directly, not through a parent that forwards their findings.
+    # Without membership here their tool_call/tool_result rows land while their candidate findings do
+    # not, producing a false-clean mission. run_service_pack has both paths: _run_service_packs
+    # forwards its internal calls, while graph-directed execution goes through _run_tool here.
+    "run_fingerprint", "run_github_recon", "run_service_pack", "run_whatweb",
     "run_cloud_probe",   # public-bucket listing is confirmed-by-oracle; auto-store it (#13, was an island)
     # Q-054, the THIRD sink. workflow.run and tools._run_workflow now both FORWARD their steps'
     # findings (measured: a confirmed CWE-639 survives the live idor_read pack end to end). Without
@@ -2874,14 +2879,16 @@ class BBHAgent:
     async def _probe_for_creds(self, base: str) -> list:
         """Bounded, polite fetch of the login page + common credential-disclosure pages, harvesting any
         exposed creds into the intel store. Small fixed page set -- never a crawl/brute."""
+        import browser_engine as _browser_engine
         import httpx
         for p in ("/vulnerabilities", "/", "/login", "/readme", "/README.md", "/help", "/about"):
             u = base.rstrip("/") + p
             try:
                 if not self.scope.validate(u)[0]:
                     continue
-                async with httpx.AsyncClient(verify=False, follow_redirects=True, timeout=12,
-                                             headers={"User-Agent": "apolaki-recon"}) as c:
+                async with _browser_engine.rate_limited_async_client(
+                        httpx, verify=False, follow_redirects=True, timeout=12,
+                        headers={"User-Agent": "apolaki-recon"}) as c:
                     self.tools._harvest_body(u, {}, (await c.get(u)).text)
             except Exception:
                 continue

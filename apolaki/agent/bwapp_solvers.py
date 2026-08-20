@@ -29,14 +29,16 @@ def prove(base_url: str) -> dict:
     """Log in to bWAPP and confirm each generalized technique via its response oracle. Returns which
     classes fired. Never raises; degrades to an error dict when httpx/the target is unavailable."""
     try:
+        import browser_engine
         import httpx
     except Exception:
         return {"lab": "bwapp", "error": "httpx unavailable"}
     base = base_url.rstrip("/")
     out = {"lab": "bwapp", "confirmed": [], "probes": {}}
     try:
-        c = httpx.Client(base_url=base, timeout=15, follow_redirects=True,
-                         headers={"User-Agent": "apolaki-labmode"})
+        c = browser_engine.rate_limited_sync_client(
+            httpx, base_url=base, timeout=15, follow_redirects=True,
+            headers={"User-Agent": "apolaki-labmode"})
     except Exception as e:
         return {"lab": "bwapp", "error": str(e)}
     try:

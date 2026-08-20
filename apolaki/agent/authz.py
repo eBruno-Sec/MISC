@@ -156,13 +156,15 @@ def run_matrix(base_url: str, roles: list, requests: list, timeout: int = 12) ->
     NO credential brute-force and no state-changing methods unless the caller opts in — read-only by
     default (only GET/HEAD/OPTIONS are sent) so the matrix is a safe recon differential."""
     try:
+        import browser_engine
         import httpx
     except Exception:
         return {"error": "httpx unavailable"}
     base = base_url.rstrip("/")
     cells = []
     try:
-        c = httpx.Client(base_url=base, timeout=timeout, follow_redirects=False)
+        c = browser_engine.rate_limited_sync_client(
+            httpx, base_url=base, timeout=timeout, follow_redirects=False)
     except Exception as e:
         return {"error": str(e)}
     try:
