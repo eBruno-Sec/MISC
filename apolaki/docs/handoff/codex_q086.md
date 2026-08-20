@@ -104,7 +104,7 @@ No crash, import error, timeout, skip, or unrelated assertion was credited as a 
 
 ## Part 2 - Q-086 ZAP absence guard
 
-Status: implementation and targeted verification complete; commit pending.
+Status: committed as `2813ecd4076dccacfc1d4f08858d151be76a8468`; full-suite verification pending.
 
 ### Pre-fix counterexample
 
@@ -169,7 +169,45 @@ No production ZAP behaviour changed; this slice repairs the guard's claim rather
 
 ## Part 3 - engine guard claim
 
-Status: in progress.
+Status: implementation and targeted verification complete; commit pending.
+
+The old helper was named `_planner_names` but read only `agent.py`; it never opened `planner.py` and
+used a quoted-string regex. Measured before the rename:
+
+```text
+defined engines:             90
+CLAUDE_TOOLS specs:          75
+agent.py quoted names:       86
+agent.py exact AST literals: 86
+planner.py parsed:            0
+AST-reference orphans:        0
+```
+
+The file now calls this evidence what it is:
+
+- `_agent_literal_names`, not `_planner_names`;
+- static invocation-reference census, not reachability scan;
+- static invocation reference, not deterministic invocability;
+- orphan candidate, not proof that an engine can never execute.
+
+Exact engine-name literals are now collected from the AST, which excludes comments while retaining
+the same measured 86 references. The module docstring explicitly states that the guard does not parse
+`planner.py` or trace values into `next_batch`.
+
+Targeted output:
+
+```text
+4 passed in 2.37s
+```
+
+One stale overclaim is in an unowned file and was deliberately not changed:
+
+```text
+agent/tools.py:6675
+"is dispatched rather than merely defined -- tests/test_engine_reachability.py enforces that."
+```
+
+The guard does not enforce dispatch. Coordinator should revise that comment when `tools.py` is free.
 
 ## Final verification
 
