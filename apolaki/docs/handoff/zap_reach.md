@@ -237,6 +237,58 @@ the evidence is not.
 
 ---
 
+## Q-023's three sub-defects, measured against code rather than against markers
+
+| # | sub-defect as filed | measured now | verdict |
+|---|---|---|---|
+| 1 | `recon["zap"]` is a dead write (`tools.py:8470`) | `grep` for `recon.setdefault("zap"` / `recon["zap"]` / `recon.get("zap")` across `agent/*.py` returns **nothing** — writer and all candidate readers gone | **CLOSED** |
+| 2 | targeted rescan not wired — one `run_zap:{h}` key per host, ever | `planner.py:976` still `f"run_zap:{h}"`, single occurrence | **LIVE** (planner.py, not mine — see below) |
+| 3 | AJAX spider fails silently behind `except: pass` | `tools.py:10402` is now `except Exception as exc: degraded.append("AJAX spider degraded: %s: %s" % …)`, mirroring the `ascan_err` idiom the ticket asked for | **CLOSED** |
+
+Sub-defect 3 is not merely present in source — it was **observed working in production output** this
+session: the durable mission's note carried `active scan degraded, passive alerts kept: active scan
+incomplete or timed out`. A degradation the old code would have swallowed is now the thing that
+exposed a flaw in my own proposed gate.
+
+**Sub-defect 2 remains open and belongs to whoever owns `planner.py`.** The step key is the host, so
+`fresh()` (`planner.py:219-234`) drops any later `run_zap` step for a host already scanned — one ZAP
+pass per host per mission, forever. A second, narrower pass against a path discovered *after* the
+first pass is unrepresentable. Minimal patch, preserving the existing once-per-host default:
+
+```python
+# planner.py:975-976 — today the key is the host, so a narrower rescan can never be scheduled.
+z_steps = [_step("run_zap", {"url": _b(h), "policy": _zpol, "speed": _zsp, "aggression": _zag},
+                 f"run_zap:{h}") for h in host_bases[:CAP_ZAP]]
+# → make the key carry what makes the pass DIFFERENT, so a re-scan of the same host with a
+#   different scope/policy is a distinct step while an identical repeat is still deduped:
+z_steps = [_step("run_zap", {...}, f"run_zap:{h}:{_zpol}:{_scope_digest(h)}") for h in …]
+```
+
+Do not land that without a bound: `CAP_ZAP` currently caps hosts, and a per-scope key makes the step
+count grow with discovery. The ticket's own mutation test applies — remove the key change and the
+second pass must disappear.
+
+---
+
+## The oracle and all four negative controls, from real missions
+
+| | requirement | result |
+|---|---|---|
+| Oracle 1 | ≥1 `run_zap` `tool_call` row in the persisted log | **PASS** — `b226bc05`, `permission: active`, durable corpus |
+| Oracle 2 | paired `tool_result`, success, note begins with a policy token | **PASS** — `policy=safe_active; speed=normal; …`, `errors: 0` |
+| Oracle 3 | report's ZAP state derived from the RESULT, not the request flag | **PASS** — `_tool_ledger("b226bc05")["zap_status"] == "executed_safe_active"`, parsed out of the note |
+| Control (a) | a ZAP-off mission claims nothing | **PASS** — `_tool_ledger("ebd96f45")["zap_status"] == "user_disabled"`, and 0 `run_zap` rows |
+| Control (b) | daemon stopped ⇒ visible degradation, not a silent skip or crash | **NOT RUN** — deliberately. Stopping `apolaki-zap-1` is a shared-service restart and two other lanes plus the Coordinator are live on this network. The code path is `require_zap` → `zap_client.health()` → `HTTPException(422)` at `main.py:538-545`, i.e. fail-closed at engage time. Verify under a lane that owns the daemon. |
+| Control (c) | AJAX spider forced to raise ⇒ note says so, passive alerts survive | **PASS** — covered by `test_zap_invocation.py:199`, and independently observed live in the degraded note above |
+| Control (d) | non-vacuity: the mission really completed and did real work | **PASS** — `b226bc05` reached `status: complete, phase: report`; the ZAP step alone spent 6m51s and ZAP's own `ascan` recorded `reqCount=302` |
+
+Control (a) is worth a second look because it is the one that would have hidden the ticket: a ZAP-off
+mission reports `user_disabled` rather than the ambiguous `not_invoked`. `not_invoked` is reserved for
+*enabled but never scheduled* — which is precisely the state Q-023 was filed about, and the report can
+now say so out loud.
+
+---
+
 ## Recommendation: **KEEP ZAP.** Do not remove it.
 
 The removal option the brief offers is not supported by the evidence. A scanner nobody can reach is
