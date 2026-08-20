@@ -1,11 +1,13 @@
 from __future__ import annotations
 
+import ast
 import asyncio
 from pathlib import Path
 
 import agent as agent_mod
 import db
 import main
+import pytest
 import scope as scope_mod
 import tools
 import zap_client
@@ -355,12 +357,114 @@ def test_zap_off_mission_completion_and_log_stream_are_unchanged(tmp_path):
         db.init(old_path)
 
 
-def test_zap_target_drivers_remain_inside_one_guarded_function():
-    """Static bypass control: target-driving APIs cannot migrate out of `_run_zap`."""
-    source = Path(tools.__file__).read_text(encoding="utf8")
-    start = source.index("    async def _run_zap(")
-    end = source.index("\n    async def ", start + 1)
-    body = source[start:end]
-    for name in ("access_url", "spider", "ajax_start", "ascan"):
-        assert body.count("zap.%s(" % name) >= 1
-    assert "configure_target_safety" in body
+_ZAP_TARGET_DRIVERS = frozenset({"access_url", "spider", "ajax_start", "ascan"})
+
+
+def _zap_production_paths(root: Path):
+    return sorted(path for path in Path(root).rglob("*.py")
+                  if not ({"tests", "tier3"} & set(path.relative_to(root).parts[:-1])))
+
+
+def _zap_call_inventory(methods, root=None):
+    """Find calls by API method, independent of receiver spelling or aliasing."""
+    root = Path(root or Path(tools.__file__).resolve().parent)
+    rows = []
+    for path in _zap_production_paths(root):
+        tree = ast.parse(path.read_text(encoding="utf8"), filename=str(path))
+        parents = {}
+        for parent in ast.walk(tree):
+            for child in ast.iter_child_nodes(parent):
+                parents[child] = parent
+        for node in ast.walk(tree):
+            if not (isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)
+                    and node.func.attr in methods):
+                continue
+            functions = []
+            owner = node
+            while owner in parents:
+                owner = parents[owner]
+                if isinstance(owner, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                    functions.append(owner.name)
+            rows.append({
+                "module": path.relative_to(root).as_posix(),
+                "line": node.lineno,
+                "method": node.func.attr,
+                "call": ast.unparse(node.func),
+                "functions": functions,
+            })
+    return sorted(rows, key=lambda row: (row["module"], row["line"], row["method"]))
+
+
+def _zap_target_driver_bypasses(root=None):
+    bypasses = []
+    for row in _zap_call_inventory(_ZAP_TARGET_DRIVERS, root):
+        if row["module"] == "tools.py" and "_run_zap" in row["functions"]:
+            continue
+        bypasses.append("%s:%d:%s" % (row["module"], row["line"], row["call"]))
+    return bypasses
+
+
+def test_zap_target_drivers_are_absent_outside_the_guarded_run_zap_subtree():
+    """Known target-driving ZAP APIs may occur only below the guarded `_run_zap` entry point."""
+    bypasses = _zap_target_driver_bypasses()
+    assert bypasses == [], "ZAP target drivers exist outside guarded _run_zap: %s" % bypasses
+
+    rows = _zap_call_inventory(_ZAP_TARGET_DRIVERS)
+    counts = {name: sum(row["method"] == name for row in rows)
+              for name in _ZAP_TARGET_DRIVERS}
+    assert counts == {name: 1 for name in _ZAP_TARGET_DRIVERS}, (
+        "the guarded ZAP driver inventory changed: %s" % counts)
+
+    safety = _zap_call_inventory({"configure_target_safety"})
+    assert len(safety) == 1
+    assert safety[0]["module"] == "tools.py" and "_run_zap" in safety[0]["functions"]
+    assert safety[0]["line"] < min(row["line"] for row in rows), (
+        "ZAP target safety must be established before any target driver")
+
+
+def test_zap_guard_rejects_a_duplicate_driver_in_a_sibling_module(tmp_path, monkeypatch):
+    """Negative control: presence in `_run_zap` cannot excuse a second target driver elsewhere."""
+    fake_root = tmp_path / "agent"
+    fake_root.mkdir()
+    fake_tools = fake_root / "tools.py"
+    fake_tools.write_text(
+        "class Registry:\n"
+        "    async def _run_zap(self, zap, url):\n"
+        "        await zap.configure_target_safety(url)\n"
+        "        await zap.access_url(url)\n"
+        "        await zap.spider(url)\n"
+        "        await zap.ajax_start(url)\n"
+        "        await zap.ascan(url)\n\n"
+        "    async def next_tool(self):\n"
+        "        return None\n",
+        encoding="utf8")
+    duplicate = fake_root / "other_module.py"
+    duplicate.write_text(
+        "async def duplicate(zap, url):\n"
+        "    await zap.ascan(url)\n",
+        encoding="utf8")
+    monkeypatch.setattr(tools, "__file__", str(fake_tools))
+
+    with pytest.raises(AssertionError, match="outside guarded _run_zap"):
+        test_zap_target_drivers_are_absent_outside_the_guarded_run_zap_subtree()
+
+    duplicate.write_text(
+        "async def inspect_without_driving(zap):\n"
+        "    return await zap.alerts()\n",
+        encoding="utf8")
+    test_zap_target_drivers_are_absent_outside_the_guarded_run_zap_subtree()
+
+
+def test_zap_driver_inventory_does_not_depend_on_receiver_variable_name(tmp_path):
+    fake_root = tmp_path / "agent"
+    fake_root.mkdir()
+    path = fake_root / "renamed_receiver.py"
+    path.write_text(
+        "async def duplicate(zap, url):\n"
+        "    scanner = zap\n"
+        "    await scanner.ascan(url)\n",
+        encoding="utf8")
+
+    assert _zap_target_driver_bypasses(fake_root) == [
+        "renamed_receiver.py:3:scanner.ascan"
+    ]

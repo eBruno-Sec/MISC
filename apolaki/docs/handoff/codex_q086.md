@@ -17,7 +17,7 @@ Branch: `codex/q086`
 
 ## Part 1 - Q-085 residual
 
-Status: in progress (owned files complete; semantic mutation and full-suite verification pending).
+Status: committed as `d58e41a74291ad0da55c44b7a3861fd3c731f44a`; full-suite verification pending.
 
 ### Fail-before-fix
 
@@ -104,7 +104,68 @@ No crash, import error, timeout, skip, or unrelated assertion was credited as a 
 
 ## Part 2 - Q-086 ZAP absence guard
 
-Status: in progress.
+Status: implementation and targeted verification complete; commit pending.
+
+### Pre-fix counterexample
+
+A synthetic `tools.py::_run_zap` contained all four expected drivers plus safety configuration, while
+its sibling `other_module.py` called `zap.ascan`. The old test still passed because it read only
+`tools.__file__`, so the new negative control failed semantically:
+
+```text
+FAILED test_zap_guard_rejects_a_duplicate_driver_in_a_sibling_module
+Failed: DID NOT RAISE AssertionError
+```
+
+This was not an import failure: it demonstrated that the old guard explicitly credited presence in
+`_run_zap` while ignoring a duplicate target driver outside that function and file.
+
+### Replacement guard
+
+The replacement parses every production Python module recursively (excluding test/Tier-3 code) and
+finds calls to the four public target-driving ZAP APIs by attribute name. Receiver spelling is not a
+filter, so `zap.ascan`, `scanner.ascan`, or a chained receiver are all in scope. A call is allowed only
+when it is in `tools.py` beneath the `_run_zap` AST subtree.
+
+Measured production inventory:
+
+```text
+tools.py:10349:_run_zap>_seed:zap.access_url
+tools.py:10378:_run_zap:zap.spider
+tools.py:10392:_run_zap:zap.ajax_start
+tools.py:10441:_run_zap:zap.ascan
+bypasses=[]
+```
+
+The guard also requires exactly one call to each driver and verifies that the sole
+`configure_target_safety` call is in `_run_zap` and lexically precedes every driver.
+
+Controls:
+
+- A sibling `zap.ascan` makes the actual guard raise; replacing it with non-driving `zap.alerts`
+  makes the same fixture pass.
+- A renamed receiver `scanner.ascan` remains visible.
+- The real repository has exactly four target-driver calls and zero bypasses.
+
+Targeted output:
+
+```text
+12 passed, 3 warnings in 13.56s
+```
+
+Semantic mutations, both killed by the exact intended assertion:
+
+```text
+M4 narrow the corpus back to tools.py only
+   FAIL test_zap_guard_rejects_a_duplicate_driver_in_a_sibling_module
+   observed DID NOT RAISE because the sibling duplicate became invisible
+
+M5 count only receivers literally named `zap`
+   FAIL test_zap_driver_inventory_does_not_depend_on_receiver_variable_name
+   observed [], expected renamed_receiver.py:3:scanner.ascan
+```
+
+No production ZAP behaviour changed; this slice repairs the guard's claim rather than the scanner.
 
 ## Part 3 - engine guard claim
 
