@@ -343,6 +343,26 @@ def rate_limited_async_client(httpx_module, *args, rate_policy=None, **kwargs):
     return httpx_module.AsyncClient(*args, event_hooks=hooks, **kwargs)
 
 
+def rate_limited_sync_client(httpx_module, *args, rate_policy=None, **kwargs):
+    """Build a sync Client using the same per-origin request/response hooks as async traffic."""
+    if rate_policy is False:
+        return httpx_module.Client(*args, **kwargs)
+    policy = rate_policy or target_rate_policy
+    hooks = dict(kwargs.pop("event_hooks", {}) or {})
+    request_hooks = list(hooks.get("request", ()))
+    response_hooks = list(hooks.get("response", ()))
+
+    def wait_for_target(request):
+        policy.wait_sync(str(request.url))
+
+    def observe_target(response):
+        policy.observe(str(response.url), response.status_code, response.headers)
+
+    hooks["request"] = [wait_for_target, *request_hooks]
+    hooks["response"] = [observe_target, *response_hooks]
+    return httpx_module.Client(*args, event_hooks=hooks, **kwargs)
+
+
 async def _guard_playwright_page(page, policy):
     """Install one request gate per real Playwright page, covering navigation subresources too."""
     if getattr(page, "_apolaki_rate_guard", False):

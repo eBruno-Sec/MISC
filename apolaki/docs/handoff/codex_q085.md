@@ -101,6 +101,8 @@ mission performed the WSTG scenario. An honest evidence-driven tally is therefor
 
 ## Q-085 slice 1: repository-wide guard
 
+Commit: `1c085eb`
+
 `tests/test_rate_policy.py` now scans every top-level production Python module for raw HTTP clients,
 `urlopen`, and target `page.goto` calls. Control-plane and third-party calls are explicit one-site
 exemptions; the policy implementation and a locally wait+observe-wrapped call are separate facts.
@@ -132,9 +134,70 @@ XFAIL tests/test_rate_policy.py::test_every_target_transport_uses_the_shared_rat
 21 passed, 1 xfailed in 11.82s
 ```
 
+## Q-085 slice 2: Juice Shop no-DoS breach
+
+All four raw transports in `juiceshop_solvers.py` now route through one sync policy factory:
+
+* `solve()` and `conquest()` construct clients with
+  `browser_engine.rate_limited_sync_client()`.
+* The ten `_multiple_likes()` workers use that client instead of calling `urlopen` directly.
+* `_api_and_header_xss()` uses the same client instead of a second raw transport.
+* The sync factory installs a wait hook before every request and an observation hook after every
+  response, preserving caller-supplied hooks after the safety hooks.
+
+Fail-before-fix was semantic, not an import error:
+
+```text
+AssertionError: the lab solver promises no DoS but still has raw target transports:
+['juiceshop_solvers.py:1149:conquest:httpx.Client',
+ 'juiceshop_solvers.py:304:_like:urllib.request.urlopen',
+ 'juiceshop_solvers.py:355:_api_and_header_xss:urllib.request.urlopen',
+ 'juiceshop_solvers.py:826:solve:httpx.Client']
+1 failed in 4.93s
+```
+
+Measured after the fix:
+
+```text
+production modules scanned:             179
+raw target-capable transport inventory: 35
+ungated TARGET call sites:              21
+modules with ungated TARGET calls:      12
+```
+
+The ratchets were tightened from 25/13 to 21/12. Non-vacuity is pinned to the 179-module corpus,
+not to a raw-call floor: the first version incorrectly failed when removing raw calls reduced 39 to
+35. Fewer bypass-capable calls are an improvement, not an instrument failure.
+
+Controls:
+
+* A 429 with `Retry-After: 2` makes the sync client's next request begin at fake-clock 2.0 rather
+  than 0.0, and the response is counted as one observation and one wait.
+* The real `_multiple_likes()` function launches ten threads through an `httpx.MockTransport`; all
+  ten review POSTs cross `wait_sync` and all ten responses cross `observe`.
+* The repository-wide AST assertion reports zero Juice Shop bypasses.
+
+Semantic mutants, all killed by the exact intended assertions:
+
+1. Replaced the sync request hook's `policy.wait_sync(...)` with `return None`.
+   `starts == [0.0, 2.0]` observed `[0.0, 0.0]`, and the ten-worker wait count observed 0 instead
+   of 10. Two intended assertions failed; no crash or unrelated failure counted.
+2. Replaced the response hook's `policy.observe(...)` with `return None`.
+   The second request again began at 0.0 and the ten-worker observation count was 0 instead of 10.
+3. Replaced `solve()`'s sanctioned factory with raw `httpx.Client`.
+   The widened wiring guard failed on exactly
+   `juiceshop_solvers.py:825:solve:httpx.Client`.
+
+Post-restore targeted result:
+
+```text
+.x.......................                                                [100%]
+XFAIL tests/test_rate_policy.py::test_every_target_transport_uses_the_shared_rate_policy - Q-085 LIVE GAP: after the Juice Shop fix, 21 ungated target calls remain across 12 modules; registration is not compliance, and SKIPPED/NOT SEEN is not a pass
+24 passed, 1 xfailed in 15.37s
+```
+
 ## In progress
 
-* Juice Shop's four raw target transports, including the ten-thread review race
 * bare-429 wait provenance and Coordinator default ruling
 * audit of the engine-reachability, session-identity, and ZAP guard scopes
 * full suite, Tier-3 gate, queue gate, rebase, and final integration instructions

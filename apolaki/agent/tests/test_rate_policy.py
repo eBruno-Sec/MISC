@@ -217,15 +217,17 @@ def _target_traffic_bypasses(paths=None):
 def test_repository_wide_rate_policy_inventory_is_non_vacuous_and_ratcheted():
     bypasses = _target_traffic_bypasses()
     modules = {row.split(":", 1)[0] for row in bypasses}
-    # Measured at 256ed8e: 39 target-capable raw calls after the one literal ``about:blank``
-    # bootstrap is excluded. Keep the full denominator visible rather than asserting only on misses.
-    assert len(_raw_transport_inventory()) >= 39, "the repository-wide transport census loaded too little"
-    assert len(bypasses) <= 25, "ungated target-call sites rose above the measured Q-085 baseline: %s" % bypasses
-    assert len(modules) <= 13, "modules bypassing the target policy rose above the measured baseline: %s" % sorted(modules)
+    root = Path(tools.__file__).resolve().parent
+    # Measured after the Juice Shop slice: 179 top-level production modules are in scope. Raw-call
+    # count is deliberately NOT a floor: removing a bypass must be allowed to reduce it.
+    assert len(list(root.glob("*.py"))) >= 179, "the repository-wide module census loaded too little"
+    assert _raw_transport_inventory(), "the transport inventory is vacuous"
+    assert len(bypasses) <= 21, "ungated target-call sites rose above the measured Q-085 ratchet: %s" % bypasses
+    assert len(modules) <= 12, "modules bypassing the target policy rose above the measured ratchet: %s" % sorted(modules)
 
 
 @pytest.mark.xfail(strict=True, reason=(
-    "Q-085 LIVE GAP: repository-wide AST census measures 25 ungated target calls across 13 modules; "
+    "Q-085 LIVE GAP: after the Juice Shop fix, 21 ungated target calls remain across 12 modules; "
     "registration is not compliance, and SKIPPED/NOT SEEN is not a pass"))
 def test_every_target_transport_uses_the_shared_rate_policy():
     assert _target_traffic_bypasses() == []
@@ -244,6 +246,75 @@ def test_repository_wide_guard_catches_a_new_previously_invisible_module(tmp_pat
         "brand_new_engine.py:4:send:httpx.AsyncClient"
     ]
     assert _target_traffic_bypasses([safe]) == []
+
+
+def test_juiceshop_solver_routes_every_target_send_through_the_policy():
+    bypasses = [row for row in _target_traffic_bypasses()
+                if row.startswith("juiceshop_solvers.py:")]
+    assert bypasses == [], (
+        "the lab solver promises no DoS but still has raw target transports: %s" % bypasses)
+
+
+def test_sync_client_waits_and_observes_at_the_shared_chokepoint():
+    clock = [0.0]
+    starts = []
+    responses = [429, 200]
+
+    def sleep(delay):
+        clock[0] += delay
+
+    def handler(request):
+        starts.append(clock[0])
+        status = responses.pop(0)
+        headers = {"Retry-After": "2"} if status == 429 else {}
+        return httpx.Response(status, headers=headers, request=request)
+
+    policy = browser.TargetRatePolicy(max_wait=5, clock=lambda: clock[0], sync_sleep=sleep)
+    with browser.rate_limited_sync_client(
+            httpx, transport=httpx.MockTransport(handler), rate_policy=policy) as client:
+        client.get("https://target.example/one")
+        client.get("https://target.example/two")
+
+    assert starts == [0.0, 2.0]
+    assert policy.stats()["observations"] == 1
+    assert policy.stats()["waits"] == 1
+
+
+def test_all_ten_juice_shop_race_workers_cross_the_shared_gate():
+    import juiceshop_solvers as js
+
+    class CountingPolicy:
+        def __init__(self):
+            self.waited = []
+            self.observed = []
+            self.lock = threading.Lock()
+
+        def wait_sync(self, url):
+            with self.lock:
+                self.waited.append(url)
+
+        def observe(self, url, status, headers):
+            with self.lock:
+                self.observed.append((url, status))
+
+    def handler(request):
+        path = request.url.path
+        if path == "/rest/user/login":
+            return httpx.Response(200, json={"authentication": {"token": "T"}}, request=request)
+        if path == "/rest/products/1/reviews":
+            return httpx.Response(200, json={"data": [{"_id": "R"}]}, request=request)
+        return httpx.Response(200, request=request)
+
+    policy = CountingPolicy()
+    with browser.rate_limited_sync_client(
+            httpx, base_url="https://juice.invalid", transport=httpx.MockTransport(handler),
+            rate_policy=policy) as client:
+        js._multiple_likes(client)
+
+    review_waits = [url for url in policy.waited if url.endswith("/rest/products/reviews")]
+    review_observations = [row for row in policy.observed if row[0].endswith("/rest/products/reviews")]
+    assert len(review_waits) == 10, "one or more race workers routed around the request gate"
+    assert len(review_observations) == 10, "one or more race responses escaped policy observation"
 
 
 def test_http_engine_path_starts_zero_requests_inside_the_retry_window(monkeypatch):
