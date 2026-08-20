@@ -284,17 +284,33 @@ OBJECTIVES = (
     {"chapter": "Communication & Config", "cid": "COMM-04", "level": 2,
      "summary": "Subdomains do not dangle to takeover-able providers.",
      "objective": "Confirm no subdomain takeover.",
-     # Q-048: declared NOT IMPLEMENTED, and this is a capability gap rather than a naming error.
-     # _check_takeover (tools.py:5669) DOES detect dangling CNAMEs, but dns_recon.match_takeover returns
-     # candidate dicts carrying subdomain/service/cname/severity/reason and NO "family" key at all. They
-     # are appended to self.recon["takeover_candidates"], whose only consumer is guidance.py:629 -- they
-     # never become findings. Family "takeover" therefore has zero producers, and no takeover violation
-     # can exist as a finding by construction, so a clean run could not have been contradicted.
-     # `violated_by` is KEPT: the moment those candidates are promoted to findings this must read failed.
-     "engine": NO_ENGINE, "violated_by": ("takeover",),
-     "not_implemented_reason": ("check_takeover yields recon CANDIDATES, not findings (dns_recon."
-                                "match_takeover returns no family), so a takeover can never be recorded "
-                                "as a violation")},
+     # Q-048 declared this NOT IMPLEMENTED because family "takeover" had zero producers: candidates went
+     # to self.recon["takeover_candidates"] and never became findings. The note it left was explicit that
+     # `violated_by` was KEPT so that "the moment those candidates are promoted to findings this must read
+     # failed". Q-053 GAP-1 promoted them (`fb6f457`): ToolRegistry._takeover_finding stamps family
+     # "takeover", and `check_takeover` is in agent._AUTO_STORE_TOOLS, so detection -> family -> store is
+     # a real path pinned by tests/test_finding_provenance.py.
+     #
+     # THE PRODUCER LANDED AND THIS HALF DID NOT, which is the both-halves shape Q-051's mode key and
+     # Q-050's auto-store lines each produced once. MEASURED at 8c7065c, with the producer already live:
+     #
+     #   takeover finding + engine ran  -> failed | not_implemented_reason STILL ATTACHED
+     #   CLEAN run, engine RAN          -> not_implemented   <- "verified" unreachable
+     #   engine never ran               -> not_implemented   <- indistinguishable from the row above
+     #
+     # `failed` outranks `not_implemented`, so the FAIL direction worked by accident and hid the rest.
+     # The reason string had become false in both clauses (check_takeover DOES yield findings, and they DO
+     # carry a family) while still rendering on the row -- telling a reader "we found this" and "we have no
+     # engine for this" at once. Worse is the flattering direction: a clean run of a capability that EXISTS
+     # reported the PRODUCT as lacking it, and `not_implemented` stopped discriminating "no engine" from
+     # "not run" -- the distinction report.coverage_rollup keeps its own bucket for, citing Q-012.
+     #
+     # ENGINE NAME VERIFIED AGAINST THE LEDGER, NOT SPELLED FROM MEMORY. _engines_from_ledger reads the
+     # DISPATCH name, and the ToolResult here is built as ToolResult("takeover", ...) -- two different
+     # strings for one engine, which is exactly the near-miss that made four of Q-048's six objectives
+     # unfailable. MEASURED over 66,395 real log rows: tool_call carries `check_takeover` (140 dispatches),
+     # never `takeover`. A near-miss here fails silently and in the flattering direction.
+     "engine": "check_takeover", "violated_by": ("takeover",), "verifiable": True},
 
     # ── Business Logic (inconclusive by nature -> "attempted", never auto-"verified") ──
     {"chapter": "Business Logic", "cid": "BUSL-01", "level": 2,

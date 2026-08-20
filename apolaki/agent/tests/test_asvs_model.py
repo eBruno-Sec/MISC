@@ -426,17 +426,39 @@ def test_absent_capability_reports_not_implemented_with_a_reason():
     """A capability the product does not have must be distinguishable from one it merely skipped."""
     r = A.assess([], attempted_engines=_dispatch_reachable())
     ni = [o for o in r["objectives"] if o["status"] == "not_implemented"]
-    # Q-048 swapped the membership of this set, in both directions, and the count is a coincidence:
+    # Q-048 swapped the membership of this set, in both directions, and the count was a coincidence:
     #   ATHZ-04 LEFT  — Q-011 shipped `run_mass_assign`, so the capability now exists.
-    #   COMM-04 JOINED — check_takeover yields recon candidates that carry no family and never become
-    #                    findings, so a takeover cannot be recorded as a violation.
-    assert {o["cid"] for o in ni} == {"AUTHN-04", "COMM-04"}
+    #   COMM-04 JOINED — check_takeover yielded recon candidates carrying no family that never became
+    #                    findings, so a takeover could not be recorded as a violation.
+    #
+    # COMM-04 HAS NOW LEFT TOO (Q-053 GAP-1). This membership is a claim about what the PRODUCT can
+    # do, so it changes when the product changes, and updating it is the deliberate half of shipping
+    # the capability. `fb6f457` landed the producer: `ToolRegistry._takeover_finding` stamps family
+    # "takeover" and `check_takeover` is in `agent._AUTO_STORE_TOOLS`, so detection -> family -> store
+    # is a real path pinned by tests/test_finding_provenance.py.
+    #
+    # The producer landed and the model half did not -- the both-halves shape that Q-051's mode key
+    # and Q-050's auto-store lines each produced once. Keeping COMM-04 here would have gone on
+    # reporting a capability that EXISTS as one the product lacks, on every clean run, while the
+    # attached reason string ("returns no family") had become false in both of its clauses.
+    assert {o["cid"] for o in ni} == {"AUTHN-04"}
     for o in ni:
         assert o.get("not_implemented_reason"), "%s is not_implemented with no stated reason" % o["cid"]
         assert o["engine"] == A.NO_ENGINE
-    assert r["tally"]["not_implemented"] == 2
+    assert r["tally"]["not_implemented"] == 1
+    # THE OTHER DIRECTION, so this test cannot be satisfied by simply emptying the set: an objective
+    # that left `not_implemented` must be genuinely assessable, not merely unlabelled. A clean run of
+    # a capability that exists has to be able to reach `verified`, which is what was unreachable.
+    comm04 = [o for o in r["objectives"] if o["cid"] == "COMM-04"][0]
+    assert not comm04.get("not_implemented_reason"), \
+        "COMM-04 still carries a not-implemented reason while its producer is live"
+    assert comm04["status"] != "not_implemented"
     # and it is never quietly counted as a pass
-    assert "not_implemented" in A.STATUSES and r["tally"]["verified"] == 27
+    # 27 -> 28. COMM-04 did not vanish from the model when it left `not_implemented`; it became
+    # ASSESSABLE, and on this clean fixture it reaches `verified`. That the two numbers move in
+    # opposite directions by one is the actual evidence the capability was wired rather than merely
+    # unlabelled -- an objective quietly dropped from the model would have left this at 27.
+    assert "not_implemented" in A.STATUSES and r["tally"]["verified"] == 28
 
 
 def test_not_implemented_survives_every_engine_claiming_to_have_run():
@@ -444,9 +466,20 @@ def test_not_implemented_survives_every_engine_claiming_to_have_run():
     however dishonest or over-broad, can flip a not-implemented objective to verified."""
     liar = _dispatch_reachable() | {n for o in A.OBJECTIVES for n in A._engine_names(o)} | {A.NO_ENGINE}
     r = A.assess([], attempted_engines=liar)
-    for cid in ("AUTHN-04", "COMM-04"):          # Q-048: ATHZ-04 gained a real engine, COMM-04 lost one
+    # Q-048: ATHZ-04 gained a real engine, COMM-04 lost one. Q-053 GAP-1: COMM-04 gained one back, so
+    # it belongs on the OTHER side of this test now -- see below. AUTHN-04 is the remaining specimen.
+    for cid in ("AUTHN-04",):
         o = next(x for x in r["objectives"] if x["cid"] == cid)
         assert o["status"] == "not_implemented", "%s flipped to %s" % (cid, o["status"])
+    # POSITIVE CONTROL, and it is what stops this test decaying into "assert one hardcoded id".
+    # The rule under test is that not_implemented is a property of the PRODUCT. With the same
+    # dishonest engine set, an objective whose capability DOES exist must NOT be stuck at
+    # not_implemented -- otherwise the assertion above would pass just as well on a model that
+    # answered "not_implemented" for everything, which is the failure mode it exists to exclude.
+    comm04 = next(x for x in r["objectives"] if x["cid"] == "COMM-04")
+    assert comm04["status"] != "not_implemented", (
+        "COMM-04's producer is live (fb6f457) but the model still reports the product as lacking the "
+        "capability; got %s" % comm04["status"])
 
 
 def test_a_finding_still_fails_a_not_implemented_objective():
