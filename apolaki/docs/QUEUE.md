@@ -1110,7 +1110,65 @@ DoD: a finding whose `analysis` is `static-call-site` renders its file and line,
 replay. **Negative control:** a genuine DAST finding must KEEP its curl - a fix that strips
 reproduction from everything trades a false claim for a useless report.
 
-### Q-084 · The report tells the client "WSTG active tests: 85/109" and that number is a CONSTANT · **CRITICAL** · `ready`
+### Q-085 · A guard that parses ONE file made that file's boundary the boundary of compliance · **HIGH** · `ready`
+
+**MEASURED by the rate-policy lane, 2026-08-20** (`20883a5`, `58f2e81`), by AST census rather than
+grep, because a grep for `httpx` counts imports and comments.
+
+    modules sending TARGET traffic THROUGH the policy : 3    tools.py, browser_engine.py, proxy.py
+    modules sending TARGET traffic AROUND the policy  : 13
+    gated call sites: 207          ungated TARGET call sites: 25
+
+**Both framings are recorded because either alone misleads.** 207 vs 25 flatters the policy (200 of
+those sites sit inside one very large module); 3 vs 13 flatters the problem (`tools.py` is where most
+engines live). The honest summary: the policy covers the main engine room completely and almost
+nothing outside it, with `bie.py` the sharpest case at 6 ungated target navigations.
+
+**The structural cause, which is the actual ticket.** This is not 13 independent oversights. **Both
+AST guards parse `tools.__file__` and nothing else**, so `tools.py` is 100% clean and every other
+module drifted freely. **The guard's scope became the boundary of compliance.** That is the house
+failure mode wearing a new costume: the recorded lesson was that *a guard checking a declaration
+passes what it exists to catch*; this is its sibling, **a guard with too narrow a scope passes
+everything it cannot see**.
+
+**The sharpest live instance**: `juiceshop_solvers.py:304` fires **ten concurrent
+`threading.Thread` workers** posting to `/rest/products/reviews` with **no gate**. That is precisely
+the shape Q-043 was filed about, still live, in a module nobody had flagged. A sibling handoff
+(`docs/handoff/backoff.md`) lists `juiceshop_solvers.py` as "correctly covered"; it is MIXED, one
+`browser_engine.drive` path gated and four direct paths not. **A module can be partially gated, and a
+grep that finds the one correct call reports the whole module clean.** That does not make
+`backoff.md` wrong -- it made a bounded claim with its method stated, which is the only reason the
+discrepancy was findable at all.
+
+**Why the lane did not just widen the guard, and it was right not to**: widening lands RED on 25 call
+sites across 13 modules, 11 of them owned by other lanes. Landing a red guard in a shared tree is not
+one lane's call.
+
+**Definition of done.**
+- Widen the guard's scope to every module that can send target traffic, **and land the resulting red
+  deliberately** -- as a strict xfail carrying the measurement if the sites cannot all be fixed at
+  once, never by narrowing the guard back.
+- **Fix `juiceshop_solvers.py:304` first and separately.** Ten ungated concurrent workers against a
+  target is a live no-DoS breach, not a coverage statistic.
+- **Then audit the OTHER guards for the same shape.** This ticket is only worth its cost if the
+  question "what files does this guard actually parse?" gets asked of every guard in the tree. A
+  guard that parses one file and is described as protecting the codebase is a false assurance, and
+  false assurance is worse than no guard.
+- Negative control, mandatory: after widening, a newly-added ungated target call in a module that was
+  previously invisible must FAIL the guard. Prove it by adding one and watching it go red.
+
+### Q-084 · The report tells the client "WSTG active tests: 85/109" and that number is a CONSTANT · **CRITICAL** · **CLOSED** `b2492cc`
+Fixed on the main thread. The line now reads "WSTG catalogue: Apolaki has engines for 85/109 active
+tests ... This describes this tool, not this mission - unlike the figures above it does not vary with
+what ran." The dead `techniques` parameter is removed from `wstg_catalog.coverage()`. Tests written
+first: 3 failed before, 7 pass after, including one control that FAILS if someone "fixes" this by
+deleting the line and one that FAILS if the catalogue totals move. Full suite on an isolated snapshot:
+3273 passed / 11 skipped / 12 xfailed / 0 failed.
+
+**The fix is the sentence, not the number, and that was measured rather than preferred**: `FULL` and
+`PARTIAL` map ids to PROSE, so an evidence-driven WSTG tally is not derivable from this module until
+the maps carry machine-readable engine references. That is a bigger ticket; until then the report must
+not imply a number it cannot compute.
 
 **MEASURED 2026-08-20.** `report.py:2501` renders this into the client HTML, under a heading called
 Coverage Overview:
@@ -1679,7 +1737,34 @@ source-derived finding.**
 Closing this on the wiring alone would be the island pattern applied to the ticket ABOUT the island
 pattern: code that exists, is reachable, and has never run. DoD unchanged - run a mission with
 `source_root` against a Java or Python tree, and record the mission id and the finding.
-## Q-043 · Apolaki does not honour `Retry-After` — and the Coordinator asserted that it did · **HIGH** · `ready`
+## Q-043 · Apolaki does not honour `Retry-After` · **HALF CLOSED** `0b991e9` `5bb3330` `58f2e81` `20883a5` · the MECHANISM is built, the COVERAGE is not
+
+#### Status 2026-08-20, after two lane runs
+
+**The mechanism half is done and measured.** `Retry-After` is real now: `browser_engine.py:110`
+parses RFC 9110 delta-seconds and HTTP-date, a shared per-origin deadline exists, the past-date clamp
+that had no test now has one, the ceiling is measured at the boundary, and the "bare-429 gap" a lane
+first reported turned out to be **a designed boundary rather than a defect** -- so the fallback ships
+OFF, at 0.0 rather than the 2-5s a sibling handoff recommended, because the opposite is held by a
+named negative control and the lane would not delete an oracle to make its own change look better.
+Two lanes reached the same fix from different directions; turning it on is one constant plus a
+deliberate update to that control.
+
+**The coverage half is NOT done, and the number is the ticket's own words: "a policy covering every
+engine".**
+
+    modules sending TARGET traffic THROUGH the policy : 3    tools.py, browser_engine.py, proxy.py
+    modules sending TARGET traffic AROUND the policy  : 13
+
+That half is now **Q-085**, because its cause is structural and generalises past this ticket: both AST
+guards parse `tools.__file__` and nothing else, so the guard's scope became the boundary of
+compliance. See Q-085, which also carries the live no-DoS breach at `juiceshop_solvers.py:304` --
+ten concurrent threads against the target with no gate.
+
+**Do not close this ticket until Q-085 closes.** "No DoS" is a promise this platform makes in its own
+documentation, and a policy covering 3 of 16 modules does not keep it.
+
+#### Original filing — and the Coordinator failure it records
 
 **MEASURED by Codex lane 4**: with `Retry-After: 2` returned by the target, both concurrency widths
 sent **47 requests**; width 6 started **14 requests inside the retry window**. The concurrency ceiling
