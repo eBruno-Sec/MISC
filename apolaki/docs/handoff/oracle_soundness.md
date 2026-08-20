@@ -166,9 +166,18 @@ sample. The control cannot run in production. This is already correctly pinned b
 Two corrections for whoever lands it:
 
 * **Section 5a's line numbers have drifted.** It cites `agent/tools.py:7846` and `:7880`; today
-  `7846` is a `sqli.union_hit` check. The real anchors are the `base_r = await get(c, url)` /
-  `base_body = …` pair at **≈8339** and the call site at **8373**. The patch **text** still applies
-  verbatim — both anchor strings were confirmed present and unique — only the line numbers are stale.
+  `7846` is a `sqli.union_hit` check. The patch **text** still applies verbatim; only the line
+  numbers are stale. Measured anchors:
+
+  | anchor | line | occurrences in `tools.py` |
+  |---|---|---|
+  | `base_r = await get(c, url)` | **8339** | **1 — unique, anchor on this** |
+  | `if ns.analyze_boolean(base_body, op_r.text, ctl_body, miss_body):` | **8373** | **1 — unique** |
+  | `base_body = base_r.text if base_r is not None else ""` | 7909 / **8340** / 8452 | **3 — NOT unique** |
+
+  **Do not anchor the first hunk on the `base_body = …` line**: it appears three times and two of
+  them are the sqli carrier. Anchor on `base_r = await get(c, url)`, which is unique, and insert
+  after the `base_body` line that follows it.
 * The xfail's own reason string repeats the stale `tools.py:7846`. Its *assertion* is derived from
   the AST (`_boolean_calls(tools.ToolRegistry._run_nosqli, "ns")`), so the pin itself is robust; only
   the prose misleads.
