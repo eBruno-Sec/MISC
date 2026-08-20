@@ -3,12 +3,37 @@
 Updated by the Coordinator. Numbers here must match [LEDGERS.md](LEDGERS.md); if they disagree, the
 ledger wins and this file is stale.
 
-**Last update**: 2026-08-16 evening. The previous update was 08-13 and had rotted badly — it named
-lanes closed days earlier and a tree three days out of date. **This file is one of four criteria the
-`apolaki-autocontinue` watchdog checks before retiring itself, so leaving it stale silently disables
-that retirement.** Updating it is not bookkeeping.
+**Last update**: 2026-08-19. **The previous update was 08-16 and had rotted the same way the 08-13 one
+did** — it named a tree at 2799 tests when HEAD carries 3223, and every lane in its table was already
+closed. That is twice in a row, which makes it a property of the file rather than an accident.
+**This file is one of four criteria the `apolaki-autocontinue` watchdog checks before retiring itself,
+so leaving it stale silently disables that retirement.** Updating it is not bookkeeping.
 
-## Lanes right now
+## Lanes right now — 2026-08-19, four live
+
+| lane | ticket | owns | state |
+|---|---|---|---|
+| Vendor scope | Q-083 | `codeintel.py` | **LIVE, run 2.** Run 1 measured the blast radius at 1 of 716 findings (0.141%) and proved the obvious `*.min.js` rule misses every modern bundle, so the fix must key on EVIDENCE a file is third-party. Six fixtures copied byte-for-byte from real specimens |
+| Island triage | Q-078 | `deadcode_gate.py` | **LIVE, run 3.** Ratchet reads 51 against ceiling 37, held by a strict xfail. Run 2 refused to raise the baseline to make it pass, correctly. Three worked examples already classified: resolver blind spot, framework entry point, cross-module re-export |
+| Negative effects | Q-074 | `engine_descriptor.py`, `techniques.py`, `effect_search.py` | **LIVE, run 2.** One question: does the planner do anything differently because a negative-effect row exists? "It is decoration" is a complete answer |
+| Rate policy | Q-043 | `browser_engine.py`, `zap_client.py` | **LIVE.** Breaker. The machinery now exists (`retry_after_seconds` at `browser_engine.py:110`); the job is whether it works on BOTH paths and whether anything fails when it is deleted |
+
+Queue: **73 ticket headers, 45 cited hashes all real, 0 contradictions** (`scripts/queue_gate.sh`).
+Genuinely open and unowned after today's sweep: Q-040, Q-044 (half closed), Q-050, Q-053, Q-062.
+
+Tree at HEAD: **3223 passed / 11 skipped / 12 xfailed / 0 failed**. The two commits since that
+measurement (`5bb8627`, `cffc559`) touch only `docs/` and `scripts/`, so the count is unchanged by
+construction rather than by assumption.
+
+**The queue itself grew a gate today, because it had gone stale eleven times.** Closing a ticket and
+updating its header are two actions and only one was ever enforced. The eleventh sweep found the
+mechanism behind the other ten: the file carried a SECOND copy of some tickets, and Q-020 read
+**CLOSED** at line 102 and `proposed` at line 2119 simultaneously. `scripts/queue_gate.sh` now checks
+that every cited hash exists in history and that no ticket id carries two headers whose states
+contradict. Its negative control is the only reason to believe it: run against `docs/QUEUE.md` as it
+stood at HEAD before the fix, it exits 1 and names Q-020 with both line numbers.
+
+## Lanes, earlier cycles
 
 | lane | owner | state |
 |---|---|---|
