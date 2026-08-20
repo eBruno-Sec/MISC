@@ -281,3 +281,73 @@ degrades gracefully instead of switching off after the first 30 s.
 > on any path. That is a legitimate escape hatch, but it is indistinguishable in the logs from a
 > target that never rate-limited, because a zero-length wait writes no ledger token by design (§4,
 > `describe_wait`). If Q-043 wants the policy to be *unbypassable*, this is the bypass.
+
+---
+
+## 7. ANTI-IDLE — how many engines route THROUGH the policy vs around it
+
+Q-043 asks for "a policy covering every engine". This counts the distance to that, by AST rather
+than by grep, because a grep for `httpx` counts imports and comments.
+
+    docker run --rm -v "$SNAP:/app" -v "$MEASURE:/measure" -w /app apolaki-agent \
+      python -u /measure/census2.py
+
+**The raw number is 85% of call sites gated, and I am not reporting that, because it is
+dishonest.** Most ungated calls never touch the target: they talk to the ZAP sidecar, the
+browserless sidecar, `dns.google`, threat-intel feeds and the CI API. A *target* rate policy has no
+business gating those, and counting them as failures inflates the score. So every ungated call site
+was opened and classified by what it actually talks to.
+
+**Legitimately exempt — 11 call sites**
+
+| kind | sites |
+|---|---|
+| infrastructure / sidecar | `zap_client.py:146` (ZAP daemon), `cdp.py:96` (browserless), `ci_summary.py:103`, `labs.py:17`, `benchmark_assert.py:97`, `main.py:2072` (benchmark ANSWER KEY, deliberately outside the agent+scope for blind sealing) |
+| third-party services | `dns_recon.py:126` (DoH), `intel_connectors.py:54`, `intel_extractor.py:117`, `intel_feeds.py:260`, `cloud_iam.py:243` |
+
+`proxy.py:239` looks like a bypass to a naive AST pass and is **not** one: it is wrapped by
+`target_rate_policy.wait_sync` / `.observe` at `:237` / `:241`. Counted as gated.
+
+**THE ANSWER**
+
+    modules sending TARGET traffic THROUGH the policy : 3   (tools.py, browser_engine.py, proxy.py)
+    modules sending TARGET traffic AROUND the policy  : 13
+    gated call sites: 207        ungated TARGET call sites: 25
+
+| module | ungated target call sites |
+|---|---|
+| `bie.py` | **6** — `page.goto` at 1330, 1335, 1419, 1424, 1470, 1744 |
+| `juiceshop_solvers.py` | 4 |
+| `main.py` | 3 — Natas ladder (1969, 1988), retest client (3111) |
+| `bench_all.py`, `owasp_bench.py` | 2 each |
+| `agent.py`, `auth.py`, `authz.py`, `bwapp_solvers.py`, `codeintel.py`, `mutillidae_solvers.py`, `register.py`, `replay.py` | 1 each |
+
+Both framings are given because either alone misleads. **207 vs 25** flatters the policy: 200 of
+those gated sites are inside `tools.py`, one very large module. **3 vs 13** flatters the problem:
+`tools.py` is where most engines actually live. The honest summary is that the policy covers the
+main engine room completely and almost nothing outside it.
+
+### 7a. WHY it stopped at the door of `tools.py` — the structural cause
+
+This is not thirteen independent oversights. The two guards that enforce the policy are
+**scoped to a single file**:
+
+    agent/tests/test_rate_policy.py:310   tree = ast.parse(Path(tools.__file__).read_text(...))
+    agent/tests/test_rate_policy.py:326   tree = ast.parse(Path(tools.__file__).read_text(...))
+
+`test_tools_has_no_unguarded_target_page_goto` and `test_tools_has_no_raw_async_client_bypass` both
+parse `tools.py` and nothing else. So `tools.py` is 100% clean and every other module drifted
+freely — **the guard's scope became the boundary of compliance.** `bie.py` is the sharpest case: it
+is a first-class engine shipped deliberately (#124, Browser Intelligence Engine) with six real
+target navigations, and it was written entirely outside the guard's field of view, so no test ever
+objected.
+
+This is the house failure mode in a new costume. The recorded lesson was *"a guard checking a
+declaration passes what it exists to catch"*; this is its sibling — **a guard with too narrow a
+scope passes everything it cannot see.** Widening those two AST guards from `tools.py` to the whole
+engine surface is the single highest-value follow-up in this area, and it is mechanical: the guard
+already exists and already works, it is just pointed at one file.
+
+I did not widen it myself. It would fail immediately on 25 call sites across 13 modules — 11 of
+which belong to other lanes — and landing a red guard in a shared tree is not this lane's call.
+Filed as the Q-043 follow-up below.
