@@ -6,6 +6,7 @@ engine, waiting to be called by mistake.
 """
 import ast
 import os
+import re
 import shutil
 import warnings
 
@@ -1279,3 +1280,46 @@ def test_the_transitive_pass_measures_laundering_and_not_something_else(tmp_path
         "import b\n\n\ndef go():\n    return b.used()\n\n\nENTRY = go\n", encoding="utf8")
     single2, fixed2, _r2 = _transitive_callerless(str(tmp_path))
     assert "a.helper" not in single2 and "a.helper" not in fixed2, (single2, fixed2)
+
+
+# Backticked `_private` tokens in this gate's prose that belong to some OTHER module, or to no module at
+# all. Two entries, each naming where it lives -- the same contract every allowlist in `deadcode_gate.py`
+# carries, applied to its paperwork. A third costs a deliberate edit here.
+PROSE_FOREIGN = {
+    "_intel": "tools.py's import alias for the intel module; the Q-078 blind-spot example",
+    "_run_x": "a naming PATTERN in the string-dispatch rule, not a function that exists anywhere",
+}
+
+
+def test_the_gate_s_prose_only_names_helpers_that_exist():
+    """The file's whole thesis, applied to the file: prose that names code must be checked.
+
+    Written because run 5 produced a live instance of the defect within minutes of writing about it. The
+    module docstring said "`stale` is now resolved off the AST (`_ast_referenced_names`)" after the
+    helper had been renamed to `_ast_reference_sites`. Nothing failed. A reader would have searched for a
+    function that does not exist, in the file whose entire subject is prose asserting things the code
+    does not do.
+
+    Scoped to backticked `_private` names because a leading underscore means "local to this module", so
+    the claim is checkable without a judgement call. Anything genuinely foreign goes in PROSE_FOREIGN
+    with its home named."""
+    src = open(os.path.join(dg.APP_DIR, "deadcode_gate.py"), encoding="utf8").read()
+    tree = ast.parse(src)
+    defined = {n.name for n in ast.walk(tree)
+               if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef))}
+    defined |= {t.id for n in tree.body if isinstance(n, ast.Assign)
+                for t in n.targets if isinstance(t, ast.Name)}
+
+    cited = set(re.findall(r"`(_[a-z][A-Za-z0-9_]*)`", src))
+    # POSITIVE CONTROL: the reader found real citations, and found the one this test was written for.
+    assert len(cited) >= 3, "only %s cited; the extractor is not reading the prose" % sorted(cited)
+    assert "_ast_refs" in cited, "the extractor cannot see a citation that is demonstrably in the file"
+
+    missing = sorted(n for n in cited if n not in defined and n not in PROSE_FOREIGN)
+    assert not missing, (
+        "this module's prose names %s, which it does not define -- renamed, deleted, or a typo. Fix the "
+        "prose, or add it to PROSE_FOREIGN naming the module it really lives in." % missing)
+    # ...and the exemptions must stay exemptions: a name that this module HAS defined must not sit in
+    # PROSE_FOREIGN claiming to be somebody else's.
+    squatting = sorted(n for n in PROSE_FOREIGN if n in defined)
+    assert not squatting, "PROSE_FOREIGN claims %s is foreign, but this module defines it" % squatting

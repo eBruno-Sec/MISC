@@ -916,3 +916,17 @@ protection-level label is never read, so a plaintext-fallback run is indistingui
 one in every artefact an operator sees) and a priced patch in `main.py`/`report.py`/`ui/`. Re-measured
 here at clean HEAD and unchanged: `count 14, ok True, newly_dead [], resolved []`. Recorded as
 discharged rather than repeated.
+
+### 12.10 An apparatus mistake of this run's own, recorded because it nearly became the result
+
+The final full-suite run was started twice, 44 seconds apart, against the SAME snapshot directory —
+and between the two starts the directory was deleted and rebuilt. The first container therefore had its
+mount recreated underneath it mid-run: a torn read, self-inflicted, of exactly the kind the house rule
+about snapshots exists to prevent. Both containers were killed and the suite re-run once against a fresh
+snapshot that nothing else touches. Neither container's partial output is quoted anywhere.
+
+The rule that would have prevented it is narrower than "use a snapshot": **one snapshot, one run, and
+never rebuild a directory a container still has mounted.** `docker ps` plus
+`docker inspect -f '{{range .Mounts}}{{.Source}}{{end}}'` is how the duplicate was found, and it is worth
+running before trusting any number from a shared machine — three other lanes had containers up at the
+same time.

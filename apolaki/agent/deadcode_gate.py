@@ -54,7 +54,7 @@ Neither new hit is a caller. Both are sentences ABOUT the allowlist entry, insid
 it. This module already excludes ITSELF from the corpus for exactly this hazard ("ALLOWED_UNUSED names
 every allowlisted function, so counting those mentions would make each entry look called") -- the hazard
 simply moved one file over, into the test file that by construction names every entry it defends.
-Documenting an exemption must never retire it. `stale` is now resolved off the AST (`_ast_referenced_names`),
+Documenting an exemption must never retire it. `stale` is now resolved off the AST (`_ast_reference_sites`),
 which closes it for prose in ANY file rather than for one more excluded filename.
 
 `scan_qualified()` is the honest check: module-resolved, import-alias-aware, production-only. It reports
