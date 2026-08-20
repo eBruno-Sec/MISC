@@ -149,15 +149,39 @@ No mutant survived.
 - [x] Oracle + tests committed BEFORE any wiring.
 - [x] Local paired vulnerable/secure WS server, confirm path proven end to end.
 - [x] Wiring: dispatcher, CLAUDE_TOOLS, permission, engine_descriptor, wstg_catalog.
+      **CORRECTED 2026-08-20 (Q-050).** Every item on that list is a REGISTRATION. None of them is
+      an INVOCATION, and ticking "Wiring" for them was the claim this project has now made in three
+      different places -- a catalogue (Q-011), a descriptor (Q-020), and here, a handoff.
+      `run_ws_hijack` was reachable from nothing, in 154 missions, until `ad7c2d8`.
 - [x] Full regression.
 
 ---
 
 ## 5. PATCH FOR ANOTHER OWNER -- `agent/agent.py` (I do not own this file)
 
-The engine is dispatched from `ToolRegistry._run_client_checks`, which `agent.py` already fires on
-every HTML page (see section 7 for the proof it runs). That is a real always-on path and needs no
-agent.py change to work.
+**THIS PARAGRAPH WAS FALSE AND IS KEPT ONLY SO THE CORRECTION HAS SOMETHING TO POINT AT.**
+
+> ~~The engine is dispatched from `ToolRegistry._run_client_checks`, which `agent.py` already fires on
+> every HTML page (see section 7 for the proof it runs). That is a real always-on path and needs no
+> agent.py change to work.~~
+
+**MEASURED FALSE 2026-08-20 by the Q-050 deterministic-reach lane.** `_run_client_checks` does
+reverse-tabnabbing and `crossdomain.xml` and nothing else; `grep "self._run_ws_hijack"` over
+`tools.py` returns nothing. There was no always-on path and there never had been. `run_ws_hijack`
+had executed **zero times in 154 missions**.
+
+What made this dangerous is not that it was wrong -- it is that it was wrong in a *handoff*, which
+the next lane reads as established fact and does not re-derive. It also told that lane no change was
+needed in the one file where the change was needed. **A handoff claim is a claim, not evidence**,
+which is the same rule already recorded for a Coordinator citation after `tools.py:3296` turned out
+to be subfinder argument handling.
+
+The real wiring landed in `ad7c2d8`, and the signal this paragraph proposed was the wrong one
+anyway: Juice Shop's `index.html` is an Angular shell whose `main.js` holds 8 socket.io references
+and **zero `ws://` literals**, because a socket.io client builds the URL at runtime. Page content
+cannot see it. The planner branch keys on the long-polling negotiation the mission already
+observes -- 262 exchanges to `/socket.io/?EIO=4&transport=polling` across the corpus, on the three
+Juice Shop hosts and nowhere else.
 
 One OPTIONAL improvement I could not make, recorded so it is not lost. `agent/browser_engine.py:498`
 throws away the `runtime_ws` URL list after folding it into `has_api`:
