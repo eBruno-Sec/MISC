@@ -29,13 +29,18 @@ the deterministic scheduler must be able to store what it finds.
 """
 from __future__ import annotations
 
+import asyncio
 import inspect
+import json
 import re
 
 import pytest
 
 import agent as agentmod
+import register as registermod
+import scope as scopemod
 import tools as toolsmod
+import vault as vaultmod
 
 # Engines that legitimately produce findings the deterministic path never dispatches, or whose output
 # is stored by a different owner. Every entry NAMES ITS REASON -- an unexplained entry here is how an
@@ -48,6 +53,13 @@ _NOT_AUTO_STORED_AND_WHY = {
     # is in the set and carries them, so storing here would double-count.
     "confirm_authz_write": "forwarded by run_workflow",
     "enumerate_ids": "forwarded by run_workflow",
+    # Executed controls below prove each named BBHAgent owner appends the child's exact finding object
+    # and emits it. These exclusions prevent double storage; they are not registration-only claims.
+    "confirm_create_object_idor": "forwarded by BBHAgent._do_persona_authz",
+    "confirm_read_object_idor": "forwarded by BBHAgent._do_persona_authz",
+    "run_header_trust": "forwarded by BBHAgent._do_header_trust",
+    "run_saml": "forwarded by BBHAgent._do_saml",
+    "run_service_pack": "forwarded by BBHAgent._run_service_packs",
 }
 
 
@@ -86,24 +98,6 @@ def _deterministically_reachable() -> set:
     return names
 
 
-@pytest.mark.xfail(strict=True, reason=(
-    "MEASURED 2026-08-20, and held open deliberately rather than allowlisted away. The general rule "
-    "flags NINE engines that are reachable from the deterministic scheduler, build a findings list, "
-    "and are absent from _AUTO_STORE_TOOLS. Two of them (run_mass_assign, run_ws_hijack) are fixed "
-    "in this same commit and are no longer flagged. The other seven are UNTRIAGED:\n"
-    "    confirm_create_object_idor  x1   INTRUSIVE\n"
-    "    confirm_read_object_idor    x2   ACTIVE\n"
-    "    run_fingerprint             x1   ACTIVE\n"
-    "    run_github_recon            x1   PASSIVE\n"
-    "    run_header_trust            x2   ACTIVE\n"
-    "    run_saml                    x1   PASSIVE\n"
-    "    run_service_pack            x15  ACTIVE\n"
-    "Each needs a verdict of its own: findings genuinely forwarded by a parent (as run_workflow "
-    "forwards confirm_authz_write) belong in _NOT_AUTO_STORED_AND_WHY with the owner NAMED, and "
-    "anything else is a live false-clean. run_service_pack is the loudest at 15 append sites. "
-    "Adding all seven to either list without measuring which is which would be guessing, and an "
-    "allowlist entry with no named reason is how a gate becomes decorative. STRICT: when the seven "
-    "are triaged this XPASSes, the suite goes red, and the marker must be retired deliberately."))
 def test_every_finding_producing_reachable_engine_can_store_what_it_finds():
     """THE GENERAL GATE, and the reason this file is not just two names in a list.
 
@@ -167,3 +161,150 @@ def test_there_is_still_exactly_one_store_site():
              and not re.match(r"\s*_AUTO_STORE_TOOLS\s*=", l)]
     assert len(sites) == 1, (
         "expected exactly one guard site reading _AUTO_STORE_TOOLS, found %d: %s" % (len(sites), sites))
+
+
+def _agent(*, authenticated_scan=False):
+    sc = scopemod.ScopeEngine()
+    sc.load_manual(["https://target.tld"], [], "auto-store-control")
+    registry = toolsmod.ToolRegistry(sc, mission_id=None, lab_mode=True)
+    registry.urls = ["https://target.tld/api/items/1"]
+    agent = agentmod.BBHAgent(
+        sc, registry, asyncio.Event(), mode="active", auto_approve=True,
+        authenticated_scan=authenticated_scan, mission_id=None)
+    return agent
+
+
+async def _collect(stream):
+    return [event async for event in stream]
+
+
+def _finding(tool, confidence="candidate"):
+    return {
+        "title": "auto-store control from %s" % tool,
+        "severity": "low",
+        "target": "https://target.tld/proof/%s" % tool,
+        "confidence": confidence,
+        "evidence": "synthetic deterministic observation for %s" % tool,
+    }
+
+
+@pytest.mark.parametrize("tool", ["run_fingerprint", "run_github_recon", "run_whatweb"])
+def test_directly_dispatched_finding_producers_reach_the_store_path(tool):
+    """Registration is not storage; the production dispatcher must forward the result itself."""
+    agent = _agent()
+    calls = []
+
+    async def execute(name, _inp, _session_id):
+        calls.append(name)
+        return toolsmod.ToolResult(name, "https://target.tld", True, "ok", [_finding(name)])
+
+    agent.tools.execute = execute
+    events = asyncio.run(_collect(agent._run_tool(tool, {}, "session")))
+
+    title = _finding(tool)["title"]
+    assert calls == [tool], "%s did not execute through the production dispatcher" % tool
+    assert any(event.get("type") == "lead" and event.get("lead", {}).get("title") == title
+               for event in events), "%s executed but its finding was dropped" % tool
+    assert any(lead.get("title") == title for lead in agent.leads)
+
+
+def test_run_service_pack_findings_are_forwarded_by_run_service_packs(monkeypatch):
+    agent = _agent()
+    agent.tools.recon["target"] = "target.tld"
+    agent.tools.recon["nmap"]["open_ports"] = ["6379/tcp open redis"]
+    calls = []
+    expected = _finding("run_service_pack", confidence="confirmed")
+
+    async def no_socket(*_args, **_kwargs):
+        raise OSError("closed control port")
+
+    async def execute(name, _inp, _session_id):
+        calls.append(name)
+        findings = [expected] if name == "run_service_pack" else []
+        return toolsmod.ToolResult(name, "target.tld", True, "{}", findings)
+
+    monkeypatch.setattr(asyncio, "open_connection", no_socket)
+    agent._exec_internal = execute
+    events = asyncio.run(agent._run_service_packs("session"))
+
+    assert calls == ["run_service_pack"]
+    assert any(event.get("type") == "finding" and event.get("finding") is expected
+               for event in events)
+    assert expected in agent.findings
+
+
+def test_run_header_trust_findings_are_forwarded_by_do_header_trust():
+    agent = _agent()
+    calls = []
+    expected = _finding("run_header_trust", confidence="confirmed")
+
+    async def execute(name, _inp, _session_id):
+        calls.append(name)
+        return toolsmod.ToolResult(name, "https://target.tld", True, "{}", [expected])
+
+    agent._exec_internal = execute
+    events = asyncio.run(_collect(agent._do_header_trust("session")))
+
+    assert calls == ["run_header_trust"]
+    assert any(event.get("type") == "finding" and event.get("finding") is expected
+               for event in events)
+    assert expected in agent.findings
+
+
+def test_run_saml_findings_are_forwarded_by_do_saml():
+    agent = _agent()
+    agent.tools.urls = ["https://target.tld/saml/acs"]
+    calls = []
+    expected = _finding("run_saml")
+
+    async def execute(name, _inp, _session_id):
+        calls.append(name)
+        return toolsmod.ToolResult(name, "https://target.tld/saml/acs", True, "checked", [expected])
+
+    agent._exec_internal = execute
+    events = asyncio.run(_collect(agent._do_saml("session")))
+
+    assert calls == ["run_saml"]
+    assert any(event.get("type") == "lead" and event.get("lead") is expected
+               for event in events)
+    assert expected in agent.findings
+
+
+def test_create_and_read_idor_findings_are_forwarded_by_do_persona_authz(tmp_path, monkeypatch):
+    agent = _agent(authenticated_scan=True)
+    vaultmod._DEFAULT = vaultmod.Vault(str(tmp_path))
+    calls = []
+    create = _finding("confirm_create_object_idor", confidence="confirmed")
+    read = _finding("confirm_read_object_idor", confidence="confirmed")
+
+    async def register(_url, label="user", **_kwargs):
+        return {
+            "created": True,
+            "headers": {"Cookie": "session=" + label},
+            "identity": label + "@target.tld",
+            "account": {"username": label, "email": label + "@target.tld", "password": "control"},
+            "blocked": [],
+        }
+
+    async def execute(name, _inp, _session_id):
+        return toolsmod.ToolResult(name, "https://target.tld", True, "{}", [])
+
+    async def execute_internal(name, _inp, _session_id):
+        calls.append(name)
+        findings = {
+            "confirm_create_object_idor": [create],
+            "confirm_read_object_idor": [read],
+        }.get(name, [])
+        output = json.dumps({"auth_requests": {}}) if name == "run_authz_matrix" else "{}"
+        return toolsmod.ToolResult(name, "https://target.tld", True, output, findings)
+
+    monkeypatch.setattr(registermod, "register", register)
+    agent.tools.execute = execute
+    agent._exec_internal = execute_internal
+    events = asyncio.run(agent._do_persona_authz("session"))
+
+    assert "confirm_create_object_idor" in calls
+    assert "confirm_read_object_idor" in calls
+    forwarded = [event.get("finding") for event in events if event.get("type") == "finding"]
+    assert create in forwarded and read in forwarded
+    assert create in agent.findings and read in agent.findings

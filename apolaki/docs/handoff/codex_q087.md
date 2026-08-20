@@ -18,7 +18,7 @@ Branch: `codex/q087`
 
 ## Part 1 - Q-085 to zero
 
-Status: implementation and targeted verification complete; commit pending.
+Status: committed as `0f0d2b7bf248e0ed90a03e90390bcb8d48efa0a6`; full-suite verification pending.
 
 ### Fail before fix
 
@@ -95,10 +95,82 @@ No crash, import error, timeout, skip, or unrelated assertion was credited as a 
 
 ## Part 2 - auto-store triage
 
-Status: in progress.
+Status: implementation and targeted verification complete; commit pending.
 
-Measured candidate set at baseline: eight engines. Every candidate will receive an execution-proven
-verdict; no name will be bulk-added to the store set or forwarding allowlist.
+Measured candidate set at baseline: eight engines, not the stale seven named by the strict-xfail
+reason. The missing eighth was `run_whatweb`, newly deterministic after Q-050:
+
+```text
+confirm_create_object_idor  appends=1   INTRUSIVE
+confirm_read_object_idor    appends=2   ACTIVE
+run_fingerprint             appends=1   ACTIVE
+run_github_recon            appends=1   PASSIVE
+run_header_trust            appends=2   ACTIVE
+run_saml                    appends=1   PASSIVE
+run_service_pack            appends=15  ACTIVE
+run_whatweb                  appends=1   ACTIVE
+```
+
+### Fail before fix
+
+Execution controls were added before either set changed. The five parent-forwarding verdicts passed;
+the three direct dispatches failed on the exact false-clean:
+
+```text
+x...FFF.... [100%]
+run_fingerprint executed but its finding was dropped
+run_github_recon executed but its finding was dropped
+run_whatweb executed but its finding was dropped
+3 failed, 7 passed, 1 xfailed in 3.75s
+```
+
+### Per-engine verdicts
+
+No engine was bulk-added. Each verdict was observed through the production owner:
+
+| engine | verdict | execution-proven owner |
+|---|---|---|
+| `confirm_create_object_idor` | parent-forwarded | `BBHAgent._do_persona_authz` |
+| `confirm_read_object_idor` | parent-forwarded | `BBHAgent._do_persona_authz` |
+| `run_header_trust` | parent-forwarded | `BBHAgent._do_header_trust` |
+| `run_saml` | parent-forwarded | `BBHAgent._do_saml` |
+| `run_service_pack` | parent-forwarded | `BBHAgent._run_service_packs` |
+| `run_fingerprint` | live false-clean; auto-store | direct `_run_tool` dispatch |
+| `run_github_recon` | live false-clean; auto-store | direct `_run_tool` dispatch |
+| `run_whatweb` | live false-clean; auto-store | direct `_run_tool` dispatch |
+
+The parent controls execute the real owner method, inject a distinct child finding, and require that
+exact object in both the emitted event and `agent.findings`. The three direct controls execute
+`_run_tool` and require the candidate to reach both a `lead` event and `agent.leads`.
+
+The stale strict-xfail reason was corrected while measuring all eight, then superseded by retiring
+the marker when the gate passed. Targeted result:
+
+```text
+11 passed in 3.80s
+```
+
+Combined storage/dispatcher and owner-path controls:
+
+```text
+368 passed, 3 warnings in 120.52s (0:02:00)
+```
+
+### Semantic mutations
+
+Both mutants failed the exact intended assertion, then were reverted:
+
+```text
+M2 remove run_whatweb from _AUTO_STORE_TOOLS
+   FAIL test_directly_dispatched_finding_producers_reach_the_store_path[run_whatweb]
+   observed: run_whatweb executed but its finding was dropped
+
+M3 delete the run_service_pack parent's finding event
+   FAIL test_run_service_pack_findings_are_forwarded_by_run_service_packs
+   observed: the exact child finding was absent from the parent's emitted events
+```
+
+No crash, import error, timeout, skip, or unrelated assertion was credited as a killed mutant.
 
 ## Final verification
 
