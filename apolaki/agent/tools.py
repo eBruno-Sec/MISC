@@ -245,7 +245,20 @@ TOOL_PERMISSIONS = {
     # natively -- run_content_discovery + run_ffuf, planner-dispatched, both carrying a soft-404
     # baseline the adapters had no equivalent of. The last argument for feroxbuster was recursion,
     # and the adapter passed --no-recursion.
-    "run_nosqlmap": PermissionLevel.ACTIVE,     # optional NoSQLMap adapter
+    #
+    # Q-050: run_nosqlmap REMOVED 2026-08-20, the same adapter shape one file-section later.
+    # MEASURED: the `nosqlmap` binary is absent from the shipped image (`command -v nosqlmap` ->
+    # MISSING; no reference in agent/Dockerfile or docker-compose.yml), so _cmd could only ever
+    # return `__MISSING__`. It was named by no scheduler, and over 154 stored missions / 29,945
+    # tool_call rows it dispatched 0 times while the native pair it "supplemented" dispatched 1,046
+    # (run_nosqli 342 + run_form_nosqli 704). Its oracle was a bare
+    # re.search(r"injectable|vulnerable|payload") over stdout emitting confidence "lead" -- no
+    # baseline, no control request, no negative control; the native engines carry a baseline, a
+    # non-matching-value control AND a missing-param control. The one capability real NoSQLMap has
+    # that Apolaki lacks is unauthenticated Mongo/Couch *port* enumeration, and the adapter's own
+    # `nosqlmap --url <url>` invocation never reached it -- the feroxbuster --no-recursion mistake
+    # repeated exactly. Deleting is the fix; wiring it would have bought a guaranteed-failing
+    # dispatch on every parameterized URL.
     "run_dir_harvest": PermissionLevel.ACTIVE,  # browsable-dir file harvest + null-byte bypass
     # ── LLM investigative action primitives ──
     "http_read": PermissionLevel.ACTIVE,           # scope-guarded SAFE-method request (read atom)
@@ -980,9 +993,6 @@ CLAUDE_TOOLS = [
              "silently overridden.")},
          "wordlist": {"type": "string", "description": "catalog id or absolute path; defaults to the common-passwords list"}},
          "required": ["hash"]}},
-    {"name": "run_nosqlmap",
-     "description": "ACTIVE: NoSQL-injection testing via NoSQLMap (optional; skips gracefully if unavailable). Native run_nosqli remains the default.",
-     "input_schema": {"type": "object", "properties": {"url": {"type": "string"}}, "required": ["url"]}},
     {"name": "run_dir_harvest",
      "description": ("ACTIVE: Find browsable file directories (ftp/uploads/backup/…) and harvest sensitive files "
                      "(confidential docs, source/DB backups, keys). On a blocked backup file, attempts a poison "
@@ -1782,22 +1792,12 @@ class ToolRegistry:
     # engines it "supplemented" have one. So the adapters were not a stronger option that happened to
     # be uninstalled -- they were a weaker one.
 
-    async def _run_nosqlmap(self, inp: dict) -> ToolResult:
-        """Optional NoSQLMap adapter; native run_nosqli remains the default engine."""
-        url = (inp.get("url") or "").strip()
-        if not self.scope.validate(url)[0]:
-            return ToolResult("nosqlmap", url, False, "Off-scope", [])
-        out, err = await self._cmd(["nosqlmap", "--url", url], timeout=300)
-        if err.startswith("__MISSING__"):
-            return ToolResult("nosqlmap", url, False, "", [], "nosqlmap not installed (native run_nosqli remains available)")
-        hit = bool(re.search(r"injectable|vulnerable|payload", out or "", re.I))
-        leads = []
-        if hit:
-            leads.append({"title": "NoSQL injection signal (NoSQLMap)", "severity": "medium",
-                          "family": "nosqli", "confidence": "lead", "target": url, "tags": ["nosqli", "nosqlmap"],
-                          "description": "NoSQLMap reported a NoSQL-injection signal (verify with native run_nosqli).",
-                          "evidence": (out or "")[:800]})
-        return ToolResult("nosqlmap", url, True, "nosqlmap completed", leads)
+    # `_run_nosqlmap` REMOVED with its spec and permission entry (Q-050) -- see the note at the
+    # TOOL_PERMISSIONS site. One property is worth carrying forward if a NoSQL adapter is ever
+    # reconsidered: its oracle was `re.search(r"injectable|vulnerable|payload", stdout)`, and `_cmd`
+    # returns (stdout, stderr) while discarding the exit code, so a binary that printed a usage error
+    # to stderr and exited non-zero produced `success=True, "nosqlmap completed", 0 findings` -- a
+    # silent-failure swallow that reports clean on a tool that never ran.
 
     async def _run_dir_harvest(self, inp: dict) -> ToolResult:
         """ACTIVE: find browsable file directories (ftp/uploads/backup/…) and harvest

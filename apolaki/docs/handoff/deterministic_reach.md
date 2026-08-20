@@ -173,3 +173,108 @@ to be defaulted to JSON.
 `agent/tests/test_deterministic_reach.py` — 10 passed.
 
 ---
+## 2. Slice 2 — `run_nosqlmap`: asked the question first, and the answer was DELETE
+
+The instruction was to establish whether this is a distinct capability or a duplicate of the
+already-dispatched `run_nosqli`, comparing what each **does**, not what each **claims**. It is a
+duplicate, and a strictly weaker one. Five independent measurements, any one of which is
+disqualifying on its own.
+
+### 2.1 The binary does not exist in the shipped image
+
+MEASURED, today, in the current image (not inherited from `islands.md`):
+
+```
+$ docker run --rm apolaki-agent sh -lc 'for b in nosqlmap sqlmap hashcat john ffuf nmap; do printf "%-12s " $b; command -v $b || echo MISSING; done'
+nosqlmap     MISSING
+sqlmap       /usr/bin/sqlmap
+hashcat      MISSING
+john         MISSING
+ffuf         /usr/local/bin/ffuf
+nmap         /usr/bin/nmap
+```
+
+`sqlmap`, `ffuf` and `nmap` are the positive control: the command finds binaries that are present,
+so `MISSING` is a real absence. `agent/Dockerfile` and `docker-compose.yml` contain no reference to
+`nosqlmap` (grep: zero hits). `_cmd` (`tools.py:1525`) short-circuits on `shutil.which`, so every
+possible invocation returned `("", "__MISSING__nosqlmap")`. **Wiring it into the planner would have
+bought one guaranteed-failing dispatch per parameterized URL and zero coverage.**
+
+### 2.2 It has never run, and the capability it duplicates runs constantly
+
+MEASURED against the named volume (`-v apolaki_bbh_data:/data`), reproducing the corpus exactly —
+**154 missions, 1,773 findings, 66,395 log rows, 29,945 `tool_call` rows, 0 unparseable, 72 distinct
+tools dispatched**:
+
+```
+run_nosqlmap             0
+run_nosqli             342
+run_form_nosqli        704
+run_mass_assign          0
+run_hash_id              0
+run_hash_crack           0
+run_ws_hijack            0
+run_external_surface     0
+run_sqli              1214      <- positive control
+run_xss               1376      <- positive control
+```
+
+**1,046 native NoSQL dispatches is the positive control for this zero specifically.** The apparatus
+counts NoSQL engines fine; `run_nosqlmap`'s 0 is absence, not a broken query.
+
+### 2.3 The oracle comparison — the part descriptions would have hidden (Q-056)
+
+| | `_run_nosqlmap` (deleted) | `_run_nosqli` + `_run_form_nosqli` (kept) |
+|---|---|---|
+| truth condition | `re.search(r"injectable\|vulnerable\|payload", stdout, re.I)` | operator payload broadens the match back to baseline shape, or a driver-error signature appears |
+| baseline request | none | `base_r` fetched before any probe |
+| control requests | none | non-matching-value control (`ctl_url`) **and** a missing-param control (`ns.missing_param_url`), both fed to `ns.analyze_boolean` |
+| confidence emitted | `"lead"` | confirmed finding |
+| body/auth coverage | none (`--url` only) | `_run_form_nosqli`: `{"$ne": null}` login bypass, the class query-string probes cannot reach |
+
+The description claimed it "skips gracefully" and that "native `run_nosqli` remains the default".
+Both are true and neither is the relevant fact: it skips *always*, and it is not a fallback for the
+default — it is a weaker restatement of it.
+
+### 2.4 A silent-failure swallow, recorded for the next adapter
+
+`_cmd` returns `(stdout, stderr)` and **discards `proc.returncode`**. So a present-but-failing binary
+(usage error to stderr, non-zero exit, empty stdout) produced
+`ToolResult("nosqlmap", url, True, "nosqlmap completed", [])` — success, clean, zero findings. The
+engine could not distinguish "no NoSQL injection here" from "the tool never ran". Kept as a comment
+at the deletion site.
+
+### 2.5 The one real differentiator was disabled by Apolaki's own invocation
+
+Real NoSQLMap's non-duplicate capability is unauthenticated Mongo/CouchDB **port** enumeration.
+The adapter shelled out to `nosqlmap --url <url>` — the web-injection path only. This is the
+feroxbuster `--no-recursion` finding repeating exactly one file-section later (`tools.py:246`).
+
+### 2.6 The change
+
+* `agent/tools.py` — `TOOL_PERMISSIONS["run_nosqlmap"]`, its `CLAUDE_TOOLS` spec and
+  `_run_nosqlmap` all removed; a note at each site carrying the argument, in the Q-057 style.
+* `agent/tests/test_deterministic_reach.py` — `test_run_nosqlmap_is_removed_rather_than_left_unreachable`
+  (absence in specs, permissions and methods, plus `shutil.which` still None) and
+  **`test_the_nosql_capability_is_still_deterministically_dispatched`**, which is the half that
+  makes the deletion safe: `planner.next_batch` driven to exhaustion on a parameterized-URL +
+  login-form target emits `run_nosqli` (on the `?id=1` / `?q=a` endpoints specifically) and
+  `run_form_nosqli`. An absence assertion alone would be the "name in a dict" defect inverted.
+* `agent/tests/test_bbh.py` — **NOT one of this lane's named files.** Touched for two lines only,
+  because `test_new_optional_binaries_and_permissions` asserted `run_nosqlmap in specs` and would
+  otherwise have gone red. `run_nosqlmap` moved from the present-tuple into the existing Q-057
+  absent-tuple, which is exactly what Q-057 did to that same function.
+
+MEASURED: `pytest tests/test_deterministic_reach.py tests/test_bbh.py::test_new_optional_binaries_and_permissions` → **13 passed** (10 from slice 1, 2 new, 1 existing).
+
+### 2.7 Left stale on purpose, for owners who are not this lane
+
+| file | line | what it still says |
+|---|---|---|
+| `README.md` | 151, 156 | lists `run_nosqlmap` in the engine table and in the auto-detected-binary list. **Already stale before this change** — it still lists feroxbuster/dirsearch/gobuster, removed at Q-057, so nothing gates it |
+| `docs/handoff/arsenal.md` | 125 | inventory listing |
+| `scripts/whole_product_rerun.py` | 102 | `PROBE_TOOLS` set-membership; a stale name there matches nothing and is harmless |
+
+Net: **111 registered engines → 110**, and one of the five LLM-only detection engines is resolved by
+subtraction.
+

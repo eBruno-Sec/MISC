@@ -3903,14 +3903,16 @@ def test_new_optional_binaries_and_permissions():
     assert tools.TOOL_PERMISSIONS["run_hash_crack"] == PermissionLevel.INTRUSIVE
     # every new tool has a spec and a transport method
     specs = {s["name"] for s in tools.CLAUDE_TOOLS}
-    for t in ("run_dork_gen", "run_hash_id", "run_sourcemap", "run_metadata", "run_hash_crack",
-              "run_nosqlmap"):
+    for t in ("run_dork_gen", "run_hash_id", "run_sourcemap", "run_metadata", "run_hash_crack"):
         assert t in specs and hasattr(tools.ToolRegistry, "_" + t)
     # Q-057: ferox/dirsearch/gobuster are GONE, and this asserts their absence rather than dropping
     # them silently. All three binaries were absent from the image while three tool specs advertised
     # content discovery to the model; the capability is wired natively with a soft-404 baseline the
     # adapters lacked. Asserting absence is what stops one being re-added without the argument.
-    for gone in ("run_ferox", "run_dirsearch", "run_gobuster"):
+    # Q-050: run_nosqlmap joins them for the same reason one file-section later -- binary absent from
+    # the image, 0 dispatches in 154 missions, a bare stdout regex where the native run_nosqli /
+    # run_form_nosqli pair (1,046 dispatches) carries a baseline and two controls.
+    for gone in ("run_ferox", "run_dirsearch", "run_gobuster", "run_nosqlmap"):
         assert gone not in specs, "%s is advertised again -- it has no binary and no oracle" % gone
         assert gone not in tools.TOOL_PERMISSIONS, gone
         assert not hasattr(tools.ToolRegistry, "_" + gone), gone

@@ -1,4 +1,12 @@
-"""Q-050 -- `run_mass_assign` could never be selected by a deterministic mission.
+"""Q-050 -- the detection engines a deterministic mission could never select.
+
+Slice 1 (`run_mass_assign`) gave one of them a deterministic trigger. Slice 2 (`run_nosqlmap`)
+took the opposite verdict on the evidence and DELETED one, because one fewer engine is better
+than one more unreachable one. Both halves live here; the header below is slice 1's.
+
+---
+
+Q-050 -- `run_mass_assign` could never be selected by a deterministic mission.
 
 MEASURED over 154 missions / 29,945 `tool_call` rows: 111 registered tools, 72 ever dispatched,
 40 never. Of the 40, ten are named NOWHERE in `agent.py` or `planner.py`, and six of those ten are
@@ -289,3 +297,57 @@ def test_an_empty_content_type_is_not_read_as_json():
     assert not planner._is_json_ct("application/x-www-form-urlencoded")
     assert not planner._is_json_ct("multipart/form-data")
     assert not planner._is_json_ct("text/html")
+
+
+# ── slice 2: `run_nosqlmap` DELETED, and the capability proved to survive it ──────────
+#
+# The question asked before any wiring was whether it was a distinct capability or a duplicate of
+# the already-dispatched `run_nosqli`. It was a duplicate, and a strictly weaker one:
+#
+#   * the `nosqlmap` binary is absent from the shipped image (MEASURED: `command -v nosqlmap` ->
+#     MISSING; no reference in agent/Dockerfile or docker-compose.yml), so `_cmd` could only ever
+#     return `__MISSING__`. Wiring it buys a guaranteed-failing dispatch per parameterized URL.
+#   * over 154 missions / 29,945 tool_call rows it dispatched 0 times, while the native pair
+#     dispatched 1,046 (`run_nosqli` 342, `run_form_nosqli` 704). The 1,046 is the positive control:
+#     the apparatus counts NoSQL engines fine, so the 0 is a real absence.
+#   * its oracle was `re.search(r"injectable|vulnerable|payload", stdout)` emitting confidence
+#     "lead" -- no baseline, no control request. `_run_nosqli` baselines, then compares an operator
+#     probe against BOTH a non-matching-value control and a missing-param control before confirming.
+#   * real NoSQLMap's one non-duplicate capability is unauthenticated Mongo/Couch port enumeration,
+#     and `nosqlmap --url <url>` never reaches it -- the feroxbuster `--no-recursion` mistake again.
+
+
+PARAM_URLS = [BASE + "/", BASE + "/books/v1?id=1", BASE + "/users/v1?q=a"]
+
+LOGIN_FORMS = [{"action": BASE + "/login", "method": "POST",
+                "fields": ["username", "password"],
+                "inputs": [{"name": "username", "type": "text"},
+                           {"name": "password", "type": "password"}]}]
+
+
+def test_run_nosqlmap_is_removed_rather_than_left_unreachable():
+    """Absence asserted rather than deleted silently -- the same guard Q-057 left on
+    ferox/dirsearch/gobuster. Re-adding a NoSQL adapter now costs an argument."""
+    import tools
+    assert "run_nosqlmap" not in {s["name"] for s in tools.CLAUDE_TOOLS}
+    assert "run_nosqlmap" not in tools.TOOL_PERMISSIONS
+    assert not hasattr(tools.ToolRegistry, "_run_nosqlmap")
+    # ... and the binary it shelled out to is still not in the image, which is why it went.
+    import shutil
+    assert shutil.which("nosqlmap") is None, "a binary appeared -- re-open the argument, do not re-add blind"
+
+
+def test_the_nosql_capability_is_still_deterministically_dispatched():
+    """THE HALF THAT MAKES THE DELETION SAFE, and an absence assertion alone would be the same
+    'name in a dict' defect inverted. Driven to exhaustion on a parameterized-URL + login-form
+    target: the deletion removed an adapter, not a capability."""
+    st = _state(_Tools(spec=None, forms=LOGIN_FORMS, urls=PARAM_URLS))
+    steps = _drive(st)
+    tools_emitted = {s["tool"] for s in steps}
+    assert "run_nosqli" in tools_emitted, sorted(tools_emitted)
+    assert "run_form_nosqli" in tools_emitted, sorted(tools_emitted)
+    # the query-string engine reached the parameterized endpoints specifically, not just the root
+    nq = sorted(s["input"]["url"] for s in steps if s["tool"] == "run_nosqli")
+    assert any("id=1" in u or "q=a" in u for u in nq), nq
+    # and nothing re-emits the deleted name from any code path
+    assert "run_nosqlmap" not in tools_emitted, sorted(tools_emitted)
