@@ -1195,7 +1195,6 @@ def _transitive_callerless(work, rounds=8):
 #   bie._css_quote/locator_chain/
 #      locator_quality                <- bie.observe                    (QUALIFIED_BASELINE_SET, 3.5)
 #   saml_tool.strip_signatures        <- saml_tool.finding / confirm_bypass
-#   ics_fingerprint.is_write_frame    <- the ics_fingerprint cluster    (3.5)
 #   cvss4.is_valid, mission_export.validate   <- a round-0 dead function in their own module
 #   web_security._is_host_rule, _rule_matches_url, _host_matches_rule,
 #      _looks_like_host_identifier, _path_matches_rule, _is_path_rule
@@ -1209,9 +1208,15 @@ def _transitive_callerless(work, rounds=8):
 # runs the pipeline is a test. Scope IS still enforced -- `ScopeEngine.validate()` is called at ~20
 # sites in agent.py -- by the coarser host check, not by this one. That distinction is the difference
 # between a finding and a false alarm and is stated rather than left to the reader.
+#
+# `ics_fingerprint.is_write_frame` was the 15th and left this set the way the `gone` assertion below
+# demands be confirmed: DELETED, not wired. Q-078 run 6 removed `agent/ics_fingerprint.py` whole -- the
+# cluster it hung off was 8 of 8 dead, and this entry was the 8th, laundered by `is_read_only` in the
+# same file. It is recorded here rather than dropped silently because "the fixed point shrank" is a
+# claim, and the reason it shrank is the thing a reader needs.
 TRANSITIVE_ONLY = frozenset({
     "bench_all.aggregate", "bie._css_quote", "bie.locator_chain", "bie.locator_quality",
-    "cvss4.is_valid", "ics_fingerprint.is_write_frame", "mission_export.validate",
+    "cvss4.is_valid", "mission_export.validate",
     "saml_tool.strip_signatures", "security.is_valid_target", "web_security._host_matches_rule",
     "web_security._is_host_rule", "web_security._is_path_rule",
     "web_security._looks_like_host_identifier", "web_security._path_matches_rule",

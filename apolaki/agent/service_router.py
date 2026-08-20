@@ -35,10 +35,25 @@ _PORT_SVC = {
 # in the graph as a high-severity exposure. Apolaki NEVER writes to them.
 #
 # CORRECTED 2026-08-20 (Q-078). This comment used to name `ics_fingerprint.is_write_frame` as "the safety
-# self-check that proves every industrial frame it builds is read-only". That function is NEVER CALLED.
+# self-check that proves every industrial frame it builds is read-only". That function was NEVER CALLED,
+# and `agent/ics_fingerprint.py` has since been DELETED (Q-078 run 6) as an 8-of-8 dead duplicate.
 # MEASURED by AST across every production module, resolving both `import x as y` and `from x import f`:
-# `ics_fingerprint` has **0 call sites** and all 8 of its public functions are unreachable. The positive
-# control in the same pass found 153 call sites for `db`, so the instrument was looking.
+# it had **0 call sites** and all 8 of its public functions were unreachable. The positive control in the
+# same pass found 153 call sites for `db`, so the instrument was looking.
+#
+# AND THE DEAD COPY WAS FAIL-OPEN, which is why deleting it beat leaving it available. MEASURED by
+# executing both implementations side by side on the same frames:
+#
+#   frame                                dead ics_fingerprint   live ics_dnp3_s7
+#   unknown proto, real write payload    False  (= allow)       True  (= refuse)
+#   modbus frame truncated below 8B      False  (= allow)       True  (= refuse)
+#   DNP3 reset-link-states (a WRITE)     False  (= allow)       True  (= refuse)
+#
+# It answered "not a write" for anything it did not recognise, including a genuine DNP3 control frame,
+# because it only knew Modbus and EtherNet/IP function codes and fell through to `return False`. The live
+# rail is strict by default: unrecognised means refuse. A dead safety check that fails open, sitting
+# under a comment that named it as the enforcing control, is worse than no safety check at all -- so the
+# whole module is gone rather than kept "available for a future caller".
 #
 # The protection is real; it just lives elsewhere, and in TWO different correct forms:
 #
@@ -55,14 +70,31 @@ _PORT_SVC = {
 # conclude the rail was live. A write to real OT can move a valve or trip a breaker. The citation has to be
 # to the thing that executes.
 #
-# What this module actually uses from `ics_fingerprint` is ONE DICT, `PROTO_PORTS`, on the next line but one.
-import ics_fingerprint as _ics
+# The ONE thing this module ever used from `ics_fingerprint` was a single dict, `PROTO_PORTS`, and the
+# import existed for nothing else. It is rehomed here VERBATIM so the deletion changes no behaviour;
+# `is_ics_ot` below is its only consumer, in this file, so this is now its owner.
+#
+# RECORDED, NOT FIXED HERE (Q-078 run 6, own follow-up commit): these values disagree with `_PORT_SVC`
+# above on one protocol. MEASURED by executing the router --
+#
+#   port 44818  route() -> "enip"        is_ics_ot("enip") = False
+#               PROTO_PORTS[44818] = "ethernetip"   is_ics_ot("ethernetip") = True
+#
+# -- so the ICS safety predicate answers False for the one name the router actually produces for
+# EtherNet/IP. Two vocabularies for one protocol, one of them from a module nothing called. It has no
+# live impact today because `is_ics_ot` itself has zero callers (deadcode_gate.ALLOWED_UNUSED), and the
+# live answer to "is this OT and must it be read-only" is `ot_context.PROTOCOL_SAFETY`, which
+# tests/test_ics_real_stack.py::test_ot_safety_registry_covers_every_protocol_the_router_routes asserts
+# for all four routed protocols. Kept byte-identical in this commit so the deletion is provably
+# behaviour-free; corrected in the next one by deriving the names from `_PORT_SVC` instead.
+_ICS_PROTO_PORTS = {502: "modbus", 102: "s7comm", 44818: "ethernetip", 20000: "dnp3", 47808: "bacnet"}
 
 
 def is_ics_ot(service: str) -> bool:
     """True when a discovered service is an industrial (ICS/OT) protocol — a reachable one is an exposure and
-    must ONLY ever be probed read-only (ics_fingerprint enforces no write frames)."""
-    return service in _ics.PROTO_PORTS.values()
+    must ONLY ever be probed read-only. The read-only guarantee is enforced by the engines that actually
+    touch the wire (modbus_audit_tool by construction, ics_dnp3_s7 by rail), not by this predicate."""
+    return service in _ICS_PROTO_PORTS.values()
 
 # banner signature -> service type (a banner OVERRIDES the port guess when present)
 _BANNER_SVC = [

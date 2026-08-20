@@ -628,9 +628,16 @@ def _ratchet_message(kind, count, baseline, newly, resolved, recorded, unaccount
                "available." % (head, recorded))
     if resolved:
         # Drift, shown where someone is already reading. Not a failure: entries leave this set by being
-        # WIRED, which is the direction the ratchet exists to encourage.
-        msg += ("\n(%d recorded entr%s since been wired and no longer dead: %s)"
+        # WIRED or DELETED, both directions the ratchet exists to encourage.
+        #
+        # "or deleted" is not padding. It read "have since been wired" until Q-078 run 6 removed
+        # `ics_fingerprint.py`, at which point six recorded entries landed here and the sentence asserted
+        # that six functions that no longer exist had been wired into production. A drift report that
+        # states the wrong reason for the drift is the same prose-versus-fact defect this file exists to
+        # catch, so the sentence names both ways out and leaves the reader to check which.
+        msg += ("\n(%d recorded entr%s since been wired or deleted and %s no longer dead: %s)"
                 % (len(resolved), "y has" if len(resolved) == 1 else "ies have",
+                   "is" if len(resolved) == 1 else "are",
                    ", ".join(resolved[:8]) + (", ..." if len(resolved) > 8 else "")))
     if unaccounted:
         # The one class a reader must not mistake for backlog. `newly_dead` holds everything outside the

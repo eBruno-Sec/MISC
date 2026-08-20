@@ -253,7 +253,15 @@ def test_repository_wide_rate_policy_inventory_is_non_vacuous_and_ratcheted():
     root = Path(tools.__file__).resolve().parent
     # Measured after the Juice Shop slice: 179 top-level production modules are in scope. Raw-call
     # count is deliberately NOT a floor: removing a bypass must be allowed to reduce it.
-    assert len(_production_python_paths(root)) >= 179, \
+    #
+    # 179 -> 178, Q-078: `ics_fingerprint.py` was DELETED as an 8-of-8 dead duplicate whose copy of
+    # the ICS read-only safety check was fail-open (it answered "not a write" for any protocol it
+    # did not recognise, including a real DNP3 control frame). This assertion caught the drop, which
+    # is exactly what a non-vacuity floor is for -- a census that silently loads less is how a guard
+    # goes quiet. Lowering it is therefore a DELIBERATE, REVIEWED edit naming the module and the
+    # commit, not a nudge: the floor's value is that moving it requires saying why. It must never be
+    # lowered to accommodate a census that broke, only one that legitimately shrank.
+    assert len(_production_python_paths(root)) >= 178, \
         "the repository-wide production-module census loaded too little"
     assert _raw_transport_inventory(), "the transport inventory is vacuous"
     assert len(bypasses) == 0, "ungated target-call sites remain: %s" % bypasses
