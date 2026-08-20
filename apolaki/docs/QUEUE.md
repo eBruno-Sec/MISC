@@ -1110,7 +1110,23 @@ DoD: a finding whose `analysis` is `static-call-site` renders its file and line,
 replay. **Negative control:** a genuine DAST finding must KEEP its curl - a fix that strips
 reproduction from everything trades a false claim for a useless report.
 
-### Q-086 · A guard named "remain inside" proves PRESENCE, never ABSENCE elsewhere · **MEDIUM** · `ready`
+### Q-086 · A guard named "remain inside" proves PRESENCE, never ABSENCE elsewhere · **CLOSED** `e9e253a`
+
+**Fixed by the Codex lane that found it.** `test_zap_target_drivers_remain_inside_one_guarded_function()` is now `test_zap_target_drivers_are_absent_outside_the_guarded_run_zap_subtree()` and does a repository-wide AST absence check instead of slicing one function body. **The name now states what the assertion proves**, which was the whole ticket.
+
+**Coordinator's independent negative control, because production was already clean on that call shape and a passing guard proves nothing on a clean tree.** I planted a duplicate ungated driver in `api_inventory.py` -- a module the old guard could never see:
+
+    def _coordinator_zap_plant(zap, target):
+        zap.ascan(target)
+        return zap.spider(target)
+
+    FAILED test_zap_invocation.py::test_zap_target_drivers_are_absent_outside_the_guarded_run_zap_subtree
+
+Caught. The same lane also took the third audit item: `test_engine_reachability.py` proved *possible invocability* while its name claimed deterministic scheduling, and it now says what it proves.
+
+**Two of four one-file guards are now honest, one was already aligned** (`test_session_identity.py`, whose narrow scope genuinely matches its mechanism). That closes the audit Q-085's third DoD item asked for.
+
+### Q-085 · A guard that parses ONE file made that file's boundary the boundary of compliance · **HIGH** · **PARTIAL** `8a59a96` `e9e253a` · breach closed, ratchet 25/13 -> 8/8
 
 **Found by the Codex lane while auditing Q-085's siblings.** `test_zap_target_drivers_remain_inside_one_guarded_function()` slices only the body of `tools.ToolRegistry._run_zap` and asserts that `zap.access_url`, `zap.spider`, `zap.ajax_start` and `zap.ascan` each occur there. **It never scans outside that body.** Its name claims those drivers "remain inside" the guarded function; its assertion proves they are present in it. **A duplicate unguarded ZAP target driver in another function or another module leaves it green.**
 
@@ -1140,7 +1156,38 @@ with a ratchet asserting `<= 21` and `<= 12`, and a deliberate note that the raw
     assert 22 <= 21
     'api_inventory.py:115:_coordinator_drift_probe:httpx.Client'
 
-**Still open**, and it is the reason this is PARTIAL not CLOSED: 21 ungated target calls across 12 modules, `bie.py` the sharpest at 6 `page.goto` sites, plus `main.py` at 2 `urllib.request.urlopen`. Each needs an owner.
+#### Second Codex lane, `e9e253a`: ratchet driven 21/12 -> **8/8**
+
+Thirteen sites gated, via new wrappers in `browser_engine.py` (`rate_limited_urlopen`,
+`_guard_playwright_page_sync`, `rate_limited_goto_sync`) rather than site-by-site patches. **The
+delta accounts exactly**: `bie.py` 6 `page.goto`, `main.py` 3, `bench_all.py` 2, `owasp_bench.py` 2
+= 13, and 21 - 13 = 8.
+
+**Coordinator's independent re-measurement, not the lane's report.** Same mutation as last cycle --
+an ungated call planted in an EXISTING production module, which is the realistic drift case rather
+than the lane's own brand-new-nested-package control:
+
+    assert len(bypasses) <= 8
+    'api_inventory.py:115:_coordinator_drift_probe:httpx.Client'
+
+Caught, at the tightened level. **The strict xfail is still open and was not weakened.**
+
+**THE REMAINING EIGHT, ALL IN FILES THAT WERE OUTSIDE THE LEASE, one per module:**
+
+    agent.py:2883:_probe_for_creds        httpx.AsyncClient
+    auth.py:167:login                     httpx.AsyncClient
+    authz.py:165:run_matrix               httpx.Client
+    bwapp_solvers.py:38:prove             httpx.Client
+    codeintel.py:150:harvest              httpx.Client
+    mutillidae_solvers.py:41:prove        httpx.Client
+    register.py:196:register              httpx.AsyncClient
+    replay.py:28:client                   httpx.AsyncClient
+
+Two are lab solvers of exactly the `juiceshop_solvers.py` shape already fixed, and the fix there was
+structural (route the client construction through `rate_limited_sync_client`) rather than per-call,
+so `bwapp_solvers` and `mutillidae_solvers` should follow the same pattern. `auth.py`, `register.py`
+and `authz.py` send credentialed traffic at the target and are the ones a rate-limited host is most
+likely to punish. **Each needs an owner; none is blocked on anything.**
 
 **The bare-429 default stays at `0.0`, and the lane was right to stop.** My ruling was that the "an invented cooldown is indistinguishable from one the target asked for" objection is solvable by recording the wait's SOURCE. It is -- inside `TargetRatePolicy.observe()` -- but the durable typed row is built by `tools.py::_ledger_outcome()` against a closed schema `{tool, seconds, waits, truncated, origins}`, and `tools.py` was off-limits to that lane. Adding provenance to the prose notes alone **would produce two ledgers with different epistemics**, which is precisely the Q-084 defect. Encoding the source into `origins` or `truncated` corrupts an existing field rather than adding one. The exact atomic patch is documented in `docs/handoff/codex_q085.md`; **it must land as one change across `browser_engine.py` and `tools.py`, with `test_backoff_bounds.py::test_a_response_without_retry_after_is_never_recorded_as_a_wait` updated deliberately** to assert the new behaviour including that a NON-429 still records no wait. Never deleted.
 
