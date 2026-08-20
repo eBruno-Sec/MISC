@@ -148,10 +148,32 @@ EXCLUDED = {
 }
 
 
-def coverage(techniques: list = None) -> dict:
-    """Honest WSTG coverage: per category and overall counts of full / partial / none, plus the id lists.
+def coverage() -> dict:
+    """What Apolaki's CATALOG claims, per category and overall: full / partial / none, plus the id lists.
     `full`/`partial` come from the hand-verified maps above; anything else is `none` (excluded ones carry a
-    reason). Passing the live technique registry only enriches the `by` label; the maps are the source of truth."""
+    reason).
+
+    **This is a statement about the TOOL, not about any mission.** It returns the same numbers for a
+    full-mode scan of Juice Shop, a passive scan of one static page, and a mission in which zero engines
+    ran. Any caller rendering it must say so; `report.py` does.
+
+    Q-084 removed a `techniques: list = None` parameter from this signature. It was never referenced in
+    the body, so `coverage([])` -- an empty technique list, meaning nothing ran -- returned the same
+    60 full / 25 partial as `coverage()`. Its docstring claimed the parameter "only enriches the `by`
+    label"; it did not do that either. A parameter that cannot change the output is an island inside a
+    signature, and this one did real damage: it made `report.py:343` calling `coverage()` bare look like
+    an oversight a caller could fix, when in fact no argument would have helped. MEASURED unused at all
+    three call sites (`report.py`, two in `tests/test_wstg_catalog.py`) plus the `/coverage/wstg`
+    endpoint, none of which passed it.
+
+    **An evidence-driven WSTG tally is NOT derivable from this module as written**, which is why Q-084
+    corrected the sentence instead of the number. `FULL` and `PARTIAL` map an id to PROSE --
+    `'fetch_openapi + recon'`, `'authz matrix + run_bfla'`, `'business-logic graph reasons about it; no
+    generic confirm'`. Some name engines, some name concepts, some name no engine at all, and pulling
+    engine names out of that with a regex is the "no regex on records" mistake this project has already
+    paid for. Making this mission-sensitive means restructuring the maps to carry machine-readable engine
+    references first. Until someone does that, do not add the parameter back.
+    """
     cats = {}
     tally = {"full": 0, "partial": 0, "none": 0, "excluded": 0}
     for wid, title in CATALOG.items():

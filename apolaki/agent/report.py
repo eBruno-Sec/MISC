@@ -2498,9 +2498,20 @@ def generate_html_report(program: str, findings: list, scope: dict,
     _cov_cells = "".join(f"<div class='cov'><span style='color:{col}'>{_pp.get(k, 0)}</span><label>{lbl}</label></div>"
                          for k, lbl, col in _cov_meta) if _pp else ""
     _w = _cr.get("wstg") or {}
-    _wstg_line = (f"<div class='sub' style='margin-top:.3rem'>WSTG active tests: {_w.get('tested', 0)}/"
-                  f"{_w.get('total', 109)} covered ({_w.get('full', 0)} full, {_w.get('partial', 0)} partial), "
-                  f"{_w.get('excluded', 0)} safety-excluded.</div>") if _w else ""
+    # Q-084. This line used to read "WSTG active tests: 85/109 covered", which asserts activity. The
+    # number is a property of a static catalogue: it is 85 for a full-mode scan of Juice Shop, 85 for
+    # a passive scan of one static page, and 85 for a mission in which ZERO engines ran. The ASVS
+    # cells rendered immediately above ARE evidence-driven (`asvs_model.assess(..., attempted_engines=
+    # _engines_from_ledger(tool_ledger))`), so the two numbers sat in one visual group with opposite
+    # epistemics and nothing telling the reader which was which. The number itself is worth reporting
+    # -- it is a real capability statement -- so the fix is the sentence, and the sentence now names
+    # its own epistemics. Pinned by tests/test_wstg_coverage_claim.py, including a control that fails
+    # if someone "fixes" this by deleting the line.
+    _wstg_line = (f"<div class='sub' style='margin-top:.3rem'>WSTG catalogue: Apolaki has engines for "
+                  f"{_w.get('tested', 0)}/{_w.get('total', 109)} active tests ({_w.get('full', 0)} full, "
+                  f"{_w.get('partial', 0)} partial), {_w.get('excluded', 0)} safety-excluded. This "
+                  f"describes this tool, not this mission - unlike the figures above it does not vary "
+                  f"with what ran.</div>") if _w else ""
     cov_overview_html = (("<h2 id='coverage-overview'>Coverage Overview</h2>"
                           "<div class='sub' style='margin:-.3rem 0 .5rem'>Of the security properties Apolaki "
                           f"models ({_pp.get('total', 0)} ASVS objectives, curated-partial) — how many were "
