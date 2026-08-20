@@ -101,6 +101,15 @@ if ! git -C "$repo" rev-parse --git-dir >/dev/null 2>&1; then
   echo "queue_gate: $repo is not inside a git work tree; cannot verify hashes" >&2
   exit 2
 fi
+# A shallow clone has none of the older commits, so check 1 fails on EVERY cited hash for a reason
+# that has nothing to do with the queue. MEASURED: `git clone --depth 1` of this repo produces 45 of
+# 45 "hash-not-in-history" failures. Someone acting on that output would go and "fix" 45 hashes that
+# were never wrong. Exit 2 (cannot run) rather than 1 (violations found) -- the distinction between
+# a failed check and an unrunnable one is the entire subject of this queue.
+if [ "$(git -C "$repo" rev-parse --is-shallow-repository 2>/dev/null)" = "true" ]; then
+  echo "queue_gate: shallow clone -- hashes cannot be resolved. Use fetch-depth: 0 (CI) or a full clone." >&2
+  exit 2
+fi
 
 # A ticket ID is Q-NNN with an OPTIONAL letter suffix. Q-021B is a DIFFERENT ticket from Q-021, and
 # a prefix match reports five phantom duplicates for the Q-021 family. Measured, not assumed.

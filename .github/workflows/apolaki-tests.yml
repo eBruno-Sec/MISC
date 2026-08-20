@@ -22,3 +22,18 @@ jobs:
         run: python -m pip install --upgrade pip pytest "httpx[http2]>=0.27.0" openai anthropic fastapi python-multipart
       - name: Run tests
         run: python -m pytest apolaki/agent/tests/ -q
+
+  queue-gate:
+    # Ticket-header integrity. Separate job so a queue-doc failure is never mistaken for a test
+    # failure, and vice versa.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # REQUIRED. The gate resolves every commit hash a ticket header cites, and the default
+          # depth-1 checkout has none of them -- it would fail on all 45 for the wrong reason.
+          fetch-depth: 0
+      - name: Prove the gate can fail
+        run: bash apolaki/scripts/queue_gate.sh --self-test
+      - name: Check docs/QUEUE.md
+        run: bash apolaki/scripts/queue_gate.sh
