@@ -121,9 +121,10 @@ def test_a_ledger_row_with_NO_status_is_not_retro_labelled_broken():
 
 # ── the class-sum invariant the arsenal lane asserts on every run ────────────
 def test_the_classes_still_sum_to_the_REGISTRY_DENOMINATOR():
-    """The arsenal lane asserts the classes sum to 111 (the registered-engine denominator) on every
-    run. This fix is a RE-PARTITION of the dispatched set, so the sum must be untouched: three
-    engines moved out of `silent` and nothing else changed.
+    """The arsenal lane asserts the classes sum to the registered-engine denominator on every run
+    (111 when this was written; 110 since Q-050 deleted `run_nosqlmap`). This fix is a RE-PARTITION
+    of the dispatched set, so the sum must track the registry: three engines moved out of `silent`
+    and nothing else changed.
 
     A double-count or a dropped row breaks this even though every per-engine assertion above would
     still pass, which is why it is asserted as an arithmetic identity and not as a list.
@@ -154,11 +155,17 @@ def test_the_classes_still_sum_to_the_REGISTRY_DENOMINATOR():
         "classes sum to %d, registry denominator is %d" % (total, len(registered)))
     # the measured split on this mission, so a silent drift in any one class is visible
     assert (len(blocked), len(never), len(silent), len(errored), len(skipped), len(productive)) == \
-           (13, 53, 30, 1, 2, 12)
+           (13, 52, 30, 1, 2, 12)
     # Q-052 moved 25 engines INTRUSIVE -> ACTIVE, so 18 of them left `blocked` and arrived in
-    # `never` on this mission: 31->13 and 35->53. THE SUM IS UNCHANGED AT 111, which is the
-    # invariant this test exists for -- the split is pinned underneath it so a silent drift in
-    # any one class stays visible, and re-aiming it is the deliberate cost of a taxonomy change.
+    # `never` on this mission: 31->13 and 35->53. THE SUM IS THE INVARIANT this test exists for --
+    # the split is pinned underneath it so a silent drift in any one class stays visible, and
+    # re-aiming it is the deliberate cost of a taxonomy change.
+    #
+    # Q-050 re-aimed it a second time, and this is a DENOMINATOR change rather than a re-partition:
+    # `run_nosqlmap` was DELETED (no binary in the image, 0 dispatches in 154 missions, a bare
+    # stdout regex duplicating run_nosqli's baseline-and-two-controls oracle). It lived in `never`,
+    # so the denominator went 111 -> 110 and `never` went 53 -> 52, one engine, in one class. Every
+    # other class is byte-identical, which is what makes the delta accountable rather than asserted.
 
 
 # ── both renderers, or it is a half fix ──────────────────────────────────────

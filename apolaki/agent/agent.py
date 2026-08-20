@@ -101,6 +101,12 @@ _AUTO_STORE_TOOLS = {
     "run_content_discovery", "run_ffuf", "run_nmap_vuln", "run_param_mine", "run_anomaly_scan",
     # investigative + exploitation tools (their confirmed findings must persist too)
     "run_dir_harvest", "confirm_idor", "run_metadata", "run_sourcemap", "test_numeric_abuse",
+    # Q-050, and it is the SECOND HALF of giving run_hash_id a deterministic trigger. Dispatching it
+    # without this line executes the engine and drops its lead on the floor -- reach with no effect,
+    # which is the same defect as a step that dispatches into `ran: False`, one level over. MEASURED
+    # while wiring it: the tool_call and tool_result events both appeared and `self.leads` stayed
+    # empty, so a WSTG-CRYP-04 observation would never have reached the report.
+    "run_hash_id",
     "run_cloud_probe",   # public-bucket listing is confirmed-by-oracle; auto-store it (#13, was an island)
     # Q-054, the THIRD sink. workflow.run and tools._run_workflow now both FORWARD their steps'
     # findings (measured: a confirmed CWE-639 survives the live idor_read pack end to end). Without
@@ -401,6 +407,92 @@ def sweep_targets(urls, forms, in_scope, limit: int = SWEEP_TARGET_CAP) -> list:
     if len(targets) <= limit:
         return targets
     return _spread_by_shape(targets)[:limit]
+
+
+# ── Q-050 · the observation that gives `run_hash_id` a deterministic trigger ─────────────────
+#
+# MEASURED over the whole stored corpus (154 missions), scanning 32.5 MB of captured exchange
+# bodies + 1,773 findings with `hashid_tool.identify`, with a positive control that finds a planted
+# bcrypt / sha512crypt / MySQL / MD5 / SHA-1 in the same pass:
+#
+#   * ZERO crypt-style prefixed hashes ($2b$, $6$, {SSHA}, *HEX) appear anywhere in the corpus.
+#     Their false-positive rate on real traffic is therefore a measured zero, and they are
+#     self-identifying -- no surrounding context is needed to know what they are.
+#   * SEVENTEEN raw hex tokens appear, and hand-inspecting every one of them is what stopped this
+#     from being wired wrong. Only THREE are password hashes (Juice Shop's `"password":"<md5>"`
+#     user table, dumped through a confirmed SQLi -- one of them the `admin` row). TEN are DVWA's
+#     `user_token` anti-CSRF nonce, and the rest are a PGP fingerprint in a security.txt, a
+#     `deluxeToken`, and a csaf advisory digest.
+#
+# So a trigger keyed on "a hash-shaped string appeared" would have been 77% anti-CSRF nonces --
+# noise on every DVWA page, on an engine whose whole output is severity `info`. The discriminator is
+# not a property of the hash, which is genuinely ambiguous by construction (a 32-hex digest is MD5,
+# NTLM and MD4 at once, and `identify` says so): it is the KEY THE APP ITSELF BOUND IT TO.
+#
+# JWTs are excluded on purpose. `run_jwt` owns them with a confirming oracle and holds WSTG-SESS-10
+# in `wstg_catalog.FULL`; adding a second engine that says "this is a JWT" and stops there is the
+# `run_nosqlmap` mistake -- a weaker restatement of a dispatched engine.
+_HASH_KEY = re.compile(r"""["'\s,{]\s*["']?([A-Za-z_][A-Za-z0-9_]{0,30})["']?\s*[:=]\s*["']"""
+                       r"""([A-Za-z0-9$./*{}+=_-]{16,4096}?)["']""")
+# `passw` covers password / passwordHash / password_hash / user_password; `pwd` covers pwd/pwdHash.
+# NOT `token`, NOT `hash`, NOT `secret` -- `user_token` is the exact false positive measured above,
+# and the other two are broad enough to re-admit it under another name.
+_CRED_KEY = re.compile(r"(?i)passw|pwd")
+# Self-identifying formats, matched as WHOLE TOKENS rather than key-bound: `identify` rates these
+# "high" from the prefix alone, so no surrounding key is needed -- which is the point, because the
+# case they exist for is a `/etc/shadow`-shaped dump (`root:$6$...:19000:...`) that has no JSON key
+# anywhere near it. JWT is also rated high and is deliberately not in this set.
+_SELF_ID_TOKEN = re.compile(
+    r"(?<![A-Za-z0-9$./*])("
+    r"\$(?:1|2[aby]|5|6|argon2[a-z]*|pbkdf2[a-zA-Z0-9-]*)\$[A-Za-z0-9$./=+,-]{8,300}"
+    r"|\{S?SHA\}[A-Za-z0-9+/=]{16,120}"
+    r"|\*[0-9A-Fa-f]{40}"
+    r")(?![A-Za-z0-9$./])")
+
+
+def _disclosed_hashes(exchanges: list, cap: int = 50) -> list:
+    """Hash material a target's own RESPONSES disclosed, as [(hash, why)], de-duplicated.
+
+    RESPONSE bodies only. A request body's `password` field is either the mission's own probe value
+    or a plaintext credential it already holds -- neither is a disclosure by the target, and neither
+    should be copied into a finding's evidence.
+
+    Two admission rules, both grounded in the measurement above:
+      A. the token is a self-identifying crypt-style hash, standalone (measured FP rate: zero);
+      B. the token is hash-shaped AND the app bound it to a password-ish KEY.
+    `hashid_tool.identify` is the final filter in both, so a plaintext password sitting in a
+    `password` field ("admin123") is dropped for not being hash-shaped -- which is also what keeps a
+    real credential out of the evidence blob."""
+    import hashid_tool as hid
+    out, seen = [], set()
+
+    def take(val, key, src):
+        if val in seen:
+            return False
+        cands = hid.identify(val)
+        if not cands or cands[0]["name"].startswith("JWT"):
+            return False
+        seen.add(val)
+        out.append((val, "%s disclosed `%s` as %s" % (src or "response", key, cands[0]["name"])))
+        return len(out) >= cap
+
+    for ex in (exchanges or []):
+        if not isinstance(ex, dict):
+            continue
+        body = ex.get("response_body") or ""
+        if not isinstance(body, str) or not body:
+            continue
+        src = str(ex.get("url") or "")
+        for m in _SELF_ID_TOKEN.finditer(body):            # rule A
+            if take(m.group(1), "a crypt-style hash", src):
+                return out
+        for m in _HASH_KEY.finditer(body):                 # rule B
+            key, val = m.group(1), m.group(2)
+            if not _CRED_KEY.search(key):
+                continue
+            if take(val, key, src):
+                return out
+    return out
 
 
 def _gate_refusal(res) -> str:
@@ -933,6 +1025,29 @@ class BBHAgent:
             if dropped:
                 yield {"type": "info", "content": f"Lead promotion: {dropped} candidate lead(s) "
                        "browser-confirmed and promoted to findings."}
+
+    async def _identify_dumped_hashes(self, session_id: str):
+        """Q-050 · WSTG-CRYP-04. `run_hash_id` had NO deterministic trigger: 0 dispatches in 154
+        missions, selectable only if an LLM picked it out of `CLAUDE_TOOLS`, while
+        `wstg_catalog.PARTIAL` said "run_hash_id flags weak primitives". It flagged nothing.
+
+        The trigger is an OBSERVED value, never an invented one: hash material the target's own
+        responses disclosed, read out of the mission's captured exchanges. The precondition is
+        deliberately narrow, and it is narrow because it was MEASURED rather than guessed --
+        see `docs/handoff/deterministic_reach.md` §3."""
+        if not self.mission_id:
+            return
+        try:
+            exchanges = db.get_exchanges(self.mission_id)
+        except Exception as e:
+            self.tools._swallow(e, "hash_id.get_exchanges", str(self.mission_id))
+            return
+        hits = _disclosed_hashes(exchanges)
+        if not hits:
+            return
+        async for ev in self._run_tool("run_hash_id", {"hashes": [h for h, _ in hits]}, session_id):
+            if "_content" not in ev:
+                yield ev
 
     @staticmethod
     def _dom_class_match(family: str, finding: dict) -> bool:
@@ -3675,6 +3790,12 @@ class BBHAgent:
                 break
         # promotion pass: re-test high-signal candidate leads with a confirmatory oracle
         async for ev in self._promote_leads(session_id):
+            yield ev
+        # Q-050: offline hash-type identification of credential material the TARGET disclosed during
+        # this mission (WSTG-CRYP-04). PASSIVE and offline -- it reads exchanges already captured and
+        # sends nothing. Placed here, after the deterministic loop, because the observation it keys
+        # on lives in RESPONSE BODIES, which `planner.next_batch` state has never carried.
+        async for ev in self._identify_dumped_hashes(session_id):
             yield ev
         # additive AI enhancement: business-logic hypotheses -> leads (no-op unless an AI
         # strategy is selected and usable). The model hunts; deterministic oracles confirm.

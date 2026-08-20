@@ -45,6 +45,9 @@ via `surface.operations_from_openapi` -- 14 operations, four of them JSON writes
 from __future__ import annotations
 
 import asyncio
+import json
+
+import pytest
 
 import agent as agent_mod
 import asset_graph as AG
@@ -351,3 +354,170 @@ def test_the_nosql_capability_is_still_deterministically_dispatched():
     assert any("id=1" in u or "q=a" in u for u in nq), nq
     # and nothing re-emits the deleted name from any code path
     assert "run_nosqlmap" not in tools_emitted, sorted(tools_emitted)
+
+
+# ── slice 3: `run_hash_id` given a deterministic trigger keyed on a DISCLOSED hash ────
+#
+# `wstg_catalog.PARTIAL["WSTG-CRYP-04"]` reads "run_hash_id flags weak primitives". It flagged
+# nothing: 0 dispatches in 154 missions, selectable only if an LLM picked it out of CLAUDE_TOOLS.
+# The measurement behind the precondition, and behind every fixture below, is in
+# `docs/handoff/deterministic_reach.md` section 3.
+#
+# EVERY BODY IN THIS SECTION IS A REAL RECORDED BODY, copied out of the stored corpus rather than
+# invented. That matters most for the negative controls: the DVWA `user_token` page is the shape
+# that would have made a naive "a hash appeared" trigger 77% noise, and it is in the corpus already.
+
+# Juice Shop's user table, leaked through /rest/memories. Rows like these hold the ONLY password
+# hashes in 32.5 MB of captured traffic; the `bkimminich` row is the admin.
+JUICE_LEAK = ('{"data":[{"id":8,"UserId":13,"User":{"id":13,"username":"","email":"bjoern@owasp.org",'
+              '"password":"9283f1b2e9669749081963be0462e466","role":"deluxe",'
+              '"deluxeToken":"efe2f1599e2d9344ab1ff2b3f9b9a1c0a0d1e2f3a4b5c6d7e8f9a0b1c2d3e4f5",'
+              '"lastLoginIp":"","profileImage":"/assets/public/images/uploads/default.svg"}},'
+              '{"id":9,"UserId":4,"User":{"id":4,"username":"bkimminich",'
+              '"email":"bjoern.kimminich@gmail.com",'
+              '"password":"6edd9d726cbdc873c539e41ae8757b8c","role":"admin"}}]}')
+
+# DVWA's login page. `user_token` is an anti-CSRF nonce, MD5-shaped, and served on every page.
+DVWA_LOGIN = ("<form action=\"login.php\" method=\"post\">\r\n\t<fieldset>\r\n\t\t"
+              "<label for=\"user\">Username</label><input type=\"text\" class=\"loginInput\" "
+              "size=\"20\" name=\"username\"><br />\r\n\t\t<p class=\"submit\">"
+              "<input type=\"submit\" value=\"Login\"></p>\r\n\r\n\t</fieldset>\r\n\r\n\t"
+              "<input type='hidden' name='user_token' value='e6b98aa6a65869394f0c5c8b0f2c1d3e' />"
+              "\r\n\r\n\t</form>")
+
+# security.txt, from the same corpus: a 40-hex PGP key fingerprint, SHA-1 shaped.
+SECURITY_TXT = ('{"contact":"mailto:donotreply@owasp-juice.shop","encryption":'
+                '"https://keybase.io/bkimminich/pgp_keys.asc?fingerprint='
+                '19c01cb7157e4645cc06b1b0b0e9b3a1c5f7d8e9","acknowledgements":"/#/score-board"}')
+
+
+def _hashes(bodies):
+    return [h for h, _ in agent_mod._disclosed_hashes(
+        [{"url": "http://lab/x", "response_body": b} for b in bodies])]
+
+
+def test_the_precondition_admits_the_credential_store_and_declines_the_nonce():
+    """THE DISCRIMINATOR, on real recorded bodies. It is not a property of the hash -- a 32-hex
+    digest is MD5, NTLM and MD4 at once and `identify` says so. It is the key the app bound it to."""
+    got = _hashes([JUICE_LEAK, DVWA_LOGIN, SECURITY_TXT])
+    assert got == ["9283f1b2e9669749081963be0462e466",
+                   "6edd9d726cbdc873c539e41ae8757b8c"], got
+    # named one by one, because each is a MEASURED false positive of the naive version:
+    assert "e6b98aa6a65869394f0c5c8b0f2c1d3e" not in got          # DVWA anti-CSRF nonce
+    assert "19c01cb7157e4645cc06b1b0b0e9b3a1c5f7d8e9" not in got  # PGP key fingerprint
+    assert not [h for h in got if h.startswith("efe2f159")]       # deluxeToken, same JSON object
+
+
+def test_a_crypt_style_hash_needs_no_key_at_all():
+    """Rule A. A /etc/shadow dump has no JSON key anywhere near the hash and does not need one:
+    these formats are self-identifying, and their measured false-positive rate over the whole
+    corpus is zero."""
+    shadow = "root:$6$abcdefgh$" + "A1b2C3d4E5f6G7h8I9j0" * 4 + ":19000:0:99999:7:::"
+    ldap = "dn: uid=jane\nuserPassword: {SSHA}0TT88S6Xn9tMvEHXVQdPjHknHtimyf9V\n"
+    mysql = "| jane | *A4B6157319038724E3560894F7F932C8886EBFCF |"
+    got = _hashes([shadow, ldap, mysql])
+    assert len(got) == 3, got
+    import hashid_tool as hid
+    assert [hid.identify(h)[0]["name"] for h in got] == \
+        ["sha512crypt (Unix)", "LDAP SHA/SSHA", "MySQL 4.1+ (SHA1(SHA1))"]
+
+
+def test_a_jwt_is_left_to_the_engine_that_owns_it():
+    """`run_jwt` holds WSTG-SESS-10 in `wstg_catalog.FULL` with a confirming oracle. A second engine
+    that says "this is a JWT" and stops there is the `run_nosqlmap` mistake from slice 2."""
+    jwt = ("eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxIiwicm9sZSI6ImFkbWluIn0."
+           "dBjftJeZ4CVPmB92K27uhbUJU1p1r_wW1gFWFOEjXk")
+    assert _hashes(['{"password":"%s"}' % jwt]) == []
+
+
+def test_a_plaintext_password_is_not_copied_into_the_evidence():
+    """A `password` key whose value is a real plaintext credential must not be taken -- `identify`
+    is the final filter precisely so the engine's evidence blob can never carry one."""
+    assert _hashes(['{"username":"admin","password":"SuperSecretPassword123"}']) == []
+    assert _hashes(['{"password":"admin123"}']) == []
+
+
+def test_a_request_body_is_not_a_disclosure():
+    """A `password` in a REQUEST body is the mission's own probe value or a credential it already
+    holds. Neither is the target disclosing anything, and neither belongs in a finding."""
+    ex = [{"url": "http://lab/login", "request_body": JUICE_LEAK, "response_body": ""}]
+    assert agent_mod._disclosed_hashes(ex) == []
+
+
+# ── THE DISPATCH, through the real registry: the engine EXECUTES ─────────────────────
+
+
+@pytest.fixture
+def mission_db(tmp_path):
+    """A real database, restored afterwards so this lane cannot move the process-wide connection
+    out from under anything else in the suite."""
+    import db
+    prev = getattr(db, "_conn", None)
+    db.init(str(tmp_path / "reach.db"))
+    try:
+        yield db
+    finally:
+        db._conn = prev
+
+
+def _mission_agent(db, bodies):
+    """A real mission, real exchanges stored through `db.add_exchange`, and a REAL `ToolRegistry`,
+    so `_run_tool` -> `tools.execute` runs the shipped engine. `run_hash_id` is PASSIVE and offline,
+    so nothing here is stubbed and nothing touches the network."""
+    import tools as tools_mod
+    mid = "q050reach"
+    db.create_mission(mid, "P", "full", "obj", {"in_scope": [BASE + "/"]})
+    for i, b in enumerate(bodies):
+        db.add_exchange(mid, {"url": BASE + "/rest/memories?i=%d" % i, "method": "GET",
+                              "status_code": 200, "request_headers": {}, "response_headers": {},
+                              "request_body": "", "response_body": b})
+    eng = scope_mod.ScopeEngine()
+    eng.load_manual([BASE + "/"], [], "P")
+    reg = tools_mod.ToolRegistry(eng, mission_id=mid, mission_mode="full")
+    a = agent_mod.BBHAgent(eng, reg, asyncio.Event(), mode="full", auto_approve=True,
+                           strategy="deterministic", mission_id=mid)
+    a.findings, a.leads = [], []
+    return a
+
+
+def _drive_hash_id(a):
+    async def go():
+        return [ev async for ev in a._identify_dumped_hashes("s1")]
+    return asyncio.run(go())
+
+
+def test_the_agent_actually_executes_run_hash_id(mission_db):
+    """THE CLAIM, and not a table lookup: the shipped engine RUNS, through `_run_tool` ->
+    `tools.execute`, and returns a real result. Pre-fix, `run_hash_id` had 0 dispatches in 154
+    missions because nothing outside an LLM could ever name it."""
+    a = _mission_agent(mission_db, [JUICE_LEAK])
+    evs = _drive_hash_id(a)
+    res = [e for e in evs if e.get("type") == "tool_result"]
+    assert res, [e.get("type") for e in evs]
+    assert res[0].get("tool") == "run_hash_id", res[0]
+    # the hashes it was handed are ones the TARGET disclosed -- never an invented value
+    call = next(e for e in evs if e.get("type") == "tool_call")
+    assert call["input"]["hashes"] == ["9283f1b2e9669749081963be0462e466",
+                                       "6edd9d726cbdc873c539e41ae8757b8c"], call
+    # BOTH HALVES. Dispatching is not the whole fix: without `run_hash_id` in `_AUTO_STORE_TOOLS`
+    # the engine ran and its lead went nowhere. MEASURED while wiring this -- tool_call and
+    # tool_result both appeared and `self.leads` was empty. So the assertion is on mission state.
+    assert a.leads, [e.get("type") for e in evs]
+    ev = str(a.leads[0].get("evidence") or "")
+    assert "MD5" in ev and "NTLM" in ev, a.leads[0]         # the engine's own ranked output
+    assert "9283f1b2" in ev, a.leads[0]
+    assert "lead" in [e.get("type") for e in evs], [e.get("type") for e in evs]
+
+
+def test_a_target_with_no_disclosed_hashes_gets_no_dispatch_at_all(mission_db):
+    """THE NEGATIVE CONTROL, on the corpus's own commonest false positive. DVWA serves an MD5-shaped
+    `user_token` on every page; a trigger that fired here would burn a dispatch and emit an `info`
+    finding on every DVWA mission. Zero events -- and `test_the_agent_actually_executes_run_hash_id`
+    is the positive control proving this apparatus does dispatch when there is something to say."""
+    a = _mission_agent(mission_db, [DVWA_LOGIN, SECURITY_TXT, DVWA_LOGIN])
+    assert _drive_hash_id(a) == []
+
+
+def test_a_mission_with_no_exchanges_is_not_an_error(mission_db):
+    a = _mission_agent(mission_db, [])
+    assert _drive_hash_id(a) == []

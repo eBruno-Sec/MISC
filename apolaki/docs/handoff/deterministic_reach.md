@@ -278,3 +278,173 @@ MEASURED: `pytest tests/test_deterministic_reach.py tests/test_bbh.py::test_new_
 Net: **111 registered engines → 110**, and one of the five LLM-only detection engines is resolved by
 subtraction.
 
+### 2.8 The ratchet that caught the deletion, and the exact delta
+
+A full-suite run flagged one failure, and it is the arsenal class-split ratchet doing its job:
+
+```
+tests/test_arsenal_errored_class.py::test_the_classes_still_sum_to_the_REGISTRY_DENOMINATOR
+E  assert (13, 52, 30, 1, 2, 12) == (13, 53, 30, 1, 2, 12)
+E    At index 1 diff: 52 != 53
+```
+
+`(blocked, never, silent, errored, skipped, productive)`. The arithmetic identity
+`total == len(registered)` still held — it is the pinned SPLIT that moved. **`run_nosqlmap` lived in
+`never`, so the denominator went 111 → 110 and `never` went 53 → 52: one engine, one class, every
+other class byte-identical.** Re-aimed with that reason recorded at the assertion, which the test's
+own comment already names as "the deliberate cost of a taxonomy change".
+
+`test_arsenal_errored_class.py` is **not one of this lane's named files**, and is the second such
+file touched (with `test_bbh.py`). Both were touched only because they pin a fact the deletion
+changed, and both are named here and in the commit message rather than folded in quietly.
+
+## 3. Slice 3 — `run_hash_id` given a deterministic trigger, after a hypothesis of mine was disproved
+
+`wstg_catalog.PARTIAL["WSTG-CRYP-04"]` reads `"run_hash_id flags weak primitives"`. It flagged
+nothing: 0 dispatches in 154 missions.
+
+**A correction to the ticket's framing first.** WSTG-CRYP-04 is in `PARTIAL`, not `FULL`, and the
+catalogue defines `partial` as *"a related tool touches it but does not confirm the specific WSTG
+scenario"*. So this is a weaker over-claim than `run_mass_assign`'s (which had `asvs_model`
+`"verifiable": True`) — but it is still an over-claim, because the engine did not *touch* it either.
+The second `engine_descriptor.py` hit is a **comment explaining a deliberately REJECTED route**
+(`:467` — `weak_secret_forgery` must not route to `run_hash_id`, which "forges nothing"). That is the
+predicted false positive of a source-text scan, and it means `run_hash_id` had exactly one live
+non-`tools.py` mention, not two.
+
+### 3.1 The hypothesis I formed, and the measurement that KILLED it
+
+Scanning the corpus for hash material with `hashid_tool.identify`, filtered to its own
+**high-confidence** verdicts:
+
+```
+                        rows     bytes       tokens   HIGH-confidence hits
+findings                1,773    —           13,178   {JWT: 28}
+exchanges               9,691    32,542,565  15,232   {JWT: 82}
+logs (tool_call/result) 55,973   —            1,809   {JWT: 115}
+memory_assets           3,247       174,132   2,718   {JWT: 321}
+POSITIVE CONTROL (planted)  —     —               6   {bcrypt: 1, sha512crypt: 1, MySQL: 1} + {MD5: 1, SHA-1: 2}
+```
+
+The control proves the apparatus finds a planted bcrypt / sha512crypt / MySQL / MD5 / SHA-1 in the
+same pass. **Hypothesis: Apolaki observes no password hashes at all, so `run_hash_id` cannot be
+deterministically triggered and the catalogue note should be deleted instead.**
+
+**That hypothesis is FALSE, and finding out took hand-inspecting the medium-confidence bucket I had
+just filtered away.** Seventeen raw-hex tokens sit in `exchanges`; printed with 90 characters of
+surrounding context, three of them are this:
+
+```
+[3 len=32] "email":"bjoern@owasp.org","password":" <<9283f1b2e9669749..>> ","role":"deluxe"
+[5 len=32] "username":"bkimminich",...,"password":" <<6edd9d726cbdc873..>> ","role":"admin"
+[6 len=32] "username":"evmrox",...,"password":"     <<2c17c6393771ee30..>> ","role":"deluxe"
+```
+
+Juice Shop's user table, MD5, dumped through `/rest/memories`, one of them the **admin** row. They
+were invisible to the high-confidence filter for a correct reason: `identify` ranks a 32-hex digest
+as MD5 *and* NTLM *and* MD4, and says so. **My filter was the defect, not the data.** Had I stopped
+at the first table I would have deleted a true catalogue claim.
+
+### 3.2 The other fourteen are exactly the noise a naive trigger would have emitted
+
+```
+[8..17] name='user_token' value=' <<e6b98aa6a6586939..>> '     <- DVWA anti-CSRF nonce, ten of them
+[1]     pgp_keys.asc?fingerprint= <<19c01cb7157e4645..>>       <- PGP key fingerprint in security.txt
+[4],[7] "deluxeToken":" <<efe2f1599e2d9344..>> "               <- session token, same JSON object
+[2]     "comment":"csaf advisory hash <<7e7ce7c65db3bf06..>>"  <- an advisory digest
+```
+
+**A trigger keyed on "a hash-shaped string appeared" would have been 77% anti-CSRF nonces**, on
+every DVWA page, from an engine whose entire output is severity `info`. The discriminator cannot be
+a property of the hash — it is genuinely ambiguous by construction. **It is the KEY THE APP ITSELF
+BOUND IT TO**, which is an observed value, not an invented one.
+
+### 3.3 The precondition, and why each half exists
+
+`agent._disclosed_hashes(exchanges)`, RESPONSE bodies only — a `password` in a *request* body is the
+mission's own probe value or a credential it already holds, and neither is the target disclosing
+anything.
+
+* **Rule A, self-identifying**: a crypt-style token (`$1$`, `$2[aby]$`, `$5$`, `$6$`, `$argon2`,
+  `$pbkdf2`, `{SSHA}`, `*HEX`) matched whole, no key required. This is the `/etc/shadow` case, which
+  has no JSON key anywhere near the hash. Measured occurrences over the corpus: zero, therefore a
+  measured false-positive rate of zero.
+* **Rule B, key-bound**: hash-shaped AND the key matches `passw|pwd`. **Not** `token`, **not**
+  `hash`, **not** `secret` — `user_token` is the measured false positive above, and the other two
+  are broad enough to re-admit it under another name.
+* **JWTs are excluded on purpose.** `run_jwt` holds WSTG-SESS-10 in `wstg_catalog.FULL` with a
+  confirming oracle. A second engine that says "this is a JWT" and stops is slice 2's mistake.
+* `hashid_tool.identify` is the final filter in both, which is also what keeps a real plaintext
+  credential out of the evidence blob: `{"password":"admin123"}` is not hash-shaped and is dropped.
+
+### 3.4 MEASURED: the precondition run over all 9,691 real captured exchanges
+
+```
+exchanges decoded 9691
+EXTRACTED 3
+   9283f1b2e9669749081963be0462e466 | http://juice-shop-bench:3000/rest/memories disclosed `password` as MD5
+   6edd9d726cbdc873c539e41ae8757b8c | http://juice-shop-bench:3000/rest/memories disclosed `password` as MD5
+   2c17c6393771ee3048ae34d6b380c5ec | http://juice-shop-bench:3000/rest/memories disclosed `password` as MD5
+
+--- POSITIVE CONTROL: planted shadow line + bcrypt + LDAP ---
+   $6$abcdefgh$AbCdEfGhIjKlMnOpQrStUv | disclosed `a crypt-style hash` as sha512crypt (Unix)
+   $2b$12$K1x8Qk9v0Zc3sB7nJ4hLPeYcQm2 | disclosed `a crypt-style hash` as bcrypt
+   {SSHA}0TT88S6Xn9tMvEHXVQdPjHknHtim | disclosed `a crypt-style hash` as LDAP SHA/SSHA
+```
+
+Exactly the three credential-store rows, and nothing else. **The ten DVWA `user_token` nonces are in
+that same 9,691-exchange corpus and were declined** — the negative control is live data, not a
+fixture.
+
+### 3.5 Why this is NOT a `planner.next_batch` branch, stated rather than assumed
+
+The observation lives in **response bodies**. `planner.next_batch` state is
+`{roots, recon, urls, bases, done, ...}` built from the asset graph; it has never carried a response
+body, and putting one there to reach an `info`-severity engine would be the wrong trade. The real
+execution path is therefore `agent._execute_plan`'s post-pass, one line after `_promote_leads` — the
+same seam the XSS lead-promotion pass already uses, and the tests drive it, not a table.
+
+### 3.6 BOTH HALVES, and the second was found by running the first
+
+Dispatch alone was not the fix. MEASURED on the first green run of the new test:
+
+```
+{"type": "tool_call",   "tool": "run_hash_id", "input": {"hashes": ["9283f1b2...", "6edd9d72..."]}, "permission": "passive"}
+{"type": "tool_result", "tool": "run_hash_id", "output": "2 hash(es) identified", "count": 1}
+```
+
+...and `self.leads` was **empty**. `run_hash_id` was not in `agent._AUTO_STORE_TOOLS`, so the engine
+executed and its lead went on the floor. **That is the same defect as a step that dispatches into
+`ran: False`, one level over: reach with no effect.** Both halves are now wired, and the test
+asserts on mission state (`a.leads[0]["evidence"]` carrying the engine's own `MD5, NTLM, MD4`
+ranking), not on the event stream.
+
+### 3.7 The tests
+
+`agent/tests/test_deterministic_reach.py`, **20 passed** (10 slice 1, 2 slice 2, 8 slice 3). Every
+body in slice 3 is a **real recorded body copied out of the corpus**, which is what makes the
+negative controls mean something.
+
+| test | what it pins |
+|---|---|
+| `test_the_precondition_admits_the_credential_store_and_declines_the_nonce` | the discriminator, on the real Juice Shop + DVWA + security.txt bodies; names each measured FP individually |
+| `test_a_crypt_style_hash_needs_no_key_at_all` | rule A: shadow / LDAP / MySQL formats identified with no key present |
+| `test_a_jwt_is_left_to_the_engine_that_owns_it` | no second JWT engine |
+| `test_a_plaintext_password_is_not_copied_into_the_evidence` | a real credential never enters a finding |
+| `test_a_request_body_is_not_a_disclosure` | direction of disclosure |
+| **`test_the_agent_actually_executes_run_hash_id`** | **THE DISPATCH.** Real mission, real `db.add_exchange`, real `ToolRegistry`; `_run_tool` to `tools.execute` runs the shipped engine, and the lead lands in `self.leads` |
+| **`test_a_target_with_no_disclosed_hashes_gets_no_dispatch_at_all`** | **THE NEGATIVE CONTROL**, on the corpus's commonest FP: a DVWA-shaped mission emits zero events |
+| `test_a_mission_with_no_exchanges_is_not_an_error` | empty input is not a failure |
+
+The `mission_db` fixture saves and restores `db._conn`, so this lane cannot move the process-wide
+connection out from under the rest of the suite.
+
+### 3.8 For the owner of `wstg_catalog.py` — NOT this lane's file
+
+`PARTIAL["WSTG-CRYP-04"] = "run_hash_id flags weak primitives"` is **true for the first time** as of
+this commit, and could now honestly read `"run_hash_id identifies weak password-storage primitives
+in credential material the target disclosed (deterministic; observed values only)"`. No edit is
+required — this is an upgrade in accuracy, not a correction of a falsehood. `engine_descriptor.py`
+needs nothing: its only mention is a comment recording a rejected route, and that rejection is still
+right.
+
