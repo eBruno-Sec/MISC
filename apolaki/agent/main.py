@@ -1960,13 +1960,15 @@ async def natas_ladder_run(payload: dict = None):
     import urllib.error
     import urllib.request
     from urllib.parse import urljoin
+    import browser_engine as _browser_engine
     import natas_ladder as nl
     try:
         last = max(0, min(int((payload or {}).get("last_level", 10)), nl.LAST_LEVEL))
 
         def fetch(u, h):
             try:
-                r = urllib.request.urlopen(urllib.request.Request(u, headers=h), timeout=20)
+                r = _browser_engine.rate_limited_urlopen(
+                    urllib.request.Request(u, headers=h), timeout=20)
                 return r.getcode(), r.read().decode("utf-8", "replace"), str(r.headers)
             except urllib.error.HTTPError as e:
                 try:
@@ -1985,7 +1987,8 @@ async def natas_ladder_run(payload: dict = None):
             hh = dict(h)
             hh["Content-Type"] = "application/x-www-form-urlencoded"
             try:
-                r = urllib.request.urlopen(urllib.request.Request(u, data=data, headers=hh), timeout=20)
+                r = _browser_engine.rate_limited_urlopen(
+                    urllib.request.Request(u, data=data, headers=hh), timeout=20)
                 return r.getcode(), r.read().decode("utf-8", "replace"), str(r.headers)
             except urllib.error.HTTPError as e:
                 try:
@@ -3041,6 +3044,7 @@ async def retest_findings(session_id: str, finding_id: str = ""):
     auto-retested; state-changing or recipe-less findings are honestly not_retestable. Feeds attack_chain
     (OPEN re-confirms, CLOSED dismisses the dead technique) so a closure updates the cross-run memory."""
     import httpx
+    import browser_engine as _browser_engine
     import retest as _rt
     import attack_chain as _ac
     m = _require_mission(session_id)
@@ -3108,7 +3112,8 @@ async def retest_findings(session_id: str, finding_id: str = ""):
                         "refused": len(findings)},
             "results": []})
     results, summary = [], {"open": 0, "closed": 0, "inconclusive": 0, "not_retestable": 0}
-    async with httpx.AsyncClient(verify=False, follow_redirects=False, timeout=20) as c:
+    async with _browser_engine.rate_limited_async_client(
+            httpx, verify=False, follow_redirects=False, timeout=20) as c:
         for f in findings:
             base = {"id": f.get("id"), "title": f.get("title"), "family": f.get("family")}
             plan = _rt.plan(f)

@@ -14,6 +14,8 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 import threading
 import time
+import urllib.error
+import urllib.request
 
 import browser_engine as browser
 import httpx
@@ -102,24 +104,46 @@ _RAW_HTTP_CALLS = {
 }
 
 _CONTROL_PLANE_CALLS = {
-    ("benchmark_assert.py", "_get", "urllib.request.urlopen"),
-    ("browser_engine.py", "drive", "httpx.post"),
-    ("cdp.py", "collect", "httpx.post"),
-    ("ci_summary.py", "_get_json", "urllib.request.urlopen"),
-    ("cloud_iam.py", "_linode_get", "urllib.request.urlopen"),
-    ("dns_recon.py", "doh", "httpx.AsyncClient"),
-    ("intel_connectors.py", "_default_http", "httpx.get"),
-    ("intel_extractor.py", "_call_llm", "urllib.request.urlopen"),
-    ("intel_feeds.py", "fetch", "urllib.request.urlopen"),
-    ("labs.py", "_http_json", "urllib.request.urlopen"),
-    ("main.py", "blind_benchmark_run", "httpx.AsyncClient"),
-    ("zap_client.py", "_call", "httpx.AsyncClient"),
+    ("benchmark_assert.py", "_get", "urllib.request.urlopen"):
+        "reads the local Apolaki API, not the assessment target",
+    ("browser_engine.py", "drive", "httpx.post"):
+        "calls the configured browserless control plane; browser target traffic is gated separately",
+    ("cdp.py", "collect", "httpx.post"):
+        "calls the browserless CDP control plane, not the assessment target",
+    ("ci_summary.py", "_get_json", "urllib.request.urlopen"):
+        "reads the local Apolaki API for CI output",
+    ("cloud_iam.py", "_linode_get", "urllib.request.urlopen"):
+        "queries the Linode provider API rather than the assessment target",
+    ("dns_recon.py", "doh", "httpx.AsyncClient"):
+        "queries the configured DNS-over-HTTPS resolver",
+    ("intel_connectors.py", "_default_http", "httpx.get"):
+        "queries a configured intelligence provider",
+    ("intel_extractor.py", "_call_llm", "urllib.request.urlopen"):
+        "calls the configured LLM control plane",
+    ("intel_feeds.py", "fetch", "urllib.request.urlopen"):
+        "downloads an intelligence feed, not an assessment target",
+    ("labs.py", "_http_json", "urllib.request.urlopen"):
+        "calls the local Docker control plane for lab state",
+    ("main.py", "blind_benchmark_run", "httpx.AsyncClient"):
+        "fetches a benchmark answer key only after sealing the blind artifact",
+    ("zap_client.py", "_call", "httpx.AsyncClient"):
+        "calls the ZAP daemon API; ZAP target traffic has a separate verified daemon-side fence",
+    ("bench_all.py", "reachable", "httpx.AsyncClient"):
+        "one-shot health check against compose-pinned local lab URLs",
+    ("bench_all.py", "scan_via_mission", "httpx.AsyncClient"):
+        "drives the Apolaki mission API; the mission owns target pacing",
+    ("owasp_bench.py", "scan", "httpx.Client"):
+        "isolated adapter for the compose-pinned OWASP benchmark corpus",
+    ("owasp_bench.py", "scan_source", "httpx.Client"):
+        "isolated source-benchmark adapter limited to the two pinned local suites",
 }
 
 _POLICY_CHOKEPOINT_CALLS = {
     ("browser_engine.py", "rate_limited_async_client", "httpx.AsyncClient"),
     ("browser_engine.py", "rate_limited_sync_client", "httpx.Client"),
     ("browser_engine.py", "rate_limited_goto", "page.goto"),
+    ("browser_engine.py", "rate_limited_goto_sync", "page.goto"),
+    ("browser_engine.py", "rate_limited_urlopen", "urllib.request.urlopen"),
 }
 
 
@@ -232,12 +256,23 @@ def test_repository_wide_rate_policy_inventory_is_non_vacuous_and_ratcheted():
     assert len(_production_python_paths(root)) >= 179, \
         "the repository-wide production-module census loaded too little"
     assert _raw_transport_inventory(), "the transport inventory is vacuous"
-    assert len(bypasses) <= 21, "ungated target-call sites rose above the measured Q-085 ratchet: %s" % bypasses
-    assert len(modules) <= 12, "modules bypassing the target policy rose above the measured ratchet: %s" % sorted(modules)
+    assert len(bypasses) <= 8, "ungated target-call sites rose above the measured Q-085 ratchet: %s" % bypasses
+    assert len(modules) <= 8, "modules bypassing the target policy rose above the measured ratchet: %s" % sorted(modules)
+
+
+def test_every_rate_policy_exemption_is_named_and_matches_exactly_one_call_site():
+    assert all(isinstance(reason, str) and reason.strip()
+               for reason in _CONTROL_PLANE_CALLS.values())
+    inventory = _raw_transport_inventory()
+    counts = {key: sum((row["module"], row["function"], row["call"]) == key
+                       for row in inventory)
+              for key in _CONTROL_PLANE_CALLS}
+    assert {key: count for key, count in counts.items() if count != 1} == {}, (
+        "rate-policy exemptions must identify one measured call site: %s" % counts)
 
 
 @pytest.mark.xfail(strict=True, reason=(
-    "Q-085 LIVE GAP: after the Juice Shop fix, 21 ungated target calls remain across 12 modules; "
+    "Q-085 LIVE GAP: 8 ungated target calls remain across 8 modules outside this lease; "
     "registration is not compliance, and SKIPPED/NOT SEEN is not a pass"))
 def test_every_target_transport_uses_the_shared_rate_policy():
     assert _target_traffic_bypasses() == []
@@ -269,6 +304,13 @@ def test_juiceshop_solver_routes_every_target_send_through_the_policy():
                 if row.startswith("juiceshop_solvers.py:")]
     assert bypasses == [], (
         "the lab solver promises no DoS but still has raw target transports: %s" % bypasses)
+
+
+def test_owned_q085_call_sites_route_every_target_send_through_the_policy():
+    """The BIE and API slices must not consume the residual ratchet forever."""
+    bypasses = [row for row in _target_traffic_bypasses()
+                if row.startswith(("bie.py:", "main.py:"))]
+    assert bypasses == [], "owned Q-085 target transports remain ungated: %s" % bypasses
 
 
 def test_sync_client_waits_and_observes_at_the_shared_chokepoint():
@@ -548,6 +590,148 @@ def test_playwright_subrequests_use_the_same_policy():
 
     route = _run(exercise())
     assert route.continued and sleeps == [2]
+
+
+class _SyncPage:
+    def __init__(self, url, clock):
+        self.url = url
+        self.clock = clock
+        self.starts = []
+        self.calls = 0
+        self.route_handler = None
+        self.response_handler = None
+
+    def route(self, _pattern, handler):
+        self.route_handler = handler
+
+    def on(self, event, handler):
+        if event == "response":
+            self.response_handler = handler
+
+    def goto(self, url, **_kwargs):
+        self.starts.append(self.clock[0])
+        self.calls += 1
+        return _Response(url, 429, "2") if self.calls == 1 else _Response(url, 200)
+
+
+def test_sync_playwright_navigation_waits_and_observes_at_the_shared_chokepoint():
+    clock = [0.0]
+    sleeps = []
+
+    def sleep(delay):
+        sleeps.append(delay)
+        clock[0] += delay
+
+    policy = _policy(max_wait=5, clock=lambda: clock[0], sync_sleep=sleep)
+    page = _SyncPage("https://a.example/", clock)
+
+    browser.rate_limited_goto_sync(page, page.url, rate_policy=policy)
+    browser.rate_limited_goto_sync(page, page.url, rate_policy=policy)
+
+    assert page.starts == [0.0, 2.0]
+    assert sleeps == [2]
+
+
+def test_sync_playwright_guard_falls_through_to_existing_context_routes():
+    """A page safety route must not shadow BIE's context-level request mutation."""
+    clock = [0.0]
+    sleeps = []
+    downstream = []
+
+    def sleep(delay):
+        sleeps.append(delay)
+        clock[0] += delay
+
+    class Request:
+        url = "https://a.example/api/object/1"
+
+    class Route:
+        continued = False
+        fell_back = False
+
+        def fallback(self):
+            self.fell_back = True
+            downstream.append("context-route")
+
+        def continue_(self):
+            self.continued = True
+
+    policy = _policy(max_wait=5, clock=lambda: clock[0], sync_sleep=sleep)
+    page = _SyncPage("https://a.example/", clock)
+    browser.rate_limited_goto_sync(page, page.url, rate_policy=policy)
+    route = Route()
+    page.route_handler(route, Request())
+
+    assert sleeps == [2]
+    assert route.fell_back is True and route.continued is False
+    assert downstream == ["context-route"]
+
+
+class _UrlopenResponse:
+    def __init__(self, url, status=200, headers=None):
+        self.url = url
+        self.status = status
+        self.headers = headers or {}
+
+    def getcode(self):
+        return self.status
+
+    def geturl(self):
+        return self.url
+
+
+def test_urlopen_waits_and_observes_at_the_shared_chokepoint(monkeypatch):
+    clock = [0.0]
+    starts = []
+    sleeps = []
+    statuses = [429, 200]
+
+    def sleep(delay):
+        sleeps.append(delay)
+        clock[0] += delay
+
+    def send(request, **_kwargs):
+        starts.append(clock[0])
+        status = statuses.pop(0)
+        headers = {"Retry-After": "2"} if status == 429 else {}
+        return _UrlopenResponse(request.full_url, status, headers)
+
+    monkeypatch.setattr(urllib.request, "urlopen", send)
+    policy = _policy(max_wait=5, clock=lambda: clock[0], sync_sleep=sleep)
+    request = urllib.request.Request("https://a.example/")
+
+    browser.rate_limited_urlopen(request, rate_policy=policy)
+    browser.rate_limited_urlopen(request, rate_policy=policy)
+
+    assert starts == [0.0, 2.0]
+    assert sleeps == [2]
+
+
+def test_urlopen_observes_http_error_before_reraising_it(monkeypatch):
+    clock = [0.0]
+    starts = []
+
+    def sleep(delay):
+        clock[0] += delay
+
+    errors = [urllib.error.HTTPError(
+        "https://a.example/", 429, "limited", {"Retry-After": "3"}, None)]
+
+    def send(request, **_kwargs):
+        starts.append(clock[0])
+        if errors:
+            raise errors.pop()
+        return _UrlopenResponse(request.full_url)
+
+    monkeypatch.setattr(urllib.request, "urlopen", send)
+    policy = _policy(max_wait=5, clock=lambda: clock[0], sync_sleep=sleep)
+    request = urllib.request.Request("https://a.example/")
+
+    with pytest.raises(urllib.error.HTTPError):
+        browser.rate_limited_urlopen(request, rate_policy=policy)
+    browser.rate_limited_urlopen(request, rate_policy=policy)
+
+    assert starts == [0.0, 3.0]
 
 
 def test_tools_has_no_unguarded_target_page_goto():

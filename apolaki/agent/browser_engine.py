@@ -27,6 +27,7 @@ import math
 import os
 import threading
 import time
+import urllib.request
 from urllib.parse import urlparse
 
 
@@ -430,6 +431,38 @@ def rate_limited_sync_client(httpx_module, *args, rate_policy=None, **kwargs):
     return httpx_module.Client(*args, event_hooks=hooks, **kwargs)
 
 
+def _urllib_url(request) -> str:
+    getter = getattr(request, "get_full_url", None)
+    if callable(getter):
+        return str(getter())
+    return str(getattr(request, "full_url", None) or request)
+
+
+def _observe_urllib(policy, response, fallback_url: str):
+    getter = getattr(response, "geturl", None)
+    response_url = getter() if callable(getter) else getattr(response, "url", None)
+    code_getter = getattr(response, "getcode", None)
+    status = code_getter() if callable(code_getter) else getattr(response, "status", 0)
+    policy.observe(response_url or fallback_url, status, getattr(response, "headers", {}) or {})
+
+
+def rate_limited_urlopen(request, *args, rate_policy=None, **kwargs):
+    """Open one urllib request through the same per-origin wait and observation policy."""
+    policy = rate_policy or target_rate_policy
+    url = _urllib_url(request)
+    policy.wait_sync(url)
+    try:
+        response = urllib.request.urlopen(request, *args, **kwargs)
+    except Exception as exc:
+        # urllib represents HTTP 4xx/5xx responses as HTTPError exceptions. Observe before
+        # re-raising so a 429 still protects the next request while callers retain their
+        # existing error handling.
+        _observe_urllib(policy, exc, url)
+        raise
+    _observe_urllib(policy, response, url)
+    return response
+
+
 async def _guard_playwright_page(page, policy):
     """Install one request gate per real Playwright page, covering navigation subresources too."""
     if getattr(page, "_apolaki_rate_guard", False):
@@ -461,6 +494,52 @@ async def rate_limited_goto(page, url, rate_policy=None, **kwargs):
     await _guard_playwright_page(page, policy)
     await policy.wait_async(url)
     response = await page.goto(url, **kwargs)
+    if response is not None:
+        policy.observe(getattr(response, "url", None) or url,
+                       getattr(response, "status", 0), getattr(response, "headers", {}) or {})
+    return response
+
+
+def _guard_playwright_page_sync(page, policy):
+    """Install the target gate on one sync Playwright page, including subresources."""
+    if getattr(page, "_apolaki_rate_guard_sync", False):
+        return
+    route_method = getattr(page, "route", None)
+    if not callable(route_method):
+        return
+
+    def gate(route, request):
+        try:
+            policy.wait_sync(request.url)
+        finally:
+            # Page routes take precedence over context routes in Playwright. BIE installs a
+            # context route to mutate one request, so continue_() here would silently shadow its
+            # oracle. fallback() preserves that downstream handler while keeping the safety gate.
+            fallback = getattr(route, "fallback", None)
+            if callable(fallback):
+                fallback()
+            else:
+                route.continue_()
+
+    def observe(response):
+        try:
+            policy.observe(response.url, response.status, response.headers or {})
+        except Exception:
+            pass
+
+    route_method("**/*", gate)
+    on_method = getattr(page, "on", None)
+    if callable(on_method):
+        on_method("response", observe)
+    setattr(page, "_apolaki_rate_guard_sync", True)
+
+
+def rate_limited_goto_sync(page, url, rate_policy=None, **kwargs):
+    """Sync Playwright navigation guarded by the process-wide target policy."""
+    policy = rate_policy or target_rate_policy
+    _guard_playwright_page_sync(page, policy)
+    policy.wait_sync(url)
+    response = page.goto(url, **kwargs)
     if response is not None:
         policy.observe(getattr(response, "url", None) or url,
                        getattr(response, "status", 0), getattr(response, "headers", {}) or {})
