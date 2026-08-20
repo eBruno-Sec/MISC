@@ -101,11 +101,13 @@ mission performed the WSTG scenario. An honest evidence-driven tally is therefor
 
 ## Q-085 slice 1: repository-wide guard
 
-Commit: `1c085eb`
+Rebased commit: `8c94181`
 
-`tests/test_rate_policy.py` now scans every top-level production Python module for raw HTTP clients,
-`urlopen`, and target `page.goto` calls. Control-plane and third-party calls are explicit one-site
-exemptions; the policy implementation and a locally wait+observe-wrapped call are separate facts.
+`tests/test_rate_policy.py` now scans every production Python module recursively for raw HTTP
+clients, `urlopen`, and target `page.goto` calls. Test code and the Tier-3 gate implementation are
+excluded; future nested production packages are included. Control-plane and third-party calls are
+explicit one-site exemptions; the policy implementation and a locally wait+observe-wrapped call are
+separate facts.
 
 Measured at the baseline before any production fix:
 
@@ -121,10 +123,24 @@ reported 31 and failed its non-vacuity floor; the cause was an import-normalizat
 full 39/25/13 measurement was rerun. The floor was not lowered to the bad reading.
 
 The unresolved zero-bypass assertion is a strict xfail carrying 25/13. Separate ratchets prevent
-either count rising. Negative control: a synthetic `brand_new_engine.py` containing raw
-`httpx.AsyncClient` is reported as a bypass; its clean twin using
-`browser_engine.rate_limited_async_client` is not. This proves a module outside the old
-`tools.__file__` boundary is visible.
+either count rising. Negative control: the test replaces `tools.__file__` with an artificial agent
+root, adds a **nested** `new_package/brand_new_engine.py` containing raw `httpx.AsyncClient`, and
+calls the default collector. The module is reported as a bypass; replacing the raw call with
+`browser_engine.rate_limited_async_client` makes the same default scan clean. This proves both the
+parser and its repository collector see a module outside the old `tools.__file__` boundary.
+
+The first committed version passed the synthetic path explicitly. That proved the parser but not
+the default collector, so it was strengthened before handoff. Semantic mutant: replacing
+`root.rglob("*.py")` with `root.glob("*.py")` made the exact nested-module control fail:
+
+```text
+E AssertionError: assert [] ==
+E   ['new_package/brand_new_engine.py:4:send:httpx.AsyncClient']
+1 failed in 2.36s
+```
+
+After restoration: `1 passed in 2.26s`. No crash, import error, timeout, skip, or unrelated failure
+was credited.
 
 Targeted verification:
 
@@ -135,6 +151,8 @@ XFAIL tests/test_rate_policy.py::test_every_target_transport_uses_the_shared_rat
 ```
 
 ## Q-085 slice 2: Juice Shop no-DoS breach
+
+Rebased commit: `a57630e`
 
 All four raw transports in `juiceshop_solvers.py` now route through one sync policy factory:
 

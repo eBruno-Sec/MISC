@@ -142,9 +142,17 @@ def _canonical_call(node, aliases):
     return name
 
 
+def _production_python_paths(root):
+    """Every production module, including future nested packages; test/gate code is not traffic."""
+    root = Path(root)
+    return sorted(path for path in root.rglob("*.py")
+                  if not ({"tests", "tier3"} & set(path.relative_to(root).parts[:-1])))
+
+
 def _raw_transport_inventory(paths=None):
     root = Path(tools.__file__).resolve().parent
-    paths = sorted(root.glob("*.py")) if paths is None else [Path(p) for p in paths]
+    default_corpus = paths is None
+    paths = _production_python_paths(root) if default_corpus else [Path(p) for p in paths]
     rows = []
     for path in paths:
         source = path.read_text(encoding="utf8")
@@ -178,7 +186,8 @@ def _raw_transport_inventory(paths=None):
             if call == "page.goto" and node.args and isinstance(node.args[0], ast.Constant) \
                     and node.args[0].value == "about:blank":
                 continue
-            rows.append({"path": path, "module": path.name, "function": fn,
+            module = path.relative_to(root).as_posix() if default_corpus else path.name
+            rows.append({"path": path, "module": module, "function": fn,
                          "call": call, "line": node.lineno, "owner": owner})
     return rows
 
@@ -220,7 +229,8 @@ def test_repository_wide_rate_policy_inventory_is_non_vacuous_and_ratcheted():
     root = Path(tools.__file__).resolve().parent
     # Measured after the Juice Shop slice: 179 top-level production modules are in scope. Raw-call
     # count is deliberately NOT a floor: removing a bypass must be allowed to reduce it.
-    assert len(list(root.glob("*.py"))) >= 179, "the repository-wide module census loaded too little"
+    assert len(_production_python_paths(root)) >= 179, \
+        "the repository-wide production-module census loaded too little"
     assert _raw_transport_inventory(), "the transport inventory is vacuous"
     assert len(bypasses) <= 21, "ungated target-call sites rose above the measured Q-085 ratchet: %s" % bypasses
     assert len(modules) <= 12, "modules bypassing the target policy rose above the measured ratchet: %s" % sorted(modules)
@@ -233,19 +243,25 @@ def test_every_target_transport_uses_the_shared_rate_policy():
     assert _target_traffic_bypasses() == []
 
 
-def test_repository_wide_guard_catches_a_new_previously_invisible_module(tmp_path):
-    dirty = tmp_path / "brand_new_engine.py"
+def test_repository_wide_guard_catches_a_new_previously_invisible_module(tmp_path, monkeypatch):
+    fake_root = tmp_path / "agent"
+    nested = fake_root / "new_package"
+    nested.mkdir(parents=True)
+    fake_tools = fake_root / "tools.py"
+    fake_tools.write_text("# collection anchor\n", encoding="utf8")
+    dirty = nested / "brand_new_engine.py"
     dirty.write_text("import httpx\n\ndef send(url):\n    return httpx.AsyncClient(base_url=url)\n",
                      encoding="utf8")
-    safe = tmp_path / "brand_new_guarded_engine.py"
-    safe.write_text("import browser_engine\nimport httpx\n\ndef send(url):\n"
-                    "    return browser_engine.rate_limited_async_client(httpx, base_url=url)\n",
-                    encoding="utf8")
+    monkeypatch.setattr(tools, "__file__", str(fake_tools))
 
-    assert _target_traffic_bypasses([dirty]) == [
-        "brand_new_engine.py:4:send:httpx.AsyncClient"
+    assert _target_traffic_bypasses() == [
+        "new_package/brand_new_engine.py:4:send:httpx.AsyncClient"
     ]
-    assert _target_traffic_bypasses([safe]) == []
+
+    dirty.write_text("import browser_engine\nimport httpx\n\ndef send(url):\n"
+                     "    return browser_engine.rate_limited_async_client(httpx, base_url=url)\n",
+                     encoding="utf8")
+    assert _target_traffic_bypasses() == []
 
 
 def test_juiceshop_solver_routes_every_target_send_through_the_policy():
