@@ -598,3 +598,57 @@ tells the truth and the Code Review tab does not yet show it. `ui/` belongs to a
 this is reported rather than fixed: an operator reading the JSON or the report sees the marker; an
 operator reading that tab still cannot tell that
 `external/phpids/.../InterchangeBuilder.php:140` is HTMLPurifier and not theirs.
+
+---
+
+## 9. AN ATTEMPT TO BREAK THE CHANGE — the new surface it drags in
+
+The two walks do not read the same files, and wiring the classifier into `review()` widened what it
+sees. That is a real risk the change introduces and it was hunted rather than hoped about:
+
+```
+review_source_tree exts : ['.cjs','.java','.js','.jsx','.mjs','.py','.pyw','.ts','.tsx']
+review()._EXTS          : the above PLUS
+                          ['.conf','.config','.cs','.env','.go','.json','.php','.rb','.sql',
+                           '.xml','.yaml','.yml']
+```
+
+**Twelve extensions the classifier had never been pointed at.** Its banner and geometry rules were
+calibrated on JavaScript (§3.3, `_MINIFIED_MAX_LINE` / `_MINIFIED_MEAN_LINE`). A one-line SQL dump
+or a packed JSON blob is exactly the shape that could be miscalled `generated`.
+
+Every non-JS file the rule fires on across DVWA + Juice Shop, with evidence:
+
+```
+   .json    generated        1  <-- NON-JS CLASSIFIED
+   .php     third-party    235  <-- NON-JS CLASSIFIED
+   .php     -              112
+   .xml     -                2
+   .json    -                2
+   .ts      -                1
+
+   .json  generated   external/phpids/0.6/lib/IDS/default_filter.json
+            minified geometry: longest line 16360 chars, mean 16360 over 1 line(s)
+   .php   third-party external/phpids/0.6/lib/IDS/Converter.php   (+ 234 more)
+            licence pragma in file header: * @license  http://www.gnu.org/licenses/lgpl.html
+```
+
+**No misfire found.** All 235 `.php` hits are PHPIDS, caught because `@license` is a documented
+PHPDoc tag as well as a JS build pragma — the rule transferred to a second language without being
+told about it. The one `.json` is a 16KB single-line filter table shipped *inside* that library.
+The 112 first-party `.php` files and both `.xml` files were read and left alone.
+
+### 9.1 Two things this does NOT establish
+
+* **`.sql`, `.env`, `.yml`, `.yaml`, `.conf`, `.config`, `.go`, `.rb`, `.cs` were never exercised** —
+  no such file exists in the trees available. Those extensions are UNTESTED, not clean. The
+  geometry rule on a single-line SQL dump is the specific case a future run should go looking for.
+* **`@license` in a first-party header would misclassify.** A project that tags its OWN files
+  `@license MIT` gets called third-party. DVWA does not, Juice Shop does not, OWASP Benchmark does
+  not — measured on all three — but the rule cannot tell "I ship this licence" from "I vendored
+  something under this licence". The blast radius is asymmetric, and that asymmetry is the reason
+  to leave it alone rather than tighten it on a hypothesis: in `review()` the consequence is a
+  marker and no signal is lost, while in `review_source_tree` it is a confidence demotion. **The
+  exposure is concentrated in the walk run 1 shipped, not the one added here.** Tightening a rule
+  that shows zero observed errors across three real trees would trade a measured result for a
+  guess.
