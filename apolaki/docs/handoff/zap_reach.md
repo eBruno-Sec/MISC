@@ -273,6 +273,46 @@ the evidence is not.
 
 ---
 
+## False-positive risk: a first data point, and an explicit ceiling on what it proves
+
+Q-023 warns that enabling ZAP introduces "a new false-positive source into the report that has never
+been measured", and requires an FPR check before ZAP is defaulted on anywhere. **The default is
+unchanged by this lane** (`main.py:81` still `enable_zap: bool = False`), so that bar is not yet
+binding — but a first measurement is cheap and now exists.
+
+Every alert from the passive pass, checked against the raw response rather than against ZAP's opinion:
+
+```
+server: BaseHTTP/0.6 Python/3.12.13
+content-type: text/html; charset=utf-8
+content-length: 345
+(no x-frame-options, no content-security-policy, no x-content-type-options)
+```
+
+| ZAP alert | ground truth | verdict |
+|---|---|---|
+| Missing Anti-clickjacking Header (CWE-1021) | no `X-Frame-Options`, no CSP `frame-ancestors` | **true positive** |
+| CSP Header Not Set (CWE-693) | no `Content-Security-Policy` | **true positive** |
+| Server Leaks Version Information (CWE-497) | `Server: BaseHTTP/0.6 Python/3.12.13` | **true positive** |
+| X-Content-Type-Options Header Missing (CWE-693) | header absent | **true positive** |
+
+**4 alerts, 4 true positives, 0 false positives.**
+
+**The ceiling, stated plainly so nobody quotes the number without it.** This does *not* clear ZAP's
+FPR. All four are **passive response-header** alerts — the single easiest class ZAP emits, decidable
+from four lines of header text, and the class least capable of producing a false positive. The
+alerts that would actually threaten report quality are `safe_active`/`thorough_active` injection and
+reflection findings, and **those remain unmeasured**: this lane's `safe_active` run attributed zero
+new alerts (capped active scan plus a correctly-refusing pass-cursor), so it contributed no evidence
+either way.
+
+A real FPR check still needs a **clean paired lab** — the vulnerable and the secure half of the same
+control, requiring ZAP to flag one and decline the other. That is the standing discipline here and
+this measurement does not substitute for it. Treat 4/4 as "the trivial class is not broken", nothing
+more.
+
+---
+
 ## Q-023's three sub-defects, measured against code rather than against markers
 
 | # | sub-defect as filed | measured now | verdict |
