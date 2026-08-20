@@ -169,7 +169,7 @@ No production ZAP behaviour changed; this slice repairs the guard's claim rather
 
 ## Part 3 - engine guard claim
 
-Status: implementation and targeted verification complete; commit pending.
+Status: committed as `f55cac877d1fa3c50b92e0e4e9d96009c41b3b7d`; full-suite verification passed.
 
 The old helper was named `_planner_names` but read only `agent.py`; it never opened `planner.py` and
 used a quoted-string regex. Measured before the rename:
@@ -211,4 +211,80 @@ The guard does not enforce dispatch. Coordinator should revise that comment when
 
 ## Final verification
 
-Status: in progress.
+Status: complete.
+
+### Combined owned controls
+
+```text
+137 passed, 1 xfailed, 3 warnings in 33.65s
+```
+
+The sole xfail is the deliberately open Q-085 residual at 8 calls / 8 modules.
+
+### Full suite
+
+No mission was running (`running=0`, `total=100`) before the run. The suite used an isolated
+`git archive` of `f55cac877d1fa3c50b92e0e4e9d96009c41b3b7d`, mounted into a throwaway container on
+`apolaki_default`. The archived agent-tree object was
+`5815d69780600fa32738b25037d04bb28ce207ce`.
+
+```text
+3350 passed, 11 skipped, 14 xfailed, 9 warnings in 645.40s (0:10:45)
+```
+
+Baseline comparison over the full denominator:
+
+```text
+baseline c5c4db5: 3332 passed / 11 skipped / 14 xfailed / 0 failed
+branch f55cac8:   3350 passed / 11 skipped / 14 xfailed / 0 failed
+delta:            +18 passed / 0 skipped / 0 xfailed / 0 failed
+```
+
+### Queue integrity
+
+The bare `bash` command resolved to Windows' WSL shim and could not execute because WSL has no
+`/bin/bash`; that environment error was not reported as a gate result. Re-running with the installed
+Git Bash executable completed normally:
+
+```text
+queue_gate: 76 headers, 51 distinct hashes cited, 5 ids with >1 header
+queue_gate: OK
+```
+
+### Files changed
+
+```text
+agent/bie.py
+agent/browser_engine.py
+agent/main.py
+agent/tests/test_rate_policy.py
+agent/tests/test_zap_invocation.py
+agent/tests/test_engine_reachability.py
+docs/handoff/codex_q086.md
+```
+
+`zap_client.py`, `juiceshop_solvers.py`, all benchmark code/data, `tools.py`, `agent.py`, and
+`planner.py` were not modified.
+
+### Integration
+
+Cherry-pick these commits in order from `codex/q086`:
+
+```text
+d58e41a74291ad0da55c44b7a3861fd3c731f44a  Q-085 owned target-traffic wiring and 8/8 ratchet
+2813ecd4076dccacfc1d4f08858d151be76a8468  Q-086 repository-wide ZAP absence guard
+f55cac877d1fa3c50b92e0e4e9d96009c41b3b7d  honest engine static-reference naming
+```
+
+Then apply the final handoff-only commit that contains this completed verification record.
+
+Coordinator follow-ups:
+
+1. Lease the eight residual target transports listed in Part 1; do not retire the strict xfail until
+   the measured census reaches zero.
+2. Correct the dispatch overclaim in `tools.py:6675` when that file is free.
+3. No queue header was edited here. Q-085/Q-086 state changes remain Coordinator-owned.
+
+No benchmark application, case, label, scoring path, denominator, or artifact was changed. Benchmark
+figures were not re-run or claimed; this lane changed transport safety and structural guards, not
+detection or scoring logic.
