@@ -857,6 +857,14 @@ X-Requested-With: </textarea>
     #p-codereview .cr-why{font-size:.78rem;color:var(--text);margin-top:.15rem}
     #p-codereview .cr-conf{font-size:.76rem;color:var(--text-dim);margin-top:.25rem}
     #p-codereview .cr-conf b{color:var(--ok)}
+    /* Q-083 last mile. codeintel marks leads that landed in code the operator does NOT maintain
+       (`source_kind` + `source_kind_evidence`). The API has said so since a1a211b; this tab drew a
+       fixed row and dropped it, so the operator could not see the one thing the marker exists to
+       tell them. Deliberately UNDERSTATED styling: the finding is not retracted by the leads walk
+       (that walk tags, it does not demote confidence), so this must read as provenance, not as a
+       dismissal. */
+    #p-codereview .cr-kind{font-size:.58rem;font-weight:800;text-transform:uppercase;letter-spacing:.04em;padding:.1rem .45rem;border-radius:999px;background:var(--surface2);color:var(--text-dim);border:1px dashed var(--border2);cursor:help}
+    #p-codereview .cr-evid{font-size:.7rem;color:var(--text-dim);margin-top:.2rem;font-family:var(--mono);word-break:break-word}
     </style>
     <section class="panel" id="p-codereview">
       <div class="view-head"><h3 class="sec">Code Intelligence</h3>
@@ -2667,12 +2675,18 @@ async function runCodeReview(){
 }
 function renderCodeReview(d){
   const sev=d.by_severity||{};
+  // Q-083. `not_maintained_findings` is a COUNT and `not_maintained_files` is a MAP of the files
+  // this walk classified. Read both defensively: a stale agent image predates these keys entirely
+  // (measured 2026-08-20 - the running container was 20 modules behind the tree and returned
+  // neither), and a missing key must render as "no marker" rather than as a zero the API never sent.
+  const nmFind=d.not_maintained_findings||0, nmFiles=Object.keys(d.not_maintained_files||{}).length;
   let h=`<div class="cr-bar">
     <div class="cr-stat"><span class="v crit">${sev.critical||0}</span><span class="k">Critical</span></div>
     <div class="cr-stat"><span class="v high">${sev.high||0}</span><span class="k">High</span></div>
     <div class="cr-stat"><span class="v">${sev.medium||0}</span><span class="k">Medium</span></div>
     <div class="cr-stat"><span class="v">${d.total||0}</span><span class="k">Leads</span></div>
     <div class="cr-stat"><span class="v">${d.files_scanned||0}</span><span class="k">Files</span></div>
+    ${nmFind?`<div class="cr-stat" title="Leads in files this walk observed as third-party or generated. Still reported, never dropped - the marker records provenance so you can judge whether it is yours to fix.\n${nmFiles} of ${d.files_scanned||0} files scanned were classified not-maintained."><span class="v">${nmFind}</span><span class="k">Not maintained</span></div>`:''}
     <span class="cr-git ${d.exposed_dot_git?'yes':'no'}">${d.exposed_dot_git?'⚠ .git exposed':'.git not exposed'}</span>
   </div>`;
   if(!(d.findings||[]).length){ h+=`<div class="empty"><h4>No leads</h4><p>Nothing matched in that tree.</p></div>`; return h; }
@@ -2682,10 +2696,12 @@ function renderCodeReview(d){
       <div class="cr-fhead">
         <span class="cr-sev ${esc(f.severity)}">${esc(f.severity)}</span>
         <span class="cr-loc">${esc(f.file)}:${f.line}</span>
+        ${f.source_kind?`<span class="cr-kind" title="This lead is in code you probably do not maintain. It is still reported - the walk marks provenance, it does not retract the finding.">${esc(f.source_kind)}</span>`:''}
         <span class="cr-tech" title="maps to a Taxonomy technique">${esc(f.technique)}</span>
       </div>
       <div class="cr-snip">${esc(f.snippet||'')}</div>
       <div class="cr-why">${esc(f.why||'')}</div>
+      ${f.source_kind_evidence?`<div class="cr-evid">Observed ${esc(f.source_kind)}: ${esc(f.source_kind_evidence)}</div>`:''}
       <div class="cr-conf"><b>Confirm:</b> ${esc(f.confirm||'')}</div>
     </div>`;
   });
