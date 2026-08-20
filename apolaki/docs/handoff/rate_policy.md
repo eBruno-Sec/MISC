@@ -351,3 +351,36 @@ already exists and already works, it is just pointed at one file.
 I did not widen it myself. It would fail immediately on 25 call sites across 13 modules — 11 of
 which belong to other lanes — and landing a red guard in a shared tree is not this lane's call.
 Filed as the Q-043 follow-up below.
+
+### 7b. Cross-check against the sibling backoff lane — its count was low, by grep
+
+`docs/handoff/backoff.md` (the lane that landed `9c37ced`) already audited this area and reported
+**"7 target-traffic modules bypass the shared policy entirely"**, counted, in its own words, **"by
+grep"**. The AST census finds **13**. The delta is not a disagreement about facts, it is what grep
+cannot see:
+
+| module | backoff.md | this lane | why the difference |
+|---|---|---|---|
+| `bie.py` | not listed | **6 sites** | navigates by `page.goto`, never imports `httpx` — invisible to a grep for raw clients |
+| `agent.py`, `main.py`, `bench_all.py`, `owasp_bench.py` | not listed | 1 / 3 / 2 / 2 | build clients inline inside functions |
+| `juiceshop_solvers.py` | **"correctly covered"** | **1 gated / 4 ungated** | it is MIXED, not covered — one `browser_engine.drive` path is gated and four direct paths are not |
+
+The `juiceshop_solvers.py` row is the one worth flagging: a module can be *partially* gated, and a
+grep that finds the one correct call reports the whole module clean. Its `:304` site is the sharpest
+example in the codebase — **ten concurrent `threading.Thread` workers** posting to
+`/rest/products/reviews`, entirely outside the policy. That is precisely the shape Q-043 was filed
+about (width 6 starting 14 requests inside a retry window), still live, in a module nobody flagged.
+
+**This does not make `backoff.md` wrong** — it made a bounded claim with its method stated, which is
+why the discrepancy was findable at all. It is recorded here so the two documents do not sit in the
+tree quoting different numbers with no explanation.
+
+**Where the two lanes AGREE, and what it means for the Coordinator.** `backoff.md` §5 recommends,
+first in priority order, *"item 1 with a small fixed default (2-5 s) so a bare `429` is not free"*.
+That is exactly the mechanism §4 of this document lands — built, bounded, tested, and MEASURED
+through a real browser — with the default left at `0.0` rather than 2-5 s, because the opposite
+behaviour is currently held by a named negative control and this lane does not delete oracles.
+**Two independent lanes have now arrived at the same fix from different directions.** Turning it on
+is a one-line change to `RATE_POLICY_BARE_DEFAULT_SECONDS` plus a deliberate update to
+`test_a_response_without_retry_after_is_never_recorded_as_a_wait`. The decision is the
+Coordinator's; the engineering is done either way.
