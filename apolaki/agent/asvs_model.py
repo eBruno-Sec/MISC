@@ -247,6 +247,58 @@ OBJECTIVES = (
      # contradict it. run_js_review is the sole engine that can emit vulnerable_component, and Q-012 had
      # already added it -- so the objective could fail; only this sibling was the false-verify path.
      "engine": "run_js_review", "violated_by": ("vulnerable_component",), "verifiable": True},
+    {"chapter": "Configuration & Dependencies", "cid": "CONF-02", "level": 1,
+     "summary": ("Baseline security configuration is hardened: transport posture, security response "
+                 "headers, session-cookie attributes and permitted HTTP methods."),
+     "objective": "Confirm the origin carries the baseline configuration controls transport_posture checks.",
+     # Q-053 GAP-4, CONSUMER half. `security_misconfig` and `transport_posture` carried NO objective key
+     # at all, so every finding either family has ever produced was invisible to the entire ASVS model.
+     # MEASURED against the live corpus (apolaki_bbh_data, positive control 1773 findings / 154 missions /
+     # 29,945 tool_call rows / 0 unparseable):
+     #
+     #   security_misconfig + transport_posture stored : 24   (all confirmed, all found_by=transport_posture)
+     #     Session cookie without a restrictive SameSite  4      <- cookie hardening, a REAL target
+     #     No Content-Security-Policy                     4
+     #     HSTS not enabled on an HTTPS origin            4
+     #     MIME sniffing not disabled                     4
+     #     No Referrer-Policy                             4
+     #     No Permissions-Policy                          4
+     #   objectives keyed on either family              :  0
+     #
+     # ONE UMBRELLA OBJECTIVE, NOT THREE, AND THAT IS FORCED BY THE PRODUCER -- this is the part a later
+     # reader will want to change and should not. `transport_posture.finding` picks the family with a
+     # single ternary (`transport_posture.py:404`): `"transport_posture" if kind in ("tls","cert") else
+     # "security_misconfig"`, while `kind` also takes "cookie", "header" and "methods". So cookie
+     # hardening, header hygiene and method posture are ONE label downstream. Two objectives keyed on
+     # that one label would BOTH fail together, which means a missing Permissions-Policy would fail
+     # "session cookies are hardened" -- precisely the false FAIL Q-048 refused when it declined to
+     # re-point SESS-02 at `security_misconfig`. **That refusal stands and is not undone here**: SESS-02
+     # still keys only on `insecure_cookie`. The honest key for these 24 is a property broad enough that
+     # every one of the six titles above genuinely violates it, and this is that property.
+     #
+     # Splitting it into three belongs where the finding is BUILT, not here (Q-053's own common-root
+     # rule). The producer already carries the discriminator -- `tags: ["posture", kind, iid]` -- so the
+     # patch is small; it is written out in docs/handoff/report_truth.md because transport_posture.py is
+     # not this lane's file. A tag-keyed split HERE was rejected: it would be a second classification
+     # path that can drift from the producer's own label, which is the "second copy of the rule" defect
+     # Q-015 already cost this codebase once.
+     #
+     # ENGINE NAME TAKEN FROM THE LEDGER, NOT SPELLED FROM MEMORY, because this is the exact near-miss
+     # that made four of Q-048's six objectives unfailable and that COMM-04 documents: `_run_transport_
+     # posture` builds `ToolResult("transport_posture", ...)` -- the LABEL -- while `_engines_from_ledger`
+     # reads the DISPATCH name. MEASURED over the 29,945 real tool_call rows:
+     #     run_transport_posture : 13        transport_posture (as a dispatch name) : absent
+     # with the known-good control in the same query: check_takeover 140, takeover absent.
+     #
+     # NO SPURIOUS-FAIL RISK, measured rather than assumed: `transport_posture.py:404` is the only site
+     # in the tree that assigns either family, and all 24 stored findings carry found_by=transport_posture.
+     # `codeintel`'s "security_misconfig_errors" is a TECHNIQUE id, not a family, and emits neither.
+     #
+     # `verifiable: True` and NOT `attempt_only`: unlike business logic, this property is established by
+     # DIRECT OBSERVATION of a definite checklist -- the header is present or it is not -- so a clean run
+     # is positive evidence rather than absence of evidence.
+     "engine": "run_transport_posture",
+     "violated_by": ("security_misconfig", "transport_posture"), "verifiable": True},
 
     # ── API & Web Service ──
     {"chapter": "API & Web Service", "cid": "API-01", "level": 1,

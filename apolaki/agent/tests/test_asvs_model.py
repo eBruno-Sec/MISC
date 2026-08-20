@@ -458,7 +458,17 @@ def test_absent_capability_reports_not_implemented_with_a_reason():
     # ASSESSABLE, and on this clean fixture it reaches `verified`. That the two numbers move in
     # opposite directions by one is the actual evidence the capability was wired rather than merely
     # unlabelled -- an objective quietly dropped from the model would have left this at 27.
-    assert "not_implemented" in A.STATUSES and r["tally"]["verified"] == 28
+    #
+    # 28 -> 29 (Q-053 GAP-4 consumer half). This one moved for a DIFFERENT reason to the last one, and
+    # the difference is the whole point of the constant: COMM-04 changed STATUS inside a fixed model,
+    # so its move was paired with `not_implemented` going the other way. CONF-02 is a NEW objective, so
+    # `total_objectives` moves 33 -> 34 WITH it and `not_implemented` does not move at all. Both shapes
+    # are checked, in the opposite direction each time, by
+    # tests/test_asvs_transport_config_objective.py::test_adding_the_objective_did_not_reclassify_an_
+    # existing_one -- which asserts total 34, verified 29, not_implemented 1, blocked 2, not_tested 0
+    # and the sum identity together, so a model that dropped an objective to make room fails there
+    # even though this line alone would still read plausibly.
+    assert "not_implemented" in A.STATUSES and r["tally"]["verified"] == 29
 
 
 def test_not_implemented_survives_every_engine_claiming_to_have_run():
