@@ -3297,10 +3297,26 @@ class BBHAgent:
             ep_key = key.split("#", 1)[0]
             if not ep_key:
                 continue
-            slot = by_ep.setdefault(ep_key, {"fields": [], "method": props.get("method") or "POST"})
+            slot = by_ep.setdefault(ep_key, {"fields": [], "method": props.get("method") or "POST",
+                                             "content_type": "", "body_params": []})
+            # Q-050. The MEDIA TYPE is what separates a JSON write endpoint from an HTML form, and
+            # until now it was learned by `observe_param` and then dropped at this handoff. Only the
+            # spec producer records one (an HTML form posts urlencoded and `_project_form_params`
+            # writes none), so an absent content type is a real answer and is left absent rather
+            # than defaulted to JSON -- `run_mass_assign` would then be scheduled against every
+            # captured form, which is the always-fires failure mode, not reach.
+            if not slot["content_type"] and props.get("content_type"):
+                slot["content_type"] = str(props["content_type"])
             nm = pnode.get("label")
             if nm and nm not in slot["fields"]:
                 slot["fields"].append(nm)
+                # The typed parameter, in the exact shape `surface.operations_from_openapi` emits
+                # and `mass_assign_tool.body_from_params` reads. A name alone cannot build a body
+                # the API will accept, and a body the API rejects yields no object -- which the
+                # engine reports as a clean, i.e. a false negative.
+                slot["body_params"].append({"name": nm, "location": "body",
+                                            "type": props.get("ptype") or "",
+                                            "required": props.get("required")})
         import planner as _planner
         out = []
         for ep_key, slot in sorted(by_ep.items()):
@@ -3316,7 +3332,11 @@ class BBHAgent:
             # in `planner.fresh()` is at the door: the seventh consumer must inherit it.
             if _planner.is_session_kill_url(action):
                 continue
-            out.append({"action": action, "method": slot["method"], "fields": slot["fields"]})
+            out.append({"action": action, "method": slot["method"], "fields": slot["fields"],
+                        # Q-050: additive keys. Every existing consumer reads action/method/fields
+                        # and is unaffected; `planner`'s mass-assignment branch is the first reader
+                        # that needs to know the media type and the DECLARED TYPE of each field.
+                        "content_type": slot["content_type"], "body_params": slot["body_params"]})
         return out
 
     # U1 (architecture.md 6.3): the graph's ranked action -> a concrete tool.

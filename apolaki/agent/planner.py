@@ -74,6 +74,28 @@ CAP_ZAP = 3             # primary host roots handed to the (very slow) ZAP DAST 
 CAP_SQLMAP = 8          # deep-intensity heavy-sqlmap targets (most injection-prone params;
                         # insane runs the full fan-out). Keeps a deep scan completable —
                         # sqlmap on every endpoint is what makes deep run for hours.
+CAP_MASS_ASSIGN = 8     # JSON write endpoints handed to run_mass_assign. Each one is a THREE-object
+                        # protocol (baseline + ignored-field control + one object per candidate
+                        # field), so it is the most expensive step per target in the sweep and the
+                        # only one that leaves objects behind. Bounded like every other write engine.
+
+
+# Q-050. Write methods `_run_mass_assign` accepts — it refuses anything else outright
+# ("unsupported write method"), so scheduling a GET/DELETE would be a step that cannot run.
+_WRITE_METHODS = ("POST", "PUT", "PATCH")
+
+
+def _is_json_ct(ct) -> bool:
+    """True for a media type that carries a JSON OBJECT body.
+
+    Deliberately narrow. `run_mass_assign` sends `Content-Type: application/json` and its oracle is
+    a JSON re-read; pointing it at `application/x-www-form-urlencoded` or `multipart/form-data`
+    means the write is rejected, no object is created, and the engine reports a clean it never
+    earned. An EMPTY content type is a real observation (an HTML form records none) and reads
+    False — `x or DEFAULT` here, with "" as a genuine input, is the recorded falsy-default trap.
+    """
+    c = str(ct or "").split(";")[0].strip().lower()
+    return c == "application/json" or c.endswith("+json")
 
 _URLISH_PARAM = ("url", "uri", "link", "fetch", "redirect", "next", "return", "dest",
                  "target", "proxy", "image", "img", "callback", "webhook", "u", "r")
@@ -416,6 +438,37 @@ def next_batch(state: dict) -> list:
             _obs.get((ep.get("host") or "", ep.get("path") or "")) or {})
         return _b_url(merged) or (_b(ep.get("host") or "") + (ep.get("path") or ""))
 
+    def _observed_get_paths(host: str, cap: int = CAP_REST) -> list:
+        """Distinct paths OBSERVED on `host`, for `run_mass_assign`'s re-read ranking (Q-050).
+
+        Observed, never invented: these are the URLs the crawl and the API's own spec import put on
+        the surface, stripped of their query strings. `mass_assign_tool.read_views` then keeps only
+        the ones sharing a leading segment with the write path and ranks them, so passing a bounded
+        list here costs nothing and passing an invented one would be the recorded
+        probe-with-an-invented-value defect.
+
+        Paths the mission observed as WRITES are excluded. `_ma_views` is capped
+        (`ToolRegistry._MA_MAX_VIEWS`), so every write path in the list displaces a real read view:
+        MEASURED on the VAmPI shape, `/users/v1/register` and `/users/v1/login` took two of the five
+        slots for a register write, and both answer a GET with 405. The write endpoint itself is not
+        lost by this — `_ma_views` already appends it as the last-resort collection listing.
+        """
+        skip = {_path(f.get("action") or "") for f in (state.get("recon", {}).get("forms") or [])
+                if str(f.get("method") or "").upper() in _WRITE_METHODS
+                and _host(f.get("action") or "") == host}
+        out, seen = [], set()
+        for u in urls:
+            if not isinstance(u, str) or _host(u) != host:
+                continue
+            p = _path(u)
+            if not p.startswith("/") or p in seen or p in skip:
+                continue
+            seen.add(p)
+            out.append(p)
+            if len(out) >= cap:
+                break
+        return out
+
     def fresh(steps):
         # dedup against `done` AND within this freshly built batch (a step's key can
         # be generated twice in one phase, e.g. run_graphql from a URL hint and from
@@ -753,6 +806,59 @@ def next_batch(state: dict) -> list:
             e_steps.append(_step("run_csrf", {"url": act}, f"run_csrf:{act}"))
             e_steps.append(_step("run_race", {"url": act, "method": "POST", "body": body},
                                  f"run_race:{act}"))
+    # ── mass assignment (CWE-915 / OWASP API3:2023 BOPLA / WSTG-INPV-20) on JSON writes ──
+    #
+    # Q-050. `run_mass_assign` shipped in Q-011 with a working dispatch method, an ASVS objective
+    # (`asvs_model` ATHZ-04, `"verifiable": True`) and a WSTG test mapped onto it -- and was named
+    # in NO scheduler, so no deterministic mission could ever select it. Q-011 fixed the phantom
+    # NAME (`run_mass_assignment` -> `run_mass_assign`); the wiring never existed. Registration is
+    # not invocation, and a control catalogue citing an engine the planner cannot select is a
+    # coverage claim backed by nothing.
+    #
+    # THE PRECONDITION IS EVALUATED FROM OBSERVED STATE, and it is three facts, not one:
+    #   1. a WRITE method -- the engine only accepts POST/PUT/PATCH, and a GET creates no object;
+    #   2. a JSON media type the API ITSELF declared. `_forms_from_graph` carries the graph's
+    #      `content_type` prop, which only the OpenAPI producer writes; an HTML form posts
+    #      urlencoded and records none, so it does not match here. That is the whole negative
+    #      control: a target with no JSON write endpoint gets no step, and the filter is a
+    #      property of the surface rather than a rule written to make a test pass.
+    #   3. at least one TYPED body parameter. `_run_mass_assign` refuses to invent a body
+    #      (`"no base body ... a body invented from nothing would be rejected and read as a
+    #      clean"`), so a step carrying only a URL would dispatch and do nothing -- the appearance
+    #      of reach. The typed params are also the list of fields that are NOT mass assignment:
+    #      `mass_assign_tool.privileged_candidates` excludes every field the endpoint offers.
+    #
+    # `read_paths` are GET paths the mission ACTUALLY OBSERVED on the same host (never invented --
+    # `mass_assign_tool.read_views` ranks them and keeps only paths sharing a leading segment with
+    # the write, so a `/books` view is never used to answer for a `/users` object).
+    #
+    # Login endpoints are excluded on purpose: a login write creates no object, so there is no
+    # re-read view and the engine can only ever emit a lead. That is a budget decision, named here
+    # rather than left as an accident.
+    #
+    # INTRUSIVE -- it writes objects -- so `_allowed()` schedules it in Full mode only, the same
+    # gate already holding run_stored_xss / run_race / run_deserialization.
+    ma_seen = set()
+    for fm in (state.get("recon", {}).get("forms") or []):
+        act = fm.get("action")
+        meth = str(fm.get("method") or "").upper()
+        if not act or act in ma_seen or meth not in _WRITE_METHODS:
+            continue
+        if not _is_json_ct(fm.get("content_type")):
+            continue
+        bparams = [p for p in (fm.get("body_params") or [])
+                   if isinstance(p, dict) and p.get("name")]
+        if not bparams:
+            continue
+        if _LOGIN_SINK.search(_path(act)) or _path(act) in _LOGIN_PATHS:
+            continue
+        ma_seen.add(act)
+        e_steps.append(_step("run_mass_assign",
+                             {"url": act, "method": meth, "params": bparams,
+                              "read_paths": _observed_get_paths(_host(act))},
+                             f"run_mass_assign:{act}"))
+        if len(ma_seen) >= CAP_MASS_ASSIGN:
+            break
     # OAuth abuse on the standard OAuth surface per host + any discovered oauth/authorize path.
     oauth_seen = set()
     for h in host_bases:
