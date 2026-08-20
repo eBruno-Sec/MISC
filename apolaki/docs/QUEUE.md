@@ -1399,7 +1399,68 @@ are the answer, not the problem.
 
 ---
 
-### Q-050 · **32 of 92 engines have NEVER EXECUTED in 151 missions** · **HIGH** · `proposed`
+### Q-050 · **32 of 92 engines have NEVER EXECUTED** — RE-MEASURED, and the answer is 6, not 32 · **HIGH** · `ready`
+
+#### RE-MEASUREMENT, Coordinator, 2026-08-20 — the count is worse and the finding is much narrower
+
+Positive control first, because a zero here would otherwise mean nothing: the corpus is **154
+missions, 29,945 `tool_call` rows, 1,773 findings, 66,395 log rows**, 0 unparseable.
+
+    registry (TOOL_PERMISSIONS)          111
+    distinct tools ever dispatched        72
+    NEVER EXECUTED                        40   (was 32 of 92)
+
+**But "never executed" was the wrong question, and answering it is what made that clear.** An engine
+that has not run may simply never have met a matching target -- most of the 40 are network-service
+engines (`run_smb_enum`, `run_snmp_audit`, `run_ssh_audit`, `run_vnc_audit`, `run_rdp_audit`,
+`run_ntp_audit`, `run_rsync_audit`, `run_ipmi_audit`, `run_modbus_audit`) and every mission in this
+corpus targeted a web lab. That is not a defect. The real question is **which of them the
+deterministic schedulers can never select at all.** Classified by whether the name appears anywhere
+in `agent.py` or `planner.py`:
+
+    schedulable   30      named by a scheduler; simply never met a matching target
+    LLM-only      10      named NOWHERE in agent.py or planner.py
+    unreachable    0      no dispatch method -- none, which is the good news
+
+**Soundness of the instrument, stated because a regex over source has burned this project before
+(Q-077):** the scan includes comments and docstrings, so it can only produce false POSITIVES. A count
+of **zero** therefore really means the name is absent. The claim being made here rests only on the
+zeros. Positive control: `run_xss` and `run_sqli`, which have both run, appear across `agent.py`,
+`planner.py`, `technique_planner.py` and four catalogues.
+
+**Six of the ten LLM-only entries are real detection engines**, each with a working
+`ToolRegistry._run_*` dispatch method, reachable ONLY if an LLM picks them out of `CLAUDE_TOOLS`:
+
+    run_mass_assign        named outside tools.py only in asvs_model.py, wstg_catalog.py
+    run_hash_id            named outside tools.py only in engine_descriptor.py, wstg_catalog.py
+    run_external_surface   named outside tools.py only in description_gate.py
+    run_nosqlmap           NAMED NOWHERE
+    run_ws_hijack          NAMED NOWHERE
+    run_hash_crack         NAMED NOWHERE
+
+The other four (`benchmark_lab`, `list_workflows`, `mission_intel`, `mission_state`) are operator
+utilities and being LLM-only is correct for them.
+
+**Why this matters more than a coverage statistic.** Apolaki is deterministic-first. Run a
+deterministic mission against any target and those six can never fire. And two of them are cited as
+coverage: `asvs_model.py:179` declares an ASVS objective `"engine": "run_mass_assign",
+"verifiable": True`, and `wstg_catalog.py:110` and `:132` map WSTG-INPV-20 to `run_mass_assign` and
+WSTG-CRYP-04 to `run_hash_id`. **The platform names engines in its control catalogues that its own
+deterministic planner cannot select.**
+
+**The irony is exact and worth recording.** Q-011 found `run_mass_assignment` was a phantom NAME and
+fixed the spelling so it dispatches. `asvs_model.py:170` still carries the note. Nobody ever put the
+correctly-spelled engine into a scheduler. **The name was fixed; the wiring never existed** -- which
+is the island pattern surviving its own fix.
+
+**Definition of done**: for each of the six, either give it a deterministic trigger (a precondition
+the planner can evaluate) or move it out of the control catalogues, so a coverage claim is never
+backed by an engine the deterministic path cannot reach. `run_mass_assign` first: it is the one with
+both an ASVS objective and a WSTG test riding on it.
+
+See also Q-084, filed from the same measurement session, on the WSTG coverage NUMBER being a constant.
+
+#### Original filing
 
 Raised by Erwin: "are all tools being used harmoniously?" MEASURED rather than answered — 29,109 tool
 calls across 151 stored missions, 67 distinct tools ever executed, 92 engines defined.
