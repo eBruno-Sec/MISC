@@ -7,6 +7,7 @@ engine, waiting to be called by mistake.
 import ast
 import os
 import shutil
+import warnings
 
 import pytest
 
@@ -773,6 +774,86 @@ def test_the_qualified_scan_honours_all_three_allowlists(qual):
         "or every entry has been wired, in which case the list should shrink")
 
 
+def _module_functions():
+    """{function name: {modules that define it}} across the production tree. Read from the AST, so a
+    name that only appears in a comment is not a definition of anything."""
+    out = {}
+    for fn in sorted(os.listdir(dg.APP_DIR)):
+        if not fn.endswith(".py"):
+            continue
+        try:
+            tree = ast.parse(open(os.path.join(dg.APP_DIR, fn), encoding="utf8").read())
+        except Exception:
+            continue
+        for node in tree.body:
+            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                out.setdefault(node.name, set()).add(fn[:-3])
+    return out
+
+
+def test_every_bare_allowlist_entry_names_the_module_that_defines_it():
+    """ALLOWED_UNUSED's reasons are `"<module>: <why>"`, and that prefix is now LOAD-BEARING: it is the
+    only module `scan_qualified` will excuse the name in. So it has to be true, not merely written.
+
+    A typo'd or stale owner fails closed -- the entry stops excusing anything and the count rises -- which
+    is the safe direction but a confusing way to learn about it. This says it plainly instead."""
+    defined = _module_functions()
+    # POSITIVE CONTROL: the reader found real definitions before any conclusion is drawn from absence.
+    assert len(defined) > 500, "only %d functions parsed; the reader is blind" % len(defined)
+    assert "scan_qualified" in defined, "the reader cannot see a function it is running inside"
+
+    assert set(dg.ALLOWED_UNUSED_OWNER) == set(dg.ALLOWED_UNUSED), "every entry must yield an owner"
+    for name, owner in dg.ALLOWED_UNUSED_OWNER.items():
+        assert owner, "%s: no module prefix in its reason, so it now excuses nothing" % name
+        assert name in defined, "%s is allowlisted but no module defines it" % name
+        assert owner in defined[name], (
+            "%s says it belongs to %r but is defined in %s -- the exemption applies to a module that "
+            "does not have this function" % (name, owner, sorted(defined[name])))
+
+
+def test_a_justification_written_for_one_module_does_not_excuse_another(real_tree_copy, qual):
+    """NEGATIVE CONTROL, and the hole it closes was live until Q-078 run 4.
+
+    `ALLOWED_UNUSED` is keyed by bare name; `scan_qualified` entries are `module.function`. Matching the
+    halves meant one line of prose about `wordlists.payloads_for` excused a brand-new dead function named
+    `payloads_for` in ANY module. That defeats the count ratchet AND the accounting gate above it, so
+    while the strict xfail is pinned it was a completely silent path for new dead code.
+
+    Paired with its control, because a mutation that nothing catches proves nothing on its own: the same
+    island under an ordinary name must be caught, so the difference is the allowlist and not the scan."""
+    victim = os.path.join(real_tree_copy, "security.py")
+    original = open(victim, encoding="utf8").read()
+    borrowed = sorted(n for n, o in dg.ALLOWED_UNUSED_OWNER.items() if o != "security")[0]
+    assert borrowed not in original, "%s must not already be in security.py for this to mean anything" % borrowed
+
+    def _with(fn_name):
+        open(victim, "w", encoding="utf8").write(
+            original + "\n\ndef %s(rows):\n    return {'n': len(rows)}\n" % fn_name)
+        return dg.scan_qualified(real_tree_copy)
+
+    try:
+        stolen = _with(borrowed)
+        plain = _with("brand_new_island_fn")
+    finally:
+        open(victim, "w", encoding="utf8").write(original)
+
+    entry = "security." + borrowed
+    assert entry in stolen["unused"], (
+        "%s is excused by a justification written about %s -- one module's reason must not cover "
+        "another's function" % (entry, dg.ALLOWED_UNUSED_OWNER[borrowed]))
+    assert stolen["unaccounted"] == [entry], stolen["unaccounted"]
+    assert entry not in stolen["allowed"]
+    # CONTROL: an ordinary name is caught the same way, so the borrowed name is not being caught by some
+    # unrelated property of `security.py`.
+    assert plain["unaccounted"] == ["security.brand_new_island_fn"]
+    assert stolen["count"] == plain["count"] == qual["count"] + 1
+    # ...and the owner's own entry is STILL excused. A fix that closed the hole by disabling the
+    # allowlist would pass everything above and be a different, worse bug.
+    owner_entry = "%s.%s" % (dg.ALLOWED_UNUSED_OWNER[borrowed], borrowed)
+    assert owner_entry in qual["allowed"], (
+        "%s must still be excused in its own module; the hole was the borrowing, not the list" % owner_entry)
+
+
 def test_every_qualified_allowlist_entry_states_a_reason():
     for name, why in dg.ALLOWED_UNUSED_QUALIFIED.items():
         assert "." in name, "qualified entries are keyed module.function: %s" % name
@@ -871,3 +952,176 @@ def test_string_dispatch_counts_as_a_call(tmp_path):
         'class C:\n    async def _run_thing(self, i):\n        return 1\n\n\n'
         'def go(c, n):\n    return getattr(c, "_" + n)({})\n\n\nWIRED = ["run_thing"]\n', encoding="utf8")
     assert "m.py::C._run_thing" not in set(dg.scan_methods(str(tmp_path))["unused"])
+
+
+# ── Q-078 run 5: documenting an exemption must not retire it ─────────────────────────────────────
+
+def _an_allowlisted_name():
+    """One ALLOWED_UNUSED key, chosen at RUNTIME. Never written as a literal anywhere in this file --
+    see `test_this_file_does_not_reference_the_names_it_defends`, which is not fastidiousness but the
+    defect that produced this whole slice."""
+    return sorted(dg.ALLOWED_UNUSED)[0]
+
+
+def _refs_in(path):
+    """(every AST-visible reference in `path`, nodes walked). Same three kinds `_ast_reference_sites`
+    counts, re-derived here so the test does not check the gate against itself."""
+    seen, nodes = set(), 0
+    with warnings.catch_warnings():
+        # Same reason the gate suppresses here: compiling a file re-emits its SyntaxWarnings against
+        # `<unknown>` and against whichever test triggered the read. See
+        # `test_reading_the_corpus_does_not_re_report_another_file_s_warning`.
+        warnings.simplefilter("ignore", SyntaxWarning)
+        tree = ast.parse(open(path, encoding="utf8").read())
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Name):
+            ref = node.id
+        elif isinstance(node, ast.Attribute):
+            ref = node.attr
+        elif isinstance(node, ast.Constant) and isinstance(node.value, str):
+            ref = node.value
+        else:
+            continue
+        nodes += 1
+        seen.add(ref)
+    return seen, nodes
+
+
+def test_this_file_does_not_reference_the_names_it_defends():
+    """THE TRAP THIS SLICE FELL INTO, pinned so the next run cannot repeat it.
+
+    `scan()` reads `agent/tests/*.py`, and under the AST rule a whole string constant equal to an
+    allowlisted name IS a reference. So writing one of those six names as a literal in the file that
+    guards them would retire the entry it is testing -- the control's own text becoming the evidence,
+    which is §8.2's defect one rule later.
+
+    Run 4 hit the regex version of this: two sentences in a docstring explaining the
+    `wordlists.payloads_for` exemption pushed that entry into `stale_allowlist` and turned
+    `test_the_allowlist_does_not_rot` red demanding its deletion. MEASURED, on `git archive HEAD` versus
+    HEAD plus run 4's files: 1 corpus hit (the `def` line) versus 3 (+ two docstring lines here), stale
+    [] versus ['payloads_for']. No caller existed in either tree."""
+    here = os.path.join(dg.APP_DIR, "tests", "test_deadcode_gate.py")
+    seen, nodes = _refs_in(here)
+    # POSITIVE CONTROL: the walk is looking. Without this an empty intersection is equally consistent
+    # with a reader that parsed nothing.
+    assert nodes > 500, "only %d reference nodes in this file; the walk is blind" % nodes
+    assert "ALLOWED_UNUSED" in seen, "the walk cannot see an attribute this file demonstrably uses"
+    collide = sorted(seen & set(dg.ALLOWED_UNUSED))
+    assert not collide, (
+        "this file references %s, which ALLOWED_UNUSED excuses -- so the gate's own test now retires "
+        "the entries it defends. Build the name at runtime (_an_allowlisted_name) instead of writing "
+        "it as a literal." % collide)
+
+
+def test_prose_about_an_allowlisted_entry_does_not_retire_it(tmp_path):
+    """NEGATIVE CONTROL AND ITS PAIR, and the pair is the whole point: a rule that never reports
+    staleness would pass the first half alone.
+
+    Run on a handful of synthetic files rather than a copy of the real tree because `scan()` over the
+    corpus costs ~135s MEASURED -- the code path is identical, only the walk is smaller."""
+    name = _an_allowlisted_name()
+    prose = tmp_path / "prose"
+    prose.mkdir()
+    (prose / "talks.py").write_text(
+        "# %s() is the documented operator-facing variant and is kept deliberately.\n"
+        "def unrelated():\n"
+        '    """This module explains why %s stays on the allowlist. It does not call %s."""\n'
+        "    return 1\n" % (name, name, name), encoding="utf8")
+    only_prose = dg.scan(str(prose))
+    assert only_prose["reference_nodes"] > 0, "positive control: the reference reader saw nothing at all"
+    assert only_prose["stale_allowlist"] == [], (
+        "a comment and a docstring ABOUT %s were read as a call to it: %s"
+        % (name, only_prose["stale_sites"]))
+
+    # THE PAIR. Same directory, same allowlist, one real attribute reference added. If this does not
+    # fire, the fix above did not make the check honest -- it made it silent.
+    called = tmp_path / "called"
+    called.mkdir()
+    (called / "talks.py").write_text((prose / "talks.py").read_text(encoding="utf8"), encoding="utf8")
+    (called / "uses.py").write_text(
+        "import wordlists as wl\n\n\ndef go(x):\n    return wl.%s(x)\n" % name, encoding="utf8")
+    real = dg.scan(str(called))
+    assert real["stale_allowlist"] == [name], (
+        "a genuine call to %s must retire its entry; got %s" % (name, real["stale_allowlist"]))
+    assert real["stale_sites"][name] == "uses.py:5", real["stale_sites"]
+
+
+def test_a_bare_name_and_a_dispatch_string_also_retire_an_entry(tmp_path):
+    """The other two reference kinds, so the pair above is not read as "only attributes count".
+
+    `from wordlists import payloads_for` then a bare use is an `ast.Name`; `getattr(mod, "...")` dispatch
+    is a whole string constant. Both are real wiring and both must retire an entry, or a function could
+    be wired through either and keep its exemption."""
+    name = _an_allowlisted_name()
+    for label, body in (("bare", "from wordlists import %s\n\n\ndef go(x):\n    return %s(x)\n"),
+                        ("dispatch", "import wordlists as wl\n\n\ndef go(x):\n"
+                                     '    return getattr(wl, "%s")(x)\n')):
+        d = tmp_path / label
+        d.mkdir()
+        (d / "uses.py").write_text(body.replace("%s", name), encoding="utf8")
+        assert dg.scan(str(d))["stale_allowlist"] == [name], "%s reference missed" % label
+
+    # CONTROL: a string that merely CONTAINS the name is prose, not dispatch. This is the exact
+    # distinction the regex could not draw, so it is asserted rather than assumed.
+    d = tmp_path / "substring"
+    d.mkdir()
+    (d / "uses.py").write_text(
+        'def go():\n    return "see %s for the operator path"\n' % name, encoding="utf8")
+    assert dg.scan(str(d))["stale_allowlist"] == []
+
+
+def test_the_declaring_file_would_retire_its_own_allowlist_if_it_were_read(tmp_path):
+    """MUTATION, proving the self-exclusion in `_ast_reference_sites` is load-bearing and not inherited
+    superstition.
+
+    Every ALLOWED_UNUSED key is a whole string constant in `deadcode_gate.py`, so the whole-string rule
+    matches all of them exactly. Read that file and the allowlist retires itself -- the declaration
+    proving the fact, which is the shape this module exists to catch. The mutation cannot be applied by
+    editing the module, so the file is copied in under a name the exclusion does not match."""
+    src = open(os.path.join(dg.APP_DIR, "deadcode_gate.py"), encoding="utf8").read()
+    (tmp_path / "copy_of_the_gate.py").write_text(src, encoding="utf8")
+    mutant, nodes = dg._ast_reference_sites(str(tmp_path), set(dg.ALLOWED_UNUSED))
+    assert nodes > 0, "positive control: the reader saw nothing"
+    assert set(mutant) == set(dg.ALLOWED_UNUSED), (
+        "the mutation must retire EVERY entry, or the exclusion is guarding less than it claims: %s"
+        % sorted(set(dg.ALLOWED_UNUSED) - set(mutant)))
+
+    # The exclusion restored: same bytes, real basename, nothing retired.
+    (tmp_path / "deadcode_gate.py").write_text(src, encoding="utf8")
+    os.remove(str(tmp_path / "copy_of_the_gate.py"))
+    guarded, nodes2 = dg._ast_reference_sites(str(tmp_path), set(dg.ALLOWED_UNUSED))
+    assert nodes2 == 0, "the declaring file was read anyway: %s" % guarded
+    assert guarded == {}
+
+
+def test_reading_the_corpus_does_not_re_report_another_file_s_warning(tmp_path):
+    r"""`_ast_reference_sites` is the first thing in this module to COMPILE `tests/*.py`, and compiling
+    re-emits every SyntaxWarning those files carry -- blamed on `<unknown>:<line>` and on whichever test
+    triggered the scan.
+
+    MEASURED at clean HEAD: `tests/test_client_request_source.py:95` has `\w` in a non-raw docstring;
+    pytest already reports it against that file and line, and this reader added a second copy naming
+    `test_no_unexplained_dead_functions`. A gate that attributes another file's defect to itself is
+    noise a reader learns to ignore, which is how a gate stops being read at all.
+
+    This docstring is RAW and the fixture below builds its backslash with `chr(92)`, because the first
+    version of this test wrote both as literals and so introduced two fresh copies of the exact warning
+    it exists to remove -- MEASURED, `tests/test_deadcode_gate.py:1096` and `:1103` in the run that
+    caught it.
+
+    POSITIVE CONTROL FIRST: the same source, compiled without the suppression, must genuinely warn --
+    otherwise this test passes on a Python that does not emit SyntaxWarning here and proves nothing."""
+    src = ('def go():\n    """a docstring with an invalid escape: %sw+"""\n    return 1\n' % chr(92))
+    (tmp_path / "noisy.py").write_text(src, encoding="utf8")
+    with warnings.catch_warnings(record=True) as control:
+        warnings.simplefilter("always")
+        compile(src, "noisy.py", "exec")
+    assert any(issubclass(w.category, SyntaxWarning) for w in control), (
+        "positive control: this source does not warn on this interpreter, so the check below is vacuous")
+
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always")
+        dg._ast_reference_sites(str(tmp_path), set(dg.ALLOWED_UNUSED))
+    assert not [w for w in caught if issubclass(w.category, SyntaxWarning)], (
+        "reading the corpus re-reported another file's SyntaxWarning: %s"
+        % [str(w.message) for w in caught])

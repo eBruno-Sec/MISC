@@ -593,3 +593,161 @@ Every number identical to run 3's, which is the point: this repair changed a tes
 frozenset. It did not move the ratchet, raise `QUALIFIED_BASELINE`, or widen any allowlist. No
 production module imports `deadcode_gate` — re-confirmed by an unfiltered grep across `.py`, `.sh`,
 `.yml`, `.html`, `Dockerfile` and `Makefile` — so a new module constant cannot reach a mission path.
+
+---
+
+## 11. Run 5 — the repair: a test docstring retired an allowlist entry, and the gate was right to notice
+
+Run 4 was killed holding RED uncommitted work. The failure handed to run 5:
+
+```
+1 failed, 58 passed, 1 xfailed in 148s
+FAILED tests/test_deadcode_gate.py::test_the_allowlist_does_not_rot
+AssertionError: these are no longer unused and should be removed from ALLOWED_UNUSED: ['payloads_for']
+```
+
+### 11.1 First question, because the brief could not answer it: HEAD, or only the delta?
+
+**MEASURED — only the delta. `070ab54` did not ship it.** Two `git archive HEAD` snapshots, identical
+apart from run 4's two uncommitted files, each scanned in its own throwaway container:
+
+```
+docker run --rm -i -v "<snap>/apolaki/agent:/app" -w /app apolaki-agent python -
+  import deadcode_gate as d; r = d.scan()
+
+git archive HEAD (5d72aa3)     scan() 134.8s   stale_allowlist []                passed True
+HEAD + run 4's two files       scan() 132.5s   stale_allowlist ['payloads_for']  passed False
+```
+
+`flagged` is `[]` and `total_functions` is 1628 in both, so nothing else moved. (Worth recording for the
+next lane: **`scan()` alone costs ~135 seconds**, which is where `test_deadcode_gate.py`'s ~150s goes,
+and why every check added here runs against a handful of synthetic files instead of a copy of the tree.)
+
+### 11.2 The brief's instruction was to name the new caller. There is no caller.
+
+> "Remove `payloads_for` from the allowlist, confirm the caller that now exists (name file and line)."
+
+**MEASURED FALSE, and the instruction is the trap rather than the fix.** An unfiltered whole-repo grep —
+`.py`, `.html`, `.yml`, `.sh`, `Makefile`, `Dockerfile`, tests, `ui/`, compose, excluding only
+`__pycache__` and `docs/` — for all six `ALLOWED_UNUSED` names returns **exactly six lines, and every one
+of them is the function's own `def`**:
+
+```
+agent/xxe_tool.py:79          def build_error_xml(...)
+agent/dependency_intel.py:311 def extract_script_srcs(html)
+agent/service_router.py:40    def is_ics_ot(service)
+agent/wordlists.py:192        def payloads_for(vuln_class)
+agent/wordlists.py:68         def seclists_available()
+agent/security.py:80          def validate_targets(values)
+```
+
+The only additional `payloads_for` hits in the whole repository are **two sentences in run 4's own new
+test docstring** — `agent/tests/test_deadcode_gate.py:817-818` — explaining why the entry is
+allowlisted. Positive control on that grep: it found all six definitions and both docstring lines, so
+the reader was demonstrably looking; the six zeros are the tree's, not the apparatus's.
+
+So the gate did not catch a rotted allowlist. **It read a sentence about an allowlist entry as a call to
+the function the entry is about** — Q-077's exact defect, in the one resolver Q-077 never converted,
+triggered by the paperwork of the ticket that exists to fix Q-077's consequences.
+
+Removing the entry as instructed would have been the worst available move: `payloads_for` is still dead,
+so the moment anyone rewords that docstring it returns as an *unjustified* island and
+`test_no_unexplained_dead_functions` — the blocking gate, not the pinned ratchet — goes red. The
+allowlist would have been trimmed on the strength of prose it wrote itself.
+
+### 11.3 Why `scan()`'s conservatism is safe in one direction and not the other
+
+`scan()` resolves `unused` with `re.compile(r"\b%s\b")` over raw source, deliberately, and the module
+docstring defends that at length. The same set then fed `stale_allowlist`, and there the identical rule
+inverts:
+
+| | rule | effect | verdict |
+|---|---|---|---|
+| `flagged` | a mention counts as a use | the gate stays quiet | documented, deliberate under-report |
+| `stale` | a mention counts as a use | the gate declares a still-dead function "no longer unused" | **LOUD IN THE WRONG DIRECTION**, and the remedy it demands is deleting a true justification |
+
+A retraction is not a conservative error. `stale` is now resolved off the AST
+(`_ast_reference_sites`); `unused` is untouched, so the blocking gate keeps exactly the conservatism it
+documents and no name newly appears in `flagged`.
+
+Three reference kinds count, the same three `_ast_refs` can prove: `ast.Name`, `ast.Attribute` on any
+receiver (type-blind, as `scan_methods` is), and a **whole** string constant equal to the name
+(`getattr` dispatch). A docstring is one Constant holding prose, so it can no longer smuggle a name past
+the check. Because a reference is a strict subset of a text hit, `stale` **can only get quieter** — which
+is why every new check below ships with the pair that proves it can still fire.
+
+The module docstring also claimed *"All three resolvers matched a bare name by REGEX OVER RAW SOURCE"* in
+the past tense. Q-077 converted **two**. That sentence has been corrected in place: it was itself a
+declaration contradicted by the code beneath it, and it is what let this hole sit unnoticed.
+
+### 11.4 The trap this slice fell into on the way out, which is the part worth copying
+
+`scan()` reads `agent/tests/*.py`, and under the new rule a whole string constant equal to an
+allowlisted name **is** a reference. So writing one of those six names as a literal in the test file that
+guards them retires the entry it is testing — §8.2's defect, one rule later, in the fix for §8.2's
+cousin. Every new test therefore builds the name at runtime (`_an_allowlisted_name()`), and
+`test_this_file_does_not_reference_the_names_it_defends` walks this file's own AST and fails if any of
+the six appears as a `Name`, an `Attribute` or a whole string — with a positive control (>500 reference
+nodes seen, and `ALLOWED_UNUSED` found) so an empty intersection cannot come from a blind walk.
+
+The same hazard is why `_ast_reference_sites` excludes `deadcode_gate.py`, and there the exclusion is
+**load-bearing rather than inherited**: every `ALLOWED_UNUSED` key is a whole string constant in that
+file, so reading it retires the entire allowlist by declaration.
+`test_the_declaring_file_would_retire_its_own_allowlist_if_it_were_read` applies that mutation without
+editing the module — the file is copied in under a name the exclusion does not match — and requires
+**all six** entries to be retired, then restores the real basename and requires zero. MEASURED: 6 then 0.
+
+### 11.5 What landed, and its controls
+
+`agent/deadcode_gate.py` and `agent/tests/test_deadcode_gate.py` only.
+
+1. `_ast_reference_sites(app, wanted)` → `({name: "file:line"}, nodes_walked)`. Returns the **location**,
+   because the failure it replaces named the entry and nothing else and left the reader to guess.
+   `scan()` now returns `stale_sites` and `reference_nodes` alongside `stale_allowlist`.
+2. `test_prose_about_an_allowlisted_entry_does_not_retire_it` — **negative control and its pair**: a
+   comment plus a docstring naming the entry must not retire it; the same directory with one real
+   `wl.<name>(x)` added must retire it **and name `uses.py:5`**. Without the pair, a rule that never
+   reports staleness passes the first half.
+3. `test_a_bare_name_and_a_dispatch_string_also_retire_an_entry` — the other two reference kinds, plus
+   the control that a string merely *containing* the name is prose, not dispatch. That is the exact
+   distinction the regex could not draw, so it is asserted rather than assumed.
+4. `ALLOWED_UNUSED` **not** trimmed. `QUALIFIED_BASELINE` **not** raised, no allowlist widened,
+   `QUALIFIED_BASELINE_SET` and `RECORDED_THEN_EXCUSED` untouched. The ratchet still reads 51 against 37
+   and the strict xfail stays pinned.
+
+### 11.6 The failure reproduced before it was changed, and afterwards
+
+`git archive HEAD` + run 4's two files, in a throwaway container — the reported failure, verbatim, and
+nothing else:
+
+```
+docker run --rm -v "<snapB>/apolaki/agent:/app" -w /app apolaki-agent \
+  python -m pytest tests/test_deadcode_gate.py -p no:cacheprovider -q
+
+.F........................x.......................            1 failed, 49 passed, 1 xfailed
+FAILED test_the_allowlist_does_not_rot
+  AssertionError: these are no longer unused and should be removed from ALLOWED_UNUSED: ['payloads_for']
+  res = {'unused': [], 'allowed': [...5 entries...], 'stale_allowlist': ['payloads_for'], ...}
+```
+
+RECORDED DISCREPANCY, not smoothed over: the brief quotes `1 failed, 58 passed, 1 xfailed` — 60 items.
+This file collects **50** at HEAD+run 4 and 55 with run 5's five added, so the Coordinator's run
+collected ten items this path does not contain and was a broader selection than
+`tests/test_deadcode_gate.py`. The failure, its test and its message are identical, so the repair is
+against the right defect; the item count is not comparable and should not be quoted as if it were.
+
+### 11.7 Warning attribution, because it was a real delta
+
+Reading `tests/*.py` is the first thing in this module to COMPILE them, and compiling re-emits their
+SyntaxWarnings. MEASURED: `tests/test_client_request_source.py:95` has `\w` in a non-raw docstring;
+pytest already reports it correctly against that file, and the new reader added a second copy blaming
+`test_no_unexplained_dead_functions`. Suppressed at the read only —
+`test_reading_the_corpus_does_not_re_report_another_file_s_warning` proves the suppression works AND
+opens with a positive control compiling the same source unsuppressed, so it cannot pass vacuously on an
+interpreter that does not warn. The original report is untouched:
+
+```
+docker run ... pytest tests/test_client_request_source.py -q
+  11 passed
+  tests/test_client_request_source.py:95: SyntaxWarning: invalid escape sequence '\w'
+```

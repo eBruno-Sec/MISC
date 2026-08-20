@@ -35,6 +35,28 @@ docstring prose), 5 by a comment, and 0 by a real reference.** Three of the 27 a
 was the only thing keeping its own entry points off the list. That is the declaration-versus-fact
 pattern living inside the instrument built to detect it.
 
+**THAT PARAGRAPH WAS ITSELF THE SHAPE IT DESCRIBES, and it stayed wrong for two tickets (Q-078, run 5).**
+"All three resolvers" is the confession; Q-077 converted TWO. `scan()`'s `unused` set is still a regex
+over raw source, deliberately (see the conservatism note above) -- but the SAME regex also fed
+`stale_allowlist`, and there the conservatism inverts. For `flagged`, "a mention counts as a use" makes
+the gate quiet, which is the documented under-report. For `stale`, the identical rule makes the gate
+LOUD IN THE WRONG DIRECTION: it declares a still-dead function "no longer unused" and the remedy it
+demands is to delete a true justification.
+
+MEASURED, and the trigger was this file's own paperwork. Run 4 wrote a test whose docstring explains the
+`wordlists.payloads_for` exemption; `scan()` reads `agent/tests/*.py`, matched `\bpayloads_for\b` in that
+prose twice, and `test_the_allowlist_does_not_rot` failed demanding the entry's removal --
+
+    git archive HEAD  : 1 corpus hit  (wordlists.py:192, the `def` line)          stale []
+    HEAD + run 4      : 3 corpus hits (+ tests/test_deadcode_gate.py:817,818)     stale ['payloads_for']
+
+Neither new hit is a caller. Both are sentences ABOUT the allowlist entry, inside the test that guards
+it. This module already excludes ITSELF from the corpus for exactly this hazard ("ALLOWED_UNUSED names
+every allowlisted function, so counting those mentions would make each entry look called") -- the hazard
+simply moved one file over, into the test file that by construction names every entry it defends.
+Documenting an exemption must never retire it. `stale` is now resolved off the AST (`_ast_referenced_names`),
+which closes it for prose in ANY file rather than for one more excluded filename.
+
 `scan_qualified()` is the honest check: module-resolved, import-alias-aware, production-only. It reports
 substantially more, and those extras are CANDIDATES, not proven-dead — several will be reachable through
 patterns it does not model. So it ships as a RATCHET (`QUALIFIED_BASELINE`) rather than a blocking gate:
@@ -47,6 +69,7 @@ from __future__ import annotations
 import ast
 import os
 import re
+import warnings
 
 APP_DIR = os.path.dirname(os.path.abspath(__file__))
 
@@ -62,6 +85,36 @@ ALLOWED_UNUSED = {
     "seclists_available": "wordlists: environment probe used by operators to check SecLists presence",
     "validate_targets": "security: batch validator kept beside is_valid_target for API callers",
 }
+
+# Which MODULE each ALLOWED_UNUSED justification was written about, read off the reason itself (Q-078,
+# run 4). `scan()` is a bare-name scan and this changes nothing for it; `scan_qualified` is NOT, and
+# matching its dotted entries against a BARE-NAME list was a hole big enough to walk a new island through.
+#
+# MEASURED by mutation, on a writable copy of the real tree, with its own paired control:
+#
+#   append `def payloads_for(rows)` to security.py  -> count 51 -> 51, allowed, unaccounted []  SILENT
+#   append `def brand_new_island_fn(rows)` to it    -> count 51 -> 52, unaccounted
+#                                                      ['security.brand_new_island_fn']  CAUGHT
+#
+# One line of justification written about `wordlists.payloads_for` was silently excusing a brand-new
+# dead function in `security`, a module with no relationship to it -- defeating the count ratchet AND
+# the accounting gate above it, which is worse than the hole run 3 closed. 130 function names in this
+# tree are defined in more than one module, so the collision surface is not theoretical.
+#
+# The fix costs nothing because the answer was already written down. Every reason here is
+# `"<module>: <why>"`, and that prefix is the module the exemption is about -- prose stating a fact the
+# code then ignored, which is the exact Q-077 shape this file exists to catch, sitting in the file
+# itself. Now the prose is load-bearing and CHECKED: `test_every_bare_allowlist_entry_names_the_module_
+# that_defines_it` asserts each declared owner really defines that function.
+#
+# FAILS CLOSED by construction. A reason without the prefix yields an owner that matches no module, so
+# the entry stops excusing anything and counts toward the ratchet -- the safe direction. It cannot fail
+# open.
+#
+# MEASURED, and this is the number that matters for a hardening: all six owners resolve to the module
+# that defines them, each name is defined in exactly one module today, and the qualified count is
+# UNCHANGED at 51. Nothing was being hidden; the door was simply unlocked.
+ALLOWED_UNUSED_OWNER = {name: why.split(":")[0].strip() for name, why in ALLOWED_UNUSED.items()}
 
 
 # Justifications for the QUALIFIED scan only. Kept SEPARATE from ALLOWED_UNUSED on purpose: the two
@@ -221,6 +274,85 @@ def _decorated(node) -> bool:
     return bool(getattr(node, "decorator_list", None))
 
 
+def _ast_reference_sites(app: str, wanted) -> tuple:
+    """({name: "file:line" of its first REAL reference}, reference_nodes_seen) over the corpus `scan()`
+    reads -- production modules (minus this one) plus the test tree -- read off the AST, never off raw
+    source text.
+
+    This exists for `stale_allowlist` and nothing else. `unused` stays on the regex on purpose: there it
+    over-counts uses and so UNDER-reports dead code, which is the documented, deliberate conservatism.
+    `stale` is the same rule pointed the other way, where over-counting uses makes the gate demand the
+    deletion of a justification for a function that is still dead. A retraction is not a conservative
+    error, so it does not get to run on a conservative signal.
+
+    Three reference kinds count, matching what `_ast_refs` can prove:
+
+      * `ast.Name`      -- `from wordlists import payloads_for` then `payloads_for(...)`
+      * `ast.Attribute` -- `wl.payloads_for(...)`, on any receiver. The receiver's type is not inferred,
+                           the same deliberately type-blind rule `scan_methods` uses: a same-named
+                           attribute elsewhere can mask a retirement. That under-claims staleness, which
+                           is the safe direction for a signal whose remedy is a deletion.
+      * a WHOLE string constant equal to the name -- `getattr(mod, "payloads_for")` dispatch. Whole
+                           value, not a substring: a docstring is one Constant holding prose, so it can
+                           no longer smuggle a name past the check the way a regex over raw text did.
+
+    A definition can never count itself: `def payloads_for(...)` is a FunctionDef, so the old "subtract
+    one hit per definition site" correction has no AST equivalent to need, and one more place to be
+    off-by-one is gone with it.
+
+    NOT read here: `ui/index.html`, which the regex corpus does include. MEASURED -- an unfiltered
+    whole-repo grep for all six ALLOWED_UNUSED names returns exactly six lines, each one the function's
+    own `def`, so no entry has a UI mention to lose; and the suite runs in a container that mounts only
+    `agent/`, where that file does not exist at all. A JavaScript token is not a Python caller.
+
+    The LOCATION is returned, not just the fact, because the failure this replaces was unreadable: "these
+    are no longer unused" named the entry and nothing else, and the reader's only move was to guess. The
+    site turns the message into an instruction -- go here, look at this line, decide whether it is a call
+    or a sentence."""
+    sites, nodes = {}, 0
+    paths = [os.path.join(app, fn) for fn in sorted(os.listdir(app))
+             # SELF-EXCLUSION, and here it is LOAD-BEARING rather than inherited: every ALLOWED_UNUSED
+             # key is a whole string CONSTANT in this file, so the whole-string rule above would match
+             # all six exactly and retire the entire allowlist on the strength of its own declaration.
+             # The AST rule does not save us from this one; the exclusion does. Proven by
+             # `test_the_declaring_file_would_retire_its_own_allowlist_if_it_were_read`.
+             if fn.endswith(".py") and fn != os.path.basename(__file__)]
+    tdir = os.path.join(app, "tests")
+    if os.path.isdir(tdir):
+        paths += [os.path.join(tdir, fn) for fn in sorted(os.listdir(tdir)) if fn.endswith(".py")]
+    for path in paths:
+        try:
+            # This is the first thing here to compile `tests/*.py`, and compiling re-emits every
+            # SyntaxWarning those files carry -- attributed to `<unknown>:<line>` and to whichever test
+            # happened to trigger the scan. MEASURED at clean HEAD: `tests/test_client_request_source.py`
+            # has `\w` in a non-raw docstring, pytest already reports it correctly against that file and
+            # line, and reading the file here added a SECOND copy blaming `test_no_unexplained_dead_
+            # functions`. Suppressed at the read, not globally: the real report is untouched (positive
+            # control in `test_reading_the_corpus_does_not_re_report_another_file_s_warning`), and a gate
+            # that misattributes another file's defect to itself is noise a reader learns to ignore.
+            with warnings.catch_warnings():
+                warnings.simplefilter("ignore", SyntaxWarning)
+                tree = ast.parse(open(path, encoding="utf8").read())
+        except Exception:
+            continue
+        label = os.path.basename(path)
+        if os.path.basename(os.path.dirname(path)) == "tests":
+            label = "tests/" + label
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Name):
+                ref = node.id
+            elif isinstance(node, ast.Attribute):
+                ref = node.attr
+            elif isinstance(node, ast.Constant) and isinstance(node.value, str):
+                ref = node.value
+            else:
+                continue
+            nodes += 1
+            if ref in wanted and ref not in sites:
+                sites[ref] = "%s:%d" % (label, node.lineno)
+    return sites, nodes
+
+
 def scan(app_dir: str = None) -> dict:
     """{unused, allowed, stale_allowlist}. Conservative: a name appearing anywhere outside its own
     definition counts as used, so this under-reports rather than over-reports."""
@@ -269,8 +401,19 @@ def scan(app_dir: str = None) -> dict:
             unused.append({"name": name, "at": places})
     flagged = [u for u in unused if u["name"] not in ALLOWED_UNUSED]
     allowed = [u["name"] for u in unused if u["name"] in ALLOWED_UNUSED]
-    stale = sorted(set(ALLOWED_UNUSED) - {u["name"] for u in unused})
+    # STALE = "this entry is now REALLY CALLED", resolved off the AST -- not "the regex above stopped
+    # finding it unused", which is what it used to mean and which a sentence about the entry was enough
+    # to trigger. See `_ast_reference_sites` and the docstring at the top of this module for the run that
+    # measured it. An entry in `unused` has zero text hits and so can never be referenced, so this set is
+    # a strict subset of the old one: the check can only get quieter, never louder, which is why it ships
+    # with a paired control that adds a real call and requires the entry to be named.
+    sites, ref_nodes = _ast_reference_sites(app, set(ALLOWED_UNUSED))
+    stale = sorted(sites)
+    # POSITIVE CONTROL, carried in the result so no test can conclude anything from an empty `stale`
+    # without first proving the reader saw the tree. A blind `_ast_reference_sites` -- wrong directory,
+    # every parse failing -- returns an empty dict and produces the same empty `stale` as a clean tree.
     return {"unused": flagged, "allowed": allowed, "stale_allowlist": stale,
+            "stale_sites": sites, "reference_nodes": ref_nodes,
             "total_functions": len(defs), "passed": not flagged and not stale}
 
 
@@ -648,10 +791,16 @@ def scan_qualified(app_dir: str = None) -> dict:
                 unused.append("%s.%s" % (mod, f))
     # Honour the same allowlist `scan()` uses. Without this, six functions that already carry a written
     # justification counted toward the ratchet, which both inflates the number and makes it mean two
-    # different things at once ("unwired" vs "unwired and unexplained"). Matched on the bare name because
-    # ALLOWED_UNUSED is keyed that way.
+    # different things at once ("unwired" vs "unwired and unexplained").
+    #
+    # ALLOWED_UNUSED is keyed by BARE NAME, and this scan's entries are `module.function`. Matching the
+    # bare halves excused ANY module's function that happened to share the name -- MEASURED, a new
+    # `security.payloads_for` island rode in on the justification written for `wordlists.payloads_for`
+    # with the count unmoved and `unaccounted` empty. So the OWNING MODULE must match too; see
+    # ALLOWED_UNUSED_OWNER.
     def _justified(entry):
-        return (entry.split(".")[-1] in ALLOWED_UNUSED or entry in ALLOWED_UNUSED_QUALIFIED
+        mod, _, bare = entry.rpartition(".")
+        return (ALLOWED_UNUSED_OWNER.get(bare) == mod or entry in ALLOWED_UNUSED_QUALIFIED
                 or entry in ALLOWED_UNUSED_NAMED_CALLER)
 
     allowed = [u for u in unused if _justified(u)]
