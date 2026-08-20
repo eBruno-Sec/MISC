@@ -278,3 +278,65 @@ column carrying the same rule per row.
     restore the old WSTG clause          -> test_the_q084_sentence_is_extended_and_not_undone fails,
                                             while test_wstg_coverage_claim.py still PASSES -- which is
                                             the evidence the new test covers ground the old one cannot
+
+---
+
+# Q-022 residual · ORACLE 1 was NOT met, and in markdown the record never appeared at all
+
+The critical half of Q-022 is closed (above). **Its oracle 1 was not**, and the gap is in the same
+section:
+
+> *"A finding with a recorded control renders the RECORDED values (url/status/length), and those
+> values appear in the output."*
+
+The RECORDED branch was correctly GATED on the artifact and then printed
+`technique_model.proof_contract` keyed on FAMILY ALONE, quoting nothing. MEASURED on the stored BIE
+finding of mission `57cc3b49`, whose three real controls are in the volume:
+
+    text : A negative-control request WITHOUT the trigger does NOT reproduce the confirming signal
+           (differential measured over a stable baseline).
+
+    label 'nonexistent'   md=False  html=False
+    nonexistent.url       md=False  html=True     <- HTML only, from browser_evidence_html's table
+    control.url           md=False  html=True
+
+**A MARKDOWN reader met a heading claiming a confirmation with no record of anything underneath it**,
+and an HTML reader got the values only from a separate table the prose never referenced. The gate was
+right; the sentence was still a template. That is the narrow, true residue of Q-022 and it is now fixed.
+
+## After
+
+    text : NEGATIVE CONTROL RECORDED for this finding — anon: GET http://juice-shop:3000/rest/basket/7
+           -> 401 972 B as anonymous; nonexistent: GET .../rest/basket/99999901 -> 200 32 B as user_b;
+           control: GET .../rest/basket/8 -> 200 154 B as user_b. The differential this technique's
+           contract requires: A negative-control request WITHOUT the trigger does NOT reproduce ...
+
+Every label, url, method, status, length and persona now reaches BOTH renderers. **Bodies and header
+dicts deliberately do not** -- oracle 1 asks for url/status/length, and the anon control's body is a
+972-byte HTML error page.
+
+The record LEADS and the contract follows, explicitly labelled as what the technique requires: the
+same record-before-prescription ordering the NOT_RECORDED branch already used, pointed the other way.
+The contract sentence is not deleted -- a reviewer still needs to know what the control was meant to
+establish -- and a test asserts both halves plus their ORDER.
+
+## The corpus is unchanged in every other direction, re-measured after the change
+
+    control_status over ALL 1783 stored findings:  not_recorded 1064 · not_applicable 716 · recorded 3
+    Q-022 VIOLATIONS: 0        MARKDOWN violations: 0        HTML violations: 0
+    proof_and_retest text != negative_control_claim text: 0
+
+(The corpus grew from 1773 to 1783 findings and 154 to 156 missions DURING this session -- another
+lane is running missions. The ratios are unchanged and the 10 new rows are all `not_recorded`.)
+
+## Mutation tests, each verified as LANDED first — and what they prove about the EXISTING tests
+
+    RECORDED branch quotes nothing again  -> 6 tests fail, and test_nested_negative_control.py and
+                                             test_proof_claim_matches_artifact.py BOTH STILL PASS.
+                                             The pre-existing suite could not see this defect at all.
+    deep-scan the decoy `browser_evidence.control`
+                                          -> test_the_line_builder_agrees_with_the_status_predicate_
+                                             on_every_shape fails: quoted values appeared on a finding
+                                             that reads NOT_RECORDED. That decoy is the "worse lie
+                                             than the bug" Q-071's comment names, and the invariant
+                                             (lines exist IFF status is RECORDED) is what excludes it.

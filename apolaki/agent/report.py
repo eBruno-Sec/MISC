@@ -1441,6 +1441,78 @@ def control_status(finding: dict) -> str:
     return _ps.control_status(dict(finding, **{_NESTED_CONTROL_KEY: art}))
 
 
+def _control_line(label: str, art) -> str:
+    """One recorded control, rendered from its OWN stored values. Pure. Never a body or a header set —
+    oracle 1 asks for url/status/length, and a response body in a prose sentence is unreadable."""
+    label = str(label or "").strip()
+    if isinstance(art, dict):
+        bits = []
+        for k, fmt in (("method", "%s"), ("url", "%s"), ("status", "-> %s"), ("len", "%s B"),
+                       ("persona", "as %s")):
+            v = art.get(k)
+            if v not in (None, "", {}, []):
+                bits.append(fmt % (str(v)[:200],))
+        # the ws_tool / mass_assign_tool record shape carries prose rather than an exchange
+        if not bits:
+            for k in ("kind", "description", "result", "rules_out"):
+                v = art.get(k)
+                if isinstance(v, str) and v.strip():
+                    bits.append(v.strip()[:160])
+                    break
+        body = " ".join(bits)
+    else:
+        body = str(art or "").strip()[:160]
+    if not body:
+        return ""
+    return ("%s: %s" % (label, body)) if label else body
+
+
+def recorded_control_lines(finding: dict) -> list:
+    """The values a producer ACTUALLY recorded, one short line per control. Pure; [] when none.
+
+    Q-022 oracle 1: *"a finding with a recorded control renders the RECORDED values (url/status/
+    length), and those values appear in the output."* The RECORDED branch was gated on the artifact
+    (837b1f0, Q-071) but still PRINTED the family-keyed contract sentence and quoted nothing, so the
+    section named "How this was confirmed" showed no record of anything. MEASURED on the live corpus:
+    in the MARKDOWN report the artifact never appeared at all -- the labels `nonexistent` and
+    `control`'s url are absent from the document, because `browser_evidence_html` is HTML-only, so a
+    markdown reader got a confirmation heading over a template with no values under it.
+
+    Reads the SAME artifact `control_status` decided on, via the same two lookups, so a line can never
+    be produced for a finding that reads NOT_RECORDED and vice versa -- one definition of "recorded".
+    """
+    if not isinstance(finding, dict):
+        return []
+    art = nested_control(finding)
+    if art is None:
+        for k in _CONTROL_KEYS:
+            v = finding.get(k)
+            if isinstance(v, (list, tuple, dict)) and len(v):
+                art = v
+                break
+            if isinstance(v, str) and v.strip():
+                art = v
+                break
+    if art is None:
+        return []
+    out = []
+    if isinstance(art, dict):
+        for label, x in art.items():
+            ln = _control_line(label, x)
+            if ln:
+                out.append(ln)
+    elif isinstance(art, (list, tuple)):
+        for x in art:
+            ln = _control_line((x or {}).get("kind", "") if isinstance(x, dict) else "", x)
+            if ln:
+                out.append(ln)
+    else:
+        ln = _control_line("", art)
+        if ln:
+            out.append(ln)
+    return out
+
+
 def control_ran(finding: dict) -> bool:
     """Did a REQUEST-BASED negative control actually run for THIS finding? Pure, deliberately strict.
 
@@ -1504,8 +1576,20 @@ def negative_control_claim(finding: dict) -> dict:
                          + ". If the same rule fired on that too, this would be a signature, not a "
                            "detector.")}
     if status == _ps.CONTROL_RECORDED:
+        # Q-022 oracle 1. The gate was right and the SENTENCE was still a template: this branch
+        # printed the family-keyed contract and quoted nothing, so the one section whose heading
+        # claims a confirmation showed no record of one. The recorded values now LEAD, and the
+        # contract text follows explicitly labelled as what the technique requires -- the same
+        # record-before-prescription ordering the NOT_RECORDED branch already used, pointed the
+        # other way. `recorded_control_lines` reads the artifact `control_status` decided on, so
+        # this branch cannot describe a control that did not make the finding read RECORDED.
+        lines = recorded_control_lines(f)
+        text = nc
+        if lines:
+            text = ("NEGATIVE CONTROL RECORDED for this finding — " + "; ".join(lines)
+                    + ". The differential this technique's contract requires: " + nc)
         return {"status": status, "counter_example": None,
-                "heading": "How this was confirmed (false-positive safety)", "text": nc}
+                "heading": "How this was confirmed (false-positive safety)", "text": text}
     return {"status": status, "counter_example": None,
             "heading": "False-positive safety: NOT ESTABLISHED for this finding",
             "text": ("NO NEGATIVE CONTROL WAS RECORDED for this finding. The control that would "
