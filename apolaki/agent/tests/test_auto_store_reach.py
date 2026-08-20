@@ -59,7 +59,6 @@ _NOT_AUTO_STORED_AND_WHY = {
     "confirm_read_object_idor": "forwarded by BBHAgent._do_persona_authz",
     "run_header_trust": "forwarded by BBHAgent._do_header_trust",
     "run_saml": "forwarded by BBHAgent._do_saml",
-    "run_service_pack": "forwarded by BBHAgent._run_service_packs",
 }
 
 
@@ -188,7 +187,8 @@ def _finding(tool, confidence="candidate"):
     }
 
 
-@pytest.mark.parametrize("tool", ["run_fingerprint", "run_github_recon", "run_whatweb"])
+@pytest.mark.parametrize(
+    "tool", ["run_fingerprint", "run_github_recon", "run_service_pack", "run_whatweb"])
 def test_directly_dispatched_finding_producers_reach_the_store_path(tool):
     """Registration is not storage; the production dispatcher must forward the result itself."""
     agent = _agent()

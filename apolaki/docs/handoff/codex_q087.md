@@ -134,23 +134,37 @@ No engine was bulk-added. Each verdict was observed through the production owner
 | `confirm_read_object_idor` | parent-forwarded | `BBHAgent._do_persona_authz` |
 | `run_header_trust` | parent-forwarded | `BBHAgent._do_header_trust` |
 | `run_saml` | parent-forwarded | `BBHAgent._do_saml` |
-| `run_service_pack` | parent-forwarded | `BBHAgent._run_service_packs` |
+| `run_service_pack` | both: parent-forwarded internally and auto-stored when graph-dispatched | `BBHAgent._run_service_packs`; `_graph_action_step` -> `_run_tool` |
 | `run_fingerprint` | live false-clean; auto-store | direct `_run_tool` dispatch |
 | `run_github_recon` | live false-clean; auto-store | direct `_run_tool` dispatch |
 | `run_whatweb` | live false-clean; auto-store | direct `_run_tool` dispatch |
 
 The parent controls execute the real owner method, inject a distinct child finding, and require that
-exact object in both the emitted event and `agent.findings`. The three direct controls execute
-`_run_tool` and require the candidate to reach both a `lead` event and `agent.leads`.
+exact object in both the emitted event and `agent.findings`. The direct controls execute `_run_tool`
+and require the candidate to reach both a `lead` event and `agent.leads`.
+
+An additional call-path audit caught a dual-route case before handoff: `run_service_pack` is forwarded
+when `_run_service_packs` calls it internally, but `AssetGraph.next_best_actions` can also emit it and
+`_graph_action_step` dispatches that route through `_run_tool`. Parent forwarding does not protect the
+graph route. Adding the direct execution control before changing production failed semantically:
+
+```text
+FAILED test_directly_dispatched_finding_producers_reach_the_store_path[run_service_pack]
+run_service_pack executed but its finding was dropped
+1 failed in 3.71s
+```
+
+It is therefore in `_AUTO_STORE_TOOLS`, not the forwarding exemption list; the parent execution test
+remains to protect the internal route.
 
 The stale strict-xfail reason was corrected while measuring all eight, then superseded by retiring
 the marker when the gate passed. Targeted result:
 
 ```text
-11 passed in 3.80s
+12 passed in 3.96s
 ```
 
-Combined storage/dispatcher and owner-path controls:
+Combined storage/dispatcher and owner-path controls (before the additional direct service-pack case):
 
 ```text
 368 passed, 3 warnings in 120.52s (0:02:00)
