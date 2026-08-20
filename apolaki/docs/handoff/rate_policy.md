@@ -231,3 +231,53 @@ does not resurrect a past date into a wait, NEG 200 proves it does not leak onto
 statuses, and B5 proves it is still bounded by the same ceiling. `NEG RA banana` deliberately
 changes meaning when the knob is on — an unparseable hint is a limit whose hint is unusable, not a
 limit that never happened.
+
+---
+
+## 5. Bounded and configurable — the ceiling named, and what happens AT it
+
+    docker run --rm -v "$SNAP:/app" -v "$MEASURE:/measure" -w /app apolaki-agent \
+      python -u /measure/ceiling.py
+
+    CONSTANTS
+      RATE_POLICY_DEFAULT_MAX_SECONDS = 30.0
+      RATE_POLICY_HARD_MAX_SECONDS    = 300.0
+      RATE_POLICY_BARE_DEFAULT_SECONDS= 0.0
+
+    EFFECTIVE CEILING vs BBH_RETRY_AFTER_MAX_SECONDS
+      env=None      -> max_wait=30.0        env='banana'  -> max_wait=30.0
+      env='5'       -> max_wait=5.0         env='-3'      -> max_wait=30.0
+      env='0'       -> max_wait=0.0         env='nan'     -> max_wait=30.0
+      env='100000'  -> max_wait=300.0       env='inf'     -> max_wait=30.0
+
+**The ceiling is `BBH_RETRY_AFTER_MAX_SECONDS`, defaulting to 30 s, itself hard-capped at 300 s**
+(`RATE_POLICY_HARD_MAX_SECONDS`) so no env var can park a mission for an hour. Every malformed
+value falls back to 30 s rather than to something large.
+
+**What happens at the ceiling** — the answer is *the request goes out*, not *the mission stops*:
+
+    observe(Retry-After: 86400) returns 4.0        # header clamped to the ceiling
+    stats['capped']                    = 1         # and the clamp is COUNTED, not silent
+    wait_sync slept                    = [4.0]     # then the request GOES OUT
+    ledger token                       = '[backoff 4.0s x1, truncated at cap]'
+
+An absurd `Retry-After: 86400` therefore costs one ceiling's worth of politeness and no more —
+**MEASURED end to end at 4.007 s on `_http` (§2) and 4.029 s through a real browser (§4b)** under a
+4 s ceiling. The truncation is visible in the ledger rather than silent, so a scan that is being
+throttled cannot be mistaken for a scan that is merely slow.
+
+The same bound covers the nastier case, a deadline that keeps MOVING because sibling workers keep
+meeting fresh 429s — the GAP-1 regression that once parked one caller for 270 s under a 30 s cap:
+
+    total waited      = 30.0 (ceiling 30)
+    ledger token      = '[backoff 30.0s x1, truncated at cap]'
+    cooldown SURVIVES = 30.0 -> next crossing waits again
+
+Truncation releases **one request**, it does not cancel the target's cooldown, so politeness
+degrades gracefully instead of switching off after the first 30 s.
+
+> **One thing the Coordinator should know: `BBH_RETRY_AFTER_MAX_SECONDS=0` is a total kill switch.**
+> It is accepted as valid (not treated as malformed), and at 0 the policy never waits for anything
+> on any path. That is a legitimate escape hatch, but it is indistinguishable in the logs from a
+> target that never rate-limited, because a zero-length wait writes no ledger token by design (§4,
+> `describe_wait`). If Q-043 wants the policy to be *unbypassable*, this is the bypass.

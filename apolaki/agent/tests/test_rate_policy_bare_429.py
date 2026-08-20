@@ -156,3 +156,47 @@ def test_the_bare_backoff_is_shared_per_origin_not_per_url():
     policy.observe("https://a.example/one", 429, {})
     assert policy.remaining("https://a.example/two") == pytest.approx(2.0)
     assert policy.remaining("https://b.example/two") == 0.0
+
+
+# ------------------------------------------------------- HTTP-date in the PAST (Q-043 clause 3)
+# The suite tested `wall + 7` and nothing else. MEASURED: deleting the `max(0.0, ...)` clamp in
+# `retry_after_seconds` left the ENTIRE suite green (docs/handoff/rate_policy.md §6), so the clamp
+# was carrying no test at all.
+#
+# What the clamp actually protects was measured on the mutant rather than assumed, and it is NOT
+# what it first looks like. With the clamp removed:
+#     observe(...) returns -114679926.9      <- a negative delay escapes to every caller
+#     remaining(...)                == 0.0   <- still fine, `max(0.0, deadline - now)` clamps again
+#     a sibling's live 10s cooldown == 10.0  <- still fine, `max(deadline, existing)` holds
+# So the deadline itself is defended twice over downstream; the leak is the RETURN VALUE, which is
+# what reaches ledger notes and the zap rate events (`retry_after_seconds` in a reported event).
+# A report that says a target asked us to wait -114679926 seconds is the defect. The two sibling
+# assertions below are kept as positive controls proving those two `max()` calls hold on their own.
+_PAST = "Sun, 01 Jan 2023 00:00:00 GMT"
+
+
+@pytest.mark.parametrize("status", [429, 503])
+def test_a_retry_after_date_in_the_past_clamps_to_zero_and_never_goes_negative(status):
+    policy = browser.TargetRatePolicy(
+        max_wait=30, clock=lambda: 1000.0,
+        sync_sleep=lambda d: pytest.fail("slept on a Retry-After date that had already passed"))
+    assert policy.observe("https://a.example/x", status, {"retry-after": _PAST}) == 0.0
+    assert policy.remaining("https://a.example/x") == 0.0
+    policy.wait_sync("https://a.example/x")
+
+
+def test_retry_after_seconds_never_returns_a_negative_delay():
+    """Directly on the parser, so the clamp is guarded even if `observe` stops calling it."""
+    assert browser.retry_after_seconds(_PAST) == 0.0
+    assert browser.retry_after_seconds(_PAST, now=4102444800.0) == 0.0
+    assert browser.retry_after_seconds("Thu, 01 Jan 2099 00:00:00 GMT", now=4102444800.0) == 0.0
+
+
+def test_a_stale_date_cannot_erase_a_live_cooldown_set_by_a_sibling():
+    """The real damage a negative delay would do: rewind a deadline another worker is parked on."""
+    policy = _policy(max_wait=30)
+    assert policy.observe("https://a.example/first", 429, {"retry-after": "10"}) == 10.0
+    assert policy.remaining("https://a.example/x") == pytest.approx(10.0)
+    policy.observe("https://a.example/second", 429, {"retry-after": _PAST})
+    assert policy.remaining("https://a.example/x") == pytest.approx(10.0), \
+        "a Retry-After date in the past rewound a live cooldown"
