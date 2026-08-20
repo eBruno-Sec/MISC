@@ -175,12 +175,13 @@ liveness CHECKS: 17 checks over 9 labs
 | **webgoat** | **0** | **0** | **consumed by nothing** |
 | **mutillidae** | **0** | **0** | **consumed by nothing** |
 | **benchmarkpython** | **0** | **0** | **consumed by nothing** |
-| **sessionlife** | **0** | **0** | **consumed by nothing** (`labs/sessionlife/` is untracked — likely a lane in flight, so check before touching) |
+| **sessionlife** | **0** | **0** | **NOT idle — a lane is building it right now.** Confirmed, not guessed: `git diff docker-compose.yml` shows 20 uncommitted lines adding the `sessionlife` service (paired CWE-613 session-lifecycle lab), and `labs/sessionlife/` is untracked. **Do not reap it.** |
 
-**The honest number is four, not twelve.** Three of those four are unambiguous: `webgoat`,
-`mutillidae` and `benchmarkpython` are reachable, cost RAM continuously, and no mission and no gate
-consumes them. `webgoat` is additionally `unhealthy` and returns **404 at `/`** — it has been broken
-for 7 days and nothing noticed, because nothing looks at it.
+**The honest number is three, not twelve.** `webgoat`, `mutillidae` and `benchmarkpython` are
+reachable, cost RAM continuously, and neither a mission nor a gate consumes them. `webgoat` is
+additionally `unhealthy` and returns **404 at `/`** — broken for 7 days, unnoticed, because nothing
+looks at it. The fourth candidate, `sessionlife`, is a lane's live work and was one `git diff` away
+from being wrongly reaped.
 
 The ZAP lesson applies exactly: the interesting question was never "is it running" but "who consumes
 it". Five containers looked idle and were not; four looked fine and are idle. `docker ps` answers
@@ -530,6 +531,39 @@ while a mission is targeting that lab (it would have killed mission `b226bc05` m
 
 **P3 — `agent/main.py` (findings-gate lane owns it).** No change required for Q-023; recorded so the
 owner is not left guessing. `_missing_zap_invocation` is correct as written.
+
+## `scripts/liveness.sh` — DELIBERATELY NOT RUN, and why that is the safe answer
+
+The brief requires liveness (17/17 confirmed, baseline 16) not to regress. It cannot, and running it
+would have been the riskier choice.
+
+**It cannot regress, because this lane changed no product code.** Complete footprint across every
+commit:
+
+```
+apolaki/agent/tests/test_zap_harness_contract.py   (new, 159 lines)
+apolaki/agent/tests/test_zap_live_acceptance.py    (+35/-4)
+apolaki/docs/handoff/zap_reach.md
+```
+
+Zero files outside `agent/tests/` and `docs/handoff/`. `liveness.py` measures engine wiring in
+product modules; no product module was touched, and `liveness.CHECKS` (17 entries, 9 labs) contains
+no reference to any file I wrote.
+
+**Running it would have been actively dangerous right now.** `scripts/liveness.sh` opens with:
+
+```bash
+docker compose --profile labs up -d clientauthz domsource conpot dvga openldap smb snmpd
+```
+
+`docker-compose.yml` currently carries **20 uncommitted lines from another lane** (the `sessionlife`
+service). `up -d` against a changed compose file **recreates** containers rather than no-opping, so
+that command would have torn down and rebuilt six shared lab containers underneath two other live
+lanes and the Coordinator — the exact class of accident the house rules were written for. It would
+also have recreated `domsource` mid-flight while mission `b226bc05` was scanning it.
+
+Recommend the Coordinator run liveness once the compose change lands, and use `--update` at that
+point only if the ZAP entry from P2 is added.
 
 ## Anti-idle follow-on filed as evidence, not as a patch
 
