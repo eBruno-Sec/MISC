@@ -1110,6 +1110,63 @@ DoD: a finding whose `analysis` is `static-call-site` renders its file and line,
 replay. **Negative control:** a genuine DAST finding must KEEP its curl - a fix that strips
 reproduction from everything trades a false claim for a useless report.
 
+### Q-084 · The report tells the client "WSTG active tests: 85/109" and that number is a CONSTANT · **CRITICAL** · `ready`
+
+**MEASURED 2026-08-20.** `report.py:2501` renders this into the client HTML, under a heading called
+Coverage Overview:
+
+    WSTG active tests: 85/109 covered (60 full, 25 partial), 5 safety-excluded.
+
+"Active tests" asserts activity. The number is a property of a static catalogue and has nothing to do
+with the mission. It is 85 for a full-mode scan of Juice Shop, 85 for a passive scan of one static
+page, and 85 for a mission in which **zero engines ran**:
+
+    coverage()          tally: {'full': 60, 'partial': 25, 'none': 24, 'excluded': 5}
+    coverage([])        tally: {'full': 60, 'partial': 25, 'none': 24, 'excluded': 5}
+    coverage(['xss'])   tally: {'full': 60, 'partial': 25, 'none': 24, 'excluded': 5}
+
+    empty mission, zero engines run -> {"tested": 85, "full": 60, "partial": 25,
+                                        "not_tested": 24, "excluded": 5, "total": 109}
+
+**Two defects stacked, and the second is why fixing the first is not enough.**
+
+1. `report.py:343` calls `wstg_catalog.coverage()` **with no argument**, so no evidence reaches it.
+2. `wstg_catalog.coverage(techniques=None)` **accepts an evidence parameter and ignores it** -- the
+   three rows above are the proof: an empty technique list returns the same 60/25 as no list at all.
+   So passing the ledger would change nothing. A parameter that does not affect the output is the
+   island pattern inside a single function signature.
+
+**The ASVS half, six lines away in the same function, is CORRECT**, which is what makes this a defect
+rather than a design choice. `report.py:319` calls
+`asvs_model.assess(findings, attempted_engines=_engines_from_ledger(tool_ledger))` -- evidence-driven,
+so an engine that never ran yields not-tested rather than a coverage claim. The rendered block puts
+the truthful ASVS cells and the constant WSTG line in the same visual group, and a reader cannot tell
+that they come from different epistemics. **This is `verify BOTH halves of a fix` again**, and it is
+the same family as Q-082 (716 fabricated curl reproductions) and Q-071: the report asserting work
+that was never done.
+
+**In mitigation, and it is real but not sufficient:** the function's docstring says "Truth-first: this
+is a CURATED-PARTIAL model, never a full-coverage claim", `out["model"]` is `"curated_partial"`, and
+the surrounding prose repeats "Never a full-coverage claim". The author knew the model was partial.
+That disclaims BREADTH -- "we only model some of WSTG" -- and it does not disclaim ACTIVITY. The
+sentence a client reads still says 85 tests were active. A disclaimer about the denominator does not
+make the numerator true.
+
+**Definition of done.**
+- The rendered line states what it can support. Either it reports what the mission ACTUALLY exercised
+  (evidence-driven, which needs defect 2 fixed first), or it stops using the word "tests" for a
+  catalogue property and says so plainly -- "Apolaki models 85 of 109 WSTG tests" is true and useful.
+- **A negative control: a report rendered from an EMPTY ledger must not claim 85 of anything as
+  tested.** Absence of that control is how this survived.
+- If `coverage(techniques=...)` is meant to filter, make it filter and pin it with a test where two
+  different technique lists give two different tallies. If it is not meant to, delete the parameter
+  rather than leave a signature that implies an evidence path.
+- Check the sibling numbers in the same block while you are there. `_pp.get('total')` ASVS objectives
+  is rendered next to it and is a different mechanism; say which of the two rules it follows.
+
+**Owner: unassigned.** Do not fix this by deleting the line -- the coverage view is genuinely useful
+and a competitor-inspired feature. Fix what it claims.
+
 ### Q-083 · The code-assisted lane confirms a MEDIUM inside a vendored minified bundle · **HIGH** · `ready`
 
 Same mission. A **confirmed medium** against a minified third-party library the operator does not
