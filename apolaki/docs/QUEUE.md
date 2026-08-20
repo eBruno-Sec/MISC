@@ -1110,7 +1110,39 @@ DoD: a finding whose `analysis` is `static-call-site` renders its file and line,
 replay. **Negative control:** a genuine DAST finding must KEEP its curl - a fix that strips
 reproduction from everything trades a false claim for a useless report.
 
-### Q-085 · A guard that parses ONE file made that file's boundary the boundary of compliance · **HIGH** · `ready`
+### Q-086 · A guard named "remain inside" proves PRESENCE, never ABSENCE elsewhere · **MEDIUM** · `ready`
+
+**Found by the Codex lane while auditing Q-085's siblings.** `test_zap_target_drivers_remain_inside_one_guarded_function()` slices only the body of `tools.ToolRegistry._run_zap` and asserts that `zap.access_url`, `zap.spider`, `zap.ajax_start` and `zap.ascan` each occur there. **It never scans outside that body.** Its name claims those drivers "remain inside" the guarded function; its assertion proves they are present in it. **A duplicate unguarded ZAP target driver in another function or another module leaves it green.**
+
+The current production fact was checked separately and is clean -- all four calls live at `tools.py:10340/10369/10383/10432` and nowhere else -- **so this is a false assurance rather than a live breach.** That distinction is the ticket: the repository happens to be compliant, and the named guard cannot preserve it.
+
+This is the Q-085 family, third form. Q-085 was *a guard with too narrow a SCOPE*; this is *a guard asserting the wrong PROPERTY*. Both pass everything they exist to catch, and both are descended from the recorded lesson that a guard checking a declaration passes what it exists to catch.
+
+**Definition of done**: a repository-wide AST ABSENCE check, on the `_target_traffic_bypasses` pattern Q-085 already landed. **The Codex lane deliberately did not build it**, and the reason is worth keeping: deciding which receiver aliases count requires `zap_client.py` and the production call contract, and it declined to land a noisy grep guard in a shared tree. Fold this into the next ZAP lease.
+
+**And check the fourth guard family generally**: `test_session_identity.py`'s narrow scope was audited and found ALIGNED with its stated mechanism, and `test_engine_reachability.py` was found to prove *possible invocability*, not *deterministic scheduling* -- a weaker claim than its name implies, and a partial false assurance of its own. Neither is fixed. Q-085's third DoD item was to ask "what does this guard actually parse, and what does it actually assert?" of every guard in the tree; two of four have now been answered and the answers were not reassuring.
+
+### Q-085 · A guard that parses ONE file made that file's boundary the boundary of compliance · **HIGH** · **PARTIAL** `8a59a96` · breach closed, ratchet pinned at 21/12
+
+#### Landed 2026-08-20 by an external Codex lane, on its own branch, merged after ownership verification
+
+**The live no-DoS breach is CLOSED, and structurally rather than site-by-site.** `juiceshop_solvers.py` no longer builds a raw `httpx.Client`: both constructions now go through `browser_engine.rate_limited_sync_client`, and the raw `urllib.request.urlopen` calls are gone. So all four previously-ungated paths are gated, **including the ten concurrent `threading.Thread` workers** posting to `/rest/products/reviews` that the ticket was filed on.
+
+**The guard now walks the repository** instead of parsing `tools.__file__` alone. Remaining gap, **pinned by a STRICT xfail rather than allowlisted away**:
+
+    ungated target-call sites  25 -> 21
+    modules bypassing          13 -> 12
+
+with a ratchet asserting `<= 21` and `<= 12`, and a deliberate note that the raw count is **not** a floor, so removing a bypass is allowed to reduce it.
+
+**Coordinator's independent mutation, harder than the lane's own.** The lane's non-vacuity control plants an ungated call in a brand-new nested package. I planted one in an EXISTING production module instead, which is the realistic drift case, and the guard caught it by name:
+
+    assert 22 <= 21
+    'api_inventory.py:115:_coordinator_drift_probe:httpx.Client'
+
+**Still open**, and it is the reason this is PARTIAL not CLOSED: 21 ungated target calls across 12 modules, `bie.py` the sharpest at 6 `page.goto` sites, plus `main.py` at 2 `urllib.request.urlopen`. Each needs an owner.
+
+**The bare-429 default stays at `0.0`, and the lane was right to stop.** My ruling was that the "an invented cooldown is indistinguishable from one the target asked for" objection is solvable by recording the wait's SOURCE. It is -- inside `TargetRatePolicy.observe()` -- but the durable typed row is built by `tools.py::_ledger_outcome()` against a closed schema `{tool, seconds, waits, truncated, origins}`, and `tools.py` was off-limits to that lane. Adding provenance to the prose notes alone **would produce two ledgers with different epistemics**, which is precisely the Q-084 defect. Encoding the source into `origins` or `truncated` corrupts an existing field rather than adding one. The exact atomic patch is documented in `docs/handoff/codex_q085.md`; **it must land as one change across `browser_engine.py` and `tools.py`, with `test_backoff_bounds.py::test_a_response_without_retry_after_is_never_recorded_as_a_wait` updated deliberately** to assert the new behaviour including that a NON-429 still records no wait. Never deleted.
 
 **MEASURED by the rate-policy lane, 2026-08-20** (`20883a5`, `58f2e81`), by AST census rather than
 grep, because a grep for `httpx` counts imports and comments.
