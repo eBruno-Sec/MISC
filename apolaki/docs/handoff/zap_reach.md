@@ -281,10 +281,27 @@ b226bc05  tool_call  2026-08-20T23:11:42Z
 TOTAL run_zap rows in durable corpus: 1
 ```
 
+The mission then reached `status: complete, phase: report`, and the paired result landed too:
+
+```
+b226bc05  tool_result  2026-08-20T23:18:33Z
+  {"tool":"run_zap","count":0,
+   "output":"policy=safe_active; speed=normal; aggression=normal; target-rate<=1rps; …
+             [191 retained alert(s) excluded; active scan degraded, passive alerts kept:
+              active scan incomplete or timed out]"}
+TOTAL run_zap rows in durable corpus: 2
+```
+
 ZAP context `bbh-b226bc05-7844` was created on the daemon by that mission, matching
 `tools.py:10301`. **The ticket's headline count is now falsified by construction**: a real mission,
-driven by the live agent, in Full mode, reached phase F2 and dispatched `run_zap`, and the corpus
-recorded it. The scanner is reachable and the ledger can see it.
+driven by the live agent, in Full mode, reached phase F2, dispatched `run_zap`, completed, and the
+corpus recorded both rows. The scanner is reachable and the ledger can see it.
+
+Note the note. `active scan degraded, passive alerts kept: active scan incomplete or timed out` is
+Q-023 sub-defect 3 working as specified — a degraded sub-phase **surfaced in the ToolResult** instead
+of swallowed. The bare `except: pass` the ticket complained about is gone and its replacement is
+visibly doing its job in production output. That same note is what exposed the `min_alerts` trap
+below, so the honest reporting paid for itself within one run.
 
 ---
 
@@ -340,38 +357,84 @@ not *did Apolaki prove a bug*.
 
 Suggested patch, for the owner to place in `CHECKS` and implement the arm in `verdict()`:
 
-```python
-# ── DAST: did the ZAP pass actually EXECUTE? ─────────────────────────────────────────────────
-# Q-023: ZAP had 0 tool_call rows across 154 missions while the engine worked fine — the only
-# path that ran it wrote its ledger to tmp_path. This check is the missing witness.
-# NOT kind:"tool". ZAP alerts are graded `candidate` on purpose (zap_client.alert_to_finding),
-# and _match refuses leads on purpose, so a tool-check reports DEAD on a healthy ZAP. MEASURED.
-# The question here is EXECUTION, like kind:"surface", not proof.
-{"technique": "zap_dast_execution", "lab": "domsource", "kind": "zap",
- "input": {"url": "http://domsource:8080", "policy": "passive"}, "min_alerts": 1},
+### …and `min_alerts` is a SECOND mis-specified oracle. I only caught it by running ZAP twice.
+
+My own first draft of this patch was `{"kind": "zap", …, "min_alerts": 1}`. **It is wrong, and the
+second live run proved it.** The durable `safe_active` mission returned:
+
+```
+count: 0
+"policy=safe_active; speed=normal; aggression=normal; target-rate<=1rps;
+ 0 ZAP alert(s) [safe-active] (from 0 current raw)
+ [191 retained alert(s) excluded; active scan degraded, passive alerts kept:
+  active scan incomplete or timed out]"
 ```
 
-with a `verdict()` arm alongside the `kind == "surface"` one:
+Zero alerts — from a pass that worked correctly. Daemon-side, measured:
+
+```
+alerts on http://domsource:8080 : 191
+ascan scan 0 : reqCount=302  alertCount=0  newAlertCount=0  progress=1  state=FINISHED
+spider scan 13 : progress=100 FINISHED
+```
+
+Two independent reasons, both of them correct behaviour:
+
+1. **The pass-cursor did its job.** domsource already carried 191 alerts from the earlier passive
+   run, and the cursor refuses to claim alerts it did not raise. A pass against an
+   already-alerted site legitimately attributes **0 new** alerts. The same control that stopped ZAP
+   claiming 191 findings it did not earn also guarantees a repeat run scores zero.
+2. **The active scan was capped**, `progress=1` yet `FINISHED` after 302 requests — stopped by the
+   engine's own time budget, and *reported* as `active scan degraded, passive alerts kept`.
+
+So `min_alerts: 1` would be **green on a fresh daemon and DEAD on every run after it** — a flaky gate
+that blames ZAP for a working cursor. That is the same mis-specified-oracle shape as the
+`family: "zap"` version, and I walked straight into it one paragraph after warning about it.
+
+**Corrected oracle: assert EXECUTION and REACH, never newly-attributed alert count.**
+
+```python
+# ── DAST: did the ZAP pass actually EXECUTE and reach the target? ────────────────────────────
+# Q-023. Two oracles were tried and rejected here; do not "simplify" back into either.
+#   family:"zap"   -> DEAD on a healthy ZAP: alerts are graded `candidate` on purpose and
+#                     liveness._match refuses leads on purpose. MEASURED.
+#   min_alerts>=1  -> DEAD on every run after the first: the pass-cursor correctly refuses to
+#                     re-claim alerts already on a long-lived shared daemon. MEASURED (0 new
+#                     alerts against a site holding 191).
+# The only stable question is the one the ticket actually asked: did the pass RUN and reach a
+# real target. `raw + retained > 0` proves reach without ever counting proof.
+{"technique": "zap_dast_execution", "lab": "domsource", "kind": "zap",
+ "input": {"url": "http://domsource:8080", "policy": "passive"}},
+```
 
 ```python
 if check.get("kind") == "zap":
-    alerts = list(findings or [])
-    need = int(check.get("min_alerts") or 1)
-    if len(alerts) >= need:
+    res = findings            # the runner passes the ToolResult through for this kind
+    note = str(getattr(res, "output", "") or "")
+    if not getattr(res, "success", False):
+        return {..., "verdict": DEAD, "detail": "run_zap failed: %s" % getattr(res, "error", "")}
+    if not note.startswith("policy="):
+        return {..., "verdict": DEAD,
+                "detail": "run_zap returned without a policy token — the pass did not execute"}
+    # reach, not proof: raw-this-pass PLUS retained-excluded. Never `count`.
+    seen = _zap_alerts_seen(note)          # parses "from N current raw" + "M retained"
+    if seen > 0:
         return {..., "verdict": CONFIRMED,
-                "detail": "ZAP pass executed and attributed %d alert(s)" % len(alerts)}
+                "detail": "ZAP pass executed under %s; daemon holds %d alert(s) for the target"
+                          % (note.split(";")[0], seen)}
     return {..., "verdict": DEAD,
-            "detail": "ZAP daemon answered but the pass attributed no alerts — the DAST wiring "
-                      "is not carrying a target"}
+            "detail": "ZAP pass executed but the daemon holds no alerts for the target — the DAST "
+                      "wiring is not carrying a target"}
 ```
 
-and the runner arm (`liveness_run.py`, beside `kind == "tool"`), which needs `_run_zap`'s findings
-exactly as the tool arm already collects them.
+A `degraded` note must **not** be DEAD: `active scan degraded, passive alerts kept` is the engine
+correctly reporting a capped active scan, which is the Q-023 sub-defect-3 idiom working as intended.
 
 **Cost and lab choice are measured, not guessed.** `domsource` with `policy: "passive"` is the right
-lab: the whole full-mode mission including the ZAP pass took **2m43s**, it is a compose-pinned local
-lab, and it reliably yields 4 alerts (CWE-1021, CWE-693 ×2, CWE-497). `passive` rather than
-`safe_active` keeps the gate fast and avoids sending payloads on every liveness run.
+lab: the whole full-mode mission including the ZAP pass took **2m43s**, and it is a compose-pinned
+local lab. Use `passive`, not `safe_active` — the `safe_active` durable run took **6m51s**
+(23:11:42 → 23:18:33) for the ZAP step alone and ended capped at 1% active-scan progress, so it costs
+four times as much and tests less.
 
 **Baseline note.** This ADDS a technique, so `scripts/liveness.sh --update` is required once to take
 it into the baseline; `evaluate()` only ever adds, so nothing regresses. Note that `liveness.sh` runs
