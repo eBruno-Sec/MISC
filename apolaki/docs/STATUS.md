@@ -9,21 +9,44 @@ closed. That is twice in a row, which makes it a property of the file rather tha
 **This file is one of four criteria the `apolaki-autocontinue` watchdog checks before retiring itself,
 so leaving it stale silently disables that retirement.** Updating it is not bookkeeping.
 
-## Lanes right now — 2026-08-19, four live
+## Lanes — 2026-08-20, ALL STOOD DOWN, cycle folded
 
-| lane | ticket | owns | state |
-|---|---|---|---|
-| Vendor scope | Q-083 | `codeintel.py` | **LIVE, run 2.** Run 1 measured the blast radius at 1 of 716 findings (0.141%) and proved the obvious `*.min.js` rule misses every modern bundle, so the fix must key on EVIDENCE a file is third-party. Six fixtures copied byte-for-byte from real specimens |
-| Island triage | Q-078 | `deadcode_gate.py` | **LIVE, run 3.** Ratchet reads 51 against ceiling 37, held by a strict xfail. Run 2 refused to raise the baseline to make it pass, correctly. Three worked examples already classified: resolver blind spot, framework entry point, cross-module re-export |
-| Negative effects | Q-074 | `engine_descriptor.py`, `techniques.py`, `effect_search.py` | **LIVE, run 2.** One question: does the planner do anything differently because a negative-effect row exists? "It is decoration" is a complete answer |
-| Rate policy | Q-043 | `browser_engine.py`, `zap_client.py` | **LIVE.** Breaker. The machinery now exists (`retry_after_seconds` at `browser_engine.py:110`); the job is whether it works on BOTH paths and whether anything fails when it is deleted |
+Every lane below ran to a verdict and its work is merged. **No lane is live.** Six Claude lanes were
+killed by three separate session limits during this cycle and every one of them was recovered,
+because each committed per slice.
 
-Queue: **73 ticket headers, 45 cited hashes all real, 0 contradictions** (`scripts/queue_gate.sh`).
-Genuinely open and unowned after today's sweep: Q-040, Q-044 (half closed), Q-050, Q-053, Q-062.
+| lane | ticket | verdict |
+|---|---|---|
+| Vendor scope | Q-083 | **CLOSED.** Blast radius measured at 1 of 716 findings (0.141%) BEFORE any fix, and the obvious `*.min.js` rule proven to miss every modern bundle. Found a SECOND tree walk with the same blind spot at 175x the radius. The marker now reaches the operator's screen, not just the API |
+| Island triage | Q-078 | **Ratchet still pinned** by a strict xfail, correctly. Two runs refused to raise `QUALIFIED_BASELINE` to make it pass. Its own anti-rot check caught `payloads_for` |
+| Negative effects | Q-074 | **CLOSED: "it is decoration."** ONE production reader, `POST /orchestration/audit`. `agent.py` and `planner.py` import neither the module nor `effect_search`. No scheduling decision changes because a row exists |
+| Deterministic reach | Q-050 | **CLOSED.** Real detection engines a deterministic mission cannot select: **5 -> 2**, and neither of the two is cited by any control catalogue, so no coverage claim is backed by an unreachable engine. `run_nosqlmap` deleted as a proven duplicate (111 -> 110 engines) |
+| Rate policy | Q-043 | **HALF CLOSED.** Mechanism built and measured; the "bare-429 gap" turned out to be a designed boundary. Coverage half moved to Q-085 |
+| Codex Q-085 | Q-085 | **PARTIAL, merged `8a59a96`.** Live no-DoS breach closed structurally; guard widened repository-wide; 25 -> 21 ungated calls, 13 -> 12 modules, pinned by a strict xfail |
 
-Tree at HEAD: **3223 passed / 11 skipped / 12 xfailed / 0 failed**. The two commits since that
-measurement (`5bb8627`, `cffc559`) touch only `docs/` and `scripts/`, so the count is unchanged by
-construction rather than by assumption.
+Queue: **76 ticket headers, 51 cited hashes all real, 0 contradictions** (`scripts/queue_gate.sh`,
+now wired into CI with a shallow-clone guard that exits 2 rather than reporting 45 false failures).
+
+Open and unowned: **Q-085** (21 ungated target calls across 12 modules; `bie.py` sharpest at 6
+`page.goto`), **Q-086** (the ZAP guard proves presence and calls it absence), **Q-078** (ratchet at
+51 vs ceiling 37), **Q-044**, **Q-053**, **Q-062**, plus the seven untriaged auto-store engines held
+by a strict xfail in `test_auto_store_reach.py`.
+
+Tree: **3331 passed / 11 skipped / 14 xfailed / 0 failed** at the Codex merge, measured on an
+isolated snapshot. Later commits are re-measured per commit rather than assumed.
+
+**Two things worth carrying forward from how this cycle went wrong.**
+
+A lane started its final suite TWICE against the same snapshot directory and rebuilt the directory
+between the two starts, so the first container had its mount recreated underneath it. It caught
+itself and derived a better rule than the one we had: **one snapshot, one run, and never rebuild a
+directory a container still has mounted.** `docker inspect -f '{{range .Mounts}}{{.Source}}{{end}}'`
+is how the duplicate was found. Adopted.
+
+And a mutation of mine SURVIVED, then turned out never to have been applied - the `perl` substitution
+silently matched nothing. **A mutant that "survives" because the mutation never landed is a false
+all-clear**, and it would have let me claim a test catches something I had not tested. Verify the
+edit landed (grep it) before believing a surviving mutant.
 
 **The queue itself grew a gate today, because it had gone stale eleven times.** Closing a ticket and
 updating its header are two actions and only one was ever enforced. The eleventh sweep found the
