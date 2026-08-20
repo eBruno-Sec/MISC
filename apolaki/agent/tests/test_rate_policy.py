@@ -88,6 +88,251 @@ def _run(awaitable):
     return asyncio.run(awaitable)
 
 
+# Q-085: the original bypass controls below parsed ``tools.__file__`` only.  That made
+# tools.py clean while every sibling module was invisible.  Inventory raw target-capable
+# transports from every production Python module; explicit control-plane calls are recorded
+# here by owner so adding a new module cannot inherit an exemption by accident.
+_RAW_HTTP_CALLS = {
+    "httpx.Client", "httpx.AsyncClient", "httpx.request", "httpx.get", "httpx.post",
+    "httpx.put", "httpx.patch", "httpx.delete", "httpx.head", "httpx.options",
+    "requests.Session", "requests.request", "requests.get", "requests.post", "requests.put",
+    "requests.patch", "requests.delete", "requests.head", "requests.options",
+    "urllib.request.urlopen", "aiohttp.ClientSession", "urllib3.PoolManager",
+    "http.client.HTTPConnection", "http.client.HTTPSConnection",
+}
+
+_CONTROL_PLANE_CALLS = {
+    ("benchmark_assert.py", "_get", "urllib.request.urlopen"),
+    ("browser_engine.py", "drive", "httpx.post"),
+    ("cdp.py", "collect", "httpx.post"),
+    ("ci_summary.py", "_get_json", "urllib.request.urlopen"),
+    ("cloud_iam.py", "_linode_get", "urllib.request.urlopen"),
+    ("dns_recon.py", "doh", "httpx.AsyncClient"),
+    ("intel_connectors.py", "_default_http", "httpx.get"),
+    ("intel_extractor.py", "_call_llm", "urllib.request.urlopen"),
+    ("intel_feeds.py", "fetch", "urllib.request.urlopen"),
+    ("labs.py", "_http_json", "urllib.request.urlopen"),
+    ("main.py", "blind_benchmark_run", "httpx.AsyncClient"),
+    ("zap_client.py", "_call", "httpx.AsyncClient"),
+}
+
+_POLICY_CHOKEPOINT_CALLS = {
+    ("browser_engine.py", "rate_limited_async_client", "httpx.AsyncClient"),
+    ("browser_engine.py", "rate_limited_sync_client", "httpx.Client"),
+    ("browser_engine.py", "rate_limited_goto", "page.goto"),
+}
+
+
+def _dotted(node):
+    if isinstance(node, ast.Name):
+        return node.id
+    if isinstance(node, ast.Attribute):
+        left = _dotted(node.value)
+        return (left + "." if left else "") + node.attr
+    return ""
+
+
+def _canonical_call(node, aliases):
+    name = _dotted(node.func)
+    head, dot, tail = name.partition(".")
+    if head in aliases:
+        name = aliases[head] + (dot + tail if dot else "")
+    if name.endswith(".goto"):
+        return "page.goto"
+    return name
+
+
+def _production_python_paths(root):
+    """Every production module, including future nested packages; test/gate code is not traffic."""
+    root = Path(root)
+    return sorted(path for path in root.rglob("*.py")
+                  if not ({"tests", "tier3"} & set(path.relative_to(root).parts[:-1])))
+
+
+def _raw_transport_inventory(paths=None):
+    root = Path(tools.__file__).resolve().parent
+    default_corpus = paths is None
+    paths = _production_python_paths(root) if default_corpus else [Path(p) for p in paths]
+    rows = []
+    for path in paths:
+        source = path.read_text(encoding="utf8")
+        tree = ast.parse(source, filename=str(path))
+        parents = {}
+        aliases = {}
+        for parent in ast.walk(tree):
+            for child in ast.iter_child_nodes(parent):
+                parents[child] = parent
+            if isinstance(parent, ast.Import):
+                for item in parent.names:
+                    if item.asname:
+                        aliases[item.asname] = item.name
+                    elif "." not in item.name:
+                        aliases[item.name] = item.name
+            elif isinstance(parent, ast.ImportFrom) and parent.module:
+                for item in parent.names:
+                    aliases[item.asname or item.name] = parent.module + "." + item.name
+
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.Call):
+                continue
+            call = _canonical_call(node, aliases)
+            if call not in _RAW_HTTP_CALLS and call != "page.goto":
+                continue
+            owner = node
+            while owner in parents and not isinstance(owner, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                owner = parents[owner]
+            fn = owner.name if isinstance(owner, (ast.FunctionDef, ast.AsyncFunctionDef)) else "<module>"
+            # The browser bootstrap navigates to a local blank document, not to the assessment target.
+            if call == "page.goto" and node.args and isinstance(node.args[0], ast.Constant) \
+                    and node.args[0].value == "about:blank":
+                continue
+            module = path.relative_to(root).as_posix() if default_corpus else path.name
+            rows.append({"path": path, "module": module, "function": fn,
+                         "call": call, "line": node.lineno, "owner": owner})
+    return rows
+
+
+def _is_locally_wrapped(row):
+    """A raw send is acceptable only when the same function gates before and observes after it."""
+    owner = row["owner"]
+    if not isinstance(owner, (ast.FunctionDef, ast.AsyncFunctionDef)):
+        return False
+    calls = [(_dotted(n.func), n.lineno) for n in ast.walk(owner) if isinstance(n, ast.Call)]
+    waits = [line for name, line in calls if name.endswith(("target_rate_policy.wait_sync",
+                                                            "target_rate_policy.wait_async"))]
+    observations = [line for name, line in calls if name.endswith("target_rate_policy.observe")]
+    return any(line < row["line"] for line in waits) and any(line > row["line"] for line in observations)
+
+
+def _target_traffic_bypasses(paths=None):
+    rows = _raw_transport_inventory(paths)
+    exemption_use = {}
+    bypasses = []
+    for row in rows:
+        key = (row["module"], row["function"], row["call"])
+        if key in _POLICY_CHOKEPOINT_CALLS or _is_locally_wrapped(row):
+            continue
+        if key in _CONTROL_PLANE_CALLS:
+            # Every exemption names one measured call site. A second raw call in the same function is
+            # drift, not a free extension of the exemption.
+            exemption_use[key] = exemption_use.get(key, 0) + 1
+            if exemption_use[key] == 1:
+                continue
+        bypasses.append("%s:%d:%s:%s" %
+                        (row["module"], row["line"], row["function"], row["call"]))
+    return sorted(bypasses)
+
+
+def test_repository_wide_rate_policy_inventory_is_non_vacuous_and_ratcheted():
+    bypasses = _target_traffic_bypasses()
+    modules = {row.split(":", 1)[0] for row in bypasses}
+    root = Path(tools.__file__).resolve().parent
+    # Measured after the Juice Shop slice: 179 top-level production modules are in scope. Raw-call
+    # count is deliberately NOT a floor: removing a bypass must be allowed to reduce it.
+    assert len(_production_python_paths(root)) >= 179, \
+        "the repository-wide production-module census loaded too little"
+    assert _raw_transport_inventory(), "the transport inventory is vacuous"
+    assert len(bypasses) <= 21, "ungated target-call sites rose above the measured Q-085 ratchet: %s" % bypasses
+    assert len(modules) <= 12, "modules bypassing the target policy rose above the measured ratchet: %s" % sorted(modules)
+
+
+@pytest.mark.xfail(strict=True, reason=(
+    "Q-085 LIVE GAP: after the Juice Shop fix, 21 ungated target calls remain across 12 modules; "
+    "registration is not compliance, and SKIPPED/NOT SEEN is not a pass"))
+def test_every_target_transport_uses_the_shared_rate_policy():
+    assert _target_traffic_bypasses() == []
+
+
+def test_repository_wide_guard_catches_a_new_previously_invisible_module(tmp_path, monkeypatch):
+    fake_root = tmp_path / "agent"
+    nested = fake_root / "new_package"
+    nested.mkdir(parents=True)
+    fake_tools = fake_root / "tools.py"
+    fake_tools.write_text("# collection anchor\n", encoding="utf8")
+    dirty = nested / "brand_new_engine.py"
+    dirty.write_text("import httpx\n\ndef send(url):\n    return httpx.AsyncClient(base_url=url)\n",
+                     encoding="utf8")
+    monkeypatch.setattr(tools, "__file__", str(fake_tools))
+
+    assert _target_traffic_bypasses() == [
+        "new_package/brand_new_engine.py:4:send:httpx.AsyncClient"
+    ]
+
+    dirty.write_text("import browser_engine\nimport httpx\n\ndef send(url):\n"
+                     "    return browser_engine.rate_limited_async_client(httpx, base_url=url)\n",
+                     encoding="utf8")
+    assert _target_traffic_bypasses() == []
+
+
+def test_juiceshop_solver_routes_every_target_send_through_the_policy():
+    bypasses = [row for row in _target_traffic_bypasses()
+                if row.startswith("juiceshop_solvers.py:")]
+    assert bypasses == [], (
+        "the lab solver promises no DoS but still has raw target transports: %s" % bypasses)
+
+
+def test_sync_client_waits_and_observes_at_the_shared_chokepoint():
+    clock = [0.0]
+    starts = []
+    responses = [429, 200]
+
+    def sleep(delay):
+        clock[0] += delay
+
+    def handler(request):
+        starts.append(clock[0])
+        status = responses.pop(0)
+        headers = {"Retry-After": "2"} if status == 429 else {}
+        return httpx.Response(status, headers=headers, request=request)
+
+    policy = browser.TargetRatePolicy(max_wait=5, clock=lambda: clock[0], sync_sleep=sleep)
+    with browser.rate_limited_sync_client(
+            httpx, transport=httpx.MockTransport(handler), rate_policy=policy) as client:
+        client.get("https://target.example/one")
+        client.get("https://target.example/two")
+
+    assert starts == [0.0, 2.0]
+    assert policy.stats()["observations"] == 1
+    assert policy.stats()["waits"] == 1
+
+
+def test_all_ten_juice_shop_race_workers_cross_the_shared_gate():
+    import juiceshop_solvers as js
+
+    class CountingPolicy:
+        def __init__(self):
+            self.waited = []
+            self.observed = []
+            self.lock = threading.Lock()
+
+        def wait_sync(self, url):
+            with self.lock:
+                self.waited.append(url)
+
+        def observe(self, url, status, headers):
+            with self.lock:
+                self.observed.append((url, status))
+
+    def handler(request):
+        path = request.url.path
+        if path == "/rest/user/login":
+            return httpx.Response(200, json={"authentication": {"token": "T"}}, request=request)
+        if path == "/rest/products/1/reviews":
+            return httpx.Response(200, json={"data": [{"_id": "R"}]}, request=request)
+        return httpx.Response(200, request=request)
+
+    policy = CountingPolicy()
+    with browser.rate_limited_sync_client(
+            httpx, base_url="https://juice.invalid", transport=httpx.MockTransport(handler),
+            rate_policy=policy) as client:
+        js._multiple_likes(client)
+
+    review_waits = [url for url in policy.waited if url.endswith("/rest/products/reviews")]
+    review_observations = [row for row in policy.observed if row[0].endswith("/rest/products/reviews")]
+    assert len(review_waits) == 10, "one or more race workers routed around the request gate"
+    assert len(review_observations) == 10, "one or more race responses escaped policy observation"
+
+
 def test_http_engine_path_starts_zero_requests_inside_the_retry_window(monkeypatch):
     """The negative control: removing `_http`'s policy call makes this fail."""
     monkeypatch.setenv("BBH_RETRY_AFTER_MAX_SECONDS", "0.08")
