@@ -153,8 +153,119 @@ That is the same cost-with-no-capability shape as the ZAP ticket, and it is larg
 
 ---
 
-## Open at time of writing
+## The verdict: ZAP executes in a real full mission on today's code
 
-Running the `skipif`-gated live oracle against an authorized local lab to establish whether the
-mission path executes ZAP **today**, on the graph-authoritative plan loop, rather than on the
-2026-07-26 code the ticket's four residue missions ran.
+The `skipif`-gated oracle was run rather than left skipped, because **SKIPPED is never a pass**:
+
+```
+ZAP_LIVE_ACCEPTANCE=1 ZAP_LIVE_TARGET=http://domsource:8080 \
+  pytest tests/test_zap_live_acceptance.py
+→ 1 failed, 1 passed in 163.95s
+```
+
+`test_real_full_mission_persists_run_zap_tool_call` **PASSED**. Verbatim evidence it printed:
+
+```json
+{"mission_id": "4f14866f", "status": "complete",
+ "tool_call":   {"type":"tool_call","tool":"run_zap","permission":"active",
+                 "input":{"url":"http://domsource:8080","policy":"passive",
+                          "speed":"normal","aggression":"normal"},
+                 "ts":"2026-08-20T23:05:19.174633+00:00"},
+ "tool_result": {"type":"tool_result","tool":"run_zap","count":4,
+                 "output":"policy=passive; speed=n/a; aggression=n/a; target-rate<=1rps; \
+4 ZAP alert(s) [passive] (from 4 current raw) [187 retained alert(s) excluded]",
+                 "ts":"2026-08-20T23:07:06.811431+00:00"}}
+```
+
+**All three of Q-023's stated oracle assertions are satisfied:**
+
+1. ≥1 `tool_call` row with `tool == "run_zap"` — present, `permission: active`.
+2. Paired `tool_result`, `success`, note begins with a policy token — `policy=passive; …`.
+3. Mission reached `status: complete`.
+
+The one FAILED test is unrelated to the mission path:
+`test_real_zap_retry_after_aborts_before_a_second_target_request` raises
+`KeyError: 'ZAP_LIVE_SELF_HOST'` — an env var the live rate harness needs and I did not set. It is a
+harness-input gap, not a ZAP defect. **It should not be a bare `KeyError`**; see the patch list below.
+
+`[187 retained alert(s) excluded]` is worth calling out as a control that *works*: the pass-cursor
+attribution refuses to claim the 187 alerts left on the shared daemon by earlier harnesses, and counts
+only the 4 raised after this pass began. A lesser implementation would have reported 191 findings.
+
+**The alerts are real, not empty ceremony.** Queried from the daemon for that base URL:
+
+| risk | alert | CWE |
+|---|---|---|
+| Medium | Missing Anti-clickjacking Header | CWE-1021 |
+| Medium | Content Security Policy (CSP) Header Not Set | CWE-693 |
+| Low | Server Leaks Version Information via `Server` header | CWE-497 |
+| Low | X-Content-Type-Options Header Missing | CWE-693 |
+
+### So the ticket's headline is answered
+
+> "ZAP has never executed in any mission, and three flags do not explain it."
+
+Corrected against measurement:
+
+- **ZAP executes in a real full mission on today's code.** Proven above, end to end, `complete`.
+- Two of the three flags are **stale** (`INTRUSIVE` → `ACTIVE`) or **deliberate and protected by the
+  ticket itself** (`enable_zap` default off; Full-mode 422).
+- The reason the **corpus** shows zero is neither a flag nor an island. It is that **the only code path
+  that has ever run ZAP through a mission writes its ledger to `tmp_path`**, so the durable corpus is
+  structurally incapable of recording it. That is the "fifth cause" for the modern code.
+
+### The fifth cause for the four 2026-07-26 residue missions is separate, and it is NOT ZAP-specific
+
+All four residue missions reproduce exactly as filed (`enable_zap` truthy, `run_zap` 0). The
+discriminating measurement the ticket did not take:
+
+| mission | tool_calls | run_zap | **run_nuclei** | **run_nmap_vuln** | phases |
+|---|---|---|---|---|---|
+| c7bfe8e8 | 222 | 0 | **0** | **0** | recon,recon,enum,probe,scan,probe,enum,probe,report |
+| ce35b361 | 222 | 0 | **0** | **0** | (identical) |
+| 6771ec21 | 333 | 0 | **0** | **0** | (identical) |
+| 94e8b564 | 375 | 0 | **0** | **0** | (identical) |
+
+**Every phase-F tool is absent from all four, not just ZAP.** `run_nuclei` is not gated on `zap_on`,
+not on `_zap_configured()`, and not on any ZAP flag — so no ZAP-specific hypothesis can explain its
+absence. The four missions ended at `probe → report` and **the plan loop never entered phase F at
+all**. The cause is a plan-loop termination condition, and ZAP was simply downstream of it.
+
+This retires all three of the ticket's candidate hypotheses (`enable_zap` propagation,
+`_zap_configured()`, `_graph_primary_state`) as *insufficient on their own*: each is ZAP-specific, and
+the evidence is not.
+
+---
+
+## Recommendation: **KEEP ZAP.** Do not remove it.
+
+The removal option the brief offers is not supported by the evidence. A scanner nobody can reach is
+cost with no capability — but ZAP **is** reachable, **does** run end to end, produces attributed
+alerts with a working anti-contamination cursor, is correctly tiered `ACTIVE`, is fenced to a
+per-mission ZAP context, honours the shared target rate policy, and fails closed under `require_zap`.
+The defect is in the *recording*, not the *capability*.
+
+---
+
+## Patch list for lanes that own the files (I do not own these)
+
+**P1 — `agent/tests/test_zap_live_acceptance.py` (I own `agent/tests/`, so this one is mine to fix).**
+`os.environ["ZAP_LIVE_SELF_HOST"]` raises a bare `KeyError` that reads like a ZAP failure. It should
+skip with an actionable reason, exactly as the module already does for `ZAP_LIVE_ACCEPTANCE`.
+
+**P2 — the durable-ledger gap (needs a `liveness.py` / Coordinator decision, not a code change here).**
+The Q-023 DoD asks for a liveness CHECKS entry that fails when a ZAP-enabled mission produces zero
+`run_zap` rows. `main._missing_zap_invocation` (`main.py:2842-2859`) already implements exactly that
+rule per-mission and fails closed. What is missing is that **nothing runs a ZAP-enabled mission on a
+schedule against the durable DB**, so the rule has no occasion to fire. Recommend the liveness gate
+run the `domsource` full-mode ZAP mission (2m43s measured, cheapest lab that exercises the whole
+path) rather than adding a new assertion to a corpus nobody writes ZAP rows into.
+
+**P3 — `agent/main.py` (findings-gate lane owns it).** No change required for Q-023; recorded so the
+owner is not left guessing. `_missing_zap_invocation` is correct as written.
+
+## Anti-idle follow-on filed as evidence, not as a patch
+
+`webgoat` returns **404 at `/`** and has been `unhealthy` for 7 days. `mutillidae` (302),
+`bwapp` (302), `domsource` (200), `clientauthz` (200) are all alive and all but domsource unexercised.
+Twelve standing containers cost RAM continuously to validate nothing.
