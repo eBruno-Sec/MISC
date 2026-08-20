@@ -296,6 +296,50 @@ EFFECTS = {
     # true in shipped configuration and removing it returns the model to the empty state Q-074 exists
     # to escape. **When the door is fixed, RE-MEASURE THIS ENTRY — it is expected to become false.**
     #
+    # ── THE DOOR WAS FIXED, AND HERE IS THE RE-MEASUREMENT THE LINE ABOVE ASKED FOR ─────────────
+    #
+    # Q-080 (`928319b`) closed both doors with one predicate in `planner.fresh()` plus an executor
+    # ingress guard. MEASURED at HEAD by the Q-074 negative-effects lane, driving the SHIPPED
+    # `planner.next_batch` to exhaustion on the fixture the shipped crawler actually produced (raw
+    # output in docs/handoff/negative_effects.md section 4):
+    #
+    #     mode=full     106 steps, at the session-kill url: 0
+    #     mode=active    99 steps, at the session-kill url: 0
+    #     mode=passive   29 steps, at the session-kill url: 0
+    #     POSITIVE CONTROL, the ordinary form on the same page, mode=full: 6 steps, run_race among
+    #         them — so the planner is still emitting form steps and the zero is not an empty plan
+    #     NEGATIVE CONTROL, `is_session_kill_url` stubbed to False: the 6 and the 3 come straight
+    #         back, and restoring it returns them to 0
+    #
+    # So the row's ENTIRE measured ground — "the planner aims this engine at a session-destroying
+    # action carrying the mission session" — no longer exists in the shipped tree. The only surface
+    # `run_race` still reaches is the ordinary form, where the measurement recorded 22 lines above is
+    # 0 of 4 engines killing anything with the body the planner actually builds.
+    #
+    # THE ROW IS KEPT, and the reason is narrow enough to state exactly. It is NOT kept because it is
+    # still measured — it is not. It is kept as a deliberate OVER-APPROXIMATION under the asymmetry
+    # argued at the bottom of this comment: an over-declared `establishes` is UNSOUND, an
+    # over-approximated `invalidates` costs only COMPLETENESS, and `run_race` racing an arbitrary
+    # session-affecting action still plausibly ends a session even though no planner-reachable input
+    # now demonstrates it. What was FALSE was this comment, which presented an expired measurement as
+    # a live one. **Anything that reads `conflicts()` is reading a conservative bound, not an
+    # observation.** There is exactly one such reader and it is a reporting endpoint; see below.
+    #
+    # AND NO `csrf` ROW WAS CREATED, though the key would be valid (`routes()['csrf']` is
+    # `{'run_csrf': [...]}`, and `csrf` is a real technique id — MEASURED). Q-080 measured `run_csrf`
+    # as one of SIX engines that ended the mission session, all six through the two doors it then
+    # closed. A `csrf` row would therefore record, in a table nothing schedules from, a behaviour the
+    # shipped tree no longer exhibits — the fifth transcription of one door defect. A model is not
+    # made more accurate by adding rows whose fact has expired.
+    #
+    # WHAT ANY OF THIS IS WORTH, so no later reader mistakes it for planner behaviour. MEASURED over
+    # all 184 production files: the negative half has ONE production reader, `main.py`'s
+    # `POST /orchestration/audit`. `agent.py` and `planner.py` import neither this module nor
+    # `effect_search` — not by alias, not by from-import, not as a raw substring. **No scheduling
+    # decision anywhere in Apolaki changes because this row exists.** That is pinned by
+    # `tests/test_negative_effects_reach.py`, which fails in both directions: delete the row and two
+    # tests fail, wire the model into `planner.py` and two tests fail naming the new consumer.
+    #
     # `establishes` is EMPTY on purpose: a race proves a limit can be bypassed, which is a finding,
     # not an observation this 17-term vocabulary can express.
     #
