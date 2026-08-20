@@ -370,11 +370,23 @@ def _asvs_md(findings: list, tool_ledger: dict) -> list:
         return []
     a = asvs_model.assess(findings or [], attempted_engines=_engines_from_ledger(tool_ledger))
     t = a["tally"]
+    # Q-022 anti-idle. This table dropped `not_implemented` and `not_applicable`, exactly as the HTML
+    # cell grid did, so its rows did not sum to the model it claims to summarise and the ONE bucket
+    # Q-012 created -- so an absent capability could not hide inside a skipped one -- was invisible in
+    # the markdown artifact. Both renderers now project the SAME six buckets from the same tally, and
+    # the total is stated so a reader can check the arithmetic instead of taking it on trust; the
+    # epistemic rule for each row is named for the same reason it is named in the HTML legend.
+    _rows = [("Verified (engine ran clean)", t["verified"], "evidence"),
+             ("Failed (finding violates)", t["failed"], "evidence"),
+             ("Attempted (inconclusive by nature)", t["attempted"], "evidence"),
+             ("No engine (Apolaki cannot test this)", t["not_implemented"], "evidence"),
+             ("Blocked (safety-excluded by design)", t["blocked"], "catalogue constant"),
+             ("Not tested", t["not_tested"] + t["not_applicable"], "evidence")]
     out = ["", "## ASVS Objective Coverage", "", "_%s_" % a["disclaimer"], "",
-           "| Status | Count |", "| --- | --- |",
-           "| Verified | %d |" % t["verified"], "| Failed (finding violates) | %d |" % t["failed"],
-           "| Attempted (inconclusive) | %d |" % t["attempted"],
-           "| Blocked (safety-excluded) | %d |" % t["blocked"], "| Not tested | %d |" % t["not_tested"], ""]
+           "| Status | Count | Follows |", "| --- | --- | --- |"]
+    out += ["| %s | %d | %s |" % r for r in _rows]
+    out += ["| **Total objectives modelled** | **%d** | model size (a denominator) |"
+            % a["total_objectives"], ""]
     failed = [o for o in a["objectives"] if o["status"] == "failed"]
     if failed:
         out += ["**Failed objectives — a finding violates the verification property:**", ""]
@@ -2492,11 +2504,53 @@ def generate_html_report(program: str, findings: list, scope: dict,
     # a curated-partial model, never a full-coverage claim.
     _cr = coverage_rollup(raw_findings, tool_ledger, candidate_validation)
     _pp = _cr.get("properties") or {}
+    # Q-022 anti-idle audit. Q-084 caught ONE constant-dressed-as-a-measurement in this block; the
+    # rest of the block had never been audited. Measured by VARYING THE INPUT across the whole span a
+    # mission can occupy -- (A) nothing ran/nothing found, (B) every dispatch-reachable engine ran
+    # clean, (C) every engine ran + one finding of every family an objective keys on:
+    #
+    #   ASVS total       34  34  34   CONSTANT  -> the size of the model; a DENOMINATOR
+    #   confirmed_safe    0  29   0   varies    -> evidence (engines that ran clean)
+    #   vulnerable        0   0  32   varies    -> evidence (findings)
+    #   inconclusive      0   2   0   varies    -> evidence
+    #   not_tested       31   0   0   varies    -> evidence
+    #   not_implemented   1   1   0   varies    -> evidence (a finding can still FAIL one)
+    #   blocked           2   2   2   CONSTANT  -> catalogue: AUTHN-05/06 carry violated_by=(), so no
+    #                                              finding and no run can ever move this number
+    #   WSTG tested/total/full/partial/excluded  CONSTANT (already labelled by Q-084)
+    #
+    # TWO DEFECTS FOUND, both fixed here.
+    #
+    # 1. `not_implemented` WAS NOT RENDERED AT ALL. `coverage_rollup` gives it its own bucket with an
+    #    explicit note that Q-012's distinction "must not be undone one layer up" -- and the renderer,
+    #    one layer further up, dropped it. MEASURED: stated total 34, cells summed to 33 in cases A
+    #    and B. It closed in case C only because a finding had moved the last one out of the bucket,
+    #    which is worse than never closing: a reader who checks the arithmetic once may conclude it
+    #    always closes. Producer landed, consumer never did -- the fifth instance of that shape this
+    #    week (Q-050, Q-051, Q-084, Q-053 GAP-1).
+    # 2. `blocked` is a CATALOGUE CONSTANT sitting unlabelled inside an evidence-driven grid, which is
+    #    Q-084's exact defect one row down. It is not removed -- 2 safety-excluded objectives is a real
+    #    and deliberate statement -- it is now named as what it is, below the grid.
     _cov_meta = [("confirmed_safe", "Confirmed safe", "#3fb950"), ("vulnerable", "Vulnerable", "#e5484d"),
-                 ("inconclusive", "Inconclusive", "#d29922"), ("blocked", "Blocked", "#8b949e"),
+                 ("inconclusive", "Inconclusive", "#d29922"),
+                 ("not_implemented", "No engine", "#8b949e"),
+                 ("blocked", "Blocked", "#8b949e"),
                  ("not_tested", "Not tested", "#6e7681")]
     _cov_cells = "".join(f"<div class='cov'><span style='color:{col}'>{_pp.get(k, 0)}</span><label>{lbl}</label></div>"
                          for k, lbl, col in _cov_meta) if _pp else ""
+    # The rule EACH number follows, stated on the page rather than in this comment, and DERIVED from
+    # `_cov_meta` so it cannot drift out of step with the cells it describes. No number is hardcoded
+    # here: "Blocked" is named as the constant, its VALUE still comes from the tally.
+    _mission_driven = ", ".join(lbl for k, lbl, _c in _cov_meta if k != "blocked")
+    _cov_legend = (f"<div class='sub' style='margin-top:.4rem'>How to read these: "
+                   f"<b>{e(_mission_driven)}</b> are evidence-driven — computed from the findings of "
+                   f"this mission and the engines that actually ran. <b>Blocked</b> is not: those "
+                   f"objectives are safety-excluded by design, so no run and no finding can change "
+                   f"that number. <b>No engine</b> counts properties Apolaki cannot test at all, kept "
+                   f"separate from Not tested so an absent capability cannot hide inside a skipped "
+                   f"one. The six cells sum to the "
+                   f"{_pp.get('total', 0)} objectives above, which is the SIZE OF THE MODEL, not a "
+                   f"measurement.</div>") if _pp else ""
     _w = _cr.get("wstg") or {}
     # Q-084. This line used to read "WSTG active tests: 85/109 covered", which asserts activity. The
     # number is a property of a static catalogue: it is 85 for a full-mode scan of Juice Shop, 85 for
@@ -2507,16 +2561,24 @@ def generate_html_report(program: str, findings: list, scope: dict,
     # -- it is a real capability statement -- so the fix is the sentence, and the sentence now names
     # its own epistemics. Pinned by tests/test_wstg_coverage_claim.py, including a control that fails
     # if someone "fixes" this by deleting the line.
+    #
+    # Q-022 anti-idle, EXTENDING the Q-084 fix and not undoing it: the closing clause used to read
+    # "unlike the figures above it does not vary with what ran", which asserts that every figure above
+    # DOES vary. Measured, `Blocked` never varies either (2 in all three cases above), so the sentence
+    # that was added to separate two epistemics quietly mis-stated one of them. The Q-084 wording that
+    # tests/test_wstg_coverage_claim.py pins -- "this tool, not this mission", the 85 and the 109 --
+    # is untouched; only the false half of the comparison is corrected.
     _wstg_line = (f"<div class='sub' style='margin-top:.3rem'>WSTG catalogue: Apolaki has engines for "
                   f"{_w.get('tested', 0)}/{_w.get('total', 109)} active tests ({_w.get('full', 0)} full, "
                   f"{_w.get('partial', 0)} partial), {_w.get('excluded', 0)} safety-excluded. This "
-                  f"describes this tool, not this mission - unlike the figures above it does not vary "
-                  f"with what ran.</div>") if _w else ""
+                  f"describes this tool, not this mission - it does not vary with what ran, and neither "
+                  f"does the Blocked cell above; every other cell above does.</div>") if _w else ""
     cov_overview_html = (("<h2 id='coverage-overview'>Coverage Overview</h2>"
                           "<div class='sub' style='margin:-.3rem 0 .5rem'>Of the security properties Apolaki "
                           f"models ({_pp.get('total', 0)} ASVS objectives, curated-partial) — how many were "
-                          "confirmed safe, found vulnerable, inconclusive, blocked, or not tested. Never a "
-                          f"full-coverage claim.</div><div class='cov-grid'>{_cov_cells}</div>{_wstg_line}")
+                          "confirmed safe, found vulnerable, inconclusive, untestable, blocked, or not "
+                          "tested. Never a full-coverage claim.</div>"
+                          f"<div class='cov-grid'>{_cov_cells}</div>{_cov_legend}{_wstg_line}")
                          if _pp else "")
 
     # Business Logic Testing — headline capability: the workflows probed + abuse categories generated (the

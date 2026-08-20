@@ -208,3 +208,73 @@ standard ASVS property. The crypto trio is NOT cheap and must not be added carel
 is source review, so a clean run over a repository that contains no cryptography at all would read
 "verified: approved algorithms in use". That is a false verify with no finding able to contradict it,
 and it needs a reachability precondition before the objective can exist honestly.
+
+---
+
+# ANTI-IDLE · every number in the Coverage Overview block, and the rule it follows
+
+Q-084 caught ONE number in this block that was a catalogue constant worded as a measurement. **The
+rest of the block had never been audited.** Auditing it by VARYING THE INPUT rather than by reading
+the code -- three cases spanning what a mission can be -- found two more defects.
+
+    number             A: nothing ran   B: perfect clean   C: perfect + findings   RULE
+    -----------------------------------------------------------------------------------------------
+    ASVS total              34                34                  34         CONSTANT · denominator
+    confirmed_safe           0                29                   0         evidence · engines ran clean
+    vulnerable               0                 0                  32         evidence · findings
+    inconclusive             0                 2                   0         evidence
+    not_tested              31                 0                   0         evidence
+    not_implemented          1                 1                   0         evidence (a finding can fail one)
+    blocked                  2                 2                   2         CONSTANT · catalogue
+    tested_pct             0.0              91.2                94.1         evidence · derived
+    WSTG tested/total       85/109           85/109              85/109      CONSTANT · catalogue
+    WSTG full/partial/excl  60/25/5          60/25/5             60/25/5     CONSTANT · catalogue
+
+  A = no engine ran, no finding.  B = every dispatch-reachable engine (110) ran clean.
+  C = same, plus one finding of every family an objective keys on (54).
+
+## Defect 1 · the arithmetic did not close, and closed sometimes, which is worse
+
+`not_implemented` was **not rendered at all**. Measured on the real artifact:
+
+    A nothing ran    stated total=34  cells sum to 33   MISSING=1
+    B perfect clean  stated total=34  cells sum to 33   MISSING=1
+    C perfect+finds  stated total=34  cells sum to 34   MISSING=0
+
+`coverage_rollup` gives that bucket its own key with a comment saying Q-012's distinction must not be
+undone "one layer up" -- and the renderer, one layer further up, discarded it. **Producer landed,
+consumer never did: the fifth instance of that shape this week** (Q-050, Q-051, Q-084, Q-053 GAP-1).
+Case C closed on its own because a finding had emptied the bucket, so a reader who checks the
+arithmetic once concludes it always closes, and a test written against one input would have passed.
+
+The **markdown** ASVS table had the same hole plus one more: it dropped `not_implemented` AND
+`not_applicable`, so its rows summed to less than the model in every case. One projection, two
+renderers -- both now emit the same six buckets and state the total.
+
+## Defect 2 · a constant standing unlabelled among measurements, and a sentence that said so
+
+`blocked` reads 2 in all three cases and **structurally cannot move**: AUTHN-05 and AUTHN-06 carry
+`violated_by=()`, so no finding can fail them and no run can change the number. It sat unlabelled in
+a grid of five evidence-driven cells -- Q-084's defect one row down.
+
+Worse: the sentence Q-084 ADDED read *"unlike the figures above it does not vary with what ran"*,
+which asserts that every figure above DOES vary. Blocked does not. **The line is extended, never
+undone** -- `tests/test_wstg_coverage_claim.py` still pins the 85, the 109 and "this tool, not this
+mission", including its control that fails if the line is deleted. Only the false half of the
+comparison was repaired, and `test_the_q084_sentence_is_extended_and_not_undone` fails if the old
+clause returns.
+
+## What the page says now
+
+The block carries a derived legend (built from `_cov_meta`, so it cannot drift out of step with the
+cells): which cells are evidence-driven, that Blocked is not and why, that "No engine" is kept
+separate from "Not tested" so an absent capability cannot hide inside a skipped one, and that the
+ASVS total is the size of the model rather than a measurement. The markdown table gains a `Follows`
+column carrying the same rule per row.
+
+## Mutation tests, each verified as LANDED first
+
+    drop the not_implemented cell        -> 2 tests fail (sum identity + bucket presence)
+    restore the old WSTG clause          -> test_the_q084_sentence_is_extended_and_not_undone fails,
+                                            while test_wstg_coverage_claim.py still PASSES -- which is
+                                            the evidence the new test covers ground the old one cannot
