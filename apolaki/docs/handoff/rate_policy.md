@@ -80,3 +80,77 @@ the gap between the **start** of request 1 and the **start** of request 2 is the
 **Positive control**: C1/C2/C5 are non-zero on the same harness that reports zero for C2b/C3/NEG.
 The zeros mean "no wait", not "no instrument".
 
+
+---
+
+## 3. MEASURED — the BROWSER path (run 2)
+
+Run 1 was killed here. **Its verdict table already printed browser-column numbers citing
+"measured, §3" for a §3 it never wrote.** That is the Q-043 failure mode reproduced inside the
+Q-043 lane: a citation to something that does not exist. Every browser number below was
+re-measured from zero by run 2; none of run 1's browser column was inherited.
+
+`agent/browser_engine.py:134` claims *"a shared per-origin Retry-After deadline observed by sync
+and async transports"*. That decomposes into three testable claims, not one:
+(a) browser navigation consults the deadline, (b) the deadline is genuinely SHARED — a 429 seen by
+one transport parks the other, (c) the route gate covers subresources, not just navigations.
+
+Method: a REAL Playwright Chromium launched exactly as `tools.py` launches it
+(`executable_path=_chrome_path()`, `--no-sandbox`), driving the REAL
+`browser_engine.rate_limited_goto` against a responder in my own throwaway container.
+**The measurement is server-side arrival timestamps.** A gap measured in the caller only proves the
+caller slept; a gap measured at the socket proves the browser did not send.
+
+    docker run --rm --network apolaki_default -e BBH_RETRY_AFTER_MAX_SECONDS=4 \
+      -v "$SNAP:/app" -v "$MEASURE:/measure" -w /app apolaki-agent python -u /measure/probe_browser.py
+
+    chrome executable        = /opt/pw-browsers/chromium-1234/chrome-linux64/chrome
+    effective max_wait       = 4.0s
+
+    B1  delta-seconds  status=429->200  server_gap=2.033s  arrivals=2   expect >=2s
+    B2  HTTP-date +3s  status=429->200  server_gap=2.667s  arrivals=2   expect >=2s
+    B2b HTTP-date PAST status=429->200  server_gap=0.027s  arrivals=2   expect ~0s, never negative
+    B3  bare 429       status=429->200  server_gap=0.027s  arrivals=2   expect TICKET WANTS >0s
+    B3b bare 503       status=503->200  server_gap=0.028s  arrivals=2   expect TICKET WANTS >0s
+    B5  absurd 86400   status=429->200  server_gap=4.027s  arrivals=2   expect capped at max_wait
+    NEG 200+RA:5       status=200->200  server_gap=0.027s  arrivals=2   expect ~0s (positive control)
+    NEG RA banana      status=429->200  server_gap=0.026s  arrivals=2   expect ~0s (positive control)
+
+    policy stats after run: {'observations': 8, 'capped': 2, 'waits': 3, 'seconds': 8.639, 'truncated': 0}
+
+**An apparatus bug caught before it was reported as a product bug.** The first run of this probe
+returned `B2 = 0.064s`, which reads exactly like "the browser ignores HTTP-date". It was not.
+The probe built its HTTP-date once at script start; by the time case B2 ran — after B1's own 2 s
+wait — that date was in the past, and a past date correctly clamps to zero. Generating the date at
+RESPONSE time gives 2.667 s. Recorded because the failure mode is invisible: a stale fixture and a
+broken feature produce byte-identical output.
+
+### 3b. The SHARED claim, both directions — the half that actually matters
+
+Two transports each honouring a header independently is **not** what line 134 claims. The claim is
+one deadline. Tested by making one transport meet the 429 and measuring the *other*:
+
+    docker run --rm --network apolaki_default -e BBH_RETRY_AFTER_MAX_SECONDS=10 \
+      -v "$SNAP:/app" -v "$MEASURE:/measure" -w /app apolaki-agent python -u /measure/probe_shared.py
+
+    effective max_wait = 10.0s
+    T1 browser 429 -> http GET      gap=3.027s   expect >=2s (shared deadline)
+    T2 http 429 -> browser navigate gap=3.013s   expect >=2s (shared deadline)
+    T3 browser 429 -> in-page fetch gap=3.018s   expect >=2s (route gate covers subres)
+    NEG no 429 -> http GET          gap=0.064s   expect ~0s (positive control)
+    NEG no 429 -> in-page fetch     gap=0.015s   expect ~0s (positive control)
+
+The HTTP leg is built by the same factory `tools._target_client` uses
+(`rate_limited_async_client(httpx, rate_policy=target_rate_policy)`, `agent/tools.py:41-48`).
+
+**Clause 1 verdict: PASS.** Browser navigation really does consult the shared deadline; the
+deadline really is one object across both transports, in both directions; and the route gate really
+does cover in-page subresource fetches, not only navigations. The docstring at line 134 is
+**accurate** — established by execution, not by reading it.
+
+**Positive control**: the NEG rows are ~0.02-0.06 s on the same harness, through the same code path,
+that reports 2-4 s on the rows above. The zeros mean "no wait", not "no instrument".
+
+**Clause 3 (bare 429) fails identically on both paths** — 0.027 s browser, 0.003 s `_http`. This is
+the one real gap, and it is symmetric, which is the good news: one fix in `TargetRatePolicy.observe`
+covers both transports. See §4.
