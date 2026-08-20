@@ -496,3 +496,100 @@ touched. Retiring the pin needs the 17 islands in §3.5 closed, and §4 prices e
 The one thing that did change is what the number means. 51 is **34 previously recorded + 17 named,
 evidenced islands**, and the 10 entries that left it did not leave by assertion — each names a caller a
 test opens a file to find.
+
+---
+
+## 10. Run 4 — the repair: a rule that was RED on arrival, and why
+
+Run 3 was killed mid-test holding uncommitted work. The Coordinator's isolated full-suite run over HEAD
+plus those files was `1 failed, 3246 passed, 11 skipped, 12 xfailed in 661s`, the one failure being
+run 3's own `test_a_recorded_measurement_cannot_grow_to_absorb_a_new_island`. Reproduced first, before
+anything was changed, on a `git archive HEAD` snapshot with run 3's two files overlaid:
+
+```
+docker run --rm -v "<snap>/apolaki/agent:/app" -w /app apolaki-agent \
+  python -m pytest tests/test_deadcode_gate.py -p no:cacheprovider -q
+→ FAILED test_a_recorded_measurement_cannot_grow_to_absorb_a_new_island
+  AssertionError: deadcode_gate.scan_qualified is excused; it can never be flagged
+```
+
+### 10.1 The mechanism was right; one assertion had the direction backwards
+
+Run 3's accounting gate — `unaccounted = flagged - RECORDED_QUALIFIED`, kept separate from `ok` — is
+sound and is kept verbatim. What failed is the clause guarding the records against becoming allowlists:
+
+```python
+for e in dg.RECORDED_QUALIFIED:
+    assert e not in dg.ALLOWED_UNUSED_NAMED_CALLER
+```
+
+MEASURED — nine violations, every one from `QUALIFIED_Q077_REVEALED`:
+
+```
+deadcode_gate.scan  deadcode_gate.scan_methods  deadcode_gate.scan_qualified   (harness)
+description_gate.audit  engine_descriptor.effects_audit  ics_dnp3_s7._dnp3_crc_table   (harness)
+mitm_addon.request  mitm_addon.response   (framework)
+sqli_tool.is_inconclusive   (re-export)
+overlap RECORDED x ALLOWED_UNUSED_QUALIFIED: []
+named-caller entries in NO record: ['deadcode_gate.resolve_named_caller']
+```
+
+Those nine are **run 2's own work product**. They were flagged when the Q-077 delta was measured, and
+run 2's triage then found each one a caller and pinned it with a resolvable anchor. The flat rule
+therefore forbade the exact outcome the ticket exists to produce — it would have been satisfied only by
+deleting nine names from a record of a measurement, which is rewriting history to match a later opinion.
+The Q-077 delta was 27 and stays 27 however the triage of those 27 lands.
+
+**The two directions are different acts, and a set cannot tell you which order its members arrived in:**
+
+| | what happened | verdict |
+|---|---|---|
+| RECORD-then-EXCUSE | measured while flagged; triage later found a caller | the ticket working |
+| EXCUSE-then-RECORD | an already-excused name added to a record; can never be flagged, so it pads the record | dishonest |
+
+### 10.2 What landed — pinned by name, exactly as run 2 pinned `NAMED_CALLER_OUTSIDE_CHECKOUT`
+
+`RECORDED_THEN_EXCUSED`, a frozenset of the nine, in `deadcode_gate.py` beside `RECORDED_QUALIFIED`.
+A tenth costs a deliberate edit **there** as well as the allowlist edit — two places a reviewer reads —
+on top of a caller `resolve_named_caller` must actually find in the tree. That is the teeth: quietly
+excusing a recorded entry is the one move that drops the count without wiring anything.
+
+The check itself moved into `_recorded_entries_excused_without_a_pin(recorded, named_caller, prose,
+bare, pin)` and now covers **all three** excuse paths that `scan_qualified._justified` honours
+(`ALLOWED_UNUSED_NAMED_CALLER`, `ALLOWED_UNUSED_QUALIFIED`, and bare names in `ALLOWED_UNUSED`). Run 3's
+clause knew about two of the three — the same shape run 2 recorded in §8.3, where a test named for two
+allowlists silently ignored a third. MEASURED: no recorded entry is excused by the prose list or by a
+bare name today, so those two arms are proven by control rather than by observation.
+
+`test_the_recorded_then_excused_pin_is_bounded_and_every_member_earns_its_place` checks the pin in both
+directions:
+
+* bounded at the 9 measured;
+* every member must still be **both** recorded and excused, so a name whose excuse was withdrawn cannot
+  squat there and stay exempt;
+* `RECORDED_THEN_EXCUSED == RECORDED_QUALIFIED & set(ALLOWED_UNUSED_NAMED_CALLER)` — exact, not merely
+  bounded, which is what stops a name being pinned *before* it is excused. Pre-loading the pin would be
+  pre-authorising a future excuse.
+
+**NEGATIVE CONTROL, four ways.** A recorded, unpinned entry is fed to the helper through each excuse
+path in turn and must be named; then the same entry, pinned, must not be. Without it the main
+assertion's empty list would be indistinguishable from a helper that never looks at anything — which is
+precisely the defect run 2 recorded in §8.2. The victim is chosen as
+`sorted(RECORDED_QUALIFIED - RECORDED_THEN_EXCUSED)[0]` and the test **asserts its bare name is unique
+among the recorded entries** before using it for the bare-name arm, rather than assuming it.
+
+**POSITIVE CONTROL:** the pin is asserted non-empty, so the per-member loop provably ran over nine real
+names rather than over nothing.
+
+### 10.3 MEASURED after the repair
+
+```
+tests/test_deadcode_gate.py -q  →  47 passed, 1 xfailed          (was 46 passed, 1 xfailed, 1 FAILED)
+scan_qualified()  count 51  baseline 37  ok False  allowed 18  unaccounted []
+scan_methods()    count 14  ok True  newly_dead []  resolved []
+```
+
+Every number identical to run 3's, which is the point: this repair changed a test's premise and added a
+frozenset. It did not move the ratchet, raise `QUALIFIED_BASELINE`, or widen any allowlist. No
+production module imports `deadcode_gate` — re-confirmed by an unfiltered grep across `.py`, `.sh`,
+`.yml`, `.html`, `Dockerfile` and `Makefile` — so a new module constant cannot reach a mission path.

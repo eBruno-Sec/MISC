@@ -541,6 +541,144 @@ def test_a_deliberate_island_is_named_and_nothing_else_is(real_tree_copy):
         assert innocent not in after["message"], "%s is not the delta and must not be named" % innocent
 
 
+# ── the accounting gate: what still fires while the ratchet is pinned (Q-078, run 3) ────────────
+
+def test_no_flagged_entry_is_unaccounted_for(qual):
+    """THE GATE THAT WORKS WHILE THE RATCHET IS PINNED. Not xfailed, and it must never become one.
+
+    `test_the_ratchet_holds` is `xfail(strict=True)` at 51 against 37, so a RISE in the count cannot fail
+    the suite — the test fails either way and the failure is the expected one. MEASURED by mutation on a
+    copy of the real tree: appending an island to `security.py` took the count 51 -> 52 with the whole
+    file still green, exit 0. The bare-name `scan()` gate is what would normally catch that, and
+    `test_the_bare_name_scan_is_fooled_by_a_name_collision` shows the case it cannot see — which is the
+    case the mutation used, a new `summarize` beside the existing hashid_tool/race_tool ones.
+
+    So this asserts a different property, one the ceiling does not appear in: every flagged entry is one
+    somebody has already measured and written down. 51 = 34 still-dead from `QUALIFIED_BASELINE_SET` +
+    17 still-dead from `QUALIFIED_Q077_REVEALED`, exactly, with nothing left over."""
+    assert qual["unaccounted"] == [], qual["message"]
+    assert qual["accounted"]
+    # The arithmetic, asserted rather than described: the two recorded sets partition what is flagged.
+    flagged = set(qual["unused"])
+    recorded = flagged & dg.QUALIFIED_BASELINE_SET
+    revealed = flagged & dg.QUALIFIED_Q077_REVEALED
+    assert len(recorded) + len(revealed) == qual["count"], (
+        "%d recorded + %d Q-077-revealed != %d flagged" % (len(recorded), len(revealed), qual["count"]))
+    # POSITIVE CONTROL: an empty `unaccounted` must mean the check looked and found nothing, never that
+    # it had nothing to look at. Both sets must still be contributing entries to the count.
+    assert recorded and revealed, "one of the recorded sets contributes nothing; the check is vacuous"
+
+
+def test_the_accounting_gate_catches_the_island_the_pinned_ratchet_swallows(real_tree_copy, qual):
+    """NEGATIVE CONTROL for the gate above, at real-tree scale and with the name that defeats `scan()`.
+
+    A colliding name on purpose: `summarize` is already defined by `hashid_tool` and `race_tool`, so the
+    bare-name scan sees the word and clears the new one. Under the pin, nothing else in this file goes
+    red. This is the reproduction of that hole and the proof it is now closed."""
+    before_unaccounted = qual["unaccounted"]
+    assert before_unaccounted == [], "the real tree must be accounted for before the island is added"
+
+    victim = os.path.join(real_tree_copy, "security.py")
+    original = open(victim, encoding="utf8").read()
+    open(victim, "a", encoding="utf8").write(
+        "\n\ndef summarize(rows):\n"
+        "    \"\"\"Q-078 negative control: an island whose NAME COLLIDES with hashid_tool.summarize.\"\"\"\n"
+        "    return {\"n\": len(rows)}\n")
+    try:
+        after = dg.scan_qualified(real_tree_copy)
+    finally:
+        open(victim, "w", encoding="utf8").write(original)
+
+    island = "security.summarize"
+    assert island in after["unused"], "positive control: the qualified scan must SEE the island"
+    assert after["unaccounted"] == [island], (
+        "the accounting gate must name the island and nothing else; it named %s" % after["unaccounted"])
+    assert "UNACCOUNTED" in after["message"] and island in after["message"]
+    # And the half that makes this worth having: the COUNT ratchet says nothing new. It was already
+    # False, so the strict xfail is satisfied by the same failure before and after — which is exactly
+    # how a new island travelled in unnoticed.
+    assert after["ok"] is False and qual["ok"] is False
+    assert after["count"] == qual["count"] + 1
+
+
+def test_a_recorded_measurement_cannot_grow_to_absorb_a_new_island():
+    """The one dishonest way to satisfy the accounting gate is to record the new island as if it had
+    always been there. Both sets are therefore bounded at the sizes they were MEASURED at.
+
+    They may SHRINK — an entry leaves a recorded set when someone deletes it after wiring the function,
+    and `resolved` reports that drift meanwhile. They may not grow. If a future resolver fix reveals more
+    genuinely-dead entries the way Q-077 did, that is a triage ticket with evidence per entry, not an
+    edit to a number here — and forcing that edit to be deliberate and reviewed is the entire point."""
+    assert len(dg.QUALIFIED_BASELINE_SET) <= 35, (
+        "the baseline set was MEASURED at 35 entries on a clean HEAD snapshot; growing it to %d absorbs "
+        "an island into a record of a measurement that never included it"
+        % len(dg.QUALIFIED_BASELINE_SET))
+    assert len(dg.QUALIFIED_Q077_REVEALED) == 27, "the Q-077 delta was measured at exactly 27"
+    assert not (dg.QUALIFIED_BASELINE_SET & dg.QUALIFIED_Q077_REVEALED), "the two records must be disjoint"
+    assert dg.RECORDED_QUALIFIED == dg.QUALIFIED_BASELINE_SET | dg.QUALIFIED_Q077_REVEALED
+    # Neither record may quietly become an allowlist. The rule is DIRECTIONAL and run 3 had it flat:
+    # see RECORDED_THEN_EXCUSED. Excusing a recorded entry is the move that drops the count without
+    # wiring anything, so it costs an edit here as well as one to the allowlist.
+    assert _recorded_entries_excused_without_a_pin(
+        dg.RECORDED_QUALIFIED, dg.ALLOWED_UNUSED_NAMED_CALLER, dg.ALLOWED_UNUSED_QUALIFIED,
+        dg.ALLOWED_UNUSED, dg.RECORDED_THEN_EXCUSED) == []
+
+
+def _recorded_entries_excused_without_a_pin(recorded, named_caller, prose, bare, pin):
+    """Every recorded entry that some allowlist excuses and RECORDED_THEN_EXCUSED does not account for.
+
+    All THREE excuse paths, because `scan_qualified._justified` honours three and a check that knew
+    about two would pass the one it exists to catch -- the shape run 2 recorded in §8.3, where a test
+    named for two allowlists silently ignored a third."""
+    return sorted(e for e in recorded
+                  if (e in named_caller or e in prose or e.split(".")[-1] in bare) and e not in pin)
+
+
+def test_the_recorded_then_excused_pin_is_bounded_and_every_member_earns_its_place():
+    """The pin's own integrity, checked in BOTH directions, plus the control that keeps it non-vacuous.
+
+    A pin that may hold any name is not a pin. Bounded at the 9 MEASURED, and every member must still be
+    BOTH recorded AND excused -- so a name whose excuse was withdrawn cannot squat here and quietly stay
+    exempt from the directional rule."""
+    assert len(dg.RECORDED_THEN_EXCUSED) <= 9, (
+        "9 recorded-then-excused entries were MEASURED; growing to %d without a triage entry per name is "
+        "how the exemption widens" % len(dg.RECORDED_THEN_EXCUSED))
+    for e in dg.RECORDED_THEN_EXCUSED:
+        assert e in dg.RECORDED_QUALIFIED, "%s is pinned as recorded-then-excused but is in no record" % e
+        assert e in dg.ALLOWED_UNUSED_NAMED_CALLER, (
+            "%s is pinned as excused but no allowlist excuses it; the pin is stale and the entry is "
+            "exempt from the directional rule for nothing" % e)
+    # POSITIVE CONTROL: the apparatus had something to look at. The pin is non-empty and it is exactly
+    # the overlap that exists on this tree, so the check above ran over 9 real names rather than none.
+    assert dg.RECORDED_THEN_EXCUSED, "an empty pin makes the directional rule flat again"
+    # EXACT, not merely bounded, and only for the named-caller path -- which is where all 9 live. It says
+    # a name cannot be pinned BEFORE it is excused: pre-loading the pin would be pre-authorising a future
+    # excuse. The other two excuse paths carry no members today, so the main assertion above is what has
+    # teeth for them, and it is the reason that assertion checks all three rather than this one.
+    assert dg.RECORDED_THEN_EXCUSED == dg.RECORDED_QUALIFIED & frozenset(dg.ALLOWED_UNUSED_NAMED_CALLER)
+
+    # NEGATIVE CONTROL: the same helper, driven with a recorded entry that IS excused and is NOT pinned,
+    # must name it. Without this the main assertion's empty list would be indistinguishable from a helper
+    # that never looks at anything -- and one of run 2's four red tests was exactly that.
+    victim = sorted(dg.RECORDED_QUALIFIED - dg.RECORDED_THEN_EXCUSED)[0]
+    # The bare-name path below keys on `victim`'s last segment, so a second recorded entry sharing it
+    # would make the control expect the wrong list. Asserted rather than assumed.
+    assert [e for e in dg.RECORDED_QUALIFIED if e.split(".")[-1] == victim.split(".")[-1]] == [victim]
+    caught = _recorded_entries_excused_without_a_pin(
+        dg.RECORDED_QUALIFIED, {victim: ("harness", "x", "y", "z")}, {}, {},
+        dg.RECORDED_THEN_EXCUSED)
+    assert caught == [victim], "the check must name an unpinned excused entry; it returned %r" % caught
+    # And once for each of the other two excuse paths, so none of the three is decorative.
+    assert _recorded_entries_excused_without_a_pin(
+        dg.RECORDED_QUALIFIED, {}, {victim: "prose"}, {}, dg.RECORDED_THEN_EXCUSED) == [victim]
+    assert _recorded_entries_excused_without_a_pin(
+        dg.RECORDED_QUALIFIED, {}, {}, {victim.split(".")[-1]: "bare"}, dg.RECORDED_THEN_EXCUSED) == [victim]
+    # ...and the pin really does suppress: the same victim, pinned, is not reported.
+    assert _recorded_entries_excused_without_a_pin(
+        dg.RECORDED_QUALIFIED, {victim: ("harness", "x", "y", "z")}, {}, {},
+        dg.RECORDED_THEN_EXCUSED | {victim}) == []
+
+
 def test_a_recorded_baseline_set_smaller_than_the_ratchet_guarantees_a_named_entry():
     """The property that makes the alarm's message provably non-empty, for BOTH ratchets.
 

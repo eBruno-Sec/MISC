@@ -369,7 +369,71 @@ QUALIFIED_Q077_REVEALED = frozenset({
 })
 
 
-def _ratchet_message(kind, count, baseline, newly, resolved, recorded):
+# EVERY ENTRY ANYONE HAS EVER MEASURED AND TRIAGED, as one set. Not an allowlist and not a threshold:
+# nothing here is excused, and every member still counts toward the ratchet. It is the set an ACCOUNTING
+# CHECK subtracts, and that check exists because of a hole a reader will not otherwise see.
+#
+# **THE PIN IS A HOLE, MEASURED.** `test_the_ratchet_holds` is `xfail(strict=True)` while the count sits
+# at 51 against a ceiling of 37, so a count RISE cannot fail the suite -- the test fails either way and
+# the failure is the expected one. Mutation, on a copy of the real tree at HEAD:
+#
+#   append `def summarize(rows)` to security.py -- an island whose name COLLIDES with
+#   hashid_tool.summarize and race_tool.summarize --> scan_qualified count 51 -> 52, ok False before
+#   and False after, and the suite stays GREEN.
+#
+# The bare-name `scan()` gate is what normally catches a new island, and a colliding name is precisely
+# what it cannot see (`test_the_bare_name_scan_is_fooled_by_a_name_collision` proves that on a synthetic
+# tree; 90 function names in this codebase are defined in more than one module). So between the pin and
+# the collision there was NO gate on new dead code at all, for as long as the pin lasts -- and the pin
+# lasts until 14 islands in files other lanes own are closed.
+#
+# The accounting check closes it WITHOUT touching a threshold: every flagged entry must be one someone
+# has already measured and written down. A brand-new island is in neither set, so it fails immediately,
+# by name, whatever it is called. It cannot be satisfied by raising `QUALIFIED_BASELINE` -- the ceiling
+# does not appear in it -- and the one way to satisfy it dishonestly, recording the new island as if it
+# were an old measurement, is blocked by the size bounds asserted on both sets.
+#
+# Kept SEPARATE from `ok` on purpose. "the count rose" and "an entry nobody has ever looked at is here"
+# are different facts with different fixes, and collapsing them into one boolean is the mistake run 2
+# recorded about RESOLVED versus FILE_UNREACHABLE. `scan_methods` gets no equivalent because its ratchet
+# is NOT pinned (14 <= 14, ok True): its count gate still fires, so its `newly_dead` already fails.
+RECORDED_QUALIFIED = QUALIFIED_BASELINE_SET | QUALIFIED_Q077_REVEALED
+
+# The entries that are in a recorded measurement AND excused by an allowlist, PINNED BY NAME (Q-078,
+# run 4). Nine, all from QUALIFIED_Q077_REVEALED, all excused via ALLOWED_UNUSED_NAMED_CALLER.
+#
+# WHY THIS EXISTS, and it is a correction to run 3 rather than a new idea. Run 3 asserted the flat rule
+# "no recorded entry may be allowlisted", reasoning that an allowlisted entry is filtered out of
+# `flagged` before the diff and so could never be falsified. The rule was RED on arrival -- MEASURED,
+# nine violations, `test_a_recorded_measurement_cannot_grow_to_absorb_a_new_island` failing on
+# `deadcode_gate.scan_qualified` -- because it had the direction backwards.
+#
+# The two directions are different acts:
+#   RECORD-then-EXCUSE  a measurement was taken while the entry was flagged, and triage LATER found it a
+#                       caller. That is the ticket working. Deleting the name from the record afterwards
+#                       would rewrite a measurement to match a later opinion; the Q-077 delta was 27 and
+#                       stays 27 however the triage of those 27 lands.
+#   EXCUSE-then-RECORD  adding an already-excused name to a record. That entry can never be flagged, so
+#                       it sits in the record doing nothing, and it is how a record gets padded.
+#
+# Only the second is dishonest, and a set cannot tell you which order its members arrived in. So the
+# nine that went the first way are pinned by name, exactly as NAMED_CALLER_OUTSIDE_CHECKOUT pins the two
+# entries whose caller the container cannot open. A tenth takes a deliberate edit HERE plus the
+# allowlist edit, in two places a reviewer reads -- which is the teeth: quietly excusing a recorded entry
+# is the move that drops the count without wiring anything, and it now costs two visible edits and a
+# caller that `resolve_named_caller` must actually find.
+#
+# The pin is bounded and checked in both directions by
+# `test_the_recorded_then_excused_pin_is_bounded_and_every_member_earns_its_place`: every member must
+# still be BOTH recorded AND excused, so a stale name cannot squat here after the fact.
+RECORDED_THEN_EXCUSED = frozenset({
+    "deadcode_gate.scan", "deadcode_gate.scan_methods", "deadcode_gate.scan_qualified",
+    "description_gate.audit", "engine_descriptor.effects_audit", "ics_dnp3_s7._dnp3_crc_table",
+    "mitm_addon.request", "mitm_addon.response", "sqli_tool.is_inconclusive",
+})
+
+
+def _ratchet_message(kind, count, baseline, newly, resolved, recorded, unaccounted=()):
     """The failure text for either ratchet. Lives HERE, beside the data, rather than in the assertion.
 
     A message assembled at the call site is re-derived by every caller and drifts from what the scan
@@ -392,6 +456,15 @@ def _ratchet_message(kind, count, baseline, newly, resolved, recorded):
         msg += ("\n(%d recorded entr%s since been wired and no longer dead: %s)"
                 % (len(resolved), "y has" if len(resolved) == 1 else "ies have",
                    ", ".join(resolved[:8]) + (", ..." if len(resolved) > 8 else "")))
+    if unaccounted:
+        # The one class a reader must not mistake for backlog. `newly_dead` holds everything outside the
+        # BASELINE set, which today is 17 entries Q-078 triaged and named -- known, priced, and waiting on
+        # files their lanes own. These are different: nobody has ever looked at them.
+        it = "it" if len(unaccounted) == 1 else "them"
+        msg += ("\nUNACCOUNTED -- flagged in this tree and in NEITHER recorded measurement, so no triage "
+                "has ever covered %s. Wire %s, delete %s, or record %s as a measurement WITH the "
+                "evidence; raising the ceiling does not answer this:\n  %s"
+                % (it, it, it, it, "\n  ".join(unaccounted)))
     return msg
 
 
@@ -587,11 +660,17 @@ def scan_qualified(app_dir: str = None) -> dict:
     # recorded baseline did not; `resolved` is what has been wired since it was recorded.
     newly = sorted(set(flagged) - QUALIFIED_BASELINE_SET)
     resolved = sorted(QUALIFIED_BASELINE_SET - set(flagged))
+    # The accounting check -- see RECORDED_QUALIFIED. `newly_dead` is "not in the BASELINE set", which
+    # today is 17 triaged, named, priced islands; `unaccounted` is "in NO recorded measurement", which is
+    # nobody has ever looked at this. While the ratchet is pinned by a strict xfail, this is the only
+    # thing in the file that can fail on new dead code.
+    unaccounted = sorted(set(flagged) - RECORDED_QUALIFIED)
     return {"unused": flagged, "allowed": allowed, "count": len(flagged),
             "baseline": QUALIFIED_BASELINE, "ok": len(flagged) <= QUALIFIED_BASELINE,
-            "newly_dead": newly, "resolved": resolved,
+            "newly_dead": newly, "resolved": resolved, "unaccounted": unaccounted,
+            "accounted": not unaccounted,
             "message": _ratchet_message("qualified dead-code count", len(flagged), QUALIFIED_BASELINE,
-                                        newly, resolved, len(QUALIFIED_BASELINE_SET))}
+                                        newly, resolved, len(QUALIFIED_BASELINE_SET), unaccounted)}
 
 
 # Methods flagged by `scan_methods` that are deliberately kept. Same rule as ALLOWED_UNUSED: a reason or
