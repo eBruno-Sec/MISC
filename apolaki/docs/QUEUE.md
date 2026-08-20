@@ -1086,7 +1086,7 @@ built, which is the same "bind the value at the point it is known" rule as Q-046
 
 ---
 
-### Q-082 · The report hands a client 716 FABRICATED curl reproductions for static findings · **CRITICAL** · `ready`
+### Q-082 · The report hands a client 716 FABRICATED curl reproductions for static findings · **CRITICAL** · **CLOSED** `9dba899`
 
 Found by proving Q-044, and it is the only one of that lane's three findings that **reaches a reader
 today**. Live in the client-facing artifact.
@@ -1127,7 +1127,7 @@ DoD: either a vendor/minified heuristic in the walk, or a confidence demotion fo
 a measured argument that neither is right. **Negative control:** first-party code containing the same
 call must still be reported - the fix must not silence the analyser on the code that matters.
 
-### Q-081 · `effects_audit` verifies the ENGINE three ways and never checks the KEY · **HIGH** · `ready`
+### Q-081 · `effects_audit` verifies the ENGINE three ways and never checks the KEY · **HIGH** · **CLOSED** `b604709`
 
 Found by the Q-074 lane writing its negative control FIRST, per its brief. The control found a hole in
 the guard it was written to exercise, which is the whole argument for writing it first.
@@ -1153,7 +1153,7 @@ DoD: `effects_audit` validates the KEY against `TECHNIQUES` as well as the engin
 can never reach a consumer fails the audit instead of passing it. **Negative control:** an entry keyed
 on a real technique with a real engine must still pass - a guard that rejects everything is not a fix.
 
-### Q-080 · The DEFAULT scan mode destroys its own session by READING a page, and reports clean · **CRITICAL** · `ready`
+### Q-080 · The DEFAULT scan mode destroys its own session by READING a page, and reports clean · **CRITICAL** · **CLOSED** `928319b`
 
 MEASURED on the running `sessionlife` lab with shipped engines on an isolated HEAD snapshot. Driven,
 not read - which matters, because reading is what produced the wrong answer twice on this ticket
@@ -1192,7 +1192,7 @@ planner steps must apply the same session-kill quarantine, and the fix must be p
 a session-killer must still be probed by all four engines, or the fix trades a false negative for a
 capability loss.
 
-### Q-079 · The DISPATCHER enforces no permission tier at all · **HIGH** · `ready` · split out of Q-052
+### Q-079 · The DISPATCHER enforces no permission tier at all · **HIGH** · **CLOSED** `9dba899` · split out of Q-052
 
 **This was the engineering half of Q-052 and it should never have been bundled with the product
 question.** Q-052 asks what `active` should MEAN to an operator, which is a consent decision. This
