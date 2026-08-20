@@ -32,6 +32,10 @@ the measured green denominator above is the lane baseline.
 
 ### Q-050 claim: CONFIRMED
 
+This verdict is against the requested `256ed8e` snapshot. It is not a claim about the rebased final
+tree: while this lane was active, `main` landed Q-050 resolution commits that deliberately changed
+several of these reachability facts.
+
 An AST census over `agent.py` and `planner.py` found zero exact code-string references for all six
 claimed engines. Positive controls were nonzero:
 
@@ -101,7 +105,7 @@ mission performed the WSTG scenario. An honest evidence-driven tally is therefor
 
 ## Q-085 slice 1: repository-wide guard
 
-Rebased commit: `8c94181`
+Rebased commit: `386da1b`
 
 `tests/test_rate_policy.py` now scans every production Python module recursively for raw HTTP
 clients, `urlopen`, and target `page.goto` calls. Test code and the Tier-3 gate implementation are
@@ -142,6 +146,8 @@ E   ['new_package/brand_new_engine.py:4:send:httpx.AsyncClient']
 After restoration: `1 passed in 2.26s`. No crash, import error, timeout, skip, or unrelated failure
 was credited.
 
+Recursive-collector commit after the final rebase: `4112569`.
+
 Targeted verification:
 
 ```text
@@ -152,7 +158,7 @@ XFAIL tests/test_rate_policy.py::test_every_target_transport_uses_the_shared_rat
 
 ## Q-085 slice 2: Juice Shop no-DoS breach
 
-Rebased commit: `a57630e`
+Rebased commit: `1829762`
 
 All four raw transports in `juiceshop_solvers.py` now route through one sync policy factory:
 
@@ -215,6 +221,8 @@ XFAIL tests/test_rate_policy.py::test_every_target_transport_uses_the_shared_rat
 ```
 
 ## Audit of the other three one-file guards
+
+Rebased audit commit: `a50dc69`.
 
 The Coordinator's premise was checked rather than inherited. All three files do read
 `tools.__file__`, but that fact has three different consequences.
@@ -422,6 +430,114 @@ Suggested Q-043 note: bare-429 default remains `0.0` because provenance requires
 `browser_engine.py` + `tools.py` typed-ledger change. The exact producer/consumer patch and controls
 are above; do not flip the constant alone.
 
-## Remaining verification
+## Final rebase and verification
 
-* full suite, Tier-3 gate, queue gate, rebase, and final integration instructions
+The branch was rebased twice as `main` advanced during the lane. Final tested integration base:
+
+```text
+main=7b79c296a2c3e07c4dda19d4aefbd5f25e144c6a
+tested_head=4112569513ca1c00f3b9a7d2cd6032f883173c1e
+ahead=4 behind=0
+agent_tree=b3f3bd31b7c2feb5512b9d1ae39970104da0ed4e
+```
+
+The Q-050 commits on the rebased base postdate the independent verification above. They do not
+retroactively alter the baseline verdict; they are the Coordinator acting on that work.
+
+### Targeted guards
+
+Command:
+
+```text
+python -m pytest tests/test_rate_policy.py tests/test_engine_reachability.py \
+  tests/test_session_identity.py tests/test_zap_invocation.py -p no:cacheprovider -rx
+```
+
+Result:
+
+```text
+.x..............................................                         [100%]
+XFAIL tests/test_rate_policy.py::test_every_target_transport_uses_the_shared_rate_policy - Q-085 LIVE GAP: after the Juice Shop fix, 21 ungated target calls remain across 12 modules; registration is not compliance, and SKIPPED/NOT SEEN is not a pass
+47 passed, 1 xfailed, 3 warnings in 22.11s
+```
+
+Final measured inventory on the rebased tree:
+
+```text
+production_modules=179
+raw_inventory=35
+ungated_target_calls=21
+ungated_modules=12
+```
+
+The pre-fix two-framing baseline remains `207 gated / 25 ungated` and `3 through / 13 around`.
+This lane removed four raw bypasses from the one mixed Juice Shop module; it does not reconstruct
+the original lane's untracked 207-site census harness or publish an invented new gated-site total.
+
+### Tier-3 gate
+
+Artifacts were redirected to `/tmp`; the checked-in baseline was not touched.
+
+```text
+Tier-3: 33/33 controls passed across 15 classes; semantic_sha256=ae9f8a1bc998f97001d5c478304d1b0197c2472ee3619328cf431baad65968ee; artifact_sha256=b94c2fc692fc13f666e36eaef8fd62a77aefc9b42cde634b5e0db2c197c30c50
+gate_artifact_sha256=e7dca3a19ef274d55cdc318f36166920449c33391ffa245b2040d2fa1eeb9537
+33 Tier-3 control(s) pass; no regression against a baseline of 32
+```
+
+### Queue gate
+
+The first `bash scripts/queue_gate.sh` invocation resolved to Windows' WSL launcher and returned
+`execvpe(/bin/bash) failed`; that was an environment non-run, not a pass. The unchanged script was
+then run under `C:\Program Files\Git\bin\bash.exe`:
+
+```text
+queue_gate: 75 headers, 50 distinct hashes cited, 5 ids with >1 header
+queue_gate: OK
+```
+
+### Full isolated suite
+
+`git archive HEAD apolaki/agent` was extracted to a fresh absolute Windows temp path and mounted in
+a throwaway `apolaki-agent` container on `apolaki_default`. It contained 284 `test_*.py` files; the
+named running agent container and primary worktree were never used.
+
+```text
+3328 passed, 11 skipped, 13 xfailed, 9 warnings in 650.04s (0:10:50)
+```
+
+Before/after with full denominators:
+
+```text
+requested 256ed8e baseline: 3289 passed / 11 skipped / 12 xfailed / 0 failed
+rebased Q-085 branch:       3328 passed / 11 skipped / 13 xfailed / 0 failed
+```
+
+The delta includes the `main` commits that landed during the lane; it is not attributed wholly to
+Q-085. The extra xfail is the deliberate repository-wide 21/12 live-gap guard.
+
+No benchmark application, case, label, scorer, denominator, artifact, or benchmark module changed.
+No benchmark run was performed, so this handoff makes no unmeasured benchmark-score claim.
+
+## Integration instructions
+
+Cherry-pick all five commits from `codex/q085` in order, or merge the branch after verifying its
+base is still current. The first four are the independently useful implementation/audit slices;
+the fifth is this documentation-only handoff and does not change the tested agent tree.
+
+Files changed relative to `main`:
+
+```text
+apolaki/agent/browser_engine.py
+apolaki/agent/juiceshop_solvers.py
+apolaki/agent/tests/test_rate_policy.py
+apolaki/docs/handoff/codex_q085.md
+```
+
+Deliberately untouched:
+
+* `tools.py`: required for atomic bare-429 provenance in the typed ledger; exact patch above.
+* `agent.py` / `planner.py`: required to replace the possible-caller reachability test with a true
+  deterministic-scheduler guard.
+* Queue/status/ledger files: Coordinator-owned; proposed Q-085/Q-043 wording is above.
+* ZAP production files: current calls are clean, but the existing presence-only guard needs a
+  separately leased repository-wide absence control.
