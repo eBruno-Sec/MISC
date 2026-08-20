@@ -18,7 +18,7 @@ Branch: `codex/q087`
 
 ## Part 1 - Q-085 to zero
 
-Status: committed as `0f0d2b7bf248e0ed90a03e90390bcb8d48efa0a6`; full-suite verification pending.
+Status: committed as `0f0d2b7bf248e0ed90a03e90390bcb8d48efa0a6`; full-suite verification passed.
 
 ### Fail before fix
 
@@ -95,7 +95,8 @@ No crash, import error, timeout, skip, or unrelated assertion was credited as a 
 
 ## Part 2 - auto-store triage
 
-Status: implementation and targeted verification complete; commit pending.
+Status: committed as `52faf38dab43606289055ee32ad9dd927c3c2ddf`, with the graph-dispatch
+correction in `6979014b4c8018b42e66fd9b272b12c5819d2166`; full-suite verification passed.
 
 Measured candidate set at baseline: eight engines, not the stale seven named by the strict-xfail
 reason. The missing eighth was `run_whatweb`, newly deterministic after Q-050:
@@ -188,4 +189,66 @@ No crash, import error, timeout, skip, or unrelated assertion was credited as a 
 
 ## Final verification
 
-Status: pending.
+Status: complete.
+
+The final immutable snapshot used agent-tree SHA-1
+`e37d0441a1b2c51109154a156ee18df19dc22fa8` from commit `6979014`.
+
+### Targeted
+
+```text
+............................................. [100%]
+45 passed in 22.69s
+```
+
+One earlier combined targeted run hit the existing 80 ms timing control at 56 ms versus its 60 ms
+floor. The guard was not weakened or edited. Its exact isolated rerun passed (`1 passed in 3.02s`),
+the combined rerun passed (`44 passed in 22.76s` before the final service-pack case), and the final
+combined run above passed.
+
+### Full isolated suite
+
+```text
+3362 passed, 11 skipped, 12 xfailed, 9 warnings in 709.98s (0:11:49)
+```
+
+Compared with the measured baseline, passing tests rose from 3350 to 3362, skips stayed at 11, and
+xfails fell from 14 to 12 because both completed strict markers were deliberately retired. There
+were zero failures.
+
+### Queue integrity
+
+```text
+queue_gate: 77 headers, 52 distinct hashes cited, 6 ids with >1 header
+queue_gate: OK
+```
+
+No benchmark application, case, label, scorer, denominator, `validated_on` value, Tier-3 baseline,
+or Coordinator-owned queue/status file was changed. Benchmark suites were not rerun: this lane
+changed transport policy coverage and result persistence, not detector/scorer output. Liveness and
+bake/update commands were deliberately not run under this lease.
+
+## Coordinator handoff
+
+Suggested Q-085 queue/status text:
+
+```text
+Q-085 CLOSED: the repository-wide target-transport ratchet is 0 calls / 0 modules and its strict
+xfail is retired. All eight residual client factories use the shared process policy; credentialed
+requests wait after 429/503 but are never replayed. Auto-store triage also closed its strict xfail:
+four direct dispatch paths now persist findings, while four child-only engines have execution-proven,
+named parent owners. run_service_pack is dual-route and is protected on both paths.
+```
+
+Integration order:
+
+```text
+0f0d2b7bf248e0ed90a03e90390bcb8d48efa0a6
+52faf38dab43606289055ee32ad9dd927c3c2ddf
+6979014b4c8018b42e66fd9b272b12c5819d2166
+```
+
+The documentation-only verification commit follows those three. During final verification, `main`
+advanced by `47d649d` in `service_router.py` comments and Coordinator queue text; it overlaps none of
+this lane's files. This branch was intentionally left unrebased so the measured commit hashes above
+remain the hashes the Coordinator cherry-picks.
