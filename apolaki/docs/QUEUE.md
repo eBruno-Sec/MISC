@@ -331,7 +331,60 @@ rebuild** — that is now the gate's most valuable output, not an aside.
 
 
 
-### Q-078 · Triage the 27 entries Q-077 made visible · **HIGH** · `ready`
+### Q-078 · Triage the entries Q-077 made visible · **HIGH** · `ready` · **7 of 51 explained, and one is a REAL island**
+
+#### Coordinator, 2026-08-20 — the structural cut nobody had taken
+
+Five lane runs triaged this one function at a time. Grouping the 51 by MODULE first answers seven of
+them in one measurement, and finds the thing the ticket exists to find.
+
+**First, the hypothesis that was WRONG, stated because ruling it out is what made the next cut
+obvious.** "A whole module is dead" -- **disproved**: all 36 modules holding a flagged function are
+imported by production. There is no dead module. The 51 are genuinely per-function.
+
+**Then the one that was right.** Resolving calls by AST across every production module, handling
+BOTH `import x as y` and `from x import f`:
+
+    ics_fingerprint     0 call sites, all 8 public functions unreachable
+    POSITIVE CONTROL    db 153 call sites; service_router 7
+
+**My FIRST pass was wrong and the correction matters.** It looked only for `mod.attr(` and reported
+zero for `service_router` too. `service_router` actually has 7 call sites, reached through import
+forms that pattern cannot see -- the same instrument error this project has paid for repeatedly. The
+corrected instrument still reports **0 for `ics_fingerprint`**, and that zero has a working positive
+control beside it.
+
+`service_router.py` imports the module and uses exactly **one dict** from it, `PROTO_PORTS`. Nothing
+calls any of its eight functions.
+
+**AND IT WAS CITED AS A SAFETY CONTROL.** `service_router.py:35` read:
+
+> "Apolaki NEVER writes to them -- `ics_fingerprint.is_write_frame` is the safety self-check that
+> proves every industrial frame it builds is read-only."
+
+That names a function that never runs. **The protection is real and was verified before anything was
+concluded** -- it lives in two other places, in two different correct forms:
+
+    modbus_audit_tool.py   safety by CONSTRUCTION: builds only 0x2B/0x0E and 0x03. Writes are
+                           categorically absent from the code, not gated. This is what
+                           `_run_modbus_audit` actually dispatches.
+    ics_dnp3_s7.py         safety by RAIL: `_send_recv` calls `is_write_frame` on every frame
+                           immediately before the wire, returning "REFUSED: a frame failed the
+                           read-only safety rail" instead of sending.
+
+So there is **no safety hole**. There was a false citation, in the corner of the product where being
+wrong moves a valve or trips a breaker, and an auditor following that comment would have landed on
+dead code and concluded the rail was live. **Corrected in place**, naming the code that executes,
+with the measurement inline. 85 passed / 1 skipped / 1 xfailed across the ICS, service-router,
+dead-code and mutation-gate tests.
+
+**STILL OPEN, and deliberately not done on momentum**: `ics_fingerprint.py` is a dead DUPLICATE of
+live functionality -- its own `is_write_frame`/`is_read_only` pair, its own probe builders. Removing
+it would drop the ratchet 51 -> 44 in one commit. It carries six tests, and `PROTO_PORTS` must
+survive and move to a live owner. **Eight functions with tests in safety-adjacent code is not
+something to delete on a roll**; the evidence is here and the decision is explicit. Whoever takes it:
+keep `PROTO_PORTS`, prove the tests are testing the dead copy rather than the live rail before
+deleting them, and do not touch `ics_dnp3_s7.py`.
 
 Q-077 switched the dead-code resolver from regex over source text to AST resolution, so comments and
 string literals stopped counting as calls. **The count went 35 to 61 against a ceiling of 37.** The

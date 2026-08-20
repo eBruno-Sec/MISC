@@ -32,8 +32,30 @@ _PORT_SVC = {
     47808: "bacnet",                                  # ICS/OT — BACnet/IP (read-only identify) [#107]
 }
 # ICS/OT control ports classified above are recognised as industrial services so an exposed PLC/RTU surfaces
-# in the graph as a high-severity exposure. Apolaki NEVER writes to them — ics_fingerprint.is_write_frame is
-# the safety self-check that proves every industrial frame it builds is read-only.
+# in the graph as a high-severity exposure. Apolaki NEVER writes to them.
+#
+# CORRECTED 2026-08-20 (Q-078). This comment used to name `ics_fingerprint.is_write_frame` as "the safety
+# self-check that proves every industrial frame it builds is read-only". That function is NEVER CALLED.
+# MEASURED by AST across every production module, resolving both `import x as y` and `from x import f`:
+# `ics_fingerprint` has **0 call sites** and all 8 of its public functions are unreachable. The positive
+# control in the same pass found 153 call sites for `db`, so the instrument was looking.
+#
+# The protection is real; it just lives elsewhere, and in TWO different correct forms:
+#
+#   modbus_audit_tool.py   safety by CONSTRUCTION -- it builds only Read Device Identification (0x2B/0x0E)
+#                          and Read Holding Registers (0x03). Writes are categorically absent from the
+#                          code rather than gated, which is the stronger guarantee. This is the module
+#                          `ToolRegistry._run_modbus_audit` actually dispatches.
+#   ics_dnp3_s7.py         safety by RAIL -- `_send_recv` calls `is_write_frame` on every frame
+#                          immediately before it goes on the wire and returns
+#                          "REFUSED: a frame failed the read-only safety rail" rather than sending.
+#
+# Naming a dead function as the enforcing control is the Q-086 shape in the highest-consequence corner of
+# this product: a reader auditing Apolaki's ICS safety would follow this comment to code that never runs and
+# conclude the rail was live. A write to real OT can move a valve or trip a breaker. The citation has to be
+# to the thing that executes.
+#
+# What this module actually uses from `ics_fingerprint` is ONE DICT, `PROTO_PORTS`, on the next line but one.
 import ics_fingerprint as _ics
 
 
