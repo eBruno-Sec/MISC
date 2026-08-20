@@ -221,3 +221,219 @@ INTERSECTION (must be 0): []
 
 **No benchmark path, ID or filename is special-cased anywhere in the heuristic.** It is evidence-only;
 it simply finds no evidence in 2763 hand-written Java test cases, which is the correct answer.
+
+---
+
+# RUN 3 — the brief was one walk out of date, and the other walk was 175x worse
+
+Run 3 opened on the instruction *"the tests exist, the product change does not — land it"*. That is
+not what is at HEAD, and the first job was to find out rather than build a second copy of a shipped
+fix.
+
+```
+$ grep -n "not_maintained\|_tag_not_maintained" agent/codeintel.py | head
+373:def not_maintained_source(rel: str, text: str) -> tuple:
+412:def _mark_not_maintained(f: dict, kind: str, evidence: str) -> None:
+485:        kind, evidence = not_maintained_source(rel, text)
+491:                _mark_not_maintained(f, kind, evidence)
+503:            "not_maintained_files": not_maintained,
+```
+
+**The product change exists.** Run 1 landed it in `9dba899`, run 2 tested and measured it. All four
+of the brief's requirements were already met by `review_source_tree`: evidence-based classification,
+a negative control, the baseline diff, and benchmark immutability re-measured with an apparatus
+control. Building it again would have produced a duplicate, and "the lane shipped the same fix
+twice" is a worse outcome than "the lane pushed back".
+
+So the question became: **is `review_source_tree` the only walk that had this blind spot?** It is
+not.
+
+## 5. THE SECOND WALK — `codeintel.review()`
+
+`agent/codeintel.py` contains **two** independent tree walks:
+
+| | `review_source_tree` (l. 434) | `review` (l. 507) |
+|---|---|---|
+| entry point | `POST /engage` source lane, `owasp_bench` | `GET /codereview`, UI "Code Review" tab |
+| rows | findings, `confidence: confirmed` | leads (`rule`/`technique`/`severity`/`confirm`) |
+| Q-083 fix at HEAD | **yes** (run 1) | **no** |
+
+Only the first was fixed. The second has the same `_SKIP_DIRS` prune, reads the same file types,
+and said nothing about ownership.
+
+### 5.1 MEASURED on a real tree, before writing any code
+
+DVWA pulled from the running lab (`docker cp apolaki-dvwa-1:/var/www/html`), 585 files:
+
+```
+TREE dvwa           root=/work/trees/dvwa
+  review()  scanned=358 findings=57
+  leads in NOT-MAINTAINED files : 14 of 57  (24.6%)
+  does the lead row say so?     : ['NO -- no marker key on any row']
+       2  third-party vulnerabilities/javascript/source/high_unobfuscated.js  {code_exec_sink}
+       2  third-party external/phpids/0.6/lib/IDS/vendors/htmlpurifier/HTMLPurifier/Config.php  {weak_crypto}
+       1  third-party external/phpids/0.6/lib/IDS/Caching/Database.php  {unsafe_deser}
+       ... 12 distinct not-maintained files with leads
+  evidence[vulnerabilities/javascript/source/high_unobfuscated.js]
+        = 'licence pragma in file header: * @license MIT'
+```
+
+**24.6%, against the 0.141% that raised the ticket — 175x the blast radius, in the walk nobody
+looked at.** The same run on the benchmark tree returns `0 of 500`, which is the control that stops
+24.6% being read as "the classifier fires everywhere": it fires where dependencies actually are.
+
+### 5.2 The lead that proves EVIDENCE was the right rule
+
+`vulnerabilities/javascript/source/high_unobfuscated.js` is not DVWA's code:
+
+```
+$ head -8 dvwa/vulnerabilities/javascript/source/high_unobfuscated.js
+/**
+ * [js-sha256]{@link https://github.com/emn178/js-sha256}
+ *
+ * @version 0.9.0
+ * @author Chen, Yi-Cyuan [emn178@gmail.com]
+ * @copyright Chen, Yi-Cyuan 2014-2017
+ * @license MIT
+ */
+```
+
+A verbatim copy of js-sha256 v0.9.0, filed under DVWA's own `vulnerabilities/` challenge tree under
+a hand-written-looking name. **`vendor/`, `node_modules/`, `external/` and `*.min.js` all miss it.**
+It is caught only because the file says what it is. §3.2 refuted the filename rule on the grounds
+that it misses modern bundles; this is the second, independent refutation — it also misses vendored
+code that was never bundled at all.
+
+### 5.3 NEGATIVE CONTROL on the real tree — 114 first-party files read and left alone
+
+239 of DVWA's 358 read files classify not-maintained. A number that large is only acceptable if the
+239 really are vendored, so every file was classified and the result inspected by directory:
+
+```
+CLASSIFICATION BY TOP-LEVEL DIRECTORY (dvwa)
+   <root>         FIRST-PARTY       9
+   config         FIRST-PARTY       1
+   dvwa           FIRST-PARTY       6
+   external       FIRST-PARTY       3      <- DVWA's own additions inside external/, NOT stamped
+   external       generated         1
+   external       third-party     236      <- phpids 0.6 + bundled HTMLPurifier
+   hackable       FIRST-PARTY       1
+   vulnerabilities FIRST-PARTY     99
+   vulnerabilities generated         1
+   vulnerabilities third-party       1
+
+POSITIVE CONTROL for that zero: DVWA first-party files READ and left alone = 114
+   their extensions: {'.php': 112, '.js': 5, '.xml': 2}
+
+EVIDENCE SPREAD over the classified set:
+     218  dependency directory
+      19  licence pragma in file header
+       2  minified geometry
+```
+
+**114 of DVWA's own files were read and none was marked.** The zero is not vacuous — the apparatus
+read 112 PHP files including all 99 `vulnerabilities/**` challenge sources. The three FIRST-PARTY
+rows inside `external/` matter too: the classifier does not blanket-stamp a directory it has no
+evidence about.
+
+Exactly two rows under `vulnerabilities/` are classified, and both were checked by hand:
+
+* `high_unobfuscated.js` → third-party. **Correct** (§5.2, js-sha256 v0.9.0).
+* `high.js` → generated, *"minified geometry: longest line 10417 chars, mean 10418 over 1 line"*.
+  **Correct** — it is the obfuscated build of that same library, and the maintained source is the
+  file next to it.
+
+## 6. THE CHANGE, and the two decisions the measurements forced
+
+### 6.1 MARK, do not filter and do not demote — and DVWA is why
+
+The brief asked the lane to decide deliberately whether the fix is a filter at all. For this walk
+the answer came from the tree, not from taste: **`vulnerabilities/javascript/source/high.js` IS the
+DVWA JavaScript challenge.** Attacking that obfuscated client-side code is the exercise. A filter
+would have deleted the target; a confidence demotion would have told the operator to look away from
+it. Marking costs no signal and adds the one fact worth having.
+
+So `review()` rows get `source_kind`, `source_kind_evidence` and `tags` — and **no `confidence`**.
+Two reasons, the second load-bearing:
+
+1. A `review()` row has no `confidence` key at all; its contract is that *every* hit is a lead. There
+   is no claim here to retract.
+2. Writing `confidence` onto the marked subset **alone** would make the key's ABSENCE on every other
+   row mean something it does not. That is the falsy-default shape that has bitten this codebase
+   before, and `test_the_obfuscated_challenge_is_flagged_and_NOT_filtered_or_demoted` asserts the
+   key stays off every row.
+
+`_mark_not_maintained` was split so both walks write the marker through one function,
+`_tag_not_maintained`; the tree walk adds the retraction (`confidence` + `proof_gap`) on top. The
+summary keys are the SAME two names `review_source_tree` already returns — a second private name for
+"this is a dependency" is how the original bug shipped.
+
+### 6.2 EAGER classification — the cheap-looking option lost on measurement
+
+Classifying only files that produced a lead keeps the recon path cheap and was the obvious design.
+Measured instead of assumed:
+
+```
+dvwa         review()=4.29s over 358 files, 57 leads
+   EAGER classify all   358 read files : 0.003s  (0.1% of review) -> 239 not-maintained
+   LAZY  classify    37 lead-files     : 0.001s  (0.0% of review) -> 12 not-maintained
+   inventory LOST by going lazy: 227 files
+benchmain    review()=44.95s over 5484 files, 500 leads
+   EAGER classify all  5519 read files : 0.218s  (0.5% of review) -> 2 not-maintained
+   inventory LOST by going lazy: 2 files
+js_app       review()=2.53s over 38 files, 3 leads
+   EAGER classify all    38 read files : 0.030s  (1.2% of review) -> 19 not-maintained
+   inventory LOST by going lazy: 18 files
+```
+
+**0.1%–1.2% of runtime to keep 227 of 239 dependency files in the inventory.** The bytes are already
+in memory and the regexes are not what makes the walk slow. `test_the_inventory_covers_files_that_
+produced_no_lead` is the tripwire, and it uses a real one-line 10417-char bundle that yields no lead
+because `review()` skips lines over 600 chars — precisely the file a lazy implementation loses.
+
+### 6.3 The tests, and the five mutants that prove they are not vacuous
+
+Four new fixtures, all real DVWA files (`Munge.php` / `impossible.php` / `high.js` whole; the
+js-sha256 one a byte-identical 90-line prefix, verified with `cmp`). The section turns on a
+**matched pair**: `HTMLPurifier/URIFilter/Munge.php:49` `sha1($this->secretKey . ':' . $string)` and
+`vulnerabilities/weak_id/source/impossible.php:6` `sha1(mt_rand() . time() . "Impossible")`. Same
+call, same `weak_crypto` rule, opposite ownership.
+
+```
+n1  review() marks nothing (the pre-fix behaviour)   -> 5 tests fail
+n2  LAZY: classify only lead-bearing files           -> the_inventory_covers_files_that_produced_no_lead
+n3  every .js/.php called third-party                -> the sha1 negative control + 8 of run 2's tests
+n4  reuse the DEMOTING marker in the leads walk      -> the_obfuscated_challenge_is_flagged_and_NOT_...
+n5  drop the row instead of marking it (THE FILTER)  -> positive control + both marking tests
+```
+
+n4 is the one worth reading: reusing `_mark_not_maintained` in `review()` is a one-word
+simplification that looks like *more* consistency, and exactly one test objects — the one that says
+the DVWA challenge must not be demoted. n5 is the filter the brief warns against, and it fails the
+positive control first, because it deletes the rows the control counts.
+
+Every mutant was diffed against the original before its verdict was read; a mutant that does not
+change the file proves nothing (run 2's lesson).
+
+### 6.4 The mission baseline, re-run AFTER the change — no movement
+
+`_mark_not_maintained` was split, so the walk that produces the scored number was edited. That is
+exactly the case the brief says must be re-measured rather than argued. Same tree, same script,
+same immutable diff target:
+
+```
+$ docker run --rm -v <run3-snapshot>/agent:/app -v ./benchmain:/tree:ro apolaki-agent \
+    python /work/baseline.py
+files_scanned=2766 findings=716 error=''
+by_cwe: [('CWE-327', 261), ('CWE-328', 153), ('CWE-330', 219), ('CWE-501', 83)]
+not_maintained_files: ['webapp/js/jquery.min.js', 'webapp/js/js.cookie.js']
+not_maintained_findings: 1
+confidence distribution: [('confirmed', 715), ('lead', 1)]
+   DEMOTED webapp/js/jquery.min.js:2 cwe=CWE-330 conf='lead' kind=third-party
+BASELINE IDENTICAL TO MISSION 2fb87a3a: True
+```
+
+**2766 / 716 / 261-153-219-83 — every number identical, and the per-CWE breakdown is checked
+category by category so a swap cannot hide inside a stable total.** The one intended row is still
+the one intended row. No benchmark path, ID or filename is named anywhere in this change either;
+`review()` is not on the scored path at all, and `review_source_tree`'s behaviour is unchanged.

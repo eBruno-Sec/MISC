@@ -79,7 +79,7 @@ _EXTS = {".ts", ".js", ".jsx", ".tsx", ".mjs", ".cjs", ".py", ".rb", ".php", ".j
 _SEV_RANK = {"critical": 0, "high": 1, "medium": 2, "low": 3}
 
 
-def _summarize(findings: list, exposed_git: bool, scanned: int) -> dict:
+def _summarize(findings: list, exposed_git: bool, scanned: int, not_maintained: dict) -> dict:
     findings.sort(key=lambda f: (_SEV_RANK.get(f["severity"], 9), f["file"], f["line"]))
     by_sev, by_rule, by_tech = {}, {}, {}
     for f in findings:
@@ -94,6 +94,12 @@ def _summarize(findings: list, exposed_git: bool, scanned: int) -> dict:
         "by_rule": by_rule,
         "by_technique": by_tech,
         "findings": findings,
+        # Q-083. The SAME two keys `review_source_tree` returns, carrying the same meaning, because
+        # a second private name for "this is a dependency" is how the first version of this bug got
+        # shipped. `not_maintained` is a COMPLETE inventory of the files this walk read, not just
+        # the ones that produced a lead -- see the cost measurement at the call site.
+        "not_maintained_files": not_maintained,
+        "not_maintained_findings": sum(1 for f in findings if f.get("source_kind")),
     }
 
 
@@ -409,6 +415,19 @@ def not_maintained_source(rel: str, text: str) -> tuple:
     return "", ""
 
 
+def _tag_not_maintained(f: dict, kind: str, evidence: str) -> None:
+    """THE MARKER: record on the row what was observed about the file it came from.
+
+    Split out of `_mark_not_maintained` so BOTH walks in this module say the same thing the same
+    way. `review_source_tree` adds a retraction on top (below); `review` uses the marker alone.
+    A finding is never dropped by either, so a reader can always overrule the call.
+    """
+    f["source_kind"] = kind
+    f["source_kind_evidence"] = evidence
+    tag = "third-party" if kind == "third-party" else "generated-source"
+    f["tags"] = list(dict.fromkeys((f.get("tags") or []) + [tag, "not-maintained-source"]))
+
+
 def _mark_not_maintained(f: dict, kind: str, evidence: str) -> None:
     """Demote one finding that landed in a dependency or a build artifact.
 
@@ -421,11 +440,8 @@ def _mark_not_maintained(f: dict, kind: str, evidence: str) -> None:
     the first would be asserting something new about the bug rather than retracting a claim about
     the proof.
     """
-    f["source_kind"] = kind
-    f["source_kind_evidence"] = evidence
+    _tag_not_maintained(f, kind, evidence)
     f["confidence"] = "lead"
-    tag = "third-party" if kind == "third-party" else "generated-source"
-    f["tags"] = list(dict.fromkeys((f.get("tags") or []) + [tag, "not-maintained-source"]))
     f["proof_gap"] = list(dict.fromkeys((f.get("proof_gap") or []) + [
         "call site is in %s code (%s); the reported line does not identify a location in source "
         "the operator maintains" % (kind, evidence)]))
@@ -505,11 +521,31 @@ def review_source_tree(root: str, max_file_bytes: int = 2_000_000) -> dict:
 
 
 def review(root: str, max_hits: int = 500, max_file_bytes: int = 1_000_000) -> dict:
-    """Statically review a source tree; return leads (file:line + why + dynamic-confirm hint)."""
+    """Statically review a source tree; return leads (file:line + why + dynamic-confirm hint).
+
+    Q-083 -- THE SECOND WALK. `review_source_tree` learned to say when a row came out of code the
+    operator does not maintain; this one had the same blind spot and did not. MEASURED on DVWA
+    pulled from `apolaki-dvwa-1`: **14 of 57 leads (24.6%) landed in third-party code and not one
+    row said so** -- 175x the 0.141% blast radius on the corpus that raised the ticket. The lead
+    that made it undeniable is `vulnerabilities/javascript/source/high_unobfuscated.js`, which is
+    a verbatim copy of `js-sha256` v0.9.0 sitting under a first-party-looking name in a
+    first-party-looking directory. No path or filename rule could have caught it; the `@license`
+    pragma in its header did.
+
+    A LEAD IS MARKED, NEVER DEMOTED OR DROPPED HERE. Two reasons, and the second is the one that
+    matters. (1) A `review()` row has no `confidence` key at all -- its contract is that EVERY hit
+    is a lead -- so there is no claim to retract, and writing `confidence` onto the marked subset
+    alone would make the key's ABSENCE on every other row mean something it does not. (2) DVWA's
+    `vulnerabilities/javascript/source/high.js` classifies `generated` and it is *the challenge* --
+    obfuscated client-side code the pentester is meant to attack. Filtering or demoting it would
+    delete the target. Flagging it tells the operator the maintained source is the file next door,
+    which is the useful thing to know and costs no signal.
+    """
     if not os.path.isdir(root):
         return {"error": "not a directory: %s" % root, "findings": []}
     findings: list = []
     scanned = 0
+    not_maintained: dict = {}
     exposed_git = os.path.isdir(os.path.join(root, ".git"))
     for dirpath, dirnames, filenames in os.walk(root):
         dirnames[:] = [d for d in dirnames if d not in _SKIP_DIRS]
@@ -526,14 +562,27 @@ def review(root: str, max_hits: int = 500, max_file_bytes: int = 1_000_000) -> d
                 continue
             scanned += 1
             rel = os.path.relpath(fp, root).replace("\\", "/")
+            # Classified EAGERLY -- every file read, not only the ones that produce a lead. The
+            # lazy version was the obvious way to keep the recon path fast; it was measured instead
+            # of assumed and the cost argument did not survive. Classifying everything costs 0.1%
+            # of `review()` on the 5484-file benchmark tree and 1.2% on Juice Shop's bundles, while
+            # classifying only lead-bearing files loses 227 of DVWA's 239 dependency files from the
+            # inventory. The bytes are already in memory; the regexes are not what makes this walk
+            # slow. See docs/handoff/vendor_scope.md §6.2.
+            kind, evidence = not_maintained_source(rel, "".join(lines))
+            if kind:
+                not_maintained[rel] = {"kind": kind, "evidence": evidence}
             for i, line in enumerate(lines, 1):
                 if len(line) > 600:
                     continue
                 for rid, tech, sev, rx, why, conf in _RULES_C:
                     if rx.search(line):
-                        findings.append({"rule": rid, "technique": tech, "severity": sev,
-                                         "file": rel, "line": i, "snippet": line.strip()[:180],
-                                         "why": why, "confirm": conf})
+                        f = {"rule": rid, "technique": tech, "severity": sev,
+                             "file": rel, "line": i, "snippet": line.strip()[:180],
+                             "why": why, "confirm": conf}
+                        if kind:
+                            _tag_not_maintained(f, kind, evidence)
+                        findings.append(f)
                         if len(findings) >= max_hits:
-                            return _summarize(findings, exposed_git, scanned)
-    return _summarize(findings, exposed_git, scanned)
+                            return _summarize(findings, exposed_git, scanned, not_maintained)
+    return _summarize(findings, exposed_git, scanned, not_maintained)

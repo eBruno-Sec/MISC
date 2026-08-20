@@ -250,3 +250,163 @@ def test_summary_reports_the_split_rather_than_implying_it(tree):
     assert tree["not_maintained_findings"] == len(
         [f for f in tree["findings"] if f.get("source_kind")])
     assert tree["not_maintained_findings"] < len(tree["not_maintained_files"]) + 1
+
+
+# ══════════════════════════════════════════════════════════════════════════════════════════════
+# THE SECOND WALK — `codeintel.review()`, the leads path behind GET /codereview
+# ══════════════════════════════════════════════════════════════════════════════════════════════
+# `review_source_tree` was fixed first. `review()` is a SEPARATE walk in the same module and it had
+# the identical blind spot. MEASURED on DVWA pulled from `apolaki-dvwa-1` (handoff §6.1):
+#
+#     leads in NOT-MAINTAINED files : 14 of 57  (24.6%)
+#     does the lead row say so?     : NO -- no marker key on any row
+#
+# 24.6%, against the 0.141% blast radius on the corpus that raised the ticket. Fixing one walk and
+# not the other would have closed the ticket and left the larger hole open.
+#
+# Every fixture below is a REAL DVWA file. The pair that carries the section is
+# `vendor_scope_dvwa_munge_php.txt` and `vendor_scope_dvwa_weakid_impossible_php.txt`: BOTH call
+# `sha1()`, both fire the same `weak_crypto` rule, and one is vendored HTMLPurifier while the other
+# is DVWA's own. A heuristic that cannot separate those two has not removed noise, it has removed
+# the signal.
+
+DVWA_SPECIMENS = {
+    # third-party, proved by the DIRECTORY it sits in
+    "vendor_scope_dvwa_munge_php.txt":
+        "external/phpids/0.6/lib/IDS/vendors/htmlpurifier/HTMLPurifier/URIFilter/Munge.php",
+    # third-party, proved by CONTENT ALONE at a path that looks entirely first-party: a verbatim
+    # copy of js-sha256 v0.9.0 filed under DVWA's own `vulnerabilities/` challenge tree. No path or
+    # filename rule reaches this file; the `@license` pragma in its header does.
+    "vendor_scope_dvwa_jssha256_js.txt": "vulnerabilities/javascript/source/high_unobfuscated.js",
+    # generated: the OBFUSCATED build of that same library, one 10417-char line
+    "vendor_scope_dvwa_high_obfuscated_js.txt": "vulnerabilities/javascript/source/high.js",
+    # FIRST PARTY, and the same `sha1()`/`weak_crypto` hit as Munge.php
+    "vendor_scope_dvwa_weakid_impossible_php.txt": "vulnerabilities/weak_id/source/impossible.php",
+}
+
+DVWA_THIRD_PARTY = ("external/phpids/0.6/lib/IDS/vendors/htmlpurifier/HTMLPurifier/URIFilter/"
+                    "Munge.php", "vulnerabilities/javascript/source/high_unobfuscated.js")
+DVWA_FIRST_PARTY = ("vulnerabilities/weak_id/source/impossible.php",)
+
+
+@pytest.fixture(scope="module")
+def leads():
+    """The four DVWA specimens at their real paths, run through the real `review()` walk."""
+    root = tempfile.mkdtemp(prefix="vendorscope_leads_")
+    try:
+        for fx, rel in DVWA_SPECIMENS.items():
+            dst = os.path.join(root, rel)
+            os.makedirs(os.path.dirname(dst), exist_ok=True)
+            shutil.copyfile(os.path.join(FIXTURES, fx), dst)
+        yield codeintel.review(root)
+    finally:
+        shutil.rmtree(root, ignore_errors=True)
+
+
+def _leads_in(leads: dict, rel: str) -> list:
+    return [f for f in leads["findings"] if f["file"] == rel]
+
+
+def test_positive_control_the_leads_walk_read_every_dvwa_specimen(leads):
+    """Without this, every "not marked" and "still reported" assertion below is vacuous."""
+    assert leads["files_scanned"] == len(DVWA_SPECIMENS) == 4
+    assert leads["total"] > 0
+    # named, so a regression cannot pass by the fixture silently going quiet
+    assert _leads_in(leads, "external/phpids/0.6/lib/IDS/vendors/htmlpurifier/HTMLPurifier/"
+                            "URIFilter/Munge.php"), "the vendored sha1() lead vanished"
+    assert _leads_in(leads, "vulnerabilities/weak_id/source/impossible.php"), \
+        "the first-party sha1() lead vanished"
+
+
+@pytest.mark.parametrize("rel", DVWA_THIRD_PARTY)
+def test_leads_walk_marks_a_vendored_lead_with_quotable_evidence(leads, rel):
+    fs = _leads_in(leads, rel)
+    assert fs, "no lead at all in %s" % rel
+    for f in fs:
+        assert f["source_kind"] == "third-party", rel
+        assert f["source_kind_evidence"]
+        assert "third-party" in f["tags"] and "not-maintained-source" in f["tags"]
+
+
+def test_negative_control_same_sha1_in_first_party_code_is_still_reported_unmarked(leads):
+    """THE MANDATORY CONTROL, on a matched pair of REAL files.
+
+    `HTMLPurifier/URIFilter/Munge.php:49`  -> `sha1($this->secretKey . ':' . $string)`
+    `vulnerabilities/weak_id/source/impossible.php:6` -> `sha1(mt_rand() . time() . "Impossible")`
+
+    Same call, same `weak_crypto` rule, opposite ownership. The first must be marked and the second
+    must not, and the second must still be REPORTED -- a heuristic that swallows first-party code is
+    worse than the noise it removes.
+    """
+    for rel in DVWA_FIRST_PARTY:
+        fs = _leads_in(leads, rel)
+        assert fs, "first-party file went silent: %s" % rel
+        for f in fs:
+            assert not f.get("source_kind"), "%s marked %r" % (rel, f.get("source_kind"))
+            assert "not-maintained-source" not in (f.get("tags") or [])
+        assert rel not in leads["not_maintained_files"]
+
+    # the pair really is a pair: both sides fire, and they fire the SAME rule
+    vendored = _leads_in(leads, "external/phpids/0.6/lib/IDS/vendors/htmlpurifier/HTMLPurifier/"
+                                "URIFilter/Munge.php")
+    own = _leads_in(leads, "vulnerabilities/weak_id/source/impossible.php")
+    assert {f["rule"] for f in vendored} & {f["rule"] for f in own} == {"weak_crypto"}
+
+
+def test_leads_walk_classifies_on_evidence_not_on_the_path_it_sits_in(leads):
+    """`vulnerabilities/javascript/source/high_unobfuscated.js` is js-sha256 v0.9.0 verbatim, under
+    DVWA's own challenge tree. Every path-shaped rule -- `vendor/`, `node_modules/`, `external/`,
+    `*.min.js` -- misses it. It is caught because the file SAYS what it is."""
+    rel = "vulnerabilities/javascript/source/high_unobfuscated.js"
+    assert not any(seg in rel for seg in codeintel._VENDOR_PATH_SEG)
+    assert not codeintel._MINIFIED_NAME_RX.search(rel.rsplit("/", 1)[-1])
+    row = leads["not_maintained_files"][rel]
+    assert row["kind"] == "third-party"
+    assert "@license" in row["evidence"], row["evidence"]
+
+
+def test_the_inventory_covers_files_that_produced_no_lead(leads):
+    """KILLS THE LAZY MUTANT. Classifying only lead-bearing files was the obvious way to keep the
+    recon path cheap; measured, it loses 227 of DVWA's 239 dependency files (handoff §6.2).
+
+    `vulnerabilities/javascript/source/high.js` is a real one-line 10417-char obfuscated bundle.
+    `review()` skips lines over 600 chars, so it yields NO lead -- and it must still be inventoried,
+    because "this tree ships an obfuscated copy of js-sha256" is the finding.
+    """
+    rel = "vulnerabilities/javascript/source/high.js"
+    assert _leads_in(leads, rel) == [], "fixture no longer exercises the no-lead path"
+    assert rel in leads["not_maintained_files"], "inventory only covers lead-bearing files"
+    assert leads["not_maintained_files"][rel]["kind"] == "generated"
+    assert "minified geometry" in leads["not_maintained_files"][rel]["evidence"]
+
+
+def test_the_obfuscated_challenge_is_flagged_and_NOT_filtered_or_demoted(leads):
+    """WHY THIS WALK MARKS INSTEAD OF FILTERING, found on a real tree.
+
+    DVWA's `javascript` challenge IS the obfuscated `high.js`: attacking that client-side code is
+    the exercise. A filter would have deleted the target, and a confidence demotion would have told
+    the operator to look away from it. Marking costs no signal and adds the one fact worth having --
+    the maintained source is the file next door.
+    """
+    rel = "vulnerabilities/javascript/source/high.js"
+    assert rel in leads["not_maintained_files"]
+    # the file was READ, not pruned from the walk
+    assert leads["files_scanned"] == 4
+    # and no lead anywhere in this walk was given a `confidence`: a review() row has no such key,
+    # so writing one onto the marked subset alone would make its ABSENCE elsewhere mean something
+    for f in leads["findings"]:
+        assert "confidence" not in f, "the leads walk started asserting a confidence: %r" % f
+        assert "proof_gap" not in f
+
+
+def test_both_walks_speak_the_SAME_marker_vocabulary():
+    """Two walks, one word for the same fact. A second private name for "this is a dependency" is
+    how the original bug shipped, and `_tag_not_maintained` is the single place it is written."""
+    tree_row, lead_row = {}, {}
+    codeintel._mark_not_maintained(tree_row, "third-party", "evidence text")
+    codeintel._tag_not_maintained(lead_row, "third-party", "evidence text")
+    for key in ("source_kind", "source_kind_evidence", "tags"):
+        assert tree_row[key] == lead_row[key], key
+    # and the demotion is the ONLY thing the tree walk adds on top
+    assert set(tree_row) - set(lead_row) == {"confidence", "proof_gap"}
+    assert tree_row["confidence"] in proof_schema.UNPROVEN_CONFIDENCE
