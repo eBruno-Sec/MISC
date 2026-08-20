@@ -125,3 +125,99 @@ alone outran it.
 ---
 
 *(§4 onward: the immutability check, the heuristic, and the negative control — appended as measured.)*
+
+---
+
+# RUN 2 — the code run 1 landed, the tests it never wrote, and the number it never re-measured
+
+Run 1 was killed **after committing the implementation** (`9dba899`) but **before writing §4 up**.
+So the state run 2 inherited was not "no fix": it was `codeintel.not_maintained_source` +
+`_mark_not_maintained` live in `review_source_tree`, with **zero tests and zero measured
+verification**. Run 2's first job was therefore not to design a heuristic but to find out whether
+the one already shipping is safe, and then to nail it down.
+
+Inventory at HEAD, measured:
+
+```
+$ grep -rn "not_maintained\|source_kind\|vendor_scope" agent/ docs/ ui/ | grep -v "agent/codeintel.py:"
+(no output)
+```
+
+**No test, and no consumer outside the function that writes it.** The fixtures were checked in; the
+tests that were supposed to use them were not.
+
+## 4. BENCHMARK IMMUTABILITY — the heuristic DOES touch that tree, so it is re-measured, not assumed
+
+The brief's rule is that a filter which excludes benchmark files moves a scored number by hiding
+cases. Run 1's heuristic is not a filter, but it **is** load-bearing on exactly the same axis, and
+this is the part run 1 never got to:
+
+`owasp_bench._detected` (line 379) credits a case **only** when a finding's confidence is not in
+`_UNPROVEN`, and `_UNPROVEN` contains `"lead"` — which is precisely what `_mark_not_maintained`
+assigns. **Any benchmark test-case file that the classifier touches silently becomes a miss.** That
+is a real mechanism, not a hypothetical, so it gets measured.
+
+### 4.1 Every file the walk reads, classified
+
+```
+$ docker run --rm -v <HEAD-snapshot>/agent:/app -v ./benchmain:/tree:ro apolaki-agent \
+    python /work/baseline.py
+WALK-SCANNED files          : 2766
+CLASSIFIED not-maintained   : 2
+   webapp/js/jquery.min.js      third-party  preserved licence banner: /*! jQuery v2.1.4 | (c) 2005, 2015 jQuery Fou
+   webapp/js/js.cookie.js       third-party  preserved licence banner: /*! js-cookie v2.1.3 | MIT */
+```
+
+**2 of 2766.** Both are real vendored bundles; `webapp/js/testsuiteutils.js` — OWASP's own
+first-party file, which also opens with a `/*!` banner — is **not** classified. The rule that
+separates them (a licence claim AND a version token) survives contact with the real tree.
+
+Note `not_maintained_files=2` but `not_maintained_findings=1`: `js.cookie.js` is correctly
+identified as a dependency and simply contains nothing the rules fire on. Classification is over
+FILES, demotion is over FINDINGS, and the two counts are not meant to match.
+
+### 4.2 The mission baseline, re-run at HEAD with the change in place
+
+```
+files_scanned=2766 findings=716 error=''
+by_cwe: [('CWE-327', 261), ('CWE-328', 153), ('CWE-330', 219), ('CWE-501', 83)]
+DEMOTED findings: 1
+   webapp/js/jquery.min.js:2 cwe=CWE-330 conf='lead' kind=third-party
+confidence distribution: [('confirmed', 715), ('lead', 1)]
+```
+
+**2766 / 716 / 261-153-219-83 — every number identical to the before.** Not one finding was
+dropped and no CWE bucket moved, so the per-CWE breakdown cannot be hiding a swap inside a stable
+total. The single intended change is visible as one row moving `confirmed` -> `lead`.
+
+### 4.3 The scored number, end to end, with an apparatus control
+
+Counting rows is not the same as scoring, so the actual suite score was re-run — `scan_source`
+against the live `owaspbench:8443` plus `score` against the official
+`expectedresults-1.2.csv` (2740 rows), the documented path:
+
+```
+=== AS HEAD BEHAVES ===
+  crypto    TPR=100.0% FPR=  0.0%  (tp=130 fn=0 fp=0 tn=116)
+  hash      TPR=100.0% FPR=  0.0%  (tp=129 fn=0 fp=0 tn=107)
+  weakrand  TPR=100.0% FPR=  0.0%  (tp=218 fn=0 fp=0 tn=275)
+
+=== APPARATUS CONTROL: every finding forced conf='lead' ===
+  crypto    TPR=  0.0%   hash  TPR=  0.0%   weakrand  TPR=  0.0%
+```
+
+**100/100/100 holds.** The second block is the control that makes the first block mean something:
+forcing every row to the demoted confidence collapses all three categories to zero, which proves
+the scorer really does read `confidence` and would have shown the damage if the heuristic had
+caused any. A 100% measured by an instrument that cannot move is not a measurement.
+
+The structural reason it cannot move: the scorer keys on the file's stem, and
+
+```
+demoted stems           : ['jquery.min']
+BenchmarkTest stems     : 2740
+INTERSECTION (must be 0): []
+```
+
+**No benchmark path, ID or filename is special-cased anywhere in the heuristic.** It is evidence-only;
+it simply finds no evidence in 2763 hand-written Java test cases, which is the correct answer.
