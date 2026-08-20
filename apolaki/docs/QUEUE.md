@@ -1773,7 +1773,19 @@ Until it lands, the FP is caught at RETEST (the finding closes) but is still rai
 
 ## Rank 0 — the funnel (supersedes everything below)
 
-### Q-019 · ANSWERED Q-010 · 2756 URLs discovered, 36 probed · **CRITICAL** · `ready` · **take this first**
+### Q-019 · ANSWERED Q-010 · 2756 URLs discovered, 36 probed · **CLOSED** `55c035b`
+**All three root causes verified fixed in source with positive controls on both scope gates.** The
+ticket's own four-part acceptance oracle was run against verification mission `ebd96f45` and baseline
+`90cee81c`: (a) hostless URLs 10 -> 0 PASS, (b) scope_block 34 -> 20 PASS, (d) findings 2 -> 29 PASS,
+**(c) distinct `http_probe` URLs 36 -> 36 FAIL**. Clause (c) measures the wrong stage and would record
+a FAIL against a fix that worked: `http_probe` is a recon tool dispatched 37 times in BOTH missions and
+never was the funnel. The stage that widened is the injection sweep -- `run_xpath`/`run_ldap`/`run_ssi`
+went 32 -> 412, distinct URLs any tool 63 -> 432. **Clause (c) is superseded by "distinct URLs reaching
+an injection engine > 200", which measures 432.** The residual 20 `scope_block`s were sampled verbatim
+and are correct refusals: `run_subfinder`/`run_crtsh`/`run_wayback` handed a bare host under a
+path-pinned scope. The 76-hour projection is disproved -- fixed pre-sweep overhead (~27 min) averaged
+over 8x more calls, plus `SWEEP_BROWSER_CAP=30` capping the ~19s browser confirmers; per-call cost
+inside the sweep window is 11.39s before and 1.41s after.
 Promoted out of `proposed` — this is the measured answer to Q-010 and it retires the standing belief
 that surface discovery is the gap. Full ticket below under the Distillation pass. Three compounding
 root causes: hostless `https:///benchmark/...` URLs that scope correctly refuses (34 `scope_block`
@@ -2069,7 +2081,10 @@ are handed case URLs directly. I measured where the mission actually loses the t
 neither the engines nor — contrary to the standing belief — the crawler. **Every ticket below is
 wiring, orchestration or reporting-integrity. None is a new engine. Q-019 should outrank Q-001…Q-006.**
 
-### Q-019 · The mission discovers 2756 URLs and probes 36 of them · **CRITICAL** · `proposed`
+### Q-019 (original filing, retained for its measurements) · **CLOSED** `55c035b` · see the Rank 0 entry
+NOT a second ticket. This is the original Q-019 body; the live header is at Rank 0 above. It is kept
+because it carries the baseline measurement of mission `90cee81c` that the fix was scored against, and
+deleting it would delete the before-figures. Its state is whatever the Rank 0 header says.
 - **MEASURED**, mission `90cee81c` (908 log rows, replayed from the persisted event log):
   ```
   Surface crawl: probed 12 page(s), surface 5 -> 2756 URL(s)
@@ -2116,7 +2131,9 @@ wiring, orchestration or reporting-integrity. None is a new engine. Q-019 should
 - **Dependencies**: none. **Definition of done**: the four oracle assertions above, both negative
   controls, and the whole-product smoke test in the suite.
 
-### Q-020 · Technique records declare no executor, so the no-island guard checks a declaration · **HIGH** · `proposed`
+### Q-020 (original filing, retained for its measurements) · **CLOSED** `7a73f7b` · see the entry above
+NOT a second ticket. The live header is above. Kept for the `_REQUIRED`-field measurement that
+established the root cause. Its state is whatever that header says.
 - **Root cause, and it is the parent of Q-007, Q-008 and Q-011.** MEASURED: `techniques._t()` has no
   `engine` field — `_REQUIRED` is `(id, vuln_class, cwe, owasp, permission, summary, detect, exploit,
   oracle, transferable)` and none of the `setdefault`s adds one. Nothing anywhere maps a technique to
