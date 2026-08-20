@@ -190,11 +190,13 @@ async def register(register_url: str, label: str = "user", account: dict = None,
     log in with `account`). `blocked` is non-empty when a captcha/mfa/email/invite wall was hit —
     the caller surfaces it as a manual step. Password is NEVER returned to the model layer; the
     caller stores `account` server-side only. Bounded by the caller (hard cap on registrations)."""
+    import browser_engine
     import httpx
     note = ""
     try:
-        async with httpx.AsyncClient(verify=False, follow_redirects=True, timeout=timeout,
-                                     headers={"User-Agent": auth_ua()}) as c:
+        async with browser_engine.rate_limited_async_client(
+                httpx, verify=False, follow_redirects=True, timeout=timeout,
+                headers={"User-Agent": auth_ua()}) as c:
             page = await c.get(register_url)
             blockers = detect_blockers(page.text)
             if blockers:

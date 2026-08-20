@@ -32,14 +32,16 @@ def prove(base_url: str) -> dict:
     """Initialize Mutillidae's DB, then confirm each technique via its response oracle. Returns which
     classes fired. Never raises; degrades to an error dict when httpx/the target is unavailable."""
     try:
+        import browser_engine
         import httpx
     except Exception:
         return {"lab": "mutillidae", "error": "httpx unavailable"}
     base = base_url.rstrip("/")
     out = {"lab": "mutillidae", "confirmed": [], "probes": {}}
     try:
-        c = httpx.Client(base_url=base, timeout=15, follow_redirects=False,
-                         headers={"User-Agent": "apolaki-labmode"})
+        c = browser_engine.rate_limited_sync_client(
+            httpx, base_url=base, timeout=15, follow_redirects=False,
+            headers={"User-Agent": "apolaki-labmode"})
     except Exception as e:
         return {"lab": "mutillidae", "error": str(e)}
     try:

@@ -24,8 +24,10 @@ ERROR_SIGNATURES = (
 
 def client(follow_redirects: bool = False, timeout: int = 15):
     """An httpx client configured for manual testing (no cert verify)."""
+    import browser_engine
     import httpx
-    return httpx.AsyncClient(verify=False, follow_redirects=follow_redirects, timeout=timeout)
+    return browser_engine.rate_limited_async_client(
+        httpx, verify=False, follow_redirects=follow_redirects, timeout=timeout)
 
 
 async def send(c, method: str, url: str, headers: dict = None, body: str = None) -> dict:

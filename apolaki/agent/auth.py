@@ -162,9 +162,11 @@ async def login(login_url: str, username: str, password: str, timeout: int = 15)
 
     Returns {"headers": {...}, "verified": bool, "note": str}. `headers` is empty
     if login could not be performed; the scan then continues unauthenticated."""
+    import browser_engine
     import httpx
     try:
-        async with httpx.AsyncClient(verify=False, follow_redirects=True, timeout=timeout) as c:
+        async with browser_engine.rate_limited_async_client(
+                httpx, verify=False, follow_redirects=True, timeout=timeout) as c:
             page = await c.get(login_url)
             # don't mint a false session when the login is gated by CAPTCHA / MFA / magic-link — those
             # are manual steps; surface a PAUSE rather than a bogus header (CHAD review #4).

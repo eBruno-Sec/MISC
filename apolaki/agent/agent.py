@@ -2874,14 +2874,16 @@ class BBHAgent:
     async def _probe_for_creds(self, base: str) -> list:
         """Bounded, polite fetch of the login page + common credential-disclosure pages, harvesting any
         exposed creds into the intel store. Small fixed page set -- never a crawl/brute."""
+        import browser_engine as _browser_engine
         import httpx
         for p in ("/vulnerabilities", "/", "/login", "/readme", "/README.md", "/help", "/about"):
             u = base.rstrip("/") + p
             try:
                 if not self.scope.validate(u)[0]:
                     continue
-                async with httpx.AsyncClient(verify=False, follow_redirects=True, timeout=12,
-                                             headers={"User-Agent": "apolaki-recon"}) as c:
+                async with _browser_engine.rate_limited_async_client(
+                        httpx, verify=False, follow_redirects=True, timeout=12,
+                        headers={"User-Agent": "apolaki-recon"}) as c:
                     self.tools._harvest_body(u, {}, (await c.get(u)).text)
             except Exception:
                 continue
