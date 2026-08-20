@@ -1,13 +1,14 @@
-"""Every engine must be INVOCABLE by something.
+"""Static invocation-reference census for tool engines.
 
-execute() dispatches by getattr(self, "_" + tool_name), so an engine is reachable only if some caller
-emits its name -- either the deterministic planner (a hardcoded list in agent.py) or the agentic path
-(the CLAUDE_TOOLS spec handed to the model). An engine in NEITHER is dead capability: fully implemented,
-registered for permissions, and impossible to run.
+`execute()` dispatches by getattr(self, "_" + tool_name). An engine absent from both the CLAUDE_TOOLS
+spec and exact `run_*` string literals in agent.py has no known invocation reference and is a strong
+orphan candidate. Presence proves only a static reference, not that the deterministic scheduler can or
+will select the engine. This file does not parse planner.py or trace values into `next_batch`.
 
 run_external_surface was exactly that. Implemented under #114, permission-registered, ~70 lines writing
-to recon["external_surface"], and named in no spec and no planner list. It never ran once.
+to recon["external_surface"], and named in neither static reference surface. It never ran once.
 """
+import ast
 import re
 
 import tools
@@ -22,38 +23,42 @@ def _spec_names():
     return {t["name"] for t in tools.CLAUDE_TOOLS}
 
 
-def _planner_names():
+def _agent_literal_names():
+    """Exact engine-name literals in executable agent syntax; not planner reachability."""
     import agent as agent_mod
     src = open(agent_mod.__file__, encoding="utf8").read()
-    return set(re.findall(r'"(run_[a-z0-9_]+)"', src))
+    tree = ast.parse(src)
+    return {node.value for node in ast.walk(tree)
+            if isinstance(node, ast.Constant) and isinstance(node.value, str)
+            and re.fullmatch(r"run_[a-z0-9_]+", node.value)}
 
 
-def test_the_reachability_scan_is_not_vacuous():
-    """Guard the guard: if these sets ever come back empty the test below passes for free."""
+def test_the_static_invocation_reference_census_is_not_vacuous():
+    """Guard the guard: empty source/spec/reference sets must not make the orphan check pass."""
     assert len(_defined_engines()) > 50
     assert len(_spec_names()) > 20
-    assert len(_planner_names()) > 20
+    assert len(_agent_literal_names()) > 20
 
 
-def test_external_surface_is_invocable():
-    """The specific regression. It is implemented and permission-registered; it must be callable."""
+def test_external_surface_has_a_static_invocation_reference():
+    """The specific regression: implementation alone cannot satisfy the reference census."""
     assert "run_external_surface" in _defined_engines()
     assert hasattr(tools.ToolRegistry, "_run_external_surface")
-    assert "run_external_surface" in _spec_names() | _planner_names()
+    assert "run_external_surface" in _spec_names() | _agent_literal_names()
 
 
-def test_no_engine_is_defined_without_any_possible_caller():
-    """An engine reachable from neither the planner nor the model spec cannot ever execute.
+def test_no_engine_is_defined_without_any_static_invocation_reference():
+    """An engine referenced by neither agent syntax nor the model spec is an orphan candidate.
 
     Aliases count. Some engines are exposed under a bare spec name (`enumerate_ids`) with a thin
     `_enumerate_ids` method forwarding to `_run_enumerate_ids`, so `run_X` is reachable when either
     `run_X` or `X` is advertised.
     """
-    reachable = _spec_names() | _planner_names()
+    references = _spec_names() | _agent_literal_names()
     orphans = sorted(e for e in _defined_engines()
-                     if e not in reachable and e[len("run_"):] not in reachable)
+                     if e not in references and e[len("run_"):] not in references)
     assert orphans == [], (
-        "engines with no possible caller (implemented but unrunnable): %s" % orphans)
+        "engines with no static invocation reference: %s" % orphans)
 
 
 def test_every_advertised_tool_actually_dispatches():

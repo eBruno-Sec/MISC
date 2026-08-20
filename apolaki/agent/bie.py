@@ -27,6 +27,7 @@ empty result. Nothing is faked, nothing raises.
 """
 from __future__ import annotations
 
+import browser_engine
 import re
 
 # Response bodies are compared by the oracle and embedded in evidence -- bound both.
@@ -1327,12 +1328,14 @@ def _goto_awaiting_object(page, url: str, timeout_ms: int, attempts: list = None
 
     try:
         with page.expect_response(lambda r: bool(_split_path(r.url)), timeout=timeout_ms):
-            page.goto(url, wait_until="domcontentloaded", timeout=timeout_ms)
+            browser_engine.rate_limited_goto_sync(
+                page, url, wait_until="domcontentloaded", timeout=timeout_ms)
         _record()
         return settle(page, timeout_ms) + "+object-response"
     except Exception:
         try:
-            page.goto(url, wait_until="domcontentloaded", timeout=timeout_ms)
+            browser_engine.rate_limited_goto_sync(
+                page, url, wait_until="domcontentloaded", timeout=timeout_ms)
         except Exception as e:
             _record(e)
             return "navigation-failed: %s" % classify_failure(e)["code"]
@@ -1416,12 +1419,14 @@ def _new_persona(browser, base: str, headers: dict, *, timeout_ms: int, wire: li
     page = ctx.new_page()
     cdp = _attach_cdp(ctx, page, wire, role=role)
     try:
-        page.goto(base, wait_until="domcontentloaded", timeout=timeout_ms)
+        browser_engine.rate_limited_goto_sync(
+            page, base, wait_until="domcontentloaded", timeout=timeout_ms)
     except Exception:
         pass
     seeded = _seed_auth(page, headers, storage)
     try:                                    # reload so the SPA boots WITH the persona's session
-        page.goto(base, wait_until="domcontentloaded", timeout=timeout_ms)
+        browser_engine.rate_limited_goto_sync(
+            page, base, wait_until="domcontentloaded", timeout=timeout_ms)
     except Exception:
         pass
     settle(page, timeout_ms)
@@ -1467,7 +1472,8 @@ def route_mutate(context, page, target_url: str, param: str, new_value: str, *, 
         return _fetch(page, mutated, {}, persona), "in-page-fetch"
     try:
         nav = trigger_url or page.url or target_url
-        page.goto(nav, wait_until="domcontentloaded", timeout=timeout_ms)
+        browser_engine.rate_limited_goto_sync(
+            page, nav, wait_until="domcontentloaded", timeout=timeout_ms)
         settle(page, timeout_ms)
     except Exception:
         pass
@@ -1741,7 +1747,8 @@ def _capture_shots(owner_page, attacker_page, url: str, timeout_ms: int) -> dict
     shots = {}
     for label, pg in (("owner_view", owner_page), ("attacker_view", attacker_page)):
         try:
-            pg.goto(url, wait_until="domcontentloaded", timeout=timeout_ms)
+            browser_engine.rate_limited_goto_sync(
+                pg, url, wait_until="domcontentloaded", timeout=timeout_ms)
             settle(pg, timeout_ms)
             shots[label] = {"png_b64": base64.b64encode(pg.screenshot()).decode(), "url": url}
         except Exception:
