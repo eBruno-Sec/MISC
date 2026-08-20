@@ -247,19 +247,136 @@ The defect is in the *recording*, not the *capability*.
 
 ---
 
+## The corpus number is no longer zero — driven through the LIVE agent, not a test
+
+The `tmp_path` finding above says the ticket's zero is an artefact of where the ledger was written.
+The way to prove that is to write one to the ledger everybody counts. Driven through the running
+`apolaki-agent-1` over its own HTTP API (no rebuild, no restart, no service touched):
+
+```
+GET  /zap/status  → {"state":"ready","label":"ZAP Ready (v2.17.0)","configured":true,"running":true}
+POST /engage      {"mode":"full","enable_zap":true,"require_zap":true,
+                   "zap_policy":"safe_active","strategy":"deterministic",
+                   "in_scope":["http://domsource:8080"]}    → session b226bc05
+POST /run/b226bc05                                          → {"ok":true,"status":"running"}
+```
+
+The live agent's baked image was checked against the working tree **before** trusting the result, so
+this measures shipped code and not my editor:
+
+```
+tools.py      5ee12b70…  ==  agent/tools.py      5ee12b70…
+planner.py    1319d5f8…  ==  agent/planner.py    1319d5f8…
+zap_client.py 1d62d53c…  ==  agent/zap_client.py 1d62d53c…
+```
+
+Result, read back from `apolaki_bbh_data:/data/bbh.db` — the same volume, same query, same script that
+returned `0` at the top of this document:
+
+```
+b226bc05  tool_call  2026-08-20T23:11:42Z
+  {"tool":"run_zap","permission":"active",
+   "input":{"url":"http://domsource:8080","policy":"safe_active",
+            "speed":"normal","aggression":"normal"}}
+TOTAL run_zap rows in durable corpus: 1
+```
+
+ZAP context `bbh-b226bc05-7844` was created on the daemon by that mission, matching
+`tools.py:10301`. **The ticket's headline count is now falsified by construction**: a real mission,
+driven by the live agent, in Full mode, reached phase F2 and dispatched `run_zap`, and the corpus
+recorded it. The scanner is reachable and the ledger can see it.
+
+---
+
 ## Patch list for lanes that own the files (I do not own these)
 
 **P1 — `agent/tests/test_zap_live_acceptance.py` (I own `agent/tests/`, so this one is mine to fix).**
 `os.environ["ZAP_LIVE_SELF_HOST"]` raises a bare `KeyError` that reads like a ZAP failure. It should
 skip with an actionable reason, exactly as the module already does for `ZAP_LIVE_ACCEPTANCE`.
 
-**P2 — the durable-ledger gap (needs a `liveness.py` / Coordinator decision, not a code change here).**
-The Q-023 DoD asks for a liveness CHECKS entry that fails when a ZAP-enabled mission produces zero
-`run_zap` rows. `main._missing_zap_invocation` (`main.py:2842-2859`) already implements exactly that
-rule per-mission and fails closed. What is missing is that **nothing runs a ZAP-enabled mission on a
-schedule against the durable DB**, so the rule has no occasion to fire. Recommend the liveness gate
-run the `domsource` full-mode ZAP mission (2m43s measured, cheapest lab that exercises the whole
-path) rather than adding a new assertion to a corpus nobody writes ZAP rows into.
+**P2 — the liveness entry the DoD asks for. READ THIS BEFORE WRITING IT: the obvious version is a
+mis-specified oracle that reports DEAD on a working ZAP.** `agent/liveness.py` is Coordinator-owned,
+so the patch is here rather than applied.
+
+First, what is already done and needs nothing: `main._missing_zap_invocation` (`main.py:2842-2859`)
+already fails a ZAP-enabled mission closed when no `run_zap` row was persisted, and **both halves are
+already tested** — `test_zap_invocation.py:317` (fires when the row is missing) and `:339` (a
+zap-off mission still completes with an unchanged log stream). That part of the DoD is closed.
+
+What is missing is a liveness CHECKS entry. **ZAP is absent from `liveness.py` entirely** — `grep -i
+zap agent/liveness.py agent/liveness_run.py` returns nothing.
+
+**The trap.** The natural entry, matching every other engine in the table:
+
+```python
+{"technique": "zap_dast", "lab": "domsource", "kind": "tool", "tool": "_run_zap",
+ "input": {"url": "http://domsource:8080", "policy": "safe_active"}, "family": "zap"}
+```
+
+would report **DEAD against a perfectly working ZAP**. MEASURED, not reasoned:
+
+```
+zap_client.alert_to_finding(<a real CSP alert>)  →  confidence = 'candidate'
+                                                     scanner_confidence = 'High'
+                                                     family='zap'  cwe='CWE-693'  evidence=60 chars
+liveness._match(f, {"family": "zap"})    → False
+liveness._match(f, {"cwe": "CWE-693"})   → False
+```
+
+The cause is deliberate design on both sides and neither side is wrong. `liveness._match` requires
+`confidence in ("confirmed","high")` and its docstring states the rule outright: *a lead never
+satisfies a liveness check*. `zap_client.alert_to_finding` grades every ZAP alert `"candidate"` on
+purpose, keeping ZAP's own rating in `scanner_confidence` so a scanner's opinion can never be
+mistaken for an Apolaki oracle. **Do not "fix" either one to make the check pass** — loosening
+`_match` would let leads satisfy every other engine's check, and promoting ZAP alerts to `confirmed`
+would inject an unmeasured false-positive source into the report, which this ticket's own
+false-positive section forbids.
+
+**The correct shape is a REACH check, not a proof check** — and the precedent already exists in the
+same table. `kind: "surface"` was added for exactly this reason: "can the product still reach a
+target" is a different question from "did an oracle fire", and it belongs in the same ratchet. ZAP's
+liveness question is the same kind: *did the DAST pass execute and come back with attributed alerts*,
+not *did Apolaki prove a bug*.
+
+Suggested patch, for the owner to place in `CHECKS` and implement the arm in `verdict()`:
+
+```python
+# ── DAST: did the ZAP pass actually EXECUTE? ─────────────────────────────────────────────────
+# Q-023: ZAP had 0 tool_call rows across 154 missions while the engine worked fine — the only
+# path that ran it wrote its ledger to tmp_path. This check is the missing witness.
+# NOT kind:"tool". ZAP alerts are graded `candidate` on purpose (zap_client.alert_to_finding),
+# and _match refuses leads on purpose, so a tool-check reports DEAD on a healthy ZAP. MEASURED.
+# The question here is EXECUTION, like kind:"surface", not proof.
+{"technique": "zap_dast_execution", "lab": "domsource", "kind": "zap",
+ "input": {"url": "http://domsource:8080", "policy": "passive"}, "min_alerts": 1},
+```
+
+with a `verdict()` arm alongside the `kind == "surface"` one:
+
+```python
+if check.get("kind") == "zap":
+    alerts = list(findings or [])
+    need = int(check.get("min_alerts") or 1)
+    if len(alerts) >= need:
+        return {..., "verdict": CONFIRMED,
+                "detail": "ZAP pass executed and attributed %d alert(s)" % len(alerts)}
+    return {..., "verdict": DEAD,
+            "detail": "ZAP daemon answered but the pass attributed no alerts — the DAST wiring "
+                      "is not carrying a target"}
+```
+
+and the runner arm (`liveness_run.py`, beside `kind == "tool"`), which needs `_run_zap`'s findings
+exactly as the tool arm already collects them.
+
+**Cost and lab choice are measured, not guessed.** `domsource` with `policy: "passive"` is the right
+lab: the whole full-mode mission including the ZAP pass took **2m43s**, it is a compose-pinned local
+lab, and it reliably yields 4 alerts (CWE-1021, CWE-693 ×2, CWE-497). `passive` rather than
+`safe_active` keeps the gate fast and avoids sending payloads on every liveness run.
+
+**Baseline note.** This ADDS a technique, so `scripts/liveness.sh --update` is required once to take
+it into the baseline; `evaluate()` only ever adds, so nothing regresses. Note that `liveness.sh` runs
+`docker compose --profile labs up -d … domsource …`, which **recreates `domsource`** — do not run it
+while a mission is targeting that lab (it would have killed mission `b226bc05` mid-flight).
 
 **P3 — `agent/main.py` (findings-gate lane owns it).** No change required for Q-023; recorded so the
 owner is not left guessing. `_missing_zap_invocation` is correct as written.
