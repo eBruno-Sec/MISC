@@ -5,6 +5,7 @@ from contextlib import contextmanager
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import json
 import os
+import socket
 import threading
 import time
 
@@ -18,6 +19,36 @@ import tools
 
 LIVE = bool(os.getenv("ZAP_LIVE_ACCEPTANCE"))
 pytestmark = pytest.mark.skipif(not LIVE, reason="requires the pinned local ZAP daemon and labs")
+
+
+def _self_host() -> str:
+    """The address ZAP must use to call *back* into this test process.
+
+    Q-023: this used to be a bare ``os.environ["ZAP_LIVE_SELF_HOST"]``. When the var was unset the
+    live run died with ``KeyError: 'ZAP_LIVE_SELF_HOST'`` inside a file called
+    ``test_zap_live_acceptance``, which reads like ZAP failing. It is a harness input, not a ZAP fact,
+    and it is one the harness can supply itself: on a user-defined Docker network the container's own
+    hostname resolves for every other container on that network, ZAP included. MEASURED before being
+    relied on -- a throwaway container on ``apolaki_default`` served on 42888 and was reached from a
+    second container by ``socket.gethostname()`` alone (HTTP 200).
+
+    An explicitly-set value still wins, so a run outside that topology can override. The empty string
+    is treated as unset deliberately rather than by a falsy accident: an empty hostname cannot be
+    bound or resolved, so honouring it would only reproduce the failure this replaces.
+    """
+    return os.environ.get("ZAP_LIVE_SELF_HOST") or socket.gethostname()
+
+
+def _required_target() -> str:
+    """The authorized lab under test. Unlike the self-host this is a SCOPE decision, so it is never
+    guessed -- an unset target fails loudly and says exactly what to set."""
+    target = os.environ.get("ZAP_LIVE_TARGET") or ""
+    assert target, (
+        "ZAP_LIVE_TARGET is unset. This live test engages a real full mission, so the target is a "
+        "scope decision the harness will not make for you. Set it to an authorized lab, e.g. "
+        "ZAP_LIVE_TARGET=http://domsource:8080"
+    )
+    return target
 
 
 def _run(awaitable):
@@ -70,7 +101,7 @@ def _limiting_target(host: str, port: int):
 
 
 def test_real_zap_retry_after_aborts_before_a_second_target_request():
-    host = os.environ["ZAP_LIVE_SELF_HOST"]
+    host = _self_host()
     browser_engine.target_rate_policy.clear()
     with _limiting_target(host, 42888) as (url, starts, observations):
         scope = scope_mod.ScopeEngine()
@@ -93,7 +124,7 @@ def test_real_zap_retry_after_aborts_before_a_second_target_request():
 
 
 def test_real_full_mission_persists_run_zap_tool_call(tmp_path, monkeypatch):
-    target = os.environ["ZAP_LIVE_TARGET"]
+    target = _required_target()
     old_path = db.DB_PATH
     session_id = None
     monkeypatch.setenv("BBH_REQUEST_BUDGET", "2")
