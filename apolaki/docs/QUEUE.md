@@ -331,7 +331,7 @@ rebuild** — that is now the gate's most valuable output, not an aside.
 
 
 
-### Q-078 · Triage the entries Q-077 made visible · **HIGH** · `ready` · **7 of 51 explained, and one is a REAL island**
+### Q-078 · Triage the entries Q-077 made visible · **HIGH** · `ready` · **51 -> 44**, and the island was FAIL-OPEN `643a5ca`
 
 #### Coordinator, 2026-08-20 — the structural cut nobody had taken
 
@@ -775,7 +775,33 @@ DoD: log the dispatch at the one place it is known — inside `Tools.execute()` 
 the fact rather than a wrapper's account of it. Then re-derive the arsenal classification, because
 every "never dispatched" count in every report predating the fix is an upper bound, not a measurement.
 
-### Q-062 · Two browser worlds; the CDP sidecar served ZERO sessions · **HIGH** · `ready`
+### Q-062 · Two browser worlds; the CDP sidecar served ZERO sessions · **CLOSED — PREMISE DISPROVED** `11c5a52`
+
+**The ticket's measurement was right and the conclusion drawn from it was not.** The sidecar has
+served **509 successful sessions**, not zero. `GET /metrics` retains 2922 five-minute periods across
+2026-08-10..08-20; 68 are non-zero. The most recent product-code cluster is 2026-08-20T03:05Z -- five
+`POST /function` calls whose `launch={"ignoreHTTPSErrors": true}` is the byte-for-byte signature of
+`browser_engine.drive()`, **19 hours before the lane that checked**. Q-062 sampled 60 minutes of a
+curve that fell off a cliff on 2026-08-13.
+
+**The apparatus note is the transferable part.** `/metrics` returns only COMPLETED periods, so driving
+the sidecar and re-reading it immediately shows `delta=0`. The lane **reproduced that false zero
+deliberately** before trusting anything, then took every session claim from the ingress log instead.
+The original ticket did not have that control, which is the entire reason it resolved the wrong way.
+**A zero with no positive control is not a measurement** -- this queue has now had it both ways: zeros
+that were real defects, and a zero that was the instrument.
+
+Both worlds are consumed and they are DISJOINT, proven at the sidecar's own ingress rather than from a
+counter: `browser_engine.observe()` produced exactly one `POST /function`; `bie.run_persona_swap()`
+then confirmed 2 real findings against `clientauthz` with the sidecar seeing no request at all.
+
+**Why a mission never touches it is not "not selected"**: all six sidecar call sites are HTTP endpoint
+handlers or a lab solver, none on the autonomous mission path. And the confusion has a root cause
+worth keeping -- `browser_engine.py` also houses the Q-043 rate policy, so **eleven of its thirteen
+importers import it for `target_rate_policy` and never call `drive()`**. A module that is two things
+reads as one thing being used.
+
+Nothing removed, nothing rewired. Evidence only.
 
 MEASURED with a properly closed control. Every browser ENGINE call site uses `pw.chromium.launch()` —
 a chromium local to the agent container. **`connect_over_cdp` appears zero times in the tree**
@@ -1118,7 +1144,43 @@ pushed as `b1d56eb`.
   reachability gate after the handoff had already claimed the wiring was done.
 - **Q-017 CLOSED**, **Q-045/Q-046 CLOSED**, **Q-015/Q-016 CLOSED**, **Q-013/Q-014 CLOSED**.
 
-### Q-053 · Four findings-plumbing gaps the Q-048 lane refused to paper over · **MEDIUM** · `proposed`
+### Q-053 · Four findings-plumbing gaps the Q-048 lane refused to paper over · **MEDIUM** · `ready` · **GAP-1 CLOSED** `fb6f457` `c03e1e9`
+
+#### GAP-1 CLOSED, and it was a both-halves defect rather than the gap the ticket described
+
+The ticket said `takeover` is DETECTED and can never be REPORTED. **The producer half had already
+shipped** in `fb6f457` -- `ToolRegistry._takeover_finding` stamps family `takeover` and
+`check_takeover` is in `agent._AUTO_STORE_TOOLS`, so detection -> family -> store is real and pinned
+by `tests/test_finding_provenance.py`. **The ASVS half never moved.** MEASURED at `8c7065c` with the
+producer already live:
+
+    takeover finding + engine ran  -> failed | not_implemented_reason STILL ATTACHED
+    CLEAN run, engine RAN          -> not_implemented   <- "verified" unreachable
+    engine never ran               -> not_implemented   <- indistinguishable from the row above
+
+`failed` outranks `not_implemented`, so the FAIL direction worked **by accident** and hid the rest.
+The flattering direction is the damaging one: a clean run of a capability that EXISTS reported the
+PRODUCT as lacking it, and `not_implemented` stopped discriminating "no engine" from "engine ran
+clean". The attached reason string had gone false in both clauses while still rendering on the row --
+telling a reader "we found this" and "we have no engine for this" at once.
+
+**Fourth instance of one shape this week**: Q-051's mode key, Q-050's auto-store lines, Q-084's
+ignored parameter, this. Producer and consumer are two halves and only one of them is ever enforced.
+
+Two tests updated deliberately, each gaining a POSITIVE CONTROL in the opposite direction, because a
+test asserting a SMALLER not-implemented set is equally satisfied by a model that quietly dropped the
+objective -- which is what this change could plausibly have broken. Tally moves **27 -> 28 verified
+against 2 -> 1 not_implemented, in opposite directions by one**, and that pairing is the evidence the
+capability was WIRED rather than unlabelled.
+
+#### STILL OPEN: GAP-2, GAP-3, GAP-4, plus one the lane found on its way
+
+**24 findings are invisible to the entire ASVS model**, including 4 genuine session-cookie hardening
+findings against a real target. `security_misconfig` and `transport_posture` carry NO objective keys
+at all. **Q-048's refusal was correct and is not to be undone**: it narrowed SESS-02 to
+`insecure_cookie` and explicitly refused `security_misconfig`, because a missing Permissions-Policy
+would otherwise fail "session cookies carry Secure" (`asvs_model.py:127-131`). That correct refusal
+left the 4 stranded. The fix is a key those families can carry honestly, not a re-point of SESS-02.
 
 Handed over as tickets rather than quiet re-points, with patches already written in
 `docs/handoff/asvsproducers.md`. Each is a real product gap, not a mapping preference.
