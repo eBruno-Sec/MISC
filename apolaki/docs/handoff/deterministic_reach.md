@@ -590,3 +590,141 @@ Section 5's claim that the engine "is dispatched from `ToolRegistry._run_client_
 should be struck; the checklist line `[x] Wiring` should read `[x] Registration` — it was never
 invocation. As of this commit the engine IS dispatched, from `planner.py`, on an observed signal.
 
+## 5. The remaining two: NOT wired, each with the reason
+
+The ticket's standard is explicit — *"Wired and demonstrated on lab X, cannot fire on lab Y because
+Z" is a complete result.* Both of these were taken to a verdict, and in both cases the verdict is
+that wiring them would make the product worse.
+
+### 5.1 `run_hash_crack` — the binary is not in the image, and there is no native equivalent
+
+MEASURED in the current shipped image, same command and same positive control as slice 2:
+
+```
+nosqlmap     MISSING
+sqlmap       /usr/bin/sqlmap
+hashcat      MISSING
+john         MISSING
+ffuf         /usr/local/bin/ffuf
+nmap         /usr/bin/nmap
+```
+
+`_run_hash_crack` short-circuits to `"Skipped — neither hashcat nor john installed"` and returns no
+findings. **Scheduling it today would add a guaranteed no-op dispatch to every mission that finds a
+hash** — the exact cost slice 2 deleted an engine to avoid.
+
+**It is NOT deleted, and the distinction from `run_nosqlmap` is the whole point.** `run_nosqlmap`
+duplicated a native engine with a better oracle. Apolaki has **no** native offline cracker, so this
+is a real, distinct capability that becomes available the day the image gains `hashcat` — and Q-058
+already invested a `hash_type` pin and 11 tests in it. It is also named in **no** control catalogue
+(grep over `agent/*.py` outside `tools.py`: zero hits), so nothing claims coverage from it and the
+Q-050 definition of done is already satisfied by its second clause.
+
+**The chain is now ready for whoever owns `agent/Dockerfile`.** Slice 3 made `run_hash_id` fire
+deterministically on credential material the target disclosed. `_disclosed_hashes` already returns
+exactly what `run_hash_crack` takes — a list of observed hash strings — so the moment `hashcat` is
+installed, the trigger is a three-line extension of `_identify_dumped_hashes` and the Juice Shop MD5
+rows are a live positive control waiting for it. **That order is deliberate: install the binary,
+then wire.** Doing it the other way round is how `run_nosqlmap` existed for 154 missions.
+
+### 5.2 `run_external_surface` — two of its four capabilities already run 322 times each
+
+This one had a matching target and still never fired, which makes it a genuine selection defect
+rather than a "no matching target" case. MEASURED over the 154 mission scopes:
+
+```
+PUBLIC-domain scope entries: {'ginandjuice.shop': 50, 'calegionpost255.org': 1}
+local/bare-host entries:     {'juice-shop': 47, 'vampi': 15, 'juice-shop-bench': 14, ...}
+```
+
+**Fifty missions targeted a real public domain.** So a "public registrable domain" precondition is
+evaluable and would have matched a third of the corpus. I did not wire it, because asking slice 2's
+question first gives a different answer.
+
+`_run_external_surface` does four things. Two of them are already dispatched, per root, in
+**planner phase A**, on every single mission:
+
+| its capability | already covered by | dispatches in the corpus |
+|---|---|---|
+| ASN + BGP prefix | `run_asn` — the same `dns_recon.ip_intel(domain)` call | **322** |
+| certificate-transparency harvest | `run_crtsh` — through the same `recon_expand.parse_ct_names` parser | **322** |
+| favicon pivot hash | nothing | — |
+| permuted subdomain candidates | nothing | — |
+
+`run_subfinder` 323, `run_wayback` 322, `run_dns` 322, `run_github_recon` 322, `run_dork_gen` 314
+are the positive control that phase A really is always-on. `run_external_surface`: **0**.
+
+**Wiring it whole would re-run ASN and CT on every root that already gets both**, doubling
+third-party traffic — including to crt.sh, which is slow and rate-limited — for information the
+mission already holds. That is a strictly worse product.
+
+The two genuinely additive halves (favicon pivot hash, subdomain permutation) deserve to be folded
+into the phase-A engines that already fire, or given their own narrow step. **That is a `tools.py`
+refactor**, and this lane's `tools.py` mandate this cycle is "deleting a proven-duplicate engine or
+fixing a dispatch" — this is neither, so it is handed on rather than done half. `run_external_surface`
+is named in no control catalogue either: its only non-`tools.py` mention is `description_gate.py:6`,
+which flags it for **describing itself PASSIVE while registered ACTIVE** — a description-accuracy
+finding, not a coverage claim, and one its docstring already answers at `tools.py:2807`.
+
+---
+
+## 6. ANTI-IDLE — the Q-050 census re-taken, and it moved
+
+Nobody had re-taken this since `a35be46`. Same corpus, same query, run against the code as of this
+lane's last commit.
+
+```
+POSITIVE CONTROL  missions=154 findings=1773 tool_call rows=29945 unparseable=0
+  run_xss=1376 run_sqli=1214  (engines that HAVE run)
+
+registry (TOOL_PERMISSIONS)      110      (was 111)
+distinct tools ever dispatched    72      (unchanged)
+NEVER EXECUTED                    39      (was 40)
+
+schedulable                       33      (was 30)
+LLM-only                           6      (was 10)
+```
+
+**Every delta is accounted, not asserted.** The corpus did not change — no missions were run — so
+the only things that could move are the registry and the static classification:
+
+| | was | now | why |
+|---|---|---|---|
+| registry | 111 | 110 | `run_nosqlmap` deleted (slice 2) |
+| never executed | 40 | 39 | the same deletion; it was in `never` |
+| LLM-only | 10 | 6 | `run_nosqlmap` deleted; `run_mass_assign`, `run_hash_id`, `run_ws_hijack` now named by a scheduler |
+| schedulable | 30 | 33 | the same three, arriving |
+
+The six that remain LLM-only:
+
+```
+benchmark_lab  list_workflows  mission_intel  mission_state     <- operator utilities, correct as-is
+run_external_surface  run_hash_crack                            <- section 5, each with a reason
+```
+
+**Real detection engines a deterministic mission cannot select: 5 → 2**, and neither of the two is
+cited by any control catalogue, so no coverage claim anywhere is now backed by an unreachable
+engine. That was the Q-050 definition of done.
+
+### 6.1 The soundness argument, tested rather than trusted
+
+The ticket flagged that an external lane was re-checking whether a name can reach a scheduler
+without appearing in `agent.py` or `planner.py`. **It can — and I hit a live instance of the belief
+that it does.** `docs/handoff/realtime.md` claimed `run_ws_hijack` was reached from
+`ToolRegistry._run_client_checks`, i.e. engine-to-engine inside `tools.py`, invisible to the name
+scan. That specific claim was false (section 4.1), but the ROUTE is real: `_run_client_checks` is
+itself planner-dispatched, so an engine it called WOULD be reachable while scanning as LLM-only.
+
+So the census above extends the instrument to close that hole, and reports the answer:
+
+```
+SOUNDNESS EXTENSION -- engines reached only from INSIDE tools.py (the hole in the name scan):
+    none
+```
+
+`re.findall(r"self\._<tool>\s*\(", tools.py)` over every never-executed engine. **The hole exists in
+principle and no engine falls through it**, so the original classification stands — now for a
+measured reason rather than an assumed one. The other three routes the ticket named (a variable, an
+f-string, a dict built elsewhere, `getattr`) remain unchecked by this instrument and are still the
+external lane's to answer.
+
