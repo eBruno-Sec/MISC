@@ -605,6 +605,40 @@ also have recreated `domsource` mid-flight while mission `b226bc05` was scanning
 Recommend the Coordinator run liveness once the compose change lands, and use `--update` at that
 point only if the ZAP entry from P2 is added.
 
+## Q-023 definition-of-done, item by item
+
+| DoD item | state |
+|---|---|
+| three oracle assertions from a real mission's event log | **MET** — `b226bc05`, durable corpus |
+| all four negative controls | **3 MET, 1 deliberately deferred** — (b) requires stopping a shared daemon under two live lanes; fail-closed path named for the owning lane |
+| the dead write fixed | **MET** — `recon["zap"]` gone entirely |
+| the bare swallow fixed | **MET** — and observed working in production output |
+| a `liveness.py` CHECKS entry that fails when a ZAP-enabled mission produces zero `run_zap` rows | **NOT LANDED — patch written, twice corrected.** `liveness.py` is Coordinator-owned. Both naive versions of this entry were measured to report DEAD on a healthy ZAP; the corrected reach-based form is in P2. |
+| **the fifth cause named, with the measurement that identified it** | **MET — and it is two different causes for two different eras.** For today's code: the only path that runs ZAP through a mission writes its ledger to `tmp_path`, so the corpus cannot record it. For the four 2026-07-26 residue missions: the plan loop never entered phase F at all — proven because `run_nuclei` and `run_nmap_vuln` are equally absent, and neither is gated on any ZAP flag. |
+| not closed by flipping `enable_zap` | **HONOURED** — `main.py:81` still `False`; the corpus moved off zero by running a mission, not by changing a default |
+
+**Remaining to close the ticket:** the P2 liveness entry (Coordinator), sub-defect 2's rescan key
+(planner owner), and negative control (b) (daemon owner). Everything else is measured and met.
+
+---
+
+## What I got wrong, recorded because the corrections are the useful part
+
+Three of my own claims were wrong and were caught by re-measuring rather than by review:
+
+1. **"The ZAP daemon is unreachable."** Nine endpoints returned `RemoteProtocolError`. The daemon was
+   fine; ZAP 2.17 drops unauthorised API connections without a response body, and I had omitted
+   `apikey=bbh-zap`. A dead-looking apparatus was my probe, not the service.
+2. **"Twelve labs are idle."** I had counted one consumer. Six of those twelve are driven by the
+   liveness gate, and a seventh is a lane's in-flight work. The real number is three.
+3. **My own liveness patch, twice.** `family: "zap"` reports DEAD because ZAP alerts are graded
+   `candidate` by design; `min_alerts: 1` reports DEAD on every run after the first because the
+   pass-cursor correctly refuses to re-claim alerts. I wrote the second one immediately after warning
+   about the first.
+
+The common shape is the ticket's own: **an absence observed through a channel nobody validated.** The
+positive control is not ceremony — it caught me three times in one session.
+
 ## Anti-idle follow-on filed as evidence, not as a patch
 
 `webgoat` returns **404 at `/`** and has been `unhealthy` for 7 days. `mutillidae` (302),
