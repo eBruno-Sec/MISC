@@ -546,3 +546,55 @@ B. runtime findings naming a third-party CDN HOST : 0 of 1057
 Zero — but every corpus in that DB is a self-hosted lab (`ginandjuice.shop`, `juice-shop:3000`,
 `owaspbench:8443`), so no scan has ever met a CDN-hosted asset. **That zero is a property of the
 corpus, not evidence that the cross-origin case is handled.** It is untested, not clean.
+
+---
+
+## 8. THE REAL EXECUTION PATH — driven over HTTP, not asserted from a unit test
+
+A passing test proves the function; it does not prove the endpoint returns what the function
+computed. `uvicorn main:app` in a THROWAWAY container (`apolaki-agent-1` untouched, never
+`docker cp`'d into, never restarted), DVWA mounted at `/tree`:
+
+```
+$ curl -s "http://127.0.0.1:18099/codereview?path=/tree"
+top-level keys        : ['by_rule', 'by_severity', 'by_technique', 'exposed_dot_git',
+                         'files_scanned', 'findings', 'not_maintained_files',
+                         'not_maintained_findings', 'total']
+files_scanned=358 total=57 exposed_dot_git=False
+not_maintained_files  : 239
+not_maintained_findings: 14
+marked lead rows      : 14 of 57      kinds: {'third-party': 14}
+
+SAMPLE MARKED ROW: {"rule": "code_exec_sink", ..., "file": "external/phpids/0.6/lib/IDS/vendors/
+  htmlpurifier/HTMLPurifier/ConfigSchema/InterchangeBuilder.php", "line": 140,
+  "snippet": "return eval('return array('. $contents .');');", ...}
+
+UNMARKED (first-party) leads still reported: 43
+     {"rule": "code_exec_sink", "file": "dvwa/js/dvwaPage.js", "line": 7, "severity": "critical"}
+     {"rule": "code_exec_sink", "file": "security.php", "line": 121, "severity": "critical"}
+     {"rule": "code_exec_sink", "file": "vulnerabilities/view_help.php", "line": 15, ...}
+any row carrying a confidence key? : False
+```
+
+**Exactly the 14 of 57 that §5.1 measured going unmarked are now marked, over the wire.** The 43
+first-party leads are still reported and still unmarked — the negative control holds end to end,
+on DVWA's own `dvwaPage.js`, `security.php` and `view_help.php`. No row carries a `confidence`
+key, so the §6.1 decision survives serialisation.
+
+### 8.1 THE LAST MILE IS NOT DONE, and this lane cannot do it
+
+`ui/index.html:2668 renderCodeReview()` draws a fixed row:
+
+```js
+<span class="cr-sev">${f.severity}</span>
+<span class="cr-loc">${f.file}:${f.line}</span>
+<span class="cr-tech">${f.technique}</span>
+<div class="cr-snip">${f.snippet}</div> <div class="cr-why">${f.why}</div>
+<div class="cr-conf"><b>Confirm:</b> ${f.confirm}</div>
+```
+
+**`source_kind`, `source_kind_evidence` and `not_maintained_files` are not among them.** The API
+tells the truth and the Code Review tab does not yet show it. `ui/` belongs to another lane, so
+this is reported rather than fixed: an operator reading the JSON or the report sees the marker; an
+operator reading that tab still cannot tell that
+`external/phpids/.../InterchangeBuilder.php:140` is HTMLPurifier and not theirs.
