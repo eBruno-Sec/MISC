@@ -107,6 +107,21 @@ _AUTO_STORE_TOOLS = {
     # while wiring it: the tool_call and tool_result events both appeared and `self.leads` stayed
     # empty, so a WSTG-CRYP-04 observation would never have reached the report.
     "run_hash_id",
+    # Q-050, the SAME both-halves gap twice more, found by auditing the line above rather than by a
+    # failure. The lane that wired these two spotted `run_ws_hijack` as it was killed and never
+    # reached `run_mass_assign` at all. MEASURED at HEAD: `_AUTO_STORE_TOOLS` held 69 entries and
+    # neither name was among them, while both engines BUILD a findings list and append
+    # `self._attach_poc(...)` to it -- 4 findings-bearing lines each, against 0 for an engine that
+    # genuinely returns none. `_auto_store` is the only store path (one guard site,
+    # `if not result.error and tool_name in _AUTO_STORE_TOOLS`), so every one of those findings was
+    # discarded at dispatch.
+    #
+    # `run_mass_assign` is the severe one and it is worth naming why. It CHANGES STATE, it is the
+    # engine `asvs_model.py:179` declares verifiable and `wstg_catalog.py:110` rides WSTG-INPV-20 on,
+    # and Q-050 had just given it a deterministic trigger. Without this line a mission sends the
+    # write, confirms the privileged attribute persisted on a separate re-read, and reports CLEAN --
+    # the false-clean shape, arriving through the second half of a fix whose first half shipped.
+    "run_mass_assign", "run_ws_hijack",
     "run_cloud_probe",   # public-bucket listing is confirmed-by-oracle; auto-store it (#13, was an island)
     # Q-054, the THIRD sink. workflow.run and tools._run_workflow now both FORWARD their steps'
     # findings (measured: a confirmed CWE-639 survives the live idor_read pack end to end). Without
