@@ -3,11 +3,70 @@
 Updated by the Coordinator. Numbers here must match [LEDGERS.md](LEDGERS.md); if they disagree, the
 ledger wins and this file is stale.
 
-**Last update**: 2026-08-19. **The previous update was 08-16 and had rotted the same way the 08-13 one
-did** — it named a tree at 2799 tests when HEAD carries 3223, and every lane in its table was already
-closed. That is twice in a row, which makes it a property of the file rather than an accident.
-**This file is one of four criteria the `apolaki-autocontinue` watchdog checks before retiring itself,
-so leaving it stale silently disables that retirement.** Updating it is not bookkeeping.
+**Last update**: 2026-08-21. **This file is one of four criteria the `apolaki-autocontinue` watchdog
+checks before retiring itself, so leaving it stale silently disables that retirement.** Updating it is
+not bookkeeping. It rotted three cycles running (08-13, 08-16, 08-19) before that was written down.
+
+# RELEASE-STABILIZATION MODE — since 2026-08-20
+
+Feature work is FROZEN. The unit of progress is a **measured invariant closed with its denominator**,
+not a ticket closed. Two lists, and new discoveries do not interrupt a live lane unless they are
+reproducible release blockers.
+
+## The release-invariant matrix — measured at `0f2d54c`
+
+    full suite   3445 passed / 11 skipped / 12 xfailed / 0 failed   isolated snapshot
+    gates        queue_gate OK (78 headers, 59 hashes) · bake_drift OK · liveness 17/17
+
+| # | invariant | measured | denominator |
+|---|---|---|---|
+| I-1 | scheduler / parent / **executable** manual contract | ✅ | 6 manual-only of 110 engines, contract traverses the real dispatch boundary |
+| I-2a | exactly one persistence owner | ✅ 0 unowned | 62 finding-producing engines |
+| **I-2b** | **outcome fidelity** | ⏳ guard being built | split out by Q-089 |
+| I-3 | shared rate policy | ✅ 0 ungated | 178 production modules |
+| I-8 | guard scans its claimed scope | ✅ 4 of 4 | one was RENAMED not widened, deliberately |
+| I-10 | strict xfail has reason + ticket | ✅ 12 of 12 | AST count, not `grep -c` |
+| I-4 | control per confirmed finding | ❌ **303** | of 1391 confirmed; 716 more are static, different meaning |
+| I-5 | no swallowed clean | ❌ **562 of 917** | 61.3% of exception handlers |
+| I-9 | caps preserve highest-value ordering | ❌ unmeasured | — |
+| I-11 | reachable / framework-invoked / retained-with-reason | ❌ **44 vs ceiling 37** | pin held; three lanes declined to force it |
+
+**I-2b is the invariant this week earned.** I-2 counted EDGES and measured 0 unowned *correctly* —
+Q-089's defect lived on the RETURN edge, which an ownership census does not traverse. `db.add_finding`
+answered "id" when the caller asked "stored". **An invariant that counts structure cannot see a defect
+that lives in a value.**
+
+## Lanes right now
+
+| lane | scope | state |
+|---|---|---|
+| Codex (external) | I-4 · I-5 · I-9 | leased; `tools/planner/agent/report/bie/codeintel/zap_client/browser_engine/*_tool` |
+| Claude | I-2b outcome-fidelity guard | LIVE; writes only its own new test file |
+| Coordinator | queue · STATUS · integration · mutation-verification of every returned lane | — |
+
+**No third implementation lane until one of those returns green.**
+
+## The recurring shape, five instances in one week
+
+Producer and consumer are two halves and only one is ever enforced: Q-051 (mode key), Q-050
+(auto-store), Q-084 (a parameter nothing read), Q-053 (a stale reason on a live capability),
+report-integrity (`checks_run` = the checklist's size). Q-089 is the sixth and the sharpest, because
+the two halves were a value and its reader.
+
+## Method failures worth more than the fixes
+
+- **A mutant that "survives" because the mutation never applied is a false all-clear.** Six times in
+  two days, four of them mine. Verify the edit landed — grep it, or assert through the imported
+  module — *before* believing any mutation result.
+- **`grep -c` counts LINES, AST counts NODES.** I reported a wrong strict-xfail delta by mixing them
+  when the AST tool was already built.
+- **A zero from an instrument that cannot see the common case is not a measurement.** Four of mine
+  this week: `mod.attr(` missing aliased imports, a guessed finding-key vocabulary, a hardcoded
+  "2 of 10", `reason=` bound to a module constant.
+- **Grouping by symptom and calling it a root cause.** Q-088 was filed as "four consumers of one
+  chokepoint"; three of its premises were false and the four markers have four closing conditions.
+  Committed by the Coordinator two turns after writing the opposite rule into three lane briefs.
+- **One snapshot, one run.** Never rebuild a directory a container still has mounted.
 
 ## Lanes — 2026-08-20, ALL STOOD DOWN, cycle folded
 
