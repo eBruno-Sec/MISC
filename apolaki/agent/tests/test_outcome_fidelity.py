@@ -87,11 +87,10 @@ AGENT_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 #: DELETE the entry in the commit that lands the fix -- `test_no_pinned_violation_is_stale` requires
 #: it, so a closed defect cannot leave a guard entry behind guarding nothing.
 _KNOWN_OPEN = {
-    ("main.py", "confirm_lead", "status-report", "db:add_finding"):
-        "Q-090-A. `fid = db.add_finding(...)` then the lead is removed from ctx['leads'] and the "
-        "response says promoted=True. On a SCOPE (#8) refusal fid is '' and nothing was written, so "
-        "the lead is destroyed and the operator is told it was promoted. MEASURED: 0 rows, 0 leads, "
-        "HTTP 200 {'promoted': true, 'finding_id': ''}.",
+    # Q-090-A CLOSED in the commit that removed this entry. `confirm_lead` now gates the lead
+    # removal on `fid.stored`, so a SCOPE refusal keeps the lead and answers 409 instead of
+    # deleting it and reporting promoted=True. The pin is retired here rather than left behind
+    # guarding nothing -- which is the rule the docstring above states and this guard enforces.
     ("main.py", "update_finding", "boolean-read", "db:update_finding"):
         "Q-090-B. `if not db.update_finding(...): raise HTTPException(404, 'finding not found')`. "
         "False means EITHER 'no such finding in this mission' OR 'the write was refused as "
@@ -641,8 +640,11 @@ def test_every_exemption_matches_exactly_one_measured_site():
 def test_the_violation_census_is_non_vacuous():
     """A census that found nothing would pass both ratchets forever."""
     current = _outcome_fidelity_violations()
-    assert len(current) >= 8, (
-        "the violation census found only %d site(s); it was 8 when this guard was written, so the "
+    # 8 -> 7: Q-090-A was FIXED (main.py:confirm_lead now reads `fid.stored`). Lowering a
+    # non-vacuity floor is only ever legitimate alongside the fix that removed the site, named in
+    # the same commit -- never to accommodate a census that broke.
+    assert len(current) >= 7, (
+        "the violation census found only %d site(s); it was 7 after Q-090-A closed, so the "
         "resolver is broken rather than the tree being clean: %s" % (len(current), current))
     assert {row[2] for row in current} >= {"boolean-read", "status-report", "discarded-return"}, (
         "one of the three violation shapes stopped being detected at all: %s" % current)
@@ -819,7 +821,6 @@ _FINDING = {"id": "f1", "title": "SQLi", "severity": "high", "confidence": "conf
             "reproduction_steps": ["s"]}
 
 
-@pytest.mark.xfail(strict=True, reason=_Q090 + " Q-090-A: confirm_lead destroys an off-scope lead.")
 def test_q090a_confirming_an_off_scope_lead_must_not_destroy_it_and_claim_promotion(api):
     """MEASURED 2026-08-21 against the real endpoint: HTTP 200
     {"ok": true, "promoted": true, "machine_proof": true, "finding_id": ""} -- while the findings

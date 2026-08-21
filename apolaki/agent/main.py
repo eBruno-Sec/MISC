@@ -3924,6 +3924,25 @@ async def confirm_lead(session_id: str, lid: str, req: LeadConfirmRequest = None
                                 % (operator, rationale, lead.get("analyst_notes", "") or "")).strip(" |")
     finding["tags"] = list(dict.fromkeys((lead.get("tags") or []) + ["operator-confirmed"]))
     fid = db.add_finding(session_id, finding)
+    # Q-090-A. THE LEAD WAS REMOVED UNCONDITIONALLY, and `add_finding` has three outcomes. On an
+    # off-scope refusal it writes NO row and returns a falsy id -- so this line deleted the lead, the
+    # findings table kept 0 rows, and the endpoint answered 200 with `promoted: true`. Zero findings,
+    # zero leads: the operator's attestation and the lead itself, both destroyed, reported as success.
+    # On the ATTESTATION path of all places, which exists precisely so an operator's decision is not
+    # discarded silently (see Q-014 in the docstring above).
+    #
+    # Q-089 made the outcome askable -- `.stored` is True only when a row exists -- so the promotion
+    # is now conditional on the write having actually happened. A refusal keeps the lead and says so,
+    # which is the honest answer: nothing was promoted, and nothing was lost.
+    if not fid.stored:
+        # `.stored` DIRECTLY, and the first draft of this line did not. I wrote
+        # `getattr(fid, "stored", bool(fid))` as a back-compat fallback, and the Q-089 census caught
+        # it within a minute: `main.py:3937 \`fid\` (from line 3926) used as a bool()`. The fallback
+        # was unreachable -- `add_finding` always returns a `FindingWriteId` -- and it reintroduced
+        # the exact boolean-context read that census exists to keep at zero. Defensive code that
+        # cannot trigger, restoring the defect it was defending against.
+        raise HTTPException(409, "the lead was not promoted: the finding write returned %s, so no "
+                                 "row exists. The lead is unchanged." % fid.verdict)
     ctx["leads"] = [l for l in leads if _lead_key(l) != _lead_key(lead)]
     db.update_mission(session_id, context=ctx)
     try:                                   # attack-chain memory: this class WORKED here
