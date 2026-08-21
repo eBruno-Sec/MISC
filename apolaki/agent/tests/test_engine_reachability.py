@@ -12,6 +12,7 @@ import ast
 from pathlib import Path
 import re
 
+import deadcode_gate as dg
 import tools
 
 
@@ -38,10 +39,10 @@ def _production_python_paths(root=None):
     )
 
 
-def _executable_engine_literals(paths=None):
-    """Exact run_* constants in executable syntax, never comments or docstrings."""
-    names = set()
-    for path in paths if paths is not None else _production_python_paths():
+def _executable_string_literals(paths):
+    """String constants in executable syntax, never comments or docstrings."""
+    values = set()
+    for path in paths:
         tree = ast.parse(Path(path).read_text(encoding="utf8"))
         docstrings = set()
         for owner in [tree] + [n for n in ast.walk(tree)
@@ -50,12 +51,35 @@ def _executable_engine_literals(paths=None):
             if body and isinstance(body[0], ast.Expr) and isinstance(body[0].value, ast.Constant) \
                     and isinstance(body[0].value.value, str):
                 docstrings.add(id(body[0].value))
-        names.update(
+        values.update(
             node.value for node in ast.walk(tree)
             if isinstance(node, ast.Constant) and isinstance(node.value, str)
-            and id(node) not in docstrings and re.fullmatch(r"run_[a-z0-9_]+", node.value)
+            and id(node) not in docstrings
         )
-    return names
+    return values
+
+
+def _executable_engine_literals(paths=None):
+    """Exact run_* constants in executable syntax across production consumers."""
+    values = _executable_string_literals(
+        paths if paths is not None else _production_python_paths())
+    return {value for value in values if re.fullmatch(r"run_[a-z0-9_]+", value)}
+
+
+def _dispatch_method_names(path=None):
+    """Advertised names with a concrete ToolRegistry dispatch method."""
+    tree = ast.parse(Path(path or tools.__file__).read_text(encoding="utf8"))
+    methods = {
+        node.name[1:] for node in ast.walk(tree)
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and node.name.startswith("_")
+    }
+    return _spec_names() & methods
+
+
+def _deterministic_scheduler_names(paths=None):
+    """Advertised exact tool names in the two deterministic scheduling surfaces."""
+    use_paths = paths or (APP_DIR / "agent.py", APP_DIR / "planner.py")
+    return _spec_names() & _executable_string_literals(use_paths)
 
 
 def test_the_static_invocation_reference_census_is_not_vacuous():
@@ -116,6 +140,27 @@ def test_comments_and_docstrings_cannot_rescue_an_engine_reference(tmp_path):
     names = _executable_engine_literals([path])
     assert "run_comment_only" not in names
     assert "run_docstring_only" not in names
+
+
+def test_every_unscheduled_advertised_method_has_an_explicit_manual_contract():
+    """G4. Manual reachability is a reviewed contract, not the residue after scheduling.
+
+    The equality is load-bearing: a seventh advertised dispatch method absent from agent.py and
+    planner.py fails here. Adding it to CLAUDE_TOOLS is not enough, and adding prose elsewhere cannot
+    satisfy this scheduler census.
+    """
+    unscheduled = _dispatch_method_names() - _deterministic_scheduler_names()
+    assert len(_spec_names()) == 75, "measured denominator moved; review the manual-only partition"
+    assert len(_deterministic_scheduler_names()) == 69
+    assert unscheduled == set(dg.MANUAL_ONLY_TOOL_CONTRACTS), (
+        "advertised dispatch methods without a deterministic scheduler need an explicit verdict: %s"
+        % sorted(unscheduled ^ set(dg.MANUAL_ONLY_TOOL_CONTRACTS)))
+
+
+def test_the_scheduler_census_has_positive_controls_and_no_manual_false_positive():
+    scheduled = _deterministic_scheduler_names()
+    assert {"run_sqli", "run_xss", "run_mass_assign"} <= scheduled
+    assert not (scheduled & set(dg.MANUAL_ONLY_TOOL_CONTRACTS))
 
 
 def test_every_advertised_tool_actually_dispatches():

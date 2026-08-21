@@ -73,6 +73,69 @@ import warnings
 
 APP_DIR = os.path.dirname(os.path.abspath(__file__))
 
+# Advertised ToolRegistry methods intentionally absent from deterministic scheduling.
+#
+# This is a CONTRACT, not an exemption from the dead-code scan. Every name must remain advertised,
+# dispatch through the real dynamic ToolRegistry.execute path, and remain absent from the deterministic
+# scheduler census; tests assert all three facts as one equality. A newly unscheduled method therefore
+# fails until it is either scheduled or receives a reviewed contract here.
+#
+# `dispatcher` names the manual caller that really exists. `why_no_scheduler` names why a deterministic
+# caller should not exist; prose alone is insufficient because the tests execute every entry through
+# that dispatcher. The four read-only operator utilities expose state or benchmark controls that the
+# deterministic agent already owns directly. The two `run_*` entries are deliberately operator-selected.
+MANUAL_ONLY_TOOL_CONTRACTS = {
+    "benchmark_lab": {
+        "permission": "active",
+        "kind": "operator-utility",
+        "dispatcher": "tools.py:1428 ToolRegistry.execute",
+        "why_no_scheduler": (
+            "Known-lab scoring is an operator benchmark action, not target detection. A production "
+            "mission cannot infer that it is authorized to invoke a lab completion oracle."),
+    },
+    "list_workflows": {
+        "permission": "passive",
+        "kind": "operator-utility",
+        "dispatcher": "tools.py:1428 ToolRegistry.execute",
+        "why_no_scheduler": (
+            "This lists operator-selectable workflow metadata. The deterministic planner schedules "
+            "run_workflow directly and has no reason to spend a target step listing its own packs."),
+    },
+    "mission_intel": {
+        "permission": "passive",
+        "kind": "operator-utility",
+        "dispatcher": "tools.py:1428 ToolRegistry.execute",
+        "why_no_scheduler": (
+            "This is a read-only operator/model view of the registry's current intelligence. The "
+            "deterministic agent consumes that state in-process rather than scheduling a tool read."),
+    },
+    "mission_state": {
+        "permission": "passive",
+        "kind": "operator-utility",
+        "dispatcher": "tools.py:1428 ToolRegistry.execute",
+        "why_no_scheduler": (
+            "This is a read-only operator/model view of investigation state. The deterministic "
+            "agent owns that state directly, so scheduling a tool call would only serialize it."),
+    },
+    "run_external_surface": {
+        "permission": "active",
+        "kind": "operator-selected-engine",
+        "dispatcher": "tools.py:1428 ToolRegistry.execute",
+        "why_no_scheduler": (
+            "External expansion can query third-party intelligence and fetch the in-scope favicon. "
+            "It remains an explicit operator-selected expansion rather than a universal mission step."),
+    },
+    "run_hash_crack": {
+        "permission": "intrusive",
+        "kind": "dependency-blocked-engine",
+        "dispatcher": "tools.py:1428 ToolRegistry.execute",
+        "why_no_scheduler": (
+            "The shipped agent image contains neither hashcat nor John, so deterministic scheduling "
+            "would guarantee a visible skipped dispatch. It remains manual for runtimes that add an "
+            "offline cracker and for operators who explicitly supply a previously acquired hash."),
+    },
+}
+
 # Prefixes for functions a framework or protocol calls, never our code.
 _FRAMEWORK_PREFIX = re.compile(r"^(main$|test_|_?__)")
 

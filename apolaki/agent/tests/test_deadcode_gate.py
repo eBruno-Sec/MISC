@@ -5,7 +5,9 @@ integration gap (something written but never wired) and a superseded duplicate s
 engine, waiting to be called by mistake.
 """
 import ast
+import asyncio
 import os
+from pathlib import Path
 import re
 import shutil
 import warnings
@@ -13,6 +15,7 @@ import warnings
 import pytest
 
 import deadcode_gate as dg
+import tools
 
 
 # Both scans walk the whole source tree, so each call costs seconds. Six real-tree scans in one file was
@@ -465,18 +468,11 @@ def test_the_triaged_islands_are_still_counted():
 
 
 @pytest.mark.xfail(strict=True, reason=(
-    "MEASURED, and TRUE: 61 qualified-dead against a ceiling of 37. The ceiling was calibrated "
-    "against a BLIND instrument -- Q-077 made the resolver read the AST instead of regex-matching a "
-    "bare name anywhere in the module, so comments and string literals stopped counting as calls, and "
-    "27 entries became visible that were always dead. The code did not rot; the measurement got "
-    "honest. Raising 37 to 61 would be weakening a ratchet to make a change pass, which is the one "
-    "thing this file must never do, so the ratchet stays RED and its message names all 27 every run. "
-    "TRIAGE IS Q-078, and it is not a formality: at least four of the 27 are resolver blind spots "
-    "rather than islands -- deadcode_gate.scan/scan_methods/scan_qualified look uncalled because the "
-    "gate excludes its own file, mitm_addon.request/response are framework callbacks mitmdump invokes "
-    "by name per docker-compose.yml:419, and sqli_tool.is_inconclusive is re-exported by nosqli_tool. "
-    "The real island count is LOWER than 27 and nobody may quote 27 as it. STRICT: the day Q-078 "
-    "lands a triaged baseline this XPASSes and the marker must be retired deliberately."))
+    "MEASURED at bd912f4: 44 qualified candidates against the unchanged ceiling of 37, with zero "
+    "unaccounted entries. The earlier 61 was the first honest AST measurement; reviewed callers and "
+    "removals lowered it, but seven candidates remain above the defensible ceiling. Raising 37 to 44 "
+    "would weaken the ratchet to make it pass. STRICT: when real wiring/removal takes the count to 37, "
+    "this XPASSes and the marker must be retired deliberately."))
 def test_the_ratchet_holds(qual):
     """The count may fall, never rise. A new unwired function fails this immediately, while the existing
     backlog is triaged deliberately rather than bulk-deleted — those entries are CANDIDATES, not proven
@@ -548,16 +544,16 @@ def test_a_deliberate_island_is_named_and_nothing_else_is(real_tree_copy):
 def test_no_flagged_entry_is_unaccounted_for(qual):
     """THE GATE THAT WORKS WHILE THE RATCHET IS PINNED. Not xfailed, and it must never become one.
 
-    `test_the_ratchet_holds` is `xfail(strict=True)` at 51 against 37, so a RISE in the count cannot fail
-    the suite — the test fails either way and the failure is the expected one. MEASURED by mutation on a
-    copy of the real tree: appending an island to `security.py` took the count 51 -> 52 with the whole
-    file still green, exit 0. The bare-name `scan()` gate is what would normally catch that, and
+    `test_the_ratchet_holds` is `xfail(strict=True)` at 44 against 37, so a RISE in the count cannot fail
+    the suite -- the test fails either way and the failure is the expected one. A prior semantic mutation
+    at count 51 appended an island to `security.py` and took it to 52 with the whole file still green,
+    exit 0. The bare-name `scan()` gate is what would normally catch that, and
     `test_the_bare_name_scan_is_fooled_by_a_name_collision` shows the case it cannot see — which is the
     case the mutation used, a new `summarize` beside the existing hashid_tool/race_tool ones.
 
     So this asserts a different property, one the ceiling does not appear in: every flagged entry is one
-    somebody has already measured and written down. 51 = 34 still-dead from `QUALIFIED_BASELINE_SET` +
-    17 still-dead from `QUALIFIED_Q077_REVEALED`, exactly, with nothing left over."""
+    somebody has already measured and written down. The two recorded sets must account for the current
+    44 exactly, with nothing left over."""
     assert qual["unaccounted"] == [], qual["message"]
     assert qual["accounted"]
     # The arithmetic, asserted rather than described: the two recorded sets partition what is flagged.
@@ -865,6 +861,65 @@ def test_the_two_allowlists_do_not_overlap():
     """An entry in both is a sign the distinction was not understood, and one of them will rot."""
     bare = {n.split(".")[-1] for n in dg.ALLOWED_UNUSED_QUALIFIED}
     assert not (bare & set(dg.ALLOWED_UNUSED)), sorted(bare & set(dg.ALLOWED_UNUSED))
+
+
+# ── advertised methods intentionally outside deterministic scheduling ──────────────────────────
+
+def test_every_manual_only_contract_names_a_real_dispatcher_and_reason():
+    """A prose-only manual label is another allowlist. Resolve its caller and permission as facts."""
+    assert len(dg.MANUAL_ONLY_TOOL_CONTRACTS) == 6
+    for name, contract in dg.MANUAL_ONLY_TOOL_CONTRACTS.items():
+        assert contract["kind"] in {
+            "operator-utility", "operator-selected-engine", "dependency-blocked-engine"}
+        assert contract["permission"] == tools.TOOL_PERMISSIONS[name].value
+        assert len(contract["why_no_scheduler"]) > 80
+
+        location, symbol = contract["dispatcher"].split(" ", 1)
+        file_name, line_text = location.rsplit(":", 1)
+        line_number = int(line_text)
+        source_line = Path(dg.APP_DIR, file_name).read_text(encoding="utf8").splitlines()[line_number - 1]
+        assert symbol == "ToolRegistry.execute"
+        assert "async def execute(" in source_line, (
+            "%s cites a dispatcher that no longer exists at %s" % (name, location))
+
+
+def test_every_manual_only_contract_dispatches_through_real_execute():
+    """Execute every contract through ToolRegistry.execute's real dynamic getattr boundary.
+
+    The engine bodies are replaced because four read state, one sends traffic, and one invokes an
+    optional cracker. The boundary under test is not replaced: execute -> _dispatch_engine ->
+    getattr(self, '_' + tool_name) must select each exact method and return its result.
+    """
+    registry = object.__new__(tools.ToolRegistry)
+    ledger = []
+    registry._ledger_dispatch = lambda session, name, inp: ledger.append(("call", name))
+    registry._ledger_outcome = lambda session, name, result, rate_wait=None: ledger.append(("result", name))
+    registry._permission_refusal = lambda name: None
+    called = []
+
+    async def exercise():
+        for name in dg.MANUAL_ONLY_TOOL_CONTRACTS:
+            async def _manual_body(inp, expected=name):
+                called.append(expected)
+                return tools.ToolResult(expected, "", True, "manual dispatch observed", [])
+
+            setattr(registry, "_" + name, _manual_body)
+            result = await registry.execute(name, {}, "manual-contract-test")
+            assert result.tool == name and result.success, result
+
+    asyncio.run(exercise())
+    expected = list(dg.MANUAL_ONLY_TOOL_CONTRACTS)
+    assert called == expected
+    assert ledger == [event for name in expected for event in (("call", name), ("result", name))]
+
+
+def test_hash_crack_contract_matches_the_shipped_runtime():
+    """Dependency-blocked is a measured state, not a label copied from a ticket."""
+    assert shutil.which("hashcat") is None
+    assert shutil.which("john") is None
+    present = {name: shutil.which(name) for name in ("sqlmap", "ffuf", "nmap")}
+    assert all(present.values()), "positive-control binaries missing: %r" % present
+    assert dg.MANUAL_ONLY_TOOL_CONTRACTS["run_hash_crack"]["kind"] == "dependency-blocked-engine"
 
 
 # ── class methods: the layer both other scans are blind to ──────────────────────────────────────

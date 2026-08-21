@@ -7,7 +7,7 @@ Branch: `codex/q088`
 - Requested baseline: `e321d36`.
 - Actual `main` at worktree creation: `bd912f4cc2324e3018eff54dcbfae8b3a5fbaf78`.
 - Clean worktree agent-tree SHA: `0610129e060bd47b7fb0b4da143281e5569d845a`.
-- Full isolated suite: in progress.
+- Full isolated suite at `bd912f4`: `3409 passed, 11 skipped, 13 xfailed, 0 failed` in 736.10s.
 - Missions before heavy work: 0 running (1 row returned).
 
 ## G2 guard scope
@@ -41,11 +41,38 @@ supplied source path and read `tools.py` only. Exact result: `1 failed`; the raw
 
 - Qualified dead-code measurement: 44 candidates / ceiling 37 / unaccounted 0.
 - Method measurement: 14 candidates / ceiling 14.
-- Decision: in progress. The ceiling will not be raised and the strict xfail will remain while the
-  honest qualified count exceeds 37.
+- Advertised-tool measurement: 75 specs / 69 exact names in `agent.py` + `planner.py` / 6 advertised
+  dispatch methods without deterministic scheduling.
+- The exact six are `benchmark_lab`, `list_workflows`, `mission_intel`, `mission_state`,
+  `run_external_surface`, and `run_hash_crack`.
+- Decision: all six receive an explicit manual-only contract. The four operator utilities expose
+  state, workflow metadata, or lab controls that deterministic code already owns or must not infer.
+  External-surface expansion remains operator-selected ACTIVE work. Hash cracking remains operator
+  selected because the shipped image has neither hashcat nor John.
+- Runtime dependency measurement: `hashcat` absent, `john` absent; positive controls `/usr/bin/sqlmap`,
+  `/usr/local/bin/ffuf`, and `/usr/bin/nmap` present.
+- The contract is executable: all six traverse the real `ToolRegistry.execute` -> `_dispatch_engine`
+  -> dynamic method lookup boundary in their declared order. The engine bodies are replaced to avoid
+  target traffic, state reads, and optional binary execution; the dispatch boundary is not replaced.
+- The ceiling was not raised. The strict xfail remains because the honest qualified count is 44, not
+  37. Its stale 61-candidate reason now carries the current measured 44/37/0 accounting.
+
+G4 semantic mutants:
+
+1. Added scheduled `run_sqli` to the manual-only contract. The exact partition test failed with
+   `advertised dispatch methods without a deterministic scheduler need an explicit verdict:
+   ['run_sqli']` (`1 failed`). Restored.
+2. Shifted `benchmark_lab`'s dispatcher citation from `tools.py:1428` to line 1427. The resolver test
+   failed on the exact intended assertion because line 1427 is not `ToolRegistry.execute`
+   (`1 failed`). Restored.
 
 ## Verification
 
 - G2 targeted: `17 passed in 11.86s`.
-- G4 targeted: in progress.
+- G4 targeted: `68 passed, 1 xfailed in 179.82s`.
 - Full isolated suite after final rebase: in progress.
+
+## Commits
+
+- `a66394e` - G2 repository scope plus falsifiable ToolRegistry-scoped identity detectors.
+- G4 commit: in progress.
