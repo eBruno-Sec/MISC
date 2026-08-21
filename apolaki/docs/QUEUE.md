@@ -1225,7 +1225,40 @@ DoD: a finding whose `analysis` is `static-call-site` renders its file and line,
 replay. **Negative control:** a genuine DAST finding must KEEP its curl - a fix that strips
 reproduction from everything trades a false claim for a useless report.
 
-### Q-088 · `validated_on` is a capability claim with no vocabulary · **HIGH** · `ready` · owner: unassigned
+### Q-088 · `validated_on` — MY FRAMING WAS WRONG; the four markers do NOT share a closing condition · **MEDIUM** · `ready` · owner: unassigned
+
+#### CORRECTED 2026-08-21 by the claim-integrity lane, which measured before building and did not build
+
+I filed this as "four consumers of one missing chokepoint, fix the chokepoint and three close by
+construction". **Three of that sentence's premises are false**, measured against HEAD:
+
+    the chokepoint is MISSING          ->  `techniques.known_labs()` ALREADY EXISTS
+    4 ids resolve to nothing           ->  2, not 4
+    /packs needs the technique_status  ->  `main.py:/packs` ALREADY calls `T.is_proven`
+
+Only two call sites remain unconverted. The lane applied the patch **in an isolated copy** rather
+than half-landing it, and measured the result: markers 2 and 3 XPASS, and it then **fails
+`tests/test_technique_pipeline.py:17` with `assert 'unverified' == 'proven'`** -- the OLD rule is
+pinned as a live assertion in a currently-passing test, in a file outside that lane's lease. Landing
+the chokepoint fix therefore requires deciding what that test is for, which is a separate call.
+
+**And one marker can never close as written.**
+`test_packs_and_techniques_report_the_same_proven_number` **re-implements the old rule inline instead
+of calling `/packs`**, so it cannot XPASS however the product changes. It is MISWRITTEN, not
+measuring a defect, and should be retired as such -- with a replacement that actually calls the
+endpoint if the disagreement is still worth pinning.
+
+**The four markers therefore have four different closing conditions**, not one:
+
+    no vocabulary / invented ids accepted   two call sites + a decision about test_technique_pipeline
+    /packs vs /techniques disagreement      blocked behind the same decision
+    the miswritten marker                   RETIRE, it measures nothing
+    34 of 48 claims unasserted              needs ~30 recorded artifacts; unrelated to the others
+
+**This ticket is downgraded HIGH -> MEDIUM** because the capability-integrity hole it was filed on is
+narrower than measured: the vocabulary exists, and the invented-id acceptance is the part that still
+bites. Whoever takes it should re-read this section first -- the original filing below is retained
+only so the correction has something to point at.
 
 **Filed as ONE ticket for FOUR strict xfails**, because they are four consumers of one missing
 chokepoint, not four defects. Each marker's reason is already measured; this gives them the ticket
@@ -1251,7 +1284,7 @@ call sites adopting `technique_status()`, which Q-012 already established and ne
 invented-id negative control passes; `/packs` and `/techniques` agree; the four markers XPASS and are
 retired in the commit that closes them.
 
-### Q-089 · `db.add_finding` returns truthy from `add_lead`, so the operator is told a finding was stored that was not · **HIGH** · `ready` · owner: unassigned
+### Q-089 · `db.add_finding` returns truthy from `add_lead` · **CLOSED** `7b82202` `1c357c8` · verified by Coordinator mutation
 
 **MEASURED 2026-08-18 against the running agent**, and it is a PERSISTENCE-OWNERSHIP defect rather
 than a reporting one -- which is why invariant I-2 measured 0 unowned and still missed it. The
