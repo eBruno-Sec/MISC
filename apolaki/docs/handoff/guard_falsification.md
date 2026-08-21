@@ -337,11 +337,28 @@ Each mutant is killed by exactly one assertion, the intended one, and the messag
 
 ### Ship gate
 
-Full suite on the pristine tree **with the repairs applied**, single container:
+Full suite on the pristine tree **with the repairs applied**, single container (the OOM above is why
+this one ran alone):
 
-| run | result |
-|---|---|
-| `6c7ed00` + repairs, `python -m pytest tests/` | PENDING |
+```
+3519 passed, 11 skipped, 12 xfailed, 9 warnings in 884.39s (0:14:44)   EXIT=0
+```
+
+| run | passed | skipped | xfailed | failed | exit |
+|---|---|---|---|---|---|
+| `6c7ed00` baseline (lease) | 3512 | 11 | 12 | 0 | — |
+| `6c7ed00` + repairs | **3519** | 11 | 12 | **0** | **0** |
+
+`3519 - 3512 = 7`, which is exactly the number of tests this lane added (5 to I-5, 2 to I-9).
+Skips and xfails are unchanged. No `^FAILED` and no `^ERROR` lines in the log.
+
+**Instrument note.** A character-frequency "dot census" was run over the log as a cross-check and
+returned `FAILED=2, ERROR=5`. That is **wrong and was discarded**: it counts the letters `F`, `E` and
+`s` wherever they occur, including inside the DeprecationWarning prose and test names, so it is not
+an instrument for test outcomes at all. The figures quoted above come from pytest's own summary line
+— which, contrary to the standing note in the lane brief, *did* survive the redirect on this run —
+corroborated by the captured exit code and the absence of `^FAILED`/`^ERROR` lines. Three agreeing
+signals; the fourth was a bad ruler and is recorded here so nobody re-derives it.
 
 ## What is left open
 
