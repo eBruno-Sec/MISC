@@ -10,6 +10,7 @@ Branch: `codex/q088`
 - Full isolated suite at `bd912f4`: `3409 passed, 11 skipped, 13 xfailed, 0 failed` in 736.10s.
 - Rebased cleanly first onto `a650065`, then onto `186f500` after main advanced during the first final
   suite. The 44/37/0 qualified accounting and 14/14 method accounting were unchanged after both.
+- Final verified agent-tree SHA: `b6939085242cbc72e8174dd42df1abbb3765c4d8`.
 - Missions before heavy work: 0 running (1 row returned).
 
 ## G2 guard scope
@@ -74,10 +75,21 @@ G4 semantic mutants:
 - G4 targeted: `68 passed, 1 xfailed in 179.82s`.
 - First post-rebase full snapshot at `54ad24c`: `3426 passed, 11 skipped, 13 xfailed, 0 failed`
   in 756.82s. Main advanced during the run, so this is evidence but not the handback run.
-- Full isolated suite after final rebase: in progress.
+- Final targeted immutable snapshot: `22 passed, 1 xfailed in 16.07s`.
+- Final full immutable snapshot after the last rebase: `3426 passed, 11 skipped, 13 xfailed,
+  0 failed, 9 warnings in 719.15s (0:11:59)`.
+- Queue gate via Git for Windows bash: `78 headers, 57 distinct hashes cited, 5 ids with >1 header`;
+  `queue_gate: OK`, exit 0. The duplicate IDs were Q-019, Q-020, Q-058, Q-065, and Q-069.
 
 ## Commits
 
 - `5e8b70b` - G2 repository scope plus falsifiable ToolRegistry-scoped identity detectors (rebased).
 - `7c49e80` - G4 checked manual-only contracts for the exact six unscheduled methods (rebased).
-- Final measurement commit: in progress.
+- `99bfb86` - rebased measurement record.
+- `27429d0` - preserves G3's explicit strict-xfail ticket ownership after the final rebase.
+
+## Integration
+
+Cherry-pick the branch commits in order or merge `codex/q088`. No queue/status files were edited. The
+qualified ceiling remains 37 and its strict xfail remains deliberately active at the measured count of
+44; closing that residual requires real callers or removal in the owning modules, not a baseline edit.
