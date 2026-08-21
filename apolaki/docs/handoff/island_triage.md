@@ -930,3 +930,355 @@ never rebuild a directory a container still has mounted.** `docker ps` plus
 `docker inspect -f '{{range .Mounts}}{{.Source}}{{end}}'` is how the duplicate was found, and it is worth
 running before trusting any number from a shared machine — three other lanes had containers up at the
 same time.
+
+---
+
+## 13. Run 6 (Q-088) — the 7 that nothing calls: four deleted, three that a lane boundary blocks
+
+Six lanes stalled on I-11 by attacking it as 44 individual triages. This run started from the
+Coordinator's structural cut instead — `reached from PRODUCTION 0`, `reached ONLY from tests 37`,
+`reached from NOWHERE 7` — and worked the 7 first, because for those the invariant has no judgement
+left to make: nothing calls them, so each is wire / delete / retain-with-a-named-reason.
+
+### 13.1 The apparatus, and the one thing that made it cheap
+
+ONE `ast` index over the whole repository (`/repo`, not just `agent/`), parsed once, queried per
+function. Resolution is import-aware in four directions: `from mod import fn` bound to a bare name,
+`from mod import fn as alias`, `import mod as m` then `m.fn`, and same-module internal use. It also
+carries a deliberately LOOSE second view — every mention of the bare name anywhere, including string
+constants — because the whole point of the exercise is to see what the strict view cannot.
+
+The Coordinator's first attempt re-walked the tree per function (44 x ~250 parses) and timed out. One
+index, ~250 parses total, answers all 44 in under a second.
+
+### 13.2 MEASURED: all 7 have zero callers, and the loose view says why they LOOK alive
+
+Strict, import-resolved: **`PROD []` and `TEST []` for all seven.** That reproduces the Coordinator's
+number exactly, from an independent implementation.
+
+The loose view is the interesting half. `exposure_tool.paths` shows mentions in 46 files;
+`technique_store.stats` in 26; `techniques.classes` in 30. **Every one is a collision.** `paths`,
+`stats` and `classes` are among the most common dict keys in this codebase (`scan_scope.py` alone has
+`'classes'` 13 times, as a JSON field). That is the documented `scan()` blind spot with a number on
+it: a bare-name resolver reports these three as thoroughly used, and they have no caller at all.
+
+### 13.3 Proven outside `agent/` too — the check that saved `mitm_addon`
+
+A function called only from a shell script is an entry point, not dead code. So each of the 7 was
+grepped across `docker-compose.yml`, `scripts/`, `ui/`, `Dockerfile*`, `Makefile`, `*.json`, `*.yml`,
+`*.sh`, `*.ps1`, `*.js`, `*.html`. Four names return NOTHING at all. The three that do return hits:
+
+| hit | what it actually is |
+|---|---|
+| `scripts/benchmark.sh:30` `t.graph.stats()["nodes"]` | a METHOD on a graph object, not `technique_store.stats(store)` |
+| `ui/index.html:1080,1639,1976` `graph.stats`, `d.stats` | JSON response fields |
+| `docker-compose.yml:21,24`, `ui/index.html:363` "classes" | English prose and a form label |
+
+Dynamic dispatch was checked separately and is the one that could have been fatal:
+`agent/liveness_run.py:90` does `fn = getattr(mod, check["func"])` — a real string-dispatch entry
+point driven from `liveness.CHECKS`. **MEASURED: the only `func` values in `liveness.py` are
+`run_persona_swap` (lines 93 and 100).** None of the 7. `getattr` was also swept across `agent/*.py`
+for these six module names; the only other dynamic import is `techniques.py:1322`, which reads a
+dict-valued attribute, not a function.
+
+### 13.4 THE FIND: two of the 7 are pinned by exact-match contracts in files this lane may not write
+
+This is the result worth carrying forward, and a lane that had simply deleted the 7 would have gone
+red without understanding why.
+
+**`bench_all.scan_via_mission`** is named in `agent/tests/test_rate_policy.py:133` as a rate-policy
+exemption:
+
+```python
+("bench_all.py", "scan_via_mission", "httpx.AsyncClient"):
+    "drives the Apolaki mission API; the mission owns target pacing",
+```
+
+and `test_every_rate_policy_exemption_is_named_and_matches_exactly_one_call_site` asserts every
+exemption key matches **exactly one** measured call site. Delete the function and the count goes to 0
+and the test fails.
+
+**`hashid_tool.summarize`** is named in `agent/tests/test_cap_ordering_invariant.py:202` as a
+contracted first-N work cap:
+
+```python
+("hashid_tool.py", "summarize", "cands", "3"):
+    "display-only summary; identify emits specific signatures before ambiguous raw hashes",
+```
+
+and line 241 is `assert measured == set(contracted)` — an EQUALITY. Delete the function, the measured
+slice disappears, the contract entry has nothing to match, red.
+
+Both files belong to live lanes and are outside this lane's write set, so neither function can be
+deleted here without stranding a test in a file it may not repair. **They stay flagged and honest.**
+
+And note what this pair actually demonstrates, because it is the invariant's own sentence arriving
+from an unexpected direction: two functions with zero callers anywhere are nevertheless *constrained*
+by two separate cross-cutting invariants. `hashid_tool.summarize` has a proven ordering property
+asserted about it and no consumer that could ever observe that property. **Tested dead code is not
+capability — and neither is invariant-constrained dead code.**
+
+### 13.5 What was deleted, and the proof for each
+
+Four, all in files this lane owns, all in one commit that does nothing else so a revert is one commit.
+
+| removed | proof it was unused | why deletion and not wiring |
+|---|---|---|
+| `capability_matrix.state_rank` (+ its `_RANK` table) | zero strict callers; the only two whole-string mentions of the name in the tree are `deadcode_gate.py` and `test_deadcode_gate.py`, both recording it AS an island | `capability_matrix.py:13` claimed "`state_rank` orders them" and nothing ordered anything — `matrix()` groups by `STATES`. Wiring would mean inventing a ranked view no consumer asked for, in `main.py`, which this lane may not write. The docstring is corrected in the same commit and preserves the one fact `_RANK` encoded: `blocked` ranked EQUAL to `wired`. |
+| `techniques.classes` | zero strict callers across 17 production importers of `techniques` | superseded: `taxonomy_view(lens="class")` (`techniques.py:1238`) groups the registry by `vuln_class` and is what `/intel/taxonomy` and the UI consume. `classes()` was the accessor form of a set the live path already builds. |
+| `technique_store.stats` | zero strict callers; every `.stats(` in the tree is a method on a graph/registry/policy object | superseded and MEASURED as such: `agent/main.py:1818-1831` recomputes `total` + `by_status` INLINE for `/intel/techniques`, and `ui/index.html:2415` reads `m.by_status`. The live path reimplemented this function rather than calling it. |
+| `remediation_depth.families_covered` | zero strict callers; exactly ONE whole-string mention in the tree, in `deadcode_gate.py`'s record | one line, `sorted(DEPTH)`. Its wired twin `defense_mapping.families_covered` IS called (`main.py:1631-1632`) — same name, different module, and the collision is precisely why a bare-name scan never saw this one. `report.py` consumes `depth_for`/`markdown`; nothing wants the family list. |
+
+None of the four references any other function, so none was laundering a helper: `TRANSITIVE_ONLY` is
+unaffected in both directions, which the fixed-point test re-checks on every run.
+
+### 13.6 `exposure_tool.paths` — the patch, since the file is another lane's
+
+Not touched: another lane's work just landed in `agent/exposure_tool.py`. The triage stands from run 5
+(section 3.5) and is re-confirmed here at zero strict callers. `paths()` is
+`[c["path"] for c in EXPOSURE_CHECKS]` and production consumes `EXPOSURE_CHECKS` directly at
+`tools.py:1712` and `tools.py:7553`. **Delete it** — it is the accessor form of a comprehension the
+live path already writes twice. If instead the owner wants it kept, the honest move is the opposite
+one: replace both inline comprehensions with the accessor, which turns a dead function into the single
+definition of "which paths this engine probes".
+
+### 13.7 The arithmetic, and the pin
+
+```
+BEFORE   scan_qualified   count 44   baseline 37   ok False   unaccounted []   allowed 18
+AFTER    scan_qualified   count 40   baseline 37   ok False   unaccounted []   allowed 18
+         scan_methods     count 14   ok True       newly []   resolved []
+```
+
+Four real removals, four off the count, **nothing allowlisted and `QUALIFIED_BASELINE` untouched at
+37** — this is the fourth lane in a row to refuse to raise it, and the first to move the number by
+removing code instead.
+
+**40 > 37, so `test_the_ratchet_holds` STAYS a strict xfail and the pin STAYS.** Its `reason` string
+is updated from 44 to 40 so it does not become the thing it guards against. The honest count when this
+lane stopped is **40**, and the residual 3 above the ceiling is not slack this lane can close: two of
+them (`bench_all.scan_via_mission`, `hashid_tool.summarize`) are the section 13.4 pair, blocked by test
+files in other lanes' hands, and the rest of the backlog is the 37-tests-only group whose resolution
+needs production callers in `main.py`, `tools.py`, `agent.py` and `report.py`.
+
+Note the ceiling is now within reach in a way it has not been: `test_the_baseline_is_not_slack` asserts
+`baseline - count <= 3`, so at count 34 the ceiling of 37 itself becomes stale and must be TIGHTENED,
+not raised. The next lane has six removals of headroom before that check fires, and it fires in the
+safe direction.
+
+### 13.8 A record that says WHY a name left, because `resolved` cannot
+
+`resolved` — the diff against `QUALIFIED_BASELINE_SET` — reports that a name stopped being flagged and
+is structurally incapable of saying whether it was wired or deleted. Those are opposite outcomes with
+opposite follow-ups, and `TRANSITIVE_ONLY`'s own `gone` assertion already demands that a reader
+"confirm each was WIRED rather than deleted" while nothing in the repository recorded the answer.
+
+`REMOVED_NOT_WIRED` in `deadcode_gate.py` closes that: entry -> the reason it was removed rather than
+wired. It is CHECKED, not written — `test_every_removed_entry_is_really_gone_and_stays_gone` parses the
+real tree and fails if any name in it is defined again, with a positive control proving the same parser
+finds a function that IS there. So a deleted island cannot quietly return under its old name, and the
+count cannot drift back up without the ratchet naming it.
+
+### 13.9 The trap generalised — swept across all 40, and it caught three more
+
+Section 13.4 found two functions pinned by a contract dict in a test file. That is not a coincidence
+worth writing down twice, it is a CLASS, so it was swept mechanically over every remaining flagged
+entry: for each, find whole-string constants equal to the bare function name inside test files, and
+discriminate by whether the same test also names the module FILENAME as a string. That second column
+is what separates a contract key from a dict key called `"summary"` or `"plan"`.
+
+MEASURED. Fourteen entries have some string mention in a test; **five** have the module filename beside
+them, and those five are the real pins:
+
+| entry | pinned at | shape |
+|---|---|---|
+| `bench_all.scan_via_mission` | `test_rate_policy.py:133` | exemption key, asserted `count == 1` |
+| `hashid_tool.summarize` | `test_cap_ordering_invariant.py:202` | work-cap contract, asserted `measured == set(contracted)` |
+| `bie.har_response_for` | `test_silent_failure_invariant.py:42` | `("bie.py", "har_response_for"): (1, ...)` — a COUNT |
+| `bie.observe` | `test_silent_failure_invariant.py:44` | `("bie.py", "observe"): (1, ...)` — a COUNT |
+| `bie.resolve_locator` | `test_engine_descriptor.py:172-178` | see 13.10; it is worse than a count |
+
+The other nine are collisions on common dict keys (`"summary"` appears in 14 test files, `"finding"` in
+16, `"reset"`, `"paths"`, `"plan"`) — the same bare-name blind spot, now measured on the test corpus
+instead of the production one.
+
+**What this means for whoever finishes I-11.** Five of the forty cannot be deleted without editing a
+test file that belongs to another lane, and all five of those test files are invariant suites, not
+unit tests. Deleting them is not the small mechanical act the count makes it look like; it is a
+cross-lane edit to a silent-failure, rate-policy, or cap-ordering invariant. Sequence that
+deliberately, or the deletion lane and the invariant lane collide.
+
+### 13.10 `bie.resolve_locator` — a negative control anchored to a real island, so the entry is closed in NEITHER direction
+
+The worst of the five, and it is a defect in the test rather than in the engine.
+
+`agent/tests/test_engine_descriptor.py:172` is the negative control for `verify_always_on` — the guard
+that checks that every function an ALWAYS_ON reason NAMES is really wired. Its docstring is explicit
+about what it is borrowing:
+
+```
+"""NEGATIVE CONTROL. A guard that cannot fail is not a guard. `bie.resolve_locator` is real, tested,
+and has no production caller — exactly the shape of the historical bug."""
+monkeypatch.setitem(ed.ALWAYS_ON, "fake_engine", "reached via bie.resolve_locator on every page")
+r = ed.verify_always_on()
+assert r["ok"] is False
+```
+
+Now read `engine_descriptor.py:417-420`. A token is only checked if its bare name is DEFINED in a
+non-prose file; otherwise the loop `continue`s and the token is silently skipped:
+
+```python
+defined = any(re.search(r"^\s*(async\s+)?def\s+_?%s\s*\(" % re.escape(bare), s, re.M)
+              for s in srcs.values())
+if not defined:
+    continue
+```
+
+So the control passes only while `resolve_locator` is BOTH defined AND unreferenced from running code.
+**Both resolutions the invariant offers break it:**
+
+* **Wire it** — it becomes referenced, drops out of `unwired`, `ok` flips to True, the assertion fails.
+* **Delete it** — `defined` is False, the token is skipped, `unwired` is empty, `ok` is True, the same
+  assertion fails.
+
+`bie.resolve_locator` is therefore an island that I-11 cannot close in either permitted direction while
+that test stands. It is the guards-that-check-declarations pattern turned inside out: a control that
+proves the verifier works by depending on a real production function remaining dead, so the codebase
+now has a test with an interest in dead code surviving.
+
+**The fix, for `test_engine_descriptor.py`'s owner.** The control needs a name that is dead BY
+CONSTRUCTION, not one borrowed from production. `verify_always_on` already takes `app_dir`, so point it
+at a `tmp_path` tree containing one file with `def never_wired_probe(): pass` and nothing referencing
+it, and monkeypatch the reason to name that. The control then measures the verifier instead of
+measuring `bie.py`, and it keeps working after `resolve_locator` is wired or removed. That this is
+cheap is the point: the coupling bought nothing.
+
+There is prior art for the diagnosis in this very file. `deadcode_gate.py` is in
+`engine_descriptor._PROSE_FILES` because it records dead names as string literals and
+`verify_always_on` was reading `"bie.resolve_locator"` off `QUALIFIED_BASELINE_SET` and concluding the
+function was wired — disarming this same control from the other side. The mechanism has now bitten
+this one test twice, from opposite directions, which is a strong argument that it should not depend on
+a real symbol at all.
+
+(Checked for this run: `deadcode_gate.py` is still in `_PROSE_FILES`, so the dotted names added to
+`REMOVED_NOT_WIRED` cannot re-arm that hazard. And no ALWAYS_ON reason names any of the four deleted
+functions — grepped, empty.)
+
+### 13.11 The 37 tests-only, measured in full — and the structural cut that is left
+
+Not finished, and the brief said it would not be. What is delivered instead is the measurement the
+next lane needs, because the reason six lanes stalled is that "37 triages" is the wrong unit of work.
+
+Every entry below has **zero production callers** — the third independent confirmation of the
+Coordinator's `reached from PRODUCTION 0`. The column that matters is the last one: since a
+tests-only function can only be resolved by wiring it (a file this lane does not own) or by deleting
+it TOGETHER WITH ITS TESTS, the test file named here is the second file every deletion must touch.
+
+| entry | defined | prod callers | test file(s) that must be edited with it |
+|---|---|---|---|
+| `action_envelope.mark` | `agent/action_envelope.py:97` | 0 | test_action_envelope.py (3x) |
+| `api_protocols.inventory` | `agent/api_protocols.py:109` | 0 | test_api_protocols.py (1x) |
+| `archive_intel.mark_validated` | `agent/archive_intel.py:80` | 0 | test_archive_intel.py (2x); test_asset_graph.py (1x) |
+| `archive_intel.needs_validation` | `agent/archive_intel.py:68` | 0 | test_archive_intel.py (3x) |
+| `bench_all.bench` | `agent/bench_all.py:49` | 0 | test_bench_all.py (6x) |
+| `bench_all.scan_via_mission` | `agent/bench_all.py:91` | 0 | NONE |
+| `bie.har_response_for` | `agent/bie.py:558` | 0 | test_bie.py (3x) |
+| `bie.observe` | `agent/bie.py:1759` | 0 | test_bie.py (1x) |
+| `bie.resolve_locator` | `agent/bie.py:502` | 0 | test_bie.py (4x) |
+| `candidate_pipeline.plan_targets` | `agent/candidate_pipeline.py:145` | 0 | test_candidate_pipeline.py (2x) |
+| `cloud_iam.collect_live` | `agent/cloud_iam.py:373` | 0 | test_cloud_iam.py (2x) |
+| `codereview_graph.hypotheses` | `agent/codereview_graph.py:112` | 0 | test_codereview_graph.py (1x) |
+| `codereview_graph.link_runtime_to_source` | `agent/codereview_graph.py:96` | 0 | test_codereview_graph.py (1x) |
+| `db.get_snapshot` | `agent/db.py:569` | 0 | test_bbh.py (2x) |
+| `exposure_tool.paths` | `agent/exposure_tool.py:65` | 0 | NONE |
+| `fingerprint.fingerprint` | `agent/fingerprint.py:189` | 0 | test_bbh.py (4x); test_tech_fingerprint_facts.py (6x) |
+| `graph_model.neighbors` | `agent/graph_model.py:141` | 0 | test_bbh.py (1x) |
+| `graph_model.related_findings` | `agent/graph_model.py:152` | 0 | test_bbh.py (1x) |
+| `hashid_tool.summarize` | `agent/hashid_tool.py:81` | 0 | NONE |
+| `ics_dnp3_s7.is_read_only` | `agent/ics_dnp3_s7.py:224` | 0 | test_ics_dnp3_s7.py (1x); test_ics_real_stack.py (1x) |
+| `intel_connectors.reset` | `agent/intel_connectors.py:23` | 0 | test_intel_connectors.py (5x); test_intel_registry.py (1x) |
+| `intel_registry.reset` | `agent/intel_registry.py:20` | 0 | test_intel_promotion.py (16x); test_intel_registry.py (6x) |
+| `mission_export.summary` | `agent/mission_export.py:52` | 0 | test_mission_export.py (2x) |
+| `ot_context.declare_protocol_safety` | `agent/ot_context.py:122` | 0 | test_ot_context.py (2x) |
+| `race_tool.best_round` | `agent/race_tool.py:41` | 0 | test_bbh.py (1x) |
+| `report.control_ran` | `agent/report.py:1523` | 0 | test_evidence_contract_by_proof_kind.py (7x); test_nested_negative_control.py (10x); test_proof_claim_matches_artifact.py (5x) |
+| `report_integrity.cvss_version_of` | `agent/report_integrity.py:56` | 0 | test_report_integrity_cvss.py (5x) |
+| `saml_tool.finding` | `agent/saml_tool.py:112` | 0 | test_saml_tool.py (1x) |
+| `security.expand_cidr` | `agent/security.py:56` | 0 | test_bbh.py (4x) |
+| `service_router.known_services` | `agent/service_router.py:319` | 0 | test_service_router.py (2x) |
+| `service_router.plan` | `agent/service_router.py:270` | 0 | test_service_router.py (2x) |
+| `sqli_tool.looks_like_login` | `agent/sqli_tool.py:412` | 0 | test_bbh.py (3x) |
+| `ssrf_tool.bypass_payloads` | `agent/ssrf_tool.py:122` | 0 | test_bbh.py (1x) |
+| `stealth.describe` | `agent/stealth.py:46` | 0 | test_stealth.py (4x) |
+| `technique_store.dedup_key` | `agent/technique_store.py:55` | 0 | test_technique_pipeline.py (2x) |
+| `techniques.techniques_for_lab` | `agent/techniques.py:1027` | 0 | test_techniques.py (1x) |
+| `tool_provenance.argv_hash` | `agent/tool_provenance.py:74` | 0 | test_tool_provenance.py (3x) |
+| `waf_bypass_tool.pad` | `agent/waf_bypass_tool.py:30` | 0 | test_waf_bypass.py (1x) |
+| `web_security.is_url_in_scope` | `agent/web_security.py:193` | 0 | test_bbh.py (2x); test_scope_path.py (2x) |
+| `xxe_tool.looks_like_xml` | `agent/xxe_tool.py:35` | 0 | test_bbh.py (4x) |
+
+**THE CUT. `agent/tests/test_bbh.py` carries TEN of the thirty-seven** — `db.get_snapshot`,
+`fingerprint.fingerprint`, `graph_model.neighbors`, `graph_model.related_findings`,
+`race_tool.best_round`, `security.expand_cidr`, `sqli_tool.looks_like_login`,
+`ssrf_tool.bypass_payloads`, `web_security.is_url_in_scope`, `xxe_tool.looks_like_xml`. Its own
+docstring calls it the "deterministic test suite for the Apolaki platform engines", 244 tests over
+"security, scope, poc, surface, replay, web_security, guidance, triage, report, db", and the ten it
+keeps alive are all small pure helpers with a focused unit test and no consumer. That is not ten
+problems; it is ONE decision about one file, and it is 27% of the invariant.
+
+The remaining 27 sit one or two per test file, so they are genuinely individual — which is why
+`test_bbh.py` should be taken first and separately. `report.control_ran` is the opposite extreme and
+the most expensive single entry left: 22 assertions across THREE files
+(`test_evidence_contract_by_proof_kind.py`, `test_nested_negative_control.py`,
+`test_proof_claim_matches_artifact.py`), all of them proof-integrity suites, for a function its own
+docstring records as superseded by `control_status`.
+
+Three entries have no test either, and after this run's four removals they are the whole of the
+"reached from NOWHERE" group: `bench_all.scan_via_mission`, `exposure_tool.paths`,
+`hashid_tool.summarize`. All three are dispositioned above — 13.4 for the two that cross-file
+contracts pin, 13.6 for the one whose file belongs to another lane.
+
+**What this lane would do next, in this order.** (1) `test_bbh.py`'s ten, as one reviewed decision by
+that file's owner. (2) `exposure_tool.paths`, which needs no test edit at all — the patch is in 13.6
+and it is the single cheapest remaining entry. (3) `bench_all.bench` + `bench_all.scan_via_mission`
+together via the `/bench/run` endpoint the `/bench/labs` docstring at `main.py:1324` already
+advertises, which closes two entries and one false claim at once; note this also un-launders
+`bench_all.aggregate` out of `TRANSITIVE_ONLY`, so that record must be updated in the same change.
+(4) `bie.resolve_locator` LAST, and only after `test_engine_descriptor.py`'s negative control is
+re-pointed per 13.10 — until then that entry cannot be closed in either direction.
+
+### 13.12 Verification of this run's own work
+
+Targeted slice, live tree, one run, exit code captured (the summary line does not survive the
+redirect here, so the exit code and `-rfE` are the evidence):
+
+```
+pytest tests/test_deadcode_gate.py tests/test_capability_matrix.py tests/test_remediation_depth.py
+       tests/test_validated_on.py tests/test_cap_ordering_invariant.py tests/test_rate_policy.py
+       tests/test_defense_mapping.py tests/test_bench_all.py tests/test_engine_descriptor.py
+  ..........................x............................................. [ 41%]
+  .................xxxxx.................................................. [ 83%]
+  ............................                                             [100%]
+  EXIT=0
+```
+
+Six xfails, zero F, zero E. The nine files were not chosen for comfort: they are the four modules
+this run edited plus the four invariant suites that 13.4 and 13.9 predicted would be the ones to
+break if a deletion was wrong, plus `test_engine_descriptor.py` for the 13.10 coupling.
+
+THE NEW GUARD WAS PROVEN TO RUN, not assumed: `-k removed_entry ... -v` reports
+`4 passed, 57 deselected, 1 xfailed` from 62 collected, and the five selected are the new test plus
+both ratchets, the triaged-islands check and the not-slack check.
+
+THE NEW GUARD WAS PROVEN TO BITE. Mutation on a disposable copy of the tree — append
+`def classes(): return []` to `techniques.py`, restoring one of the four deletions:
+
+```
+E  AssertionError: these are recorded as REMOVED and are defined in the tree again, at
+   {'techniques.classes': 1398} ... ['techniques.classes']
+1 failed, 61 deselected
+```
+
+Killed by the intended assertion, naming the exact entry and the line it came back on. Without this
+the record would be a dictionary of sentences that no run could contradict — which is the thing this
+whole ticket exists to stop.

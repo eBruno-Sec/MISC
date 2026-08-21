@@ -468,12 +468,14 @@ def test_the_triaged_islands_are_still_counted():
 
 
 @pytest.mark.xfail(strict=True, reason=(
-    "Q-088, MEASURED at bd912f4 and rechecked after rebasing through 186f500: 44 qualified candidates against "
-    "the unchanged ceiling of 37, with zero unaccounted entries. The earlier 61 was the first honest "
-    "AST measurement; reviewed callers and "
-    "removals lowered it, but seven candidates remain above the defensible ceiling. Raising 37 to 44 "
-    "would weaken the ratchet to make it pass. STRICT: when real wiring/removal takes the count to 37, "
-    "this XPASSes and the marker must be retired deliberately."))
+    "Q-088, MEASURED at 2957031 plus this run's removals: 40 qualified candidates against the unchanged "
+    "ceiling of 37, with zero unaccounted entries. The earlier 61 was the first honest AST measurement; "
+    "reviewed callers and removals lowered it to 44, and run 6 deleted four proven-unused functions "
+    "(see REMOVED_NOT_WIRED) to reach 40. Three candidates remain above the defensible ceiling. Raising "
+    "37 to 40 would weaken the ratchet to make it pass, which four lanes have now declined to do. "
+    "STRICT: when real wiring/removal takes the count to 37, this XPASSes and the marker must be "
+    "retired deliberately -- and note that at 34 `test_the_baseline_is_not_slack` fires first and "
+    "demands the CEILING be tightened."))
 def test_the_ratchet_holds(qual):
     """The count may fall, never rise. A new unwired function fails this immediately, while the existing
     backlog is triaged deliberately rather than bulk-deleted — those entries are CANDIDATES, not proven
@@ -707,6 +709,66 @@ def test_the_recorded_sets_are_shaped_like_real_measurements():
         path, qualified = e.split("::")
         assert path.endswith(".py") and qualified.count(".") == 1, e
         assert e.split(".")[-1] not in dg.ALLOWED_UNUSED_METHODS, e
+
+
+def test_every_removed_entry_is_really_gone_and_stays_gone():
+    """`resolved` says a name stopped being flagged. It cannot say WHY, and the two whys are opposites.
+
+    A name leaves `flagged` either because production grew a caller or because the function was
+    deleted. One means the platform gained a capability, the other means it never will, and
+    `QUALIFIED_BASELINE_SET - flagged` reports them identically. The repository already knew it needed
+    the distinction: `test_a_dead_function_s_reference_launders_its_helpers` asserts on `gone` with the
+    words "confirm each was WIRED rather than deleted", asking a reader for a fact nothing stored.
+    `REMOVED_NOT_WIRED` stores it, and this is what stops it being one more paragraph of prose.
+
+    TWO FAILURE DIRECTIONS, because a record only checked one way rots the other way:
+
+      a removed name is DEFINED AGAIN  -- the deletion was undone, or somebody wrote a new function
+                                         into the hole. Either way the island is back and the entry
+                                         above it is now a false statement about the tree.
+      an entry is parked here EARLY    -- naming a function that still exists, to pre-excuse deleting
+                                         it. Same assertion catches it: the name resolves, so it fails.
+
+    It cannot be satisfied vacuously. The positive control names a function this file demonstrably
+    calls and requires the index to find it, so an index that resolved NOTHING -- a wrong directory, a
+    parse that swallowed every SyntaxError -- fails here instead of reporting a clean sweep."""
+    defined = {}
+    for fn in sorted(os.listdir(dg.APP_DIR)):
+        if not fn.endswith(".py"):
+            continue
+        try:
+            tree = ast.parse(Path(dg.APP_DIR, fn).read_text(encoding="utf8"))
+        except SyntaxError:                                  # a broken module is another test's problem
+            continue
+        for node in tree.body:
+            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                defined["%s.%s" % (fn[:-3], node.name)] = node.lineno
+
+    # POSITIVE CONTROLS: the index read the real tree and membership works on a name that IS there.
+    assert len(defined) > 1500, (
+        "only %d top-level functions indexed; the walk is not reading the tree" % len(defined))
+    assert "deadcode_gate.scan_qualified" in defined, (
+        "the index cannot find a function this very file calls, so 'absent' means nothing here")
+
+    back = sorted(e for e in dg.REMOVED_NOT_WIRED if e in defined)
+    assert not back, (
+        "these are recorded as REMOVED and are defined in the tree again, at %s. Either the deletion "
+        "was reverted -- in which case the island is back and the ratchet will say so -- or the entry "
+        "was written before the removal, which is a record of something that did not happen: %s"
+        % ({e: defined[e] for e in back}, back))
+
+    for entry, why in dg.REMOVED_NOT_WIRED.items():
+        assert "." in entry and "::" not in entry, entry
+        assert why.strip().startswith("REMOVED"), (
+            "%s does not say what happened to it; every entry states the removal first" % entry)
+        assert len(why.split()) >= 25, (
+            "%s: a removal reason has to carry the proof it was unused and why wiring was wrong, not a "
+            "label" % entry)
+        # A removed function cannot ALSO be excused. It does not exist, so an allowlist entry naming it
+        # would be an excuse for nothing -- and worse, a name a reader would go looking for.
+        assert entry not in dg.ALLOWED_UNUSED_QUALIFIED, entry
+        assert entry not in dg.ALLOWED_UNUSED_NAMED_CALLER, entry
+        assert entry.rsplit(".", 1)[1] not in dg.ALLOWED_UNUSED, entry
 
 
 def test_the_message_says_so_when_it_cannot_name_the_delta():

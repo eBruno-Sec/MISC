@@ -672,6 +672,54 @@ RECORDED_THEN_EXCUSED = frozenset({
 })
 
 
+# Entries that left `flagged` by DELETION rather than by wiring (Q-088), each with the reason removal
+# was the right answer and wiring was not.
+#
+# WHY THIS EXISTS, and it is a gap in the reporting rather than a new policy. `resolved` is
+# `QUALIFIED_BASELINE_SET - flagged`: it says a name STOPPED being flagged and is structurally
+# incapable of saying why. "Wired" and "deleted" are opposite outcomes with opposite follow-ups -- one
+# means a capability reached production, the other means it never will -- and the repository already
+# knew it needed the distinction and did not record it: `test_a_dead_function_s_reference_launders_its_
+# helpers` asserts on `gone` with the text "confirm each was WIRED rather than deleted", which asks a
+# reader for a fact nothing here stores. A future reader seeing `remediation_depth.families_covered` in
+# `resolved` would have no way to tell whether the platform gained a caller or lost a function.
+#
+# NOT AN ALLOWLIST, and the difference is mechanical rather than a promise. An allowlist SUBTRACTS from
+# the count: entries in ALLOWED_UNUSED* are filtered out of `flagged` while the function still exists,
+# which is why each of those must name a caller. This subtracts nothing and cannot -- every name here is
+# a function that IS NOT IN THE TREE, so no scan could flag it whatever this dict said. Its only power
+# is over a reader, which is exactly the power `resolved` lacks.
+#
+# CHECKED, not written. `test_every_removed_entry_is_really_gone_and_stays_gone` parses the real tree
+# and fails if any name here is defined again -- so re-adding a deleted island under its old name is a
+# red suite, not a silent count rise, and an entry cannot be parked here to pre-excuse a function
+# somebody intends to write. Its positive control proves the same parser finds a function that IS
+# present, because a checker that reports "absent" for everything would pass this list vacuously.
+REMOVED_NOT_WIRED = {
+    "capability_matrix.state_rank": (
+        "REMOVED Q-088. `_RANK.get(state, 0)`, zero callers in production or tests, and the module "
+        "docstring asserted it 'orders them' while `matrix()` grouped by STATES and nothing ranked "
+        "anything -- prose claiming a wiring that did not exist, in the module whose job is to stop the "
+        "capability matrix lying. Wiring it meant inventing a ranked view no consumer asked for. The "
+        "`_RANK` table went with it; the one fact it encoded (blocked ranks EQUAL to wired) is now "
+        "prose in the docstring instead of an uncalled lookup"),
+    "techniques.classes": (
+        "REMOVED Q-088. `sorted({t['vuln_class'] ...})` over TECHNIQUES, zero callers across 17 "
+        "production importers of `techniques`. SUPERSEDED by `taxonomy_view(lens='class')`, which "
+        "groups the registry by the same field and is what /intel/taxonomy and the UI consume"),
+    "technique_store.stats": (
+        "REMOVED Q-088. Zero callers -- every `.stats(` in the tree is a method on a graph, registry or "
+        "rate-policy object, not this module function. SUPERSEDED and measurably so: main.py:1818-1831 "
+        "recomputes `total` + `by_status` INLINE for /intel/techniques and ui/index.html:2415 reads "
+        "`m.by_status`, so the live path reimplemented this function rather than call it"),
+    "remediation_depth.families_covered": (
+        "REMOVED Q-088. One line, `sorted(DEPTH)`, zero callers. Its WIRED TWIN is a different module: "
+        "`defense_mapping.families_covered` is called twice at main.py:1631-1632, and that name "
+        "collision is exactly why a bare-name scan never saw this one. report.py consumes `depth_for` "
+        "and `markdown`; nothing consumes the family list"),
+}
+
+
 def _ratchet_message(kind, count, baseline, newly, resolved, recorded, unaccounted=()):
     """The failure text for either ratchet. Lives HERE, beside the data, rather than in the assertion.
 
