@@ -1225,6 +1225,56 @@ DoD: a finding whose `analysis` is `static-call-site` renders its file and line,
 replay. **Negative control:** a genuine DAST finding must KEEP its curl - a fix that strips
 reproduction from everything trades a false claim for a useless report.
 
+### Q-088 · `validated_on` is a capability claim with no vocabulary · **HIGH** · `ready` · owner: unassigned
+
+**Filed as ONE ticket for FOUR strict xfails**, because they are four consumers of one missing
+chokepoint, not four defects. Each marker's reason is already measured; this gives them the ticket
+the release invariant requires.
+
+    tests/test_validated_on.py  x4 strict markers, all MEASURED, none previously ticketed
+
+1. **No vocabulary.** `techniques.all_labs()` derives the set from the claims themselves, so a claim
+   validates itself. 4 ids name a target the agent cannot resolve.
+2. **The negative control fails today**: two INVENTED lab ids yield `status='proven'`, confidence
+   90/100 in the HIGH tier, a two-entry evidence list, `generalized=True`, and a CLEAN schema
+   validation. A fabricated capability claim is indistinguishable from an earned one.
+3. **Two published "proven" numbers differing by 32.** `/packs` sums `len(validated_on) > 0` = **48**;
+   `/techniques` reports the liveness-earned **16**. The same product serves both.
+4. **34 of 48 claims are named by no test assertion at all.**
+
+**The chokepoint is (1).** Fix the vocabulary and (2) closes by construction; (3) is one of the two
+call sites adopting `technique_status()`, which Q-012 already established and never propagated
+(`technique_model.from_registry:256`, `technique_planner.registry_seed:172`, `main.py:/packs:2129`).
+**Do not fix these as four separate re-points.**
+
+**Definition of done**: a lab id resolves against a real registry or the claim is rejected; the
+invented-id negative control passes; `/packs` and `/techniques` agree; the four markers XPASS and are
+retired in the commit that closes them.
+
+### Q-089 · `db.add_finding` returns truthy from `add_lead`, so the operator is told a finding was stored that was not · **HIGH** · `ready` · owner: unassigned
+
+**MEASURED 2026-08-18 against the running agent**, and it is a PERSISTENCE-OWNERSHIP defect rather
+than a reporting one -- which is why invariant I-2 measured 0 unowned and still missed it. The
+ownership is not absent; it is **ambiguous at the boundary**.
+
+`db.add_finding` returns a TRUTHY id from `add_lead` when the TRUTH invariant reroutes a
+lead-confidence finding into the mission's leads list. `_run_source_review` counts
+`sum(1 for f in findings if db.add_finding(...))`. So a canonical source finding carrying
+`confidence='lead'` yields:
+
+    status=complete   stored_findings=1   rejected_findings=0
+    findings table:   0 rows
+    leads list:       1
+
+**The `/engage` response and the mission context both tell the operator a finding was stored.** The
+reroute is correct behaviour; the RETURN VALUE makes it indistinguishable from a store, and the
+counter believes it.
+
+**Definition of done**: the caller can tell a store from a reroute -- either a distinguishable return
+or a separate count. `stored_findings` must equal rows in the findings table, asserted end to end
+against a real mission, with a negative control proving a genuine store still counts. The marker in
+`tests/test_source_lane_persistence.py` XPASSes and is retired in that commit.
+
 ### Q-086 · A guard named "remain inside" proves PRESENCE, never ABSENCE elsewhere · **CLOSED** `e9e253a`
 
 **Fixed by the Codex lane that found it.** `test_zap_target_drivers_remain_inside_one_guarded_function()` is now `test_zap_target_drivers_are_absent_outside_the_guarded_run_zap_subtree()` and does a repository-wide AST absence check instead of slicing one function body. **The name now states what the assertion proves**, which was the whole ticket.

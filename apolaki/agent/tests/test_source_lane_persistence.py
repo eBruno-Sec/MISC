@@ -232,7 +232,7 @@ def test_a_source_derived_finding_gets_no_curl_reproduction():
 
 
 @pytest.mark.xfail(strict=True, reason=(
-    "MEASURED 2026-08-18 against the running agent. `db.add_finding` returns a TRUTHY id from "
+    "Q-089 (owner: unassigned). MEASURED 2026-08-18 against the running agent. `db.add_finding` returns a TRUTHY id from "
     "`add_lead` when the TRUTH invariant reroutes a lead-confidence finding to the mission's leads "
     "list, and `_run_source_review` counts `sum(1 for f in findings if db.add_finding(...))`. A "
     "canonical source finding carrying confidence='lead' therefore yields status=complete, "

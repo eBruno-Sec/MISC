@@ -375,7 +375,7 @@ def test_the_sqli_carriers_all_still_supply_a_reference_sample():
             "a sqli boolean carrier supplies no reference sample at all: %s" % (kwargs,))
 
 
-@pytest.mark.xfail(strict=True, reason="THE GATE IS INERT UNTIL tools.py SUPPLIES THE SAMPLE. "
+@pytest.mark.xfail(strict=True, reason="Q-040 (owner: oracle-soundness lane). THE GATE IS INERT UNTIL tools.py SUPPLIES THE SAMPLE. "
                                        "nosqli.analyze_boolean now accepts baseline_repeat, but "
                                        "tools.ToolRegistry._run_nosqli takes exactly ONE baseline "
                                        "response (tools.py:7846 `base_r = await get(c, url)`) and "

@@ -151,7 +151,7 @@ def test_the_existing_per_lab_guards_only_fail_on_REMOVAL():
 # STRICT XFAILS - the measured defects. Each XPASSes the moment it is fixed.
 # ══════════════════════════════════════════════════════════════════════════════════════════
 
-_Q_VOCAB = ("MEASURED: validated_on has no vocabulary. techniques.all_labs() derives the set of valid "
+_Q_VOCAB = ("Q-088 (owner: unassigned). MEASURED: validated_on has no vocabulary. techniques.all_labs() derives the set of valid "
             "lab ids FROM the field itself, so 'is this a real lab?' answers 'yes, you typed it'. "
             "4 of 13 ids (domsource, natas, openfmb, sessionlife) resolve to no target definition the "
             "agent owns; sessionlife has no compose service and no tracked source at HEAD.")
@@ -202,7 +202,7 @@ def test_one_rule_for_proven_across_every_module():
 
 
 @pytest.mark.xfail(strict=True, reason=(
-    "MEASURED: /packs sums 'proven' as len(validated_on)>0 = 48; /techniques reports the "
+    "Q-088 (owner: unassigned). MEASURED: /packs sums 'proven' as len(validated_on)>0 = 48; /techniques reports the "
     "liveness-earned 16. The same product publishes two 'proven' numbers differing by 32."))
 def test_packs_and_techniques_report_the_same_proven_number():
     """Reproduces agent/main.py:2129 arithmetic exactly, without needing the HTTP app up."""
@@ -214,7 +214,7 @@ def test_packs_and_techniques_report_the_same_proven_number():
 
 
 @pytest.mark.xfail(strict=True, reason=(
-    "MEASURED: 34 of 48 claims are named by no test assertion at all; widening 'backed' to include the "
+    "Q-088 (owner: unassigned). MEASURED: 34 of 48 claims are named by no test assertion at all; widening 'backed' to include the "
     "liveness ledger still leaves 30 of 48 with nothing behind them - all 24 juiceshop claims and both "
     "dvwa claims among them. The beyond-web claims ARE backed by recorded replies; the web side is not."))
 def test_every_validated_on_claim_is_backed_by_a_recorded_artifact():

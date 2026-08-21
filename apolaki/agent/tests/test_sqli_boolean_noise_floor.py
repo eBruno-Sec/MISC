@@ -120,7 +120,7 @@ def test_the_gate_still_rejects_when_the_two_reference_samples_disagree():
 
 
 # ── the defects, pinned ───────────────────────────────────────────────────────
-@pytest.mark.xfail(strict=True, reason="RESIDUAL, and PROVABLY not closable in analyze_boolean: at "
+@pytest.mark.xfail(strict=True, reason="Q-040 residual (owner: oracle-soundness lane). PROVABLY not closable in analyze_boolean: at "
                                        "the two-sample signature the tuple (A, A, A, B) is produced "
                                        "both by a genuine injection on a deterministic page and by "
                                        "an alternating page that flipped after the third request. "
