@@ -131,16 +131,19 @@ def _production_paths(root=None):
                   if not ({"tests", "tier3"} & set(path.relative_to(root).parts[:-1])))
 
 
-def _partition(paths=None):
+def _partition(paths=None, predicate=None):
+    """`predicate` selects WHICH handlers are censused.  The classification below is
+    identical either way, so the two censuses are directly comparable."""
     root = Path(tools.__file__).resolve().parent
     paths = _production_paths(root) if paths is None else [Path(path) for path in paths]
+    predicate = _swallowed if predicate is None else predicate
     rows = []
     for path in paths:
         tree = ast.parse(path.read_text(encoding="utf8"), filename=str(path))
         parents = {child: parent for parent in ast.walk(tree)
                    for child in ast.iter_child_nodes(parent)}
         for handler in (node for node in ast.walk(tree) if isinstance(node, ast.ExceptHandler)):
-            if not _swallowed(handler):
+            if not predicate(handler):
                 continue
             owner = handler
             while owner in parents and not isinstance(owner, (ast.FunctionDef, ast.AsyncFunctionDef)):
@@ -323,3 +326,240 @@ def test_registration_fallback_transport_failure_is_explicit(monkeypatch):
     assert result["created"] is False
     assert "degraded" in result["note"]
     assert "JSON transport unavailable" in result["note"]
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# I-5 REPAIR — guard-falsification lane, 2026-08-21.
+#
+# The census above CANNOT see the defect I-5 exists to catch.  `_swallowed()`
+# applies `_constant()` to its Assign branch but not to its Return branch, so a
+# handler ending `return []` / `{}` / `""` — or a bare `return <name>` — is
+# classified into NO category and constrained by NO ceiling.
+#
+# MEASURED at 6c7ed00: deleting the `_swallow` recorder from
+# `tools.ToolRegistry._traversal_differential` (tools.py:3854) leaves this file at
+# 8 passed and the census byte-identical — optional 388 / control-plane 77 /
+# load-bearing 0 — while a crashed traversal oracle becomes indistinguishable
+# from a completed scan that found nothing.  The SAME deletion ending
+# `return None` instead of `return out` is killed, naming the line.  One token.
+# docs/handoff/guard_falsification.md, mutants M5-POS and M5-HUNT.
+#
+# This repair does NOT assert the strong claim "no load-bearing handler swallows
+# silently", because that claim is FALSE: 15 such handlers exist at HEAD under the
+# guard's own written definition.  Asserting it is how the unfalsifiable guards in
+# this repo got written.  It ratchets instead, in the DELETION direction only:
+# adding a recorder is never blocked, removing one is red, and the message names
+# the owner.  Lower a baseline deliberately, in the same commit, with the reason.
+#
+# AST NODE counts (not grep LINE counts) over the same 178 production modules.
+_SWALLOW_RECORDERS = {
+    ("agent.py", "_authenticated_recrawl"): 4,
+    ("agent.py", "_do_header_trust"): 1,
+    ("agent.py", "_do_persona_authz"): 11,
+    ("agent.py", "_do_saml"): 1,
+    ("agent.py", "_do_scan_auth"): 2,
+    ("agent.py", "_do_session_lifecycle"): 1,
+    ("agent.py", "_do_transport_posture"): 2,
+    ("agent.py", "_execute_plan"): 1,
+    ("agent.py", "_graph_action_step"): 1,
+    ("agent.py", "_graph_primary_state"): 2,
+    ("agent.py", "_identify_dumped_hashes"): 1,
+    ("agent.py", "_inject_sweep_surface"): 9,
+    ("agent.py", "_probe_cloud_storage"): 1,
+    ("agent.py", "_probe_for_creds"): 1,
+    ("agent.py", "_project_spec_params"): 1,
+    ("agent.py", "_reacquire_personas"): 1,
+    ("agent.py", "_recon_code_intelligence"): 1,
+    ("agent.py", "_reject_hostless_step"): 1,
+    ("agent.py", "_reject_session_kill_step"): 1,
+    ("agent.py", "_run_pack"): 1,
+    ("agent.py", "_run_service_packs"): 2,
+    ("agent.py", "_surface_crawl"): 2,
+    ("agent.py", "_validate_candidates_impl"): 2,
+    ("tools.py", "_acquire_session"): 2,
+    ("tools.py", "_audit_one"): 4,
+    ("tools.py", "_benchmark_lab"): 1,
+    ("tools.py", "_browser_dialog_scan"): 1,
+    ("tools.py", "_browser_navigate"): 3,
+    ("tools.py", "_confirm_authz_write"): 3,
+    ("tools.py", "_confirm_create_object_idor"): 5,
+    ("tools.py", "_confirm_read_object_idor"): 3,
+    ("tools.py", "_form_xss_browser_confirm"): 3,
+    ("tools.py", "_gql_post"): 1,
+    ("tools.py", "_locate"): 1,
+    ("tools.py", "_post"): 2,
+    ("tools.py", "_render"): 2,
+    ("tools.py", "_run_authz_matrix"): 1,
+    ("tools.py", "_run_bfla"): 3,
+    ("tools.py", "_run_content_discovery"): 1,
+    ("tools.py", "_run_dir_harvest"): 1,
+    ("tools.py", "_run_dom_audit"): 3,
+    ("tools.py", "_run_dom_trace"): 2,
+    ("tools.py", "_run_enumerate_ids"): 2,
+    ("tools.py", "_run_exposure"): 1,
+    ("tools.py", "_run_external_surface"): 1,
+    ("tools.py", "_run_form_cmdi"): 2,
+    ("tools.py", "_run_github_recon"): 1,
+    ("tools.py", "_run_injection_probes"): 5,
+    ("tools.py", "_run_jsonp"): 1,
+    ("tools.py", "_run_ldap"): 1,
+    ("tools.py", "_run_mass_assign"): 1,
+    ("tools.py", "_run_param_mine"): 1,
+    ("tools.py", "_run_race"): 1,
+    ("tools.py", "_run_service_pack"): 1,
+    ("tools.py", "_run_session_fixation"): 1,
+    ("tools.py", "_run_session_token"): 1,
+    ("tools.py", "_run_sourcemap"): 2,
+    ("tools.py", "_run_sqli"): 2,
+    ("tools.py", "_run_ssi"): 1,
+    ("tools.py", "_run_transport_posture"): 3,
+    ("tools.py", "_run_web_probes"): 6,
+    ("tools.py", "_run_ws_hijack"): 2,
+    ("tools.py", "_run_xpath"): 1,
+    ("tools.py", "_run_xss"): 5,
+    ("tools.py", "_run_xxe"): 2,
+    ("tools.py", "_sl_login"): 1,
+    ("tools.py", "_sl_logout_variant"): 2,
+    ("tools.py", "_sl_marker"): 1,
+    ("tools.py", "_sl_mint"): 1,
+    ("tools.py", "_sl_pwchange_variant"): 2,
+    ("tools.py", "_submit"): 1,
+    ("tools.py", "_timed"): 1,
+    ("tools.py", "_traversal_differential"): 1,
+    ("tools.py", "_wm_audit"): 3,
+    ("tools.py", "_wm_confirm"): 4,
+    ("tools.py", "_wm_harness_server"): 1,
+    ("tools.py", "_write"): 1,
+    ("tools.py", "_ws_handshake"): 2,
+    ("tools.py", "get"): 2,
+    ("tools.py", "probe"): 1,
+}
+
+
+def _swallow_recorder_census(paths=None):
+    """AST NODE count of `*._swallow(...)` calls, keyed by (module, function) owner."""
+    root = Path(tools.__file__).resolve().parent
+    paths = _production_paths(root) if paths is None else [Path(path) for path in paths]
+    census = Counter()
+    for path in paths:
+        tree = ast.parse(path.read_text(encoding="utf8"), filename=str(path))
+        parents = {child: parent for parent in ast.walk(tree)
+                   for child in ast.iter_child_nodes(parent)}
+
+        def owner(node):
+            while node in parents:
+                node = parents[node]
+                if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                    return node.name
+            return "<module>"
+
+        module = path.relative_to(root).as_posix() if path.is_relative_to(root) else path.name
+        for node in ast.walk(tree):
+            if (isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)
+                    and node.func.attr == "_swallow"):
+                census[(module, owner(node))] += 1
+    return census
+
+
+def _recorder_losses(baseline, census):
+    """Owners that LOST recorders.  Gains are deliberately invisible to this ratchet."""
+    return {owner: (expected, census.get(owner, 0))
+            for owner, expected in baseline.items() if census.get(owner, 0) < expected}
+
+
+def _literal_return_swallow(handler):
+    """A handler that discards the exception into a literal value it RETURNS.
+
+    Same discard as `_swallowed`'s Assign branch (`out = []`), in the shape that
+    branch cannot see (`return []`).  Kept separate from `_swallowed` on purpose:
+    folding it in would move 15 already-shipped handlers into `load-bearing` and
+    make `counts["load-bearing"] == 0` fail on a pristine tree.
+
+    Strictly DISJOINT from `_swallowed`: `return None` / `return False` satisfy both
+    predicates, and counting them twice inflated this census from 89 to 134 on the
+    first attempt.  This censuses only the shape the shipped predicate misses.
+    """
+    if _swallowed(handler):
+        return False
+    saw = False
+    for stmt in handler.body:
+        if isinstance(stmt, ast.Return) and stmt.value is not None and _constant(stmt.value):
+            saw = True
+            continue
+        if isinstance(stmt, (ast.Pass, ast.Continue, ast.Break)):
+            continue
+        return False
+    return saw
+
+
+def test_swallow_recorders_are_never_silently_deleted():
+    losses = _recorder_losses(_SWALLOW_RECORDERS, _swallow_recorder_census())
+    assert losses == {}, (
+        "a degradation recorder was DELETED — owner: (expected, found). Removing one "
+        "turns a load-bearing failure back into a clean result, and the census above "
+        "cannot see it happen (M5-HUNT). If the removal is intended, lower the "
+        "baseline in the same commit with the reason: %r" % sorted(losses.items()))
+
+
+def test_the_recorder_ratchet_can_actually_fail():
+    """Negative control.  A ratchet nobody has seen go red is a declaration.
+
+    Synthetic on purpose: a control built from the live census would itself go red
+    on the very mutant it exists to describe, which is how a control stops being one.
+    The floors below are non-vacuity checks, not a second ratchet.
+    """
+    census = _swallow_recorder_census()
+    assert sum(census.values()) >= 100 and len(census) >= 50, dict(census)
+    baseline = {("m.py", "kept"): 1, ("m.py", "thinned"): 2, ("m.py", "erased"): 1}
+    actual = Counter({("m.py", "kept"): 1, ("m.py", "thinned"): 1, ("m.py", "added"): 9})
+    assert _recorder_losses(baseline, actual) == {
+        ("m.py", "thinned"): (2, 1),      # partial deletion is caught
+        ("m.py", "erased"): (1, 0),       # total deletion is caught
+    }                                     # ("m.py", "added") is deliberately ignored
+
+
+def test_recorder_census_sees_a_planted_recorder(tmp_path):
+    planted = tmp_path / "brand_new_engine.py"
+    planted.write_text(
+        "class E:\n    def probe(self):\n        try:\n            self._http()\n"
+        "        except Exception as exc:\n            self._swallow(exc, 'e.probe', '')\n",
+        encoding="utf8")
+    assert _swallow_recorder_census([planted]) == Counter({("brand_new_engine.py", "probe"): 1})
+
+
+def test_the_shipped_census_predicate_is_asymmetric_between_assign_and_return(tmp_path):
+    """The measured hole, pinned so it cannot be re-opened silently."""
+    def handler(body):
+        return ast.parse("def f():\n    try:\n        pass\n    except Exception:\n"
+                         "        %s\n" % body).body[0].body[0].handlers[0]
+
+    assert _swallowed(handler("out = []")) is True        # literal fallback, SEEN
+    assert _swallowed(handler("return []")) is False      # same discard, NOT seen
+    assert _swallowed(handler("return out")) is False     # the M5-HUNT shape
+    assert _literal_return_swallow(handler("return []")) is True
+
+    planted = tmp_path / "brand_new_engine.py"
+    planted.write_text(
+        "import httpx\n\ndef probe(url):\n"
+        "    try:\n        return httpx.get(url)\n    except Exception:\n        return []\n",
+        encoding="utf8")
+    assert _partition([planted]) == []                    # invisible to the shipped census
+    assert [(row["function"], row["category"])
+            for row in _partition([planted], predicate=_literal_return_swallow)] == [
+        ("probe", "load-bearing")]
+
+
+def test_literal_return_discards_are_censused_and_capped():
+    """MEASURED at 6c7ed00, unmutated: 89 handlers, 15 of them on load-bearing paths.
+
+    Ceilings, not equalities: FIXING one of these must never turn this red, and
+    adding an 90th must.  The load-bearing 15 are named on failure so the list can
+    only be argued down one site at a time.
+    """
+    rows = _partition(predicate=_literal_return_swallow)
+    counts = Counter(row["category"] for row in rows)
+    named = ["%s:%d:%s" % (r["module"], r["line"], r["function"])
+             for r in rows if r["category"] == "load-bearing"]
+    assert counts["optional"] <= 61
+    assert counts["control-plane"] <= 13
+    assert counts["load-bearing"] <= 15, named

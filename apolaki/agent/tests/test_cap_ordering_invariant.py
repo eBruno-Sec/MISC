@@ -247,3 +247,67 @@ def test_cap_guard_detects_a_planted_previously_invisible_bypass(tmp_path):
     planted = tmp_path / "outside_old_scope.py"
     planted.write_text("def run(targets):\n    return targets[:7]\n", encoding="utf-8")
     assert _raw_work_caps(planted) == {("run", "targets", "7")}
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# I-9 REPAIR — guard-falsification lane, 2026-08-21.
+#
+# `test_raw_production_work_caps_have_an_explicit_ordering_contract` asserts two
+# things: that the measured `(module, function, name, upper)` tuples equal the
+# contract table, and that every reason string is non-empty.  A REASON STRING IS
+# NOT A TEST.  Nothing executes the ordering claim any of the 20 contracts makes,
+# so any edit leaving the tuple intact — reordering a feed, dropping a sort key,
+# inserting instead of appending — passes.
+#
+# MEASURED at 6c7ed00: swapping the two comprehensions that feed `dom_pages` in
+# `planner.next_batch` (planner.py:720) evicts the operator-authorized root from
+# the headless DOM audit in favour of CAP_DOM catalogue pages — precisely what the
+# `dom_pages`/`CAP_DOM` contract forbids — and leaves the inventory byte-identical,
+# 20 tuples before and 20 after.  planner.py:720 is EXECUTED by `_drain` in the
+# tests above; it was executed, mutated, and still green.  Execution without an
+# ordering assertion is not coverage.
+# docs/handoff/guard_falsification.md, mutant M9-HUNT.
+#
+# HONEST COVERAGE BOUNDARY: the five execution tests above drive cuts that are all
+# slices over a `Call`, so NONE of them appears in the contract table — the static
+# and executed halves of I-9 are disjoint.  This repair witnesses ONE of the 20
+# contracts.  The other 19 remain prose-only and are recorded as such rather than
+# claimed closed.
+
+
+_WITNESSED_CONTRACTS = {
+    ("planner.py", "next_batch", "dom_pages", "CAP_DOM"):
+        "test_dom_audit_cap_spends_its_slots_on_the_operator_root_first",
+}
+
+
+def test_dom_audit_cap_spends_its_slots_on_the_operator_root_first():
+    """The `dom_pages`/`CAP_DOM` contract, executed instead of asserted in prose."""
+    ordinary = ["https://t.test/shop/item%02d?id=1" % i
+                for i in range(planner.CAP_DOM * 4)]
+    steps = _drain(_state(ordinary))
+    dom = [s["input"]["url"] for s in steps if s["tool"] == "run_dom_audit"]
+    assert dom, "fixture produced no run_dom_audit steps; this test would pass vacuously"
+    assert len(dom) >= planner.CAP_DOM, (
+        "fixture did not saturate CAP_DOM, so the cut under test never fired: %r" % dom)
+    assert any(url.rstrip("/") == "https://t.test" for url in dom), (
+        "the operator-authorized root was evicted from the DOM audit by %d parameter "
+        "endpoints — CAP_DOM cut in discovery order, not value order: %r" % (len(dom), dom))
+
+
+def test_every_claimed_ordering_witness_exists_and_still_guards_a_real_cut():
+    """A witness that names a vanished cut, or a test that does not exist, is a lie."""
+    root = Path(__file__).resolve().parents[1]
+    measured = {(path.name, fn, name, upper)
+                for path in root.glob("*.py")
+                for fn, name, upper in _raw_work_caps(path)}
+    orphaned = sorted(key for key in _WITNESSED_CONTRACTS if key not in measured)
+    assert orphaned == [], (
+        "a witnessed cap no longer exists in production; the witness now guards "
+        "nothing: %r" % orphaned)
+    absent = sorted(name for name in _WITNESSED_CONTRACTS.values() if name not in globals())
+    assert absent == [], "witness test named but not defined in this module: %r" % absent
+    # Deletion-direction ratchet: witnessing more contracts is always allowed, losing
+    # the one we have is not.  20 contracted caps at 6c7ed00, 1 executed, 19 prose-only.
+    assert len(measured) >= 20
+    assert len(_WITNESSED_CONTRACTS) >= 1

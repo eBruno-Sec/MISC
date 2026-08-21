@@ -258,22 +258,107 @@ Each hunt mutant is also a negative control for the other: `beh_m5` leaves the D
 correct and `beh_m9` leaves the swallow ledger recording, so neither behavioural result is an
 artifact of the harness.
 
-## Full-suite runs
+## Full-suite runs — NOT ESTABLISHED, and why that is being said out loud
 
-Three concurrent containers, one snapshot each, identical command
-(`python -m pytest tests/ -p no:cacheprovider -rfE`), exit codes captured:
+Three concurrent containers (pristine / M5-HUNT / M9-HUNT), one snapshot each, identical command.
+**All three were killed at ~10–18% with exit 137 — SIGKILL, the container OOM killer.** Three
+full-suite containers plus a probe container did not fit in the Docker VM's memory.
+
+```
+EXIT=137 snap | EXIT=137 mut_m5_hunt | EXIT=137 mut_m9_hunt
+```
+
+**Exit 137 is not a pass and it is not a fail. It is not a result at all**, and it is recorded here
+as UNVERIFIED rather than quietly re-run until convenient. The prior lane's two-container run was
+within budget; three is not. Anyone re-running this must run them **sequentially**.
+
+This does not weaken the verdict. The claim "these guards cannot fail" is a claim about
+`test_silent_failure_invariant.py` and `test_cap_ordering_invariant.py`, and both of those ran to
+completion, green, on both hunt mutants (16 passed, EXIT=0, twice). What is NOT established is the
+broader statement the I-4 write-up was able to make — that *no test anywhere* notices. For M5-HUNT
+and M9-HUNT that remains **UNVERIFIED**.
+
+## Repairs — both shipped, both verified against the mutant that beat the original
+
+Both follow the I-4 shape and deliberately do **not** assert the strong claim, because in both cases
+the strong claim is false: 15 load-bearing handlers already discard silently, and 19 of 20 cap
+contracts have no executable witness. Each repair is a measured inventory that ratchets in the
+**deletion direction only** — adding is never blocked, removing is red, and the message names the
+owner.
+
+### I-5 — a deletion ratchet over the degradation recorders
+
+`_SWALLOW_RECORDERS`, measured by AST (not transcribed by hand — generated from the tree and pasted):
+**160 nodes across 80 `(module, function)` owners**, counted per owner so that thinning a function
+from 3 recorders to 2 is caught, not just erasing the last one. Plus:
+
+* `_literal_return_swallow`, a predicate for the shape `_swallowed` misses, kept **strictly
+  disjoint** from it, with the 89 sites capped as ceilings (`optional <= 61`, `control-plane <= 13`,
+  `load-bearing <= 15`, the 15 named on failure). Ceilings, not equalities, so *fixing* one of the
+  15 never turns the file red and adding a 90th does.
+* `test_the_shipped_census_predicate_is_asymmetric_between_assign_and_return` pins the hole itself
+  (`out = []` seen, `return []` not, `return out` not) so it cannot silently re-open.
+* A synthetic negative control for the ratchet arithmetic — partial deletion caught, total deletion
+  caught, additions ignored.
+
+**Two defects were found in this repair by running it, not by reading it**, and both are recorded
+because they are the same class of error the lane exists to catch:
+
+1. `_literal_return_swallow` initially double-counted `return None` / `return False`, which satisfy
+   *both* predicates. Census came out 134 rather than the measured 89 and the ceiling failed **on a
+   pristine tree**. Fixed by making the predicate disjoint.
+2. The ratchet's negative control was built from the *live* census, so it went red on M5-HUNT — the
+   very mutant it exists to describe. A control that fails whenever the thing it controls for
+   happens is not a control. Rebuilt synthetically.
+
+### I-9 — one contract promoted from prose to execution
+
+`test_dom_audit_cap_spends_its_slots_on_the_operator_root_first` drives `planner.next_batch` with a
+saturating fixture and asserts the operator root survives `CAP_DOM`. It has two anti-vacuity guards
+of its own (the fixture must produce DOM steps at all, and must actually saturate the cut).
+
+`_WITNESSED_CONTRACTS` records which contracts have an executable witness and asserts that each
+named witness test exists and still guards a cut that exists in production. **Honest boundary,
+stated rather than papered over: 20 contracted caps, 1 executed, 19 still prose-only.** I-9 should
+be recorded in the matrix as *"cap shapes are ratcheted; one cap's ordering is tested"*, not as
+*"caps preserve highest-value ordering"*.
+
+### Verification of the repairs
+
+Sequential runs, one container each, same command:
 
 | snapshot | result |
 |---|---|
-| pristine `6c7ed00` | PENDING |
-| M5-HUNT | PENDING |
-| M9-HUNT | PENDING |
+| pristine `6c7ed00` + repairs | **23 passed, EXIT=0** |
+| M5-HUNT + repairs | **1 failed**, `test_swallow_recorders_are_never_silently_deleted`: `{('tools.py', '_traversal_differential'): (1, 0)}` |
+| M9-HUNT + repairs | **1 failed**, `test_dom_audit_cap_spends_its_slots_on_the_operator_root_first`: names the evicted root and the six endpoints that displaced it |
 
-## Repairs
+Each mutant is killed by exactly one assertion, the intended one, and the message names the owner.
 
-Both repairs follow the I-4 shape and deliberately do **not** assert the strong claim, because the
-strong claim is false in both cases (15 invisible load-bearing handlers; 17 unwitnessed contracts).
-Each is a measured inventory that ratchets in the **deletion direction only**: adding is never
-blocked, removing is red, and the message names the owner.
+### Ship gate
 
-See the section below for status.
+Full suite on the pristine tree **with the repairs applied**, single container:
+
+| run | result |
+|---|---|
+| `6c7ed00` + repairs, `python -m pytest tests/` | PENDING |
+
+## What is left open
+
+* **M5-HUNT / M9-HUNT survival against the full suite is UNVERIFIED** (OOM, above). Re-run
+  sequentially to close it.
+* **19 of 20 I-9 cap contracts remain prose-only.** Each is a candidate for the same treatment
+  `dom_pages` just received; `_confirm_create_object_idor`'s `specs[:6]` ("explicit proven app specs
+  precede target-derived speculative specs") is the next most security-relevant — changing
+  `specs.append(spec)` to `specs.insert(0, spec)` at `tools.py:2649` would spend the cap on
+  speculation and leave the inventory byte-identical. Not planted; UNVERIFIED.
+* **The 15 named load-bearing literal-return handlers** are now capped but not fixed. Six look like
+  genuine defects (`dns_recon.doh`, `tools._discover_params`, `bie.session_fingerprint`,
+  `tools.read_state`, `enip._list_identity_tcp`, `tools._form_xss_browser_confirm`); the rest return
+  typed degraded results and are probably fine. Production code is not writable by this lane; the
+  patch would be to route each through `_swallow`.
+* **This is the sixth guard in this repo that could not fail.** The pattern across I-4, I-5 and I-9
+  is identical: a measured inventory of the sites someone thought of, asserted with the grammar of a
+  universal. The ceilings and tuple-equalities are real ratchets for *additions* and blind to
+  *deletions* and to *anything outside the predicate*. A guard should be assumed to cover its
+  enumerated sites and nothing else until a mutant says otherwise.
