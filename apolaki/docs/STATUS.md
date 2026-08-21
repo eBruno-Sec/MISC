@@ -32,6 +32,57 @@ reproducible release blockers.
 | I-9 | caps preserve highest-value ordering | ⏳ CLAIMED closed, NOT yet verified | never measured by us; guard `test_cap_ordering_invariant` 8 tests |
 | I-11 | reachable / framework-invoked / retained-with-reason | ❌ **44 vs ceiling 37** | pin held; three lanes declined to force it |
 
+## ALL THREE CODEX GUARDS WERE UNFALSIFIABLE. Measured, not suspected.
+
+Codex shipped three guards closing I-4, I-5 and I-9, then became unavailable. Each was mutation-tested
+by a lane that did not write it. **Each one fired on its positive control and not on the same defect
+expressed slightly differently.** Three for three.
+
+| invariant | the positive control | the defect it could NOT see |
+|---|---|---|
+| I-4 | pinned emitters it NAMED | deleting `negative_controls` from an emitter it did not name -- full suite stayed **byte-identical at 3507** |
+| I-5 | handler ending `return None` | the same deletion ending `return out` -- **one token**. `_swallowed()` applies `_constant()` to its Assign branch and not its Return branch, so `out = []` is seen and `return []` is not. **89 handlers already exploit this at HEAD, 15 load-bearing**; the 160 `_swallow` nodes across 80 owners were pinned by nothing |
+| I-9 | `param_eps[:8]` -> `[:6]` | swapping two comprehensions at `planner.py:720` evicts the operator-authorized root from the DOM audit -- the exact thing the contract forbids -- and the inventory stays **byte-identical**. `planner.py:720` was executed, mutated, and still green |
+
+**The pattern is not sloppiness.** Every one was written alongside a correct fix by a careful lane, and
+every one pins exactly the sites its author had just touched. That reads as complete and is not. **A
+guard is scoped to its author's attention unless someone else tries to break it.**
+
+All three now follow the I-4 repair shape: an AST inventory of real production sites, ratcheting in the
+**DELETION direction only**, message names the owner -- and none asserts the strong claim, because all
+three strong claims are false. Adding is never blocked; removing is red.
+
+**This is why ⏳ CLAIMED exists in this table.** All three were one turn from ✅ on the strength of a
+passing new test.
+
+**I-5/I-9 residue, recorded rather than closed**: 19 of 20 I-9 cap contracts are still prose-only, and
+the 15 named literal-return handlers are capped but not fixed (the patch routes each through
+`_swallow`; production was not writable by that lane). And its three-container concurrent full-suite
+run was **OOM-killed, exit 137 on all three**, so "no OTHER test notices the hunt mutants either" is
+**UNVERIFIED** -- not green. Re-run sequentially; three concurrent full suites do not fit in this VM.
+
+### Instrument fact: `git archive` emits CRLF on this machine, so that is never your explanation
+
+A lane died holding the conclusion that ~107 snapshot differences were *"CRLF vs LF -- `git archive`
+emits LF, the working tree has CRLF."* **Measured, that is false:**
+
+```
+git archive HEAD -> agent/exposure_tool.py : 231 CR bytes
+working tree     -> agent/exposure_tool.py : 227 CR bytes   (delta 4 == the 4-line paths() deletion)
+```
+
+Both are CRLF under `core.autocrlf`, and the only gap is real edited content. The censuses are
+`ast.parse(path.read_text(encoding="utf8"))`, and Python text mode translates newlines anyway, so line
+endings cannot move an AST count in either direction.
+
+The real cause was that the lane built its snapshot with `cp -r` of the SHARED working tree while other
+lanes had uncommitted edits in it -- **a torn read, exactly the hazard rule 8c exists for.** It then
+attributed real cross-lane signal to an encoding artifact and was one step from dismissing it.
+
+**This is the dangerous shape of a wrong instrument reading: it does not look like an error, it looks
+like an explanation.** A benign-sounding cause for an unexplained delta is the single easiest way to
+retire a real finding. Snapshots come from `git archive HEAD`, never `cp -r`.
+
 **I-2b is the invariant this week earned.** I-2 counted EDGES and measured 0 unowned *correctly* —
 Q-089's defect lived on the RETURN edge, which an ownership census does not traverse. `db.add_finding`
 answered "id" when the caller asked "stored". **An invariant that counts structure cannot see a defect
