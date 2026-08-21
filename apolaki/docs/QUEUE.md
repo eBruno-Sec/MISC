@@ -1188,12 +1188,27 @@ Handed over as tickets rather than quiet re-points, with patches already written
 - **GAP-1 · `takeover` is DETECTED and can never be REPORTED.** Subdomain-takeover candidates carry no
   `family`, so they never become findings. COMM-04's `violated_by` is therefore unreachable by
   construction — the objective was honest and the plumbing was not.
-- **GAP-2 · dalfox findings carry no `family` AT ALL.** They are invisible to `map_findings` entirely,
-  not merely to VAL-03. An integrated scanner whose output cannot be classified is a scanner whose
-  output does not exist downstream.
-- **GAP-3 · a confirmed AUTH BYPASS is labelled `sqli`.** `sqli_tool._base` stamps `family: "sqli"` on
-  every finding it builds, including the auth-bypass oracle. The finding is real and its family is a
-  lie, which is why AUTHN-02 cannot be mapped without making every SQLi fail it.
+- **GAP-2 · UNFALSIFIABLE FROM DATA, and that is itself the finding.** The corpus holds **ZERO**
+  dalfox findings in 1783 (positive control: 1782 of 1783 carry a family; the single exception is
+  "Manual: exposed .git"). So "dalfox findings carry no family" can be neither confirmed nor denied
+  from storage -- there is nothing to inspect. The real question underneath is different and nobody
+  has asked it: **has `run_dalfox` ever produced a finding at all**, and if not, is that because it
+  never ran or because its output was dropped? That is a Q-050-shaped question (reachability), not a
+  classification one. Answer it before writing any mapping code.
+- **GAP-3 · CLOSED, and it was closed before I read the ticket.** `sqli_tool.auth_bypass_finding`
+  emits `family: "auth_bypass"` today -- verified by CALLING IT -- and
+  `tests/test_sqli_tool.py::test_auth_bypass_finding_fails_authn02_and_not_val01` has been pinning
+  the exact target behaviour all along: AUTHN-02 failed, VAL-01 NOT failed. `asvs_model.py`'s
+  AUTHN-02 comment already records the landing.
+  **I re-opened it by mistake and the lesson is worth more than the fix.** I verified the claim
+  against the STORED CORPUS -- 21 rows titled "SQL injection (auth-bypass)" carrying `family: sqli`
+  -- and concluded the defect was live. Those rows are dated **2026-07-25 to 08-06**, i.e. written
+  BEFORE the producer was fixed. **Stored data is historical; the emitter is current.** Asking the
+  corpus whether a producer defect exists answers a question about the past.
+  I then built a fix (read `tags` as additional properties) that made the auth-bypass finding fail
+  VAL-01 as well -- **exactly the false positive `asvs_model.py:64` says was REJECTED on purpose**,
+  and exactly what the pre-existing test forbids: "a login bypass is not evidence about every query
+  parameter in the app." Reverted whole. The existing guard caught it on the full suite.
 - **GAP-4 · `transport_posture` shares `security_misconfig`** across cookie, header and methods
   findings, so no objective can key on any one of them without catching the other two.
 

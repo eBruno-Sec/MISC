@@ -340,6 +340,34 @@ E  {('tools.py', '_confirm_read_object_idor'): {'pinned': 2, 'measured': 1}}
 
 The mutation that survived 3507 tests now dies on the exact site.
 
+## Reproduction
+
+Every snapshot in this document is `git archive <commit> apolaki/agent` unpacked into its own
+scratch directory; no snapshot was edited while a container had it mounted, and each mutant got a
+fresh copy. To repeat any single result:
+
+```
+git archive <commit> apolaki/agent | tar -x -C <scratch>/snap --strip-components=2
+# apply the one-hunk mutation, byte-wise, CRLF preserved, asserting the pattern matches exactly once
+diff <scratch>/snap_base/<file> <scratch>/snap/<file>          # must be the mutation and nothing else
+docker run --rm -v "<scratch>/snap:/app" -w /app apolaki-agent python -c \
+  "import sys; sys.path.insert(0,'/app'); import inspect, <mod>; assert <mutation is present>"
+MSYS_NO_PATHCONV=1 docker run --rm --network apolaki_default -v "<scratch>/snap:/app" -w /app \
+  apolaki-agent python -m pytest <file> -p no:cacheprovider -rfE
+```
+
+The `sys.path.insert(0, '/app')` matters: running a verification script from a second mount makes
+`import tools` resolve to an installed package instead of the snapshot, and the first attempt here
+did exactly that. A verification step that fails to import the module under test is not evidence.
+
+Corpus queries use the named volume read-only: `-v "apolaki_bbh_data:/data"` and
+`sqlite3.connect("file:/data/bbh.db?mode=ro", uri=True)`. A bare `agent:/app` mount gives an empty
+`/app/data` and every count comes back 0.
+
+`main` advanced under this lane while it ran (`2957031`, `2cabd4e`, and an in-flight
+`asvs_model.py`). All mutation results above are against `55016f4`; Parts 2 and 3 were measured
+against the tree that carries them.
+
 ## Recommended follow-ups (not done in this lane)
 
 1. State the predicate next to the I-4 number in the matrix (`303` under the 5-key analysis set,
