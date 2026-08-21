@@ -1299,6 +1299,80 @@ call sites adopting `technique_status()`, which Q-012 already established and ne
 invented-id negative control passes; `/packs` and `/techniques` agree; the four markers XPASS and are
 retired in the commit that closes them.
 
+### Q-091 · dalfox has NEVER produced a finding: a JSONL parser reading JSON-array output · **READY** · **HIGH**
+
+**This closes Q-053 GAP-2, which was unfalsifiable as posed.** "Why are there zero dalfox findings in
+1783?" cannot be answered from the corpus. The answerable form is Q-050-shaped: does the producer
+produce? It does not, and it never has.
+
+**MEASURED, live, on an authorized lab and an authorized host.** `dalfox --format json` emits a JSON
+ARRAY, not JSONL:
+
+```
+$ dalfox url http://juice-shop:3000/rest/products/search?q=test --silence --format json
+[
+{}]                      <- 6 bytes, 2 lines, exit 0, stderr empty
+```
+
+`tools.py:_run_dalfox` parses it line by line:
+
+```python
+for line in out.strip().split("
+"):
+    try: findings.append(json.loads(line))
+    except Exception: pass
+return ToolResult("dalfox", url, True, f"{len(findings)} XSS signals", findings)
+```
+
+`json.loads("[")` raises. `json.loads("{}]")` raises. Both are swallowed. **This is structural, not
+data-dependent:** with real results the lines become `[`, `{...},`, `{...}]`, and the array wrapper plus
+the trailing commas guarantee that EVERY line is invalid JSON on its own. `len(findings)` is pinned at
+0 for every possible dalfox output. Fed the real bytes above, the exact parser yields **0** while the
+array holds **1** entry.
+
+**CORPUS CONFIRMATION, 171 invocations, no outlier:** `logs` holds 171 `tool_call` + 171 `tool_result`
+rows for `run_dalfox`. The `N XSS signals` histogram is `{0: 171}`. Zero rows say "dalfox not
+installed" (the binary is at `/usr/local/bin/dalfox`). If the parser had ever worked, one run against
+Juice Shop, DVWA or ginandjuice would have been nonzero. **findings mentioning dalfox: 0 of 1783.**
+
+**Why nobody noticed: this is an I-5 silent swallow.** `ran=True` and `"0 XSS signals"` are exactly what
+a clean scan looks like. A totally broken integration and a target with no XSS are byte-identical in
+the log, the report and the ledger. `agent.py:143` compounds it by listing `run_dalfox` in
+`_CONFIRMED_BY_TOOL`, so its output is trusted as CONFIRMED while carrying nothing.
+
+`asvs_model.py:193` (Q-048) reported the downstream half of this -- raw dalfox lines carry no `family`
+key so nothing they report can fail an objective. That was true but moot: there were never any lines.
+
+**PATCH** (owner: whoever holds `tools.py`; do not apply concurrently with the I-5 lane):
+parse the document, not the lines, and make the failure VISIBLE rather than returning a clean-looking
+zero. Accept both shapes, since older dalfox builds do emit JSONL:
+
+```python
+findings = []
+body = out.strip()
+if body:
+    try:
+        doc = json.loads(body)
+        findings = [f for f in doc if isinstance(f, dict) and f] if isinstance(doc, list) else [doc]
+    except Exception:
+        for line in body.split("
+"):          # legacy JSONL builds
+            try: findings.append(json.loads(line))
+            except Exception: pass
+        if not findings:
+            _swallow("dalfox.parse", ...)       # a parse failure is NOT a clean scan
+            return ToolResult("dalfox", url, False, "dalfox output unparseable", [])
+```
+
+Note the empty-dict filter: the measured array was `[{}]`, and `{}` is not a finding. Without the
+filter the fix would turn 171 silent zeros into 171 empty-dict false positives.
+
+**GATE (required, or this regresses invisibly):** a test that feeds `_run_dalfox`'s parser the REAL
+bytes `b"[
+{}]"` and asserts 0 findings, plus a real multi-entry array asserting n>0. Both must fail
+against the current parser. A test asserting only "0 findings on empty output" passes today and proves
+nothing.
+
 ### Q-090 · Four multi-outcome write paths that report success they did not achieve · **CLOSED** `9c8f3a9` `977c4b2` `ef0db16` · **HIGH**
 
 Found by the **I-2b outcome-fidelity guard** (`tests/test_outcome_fidelity.py`, `aa01373`), which
