@@ -953,10 +953,6 @@ def list_techniques() -> list[dict]:
             for t in TECHNIQUES.values()]
 
 
-def classes() -> list[str]:
-    return sorted({t["vuln_class"] for t in TECHNIQUES.values()})
-
-
 def is_generalized(t: dict) -> bool:
     """>= 2 RESOLVABLE labs. A lab id that names no target cannot contribute to transferability:
     two invented strings used to confer `generalized` (and +8 confidence in technique_model), which

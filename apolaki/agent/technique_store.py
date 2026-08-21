@@ -173,15 +173,6 @@ def listing(store, status=None, limit=None):
     return ts[:limit] if limit else ts
 
 
-def stats(store):
-    by = {}
-    for t in (store.get("techniques") or {}).values():
-        s = t.get("status", "?")
-        by[s] = by.get(s, 0) + 1
-    return {"total": len(store.get("techniques") or {}), "by_status": by,
-            "updated_at": store.get("updated_at")}
-
-
 # ---------------------------------------------------------------------------- Phase 2: semantic dedup (pure)
 def _tokens(t):
     import re

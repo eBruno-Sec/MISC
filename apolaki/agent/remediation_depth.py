@@ -274,11 +274,6 @@ def depth_for(finding: dict, family: str = None) -> dict:
     return dict(DEPTH.get(fam, {}))
 
 
-def families_covered() -> list:
-    """Sorted families with design-level guidance. Pure."""
-    return sorted(DEPTH)
-
-
 def markdown(finding: dict, family: str = None) -> str:
     """The report block. Empty string when there is nothing substantive to add. Pure."""
     d = depth_for(finding, family)

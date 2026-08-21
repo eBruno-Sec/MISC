@@ -10,14 +10,21 @@ tests" can never masquerade as "live-proven through the real product path":
   blocked      correct + wired, but needs an external prerequisite to run (named)
   unfinished   declared but not yet built
 
-`state_rank` orders them; a capability is reported at its HIGHEST achieved state. Evidence is a
-mission id / test / artifact — never a claim. validate() enforces the invariants so the matrix
-cannot lie (every capability has a state in the enum and a non-empty evidence string).
+A capability is recorded at ONE state and reported at that state; `matrix()` groups by `STATES` and
+nothing here ranks or maximises. This sentence used to read "`state_rank` orders them", naming a
+function that existed, ordered nothing, and had no caller in production or in a test -- the
+declaration-versus-fact shape, in the docstring of the module that exists to stop the matrix lying.
+`state_rank` and its `_RANK` table were REMOVED in Q-088 rather than wired, because there is no
+consumer that wants an order: see docs/handoff/island_triage.md section 13. If a ranked view is ever
+needed, note the fact the table encoded -- `blocked` ranked EQUAL to `wired`, since a blocked
+capability is correct and composed and merely waiting on an external prerequisite.
+
+Evidence is a mission id / test / artifact — never a claim. validate() enforces the invariants so the
+matrix cannot lie (every capability has a state in the enum and a non-empty evidence string).
 """
 from __future__ import annotations
 
 STATES = ("unfinished", "implemented", "wired", "exercised", "live_proven", "blocked")
-_RANK = {"unfinished": 0, "implemented": 1, "wired": 2, "exercised": 3, "live_proven": 4, "blocked": 2}
 
 
 def _c(name, area, state, evidence, labs=None):
@@ -105,10 +112,6 @@ def matrix():
         by[c["state"]].append(c["name"])
     return {"capabilities": CAPABILITIES, "by_state": by,
             "counts": {s: len(by[s]) for s in STATES}, "total": len(CAPABILITIES)}
-
-
-def state_rank(state: str) -> int:
-    return _RANK.get(state, 0)
 
 
 def validate():
