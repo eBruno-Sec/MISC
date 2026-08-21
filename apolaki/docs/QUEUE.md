@@ -1299,7 +1299,7 @@ call sites adopting `technique_status()`, which Q-012 already established and ne
 invented-id negative control passes; `/packs` and `/techniques` agree; the four markers XPASS and are
 retired in the commit that closes them.
 
-### Q-090 · Four multi-outcome write paths that report success they did not achieve · **A/B/C CLOSED** `9c8f3a9` `977c4b2` · **D open (measured-static)** · **HIGH**
+### Q-090 · Four multi-outcome write paths that report success they did not achieve · **CLOSED** `9c8f3a9` `977c4b2` `ef0db16` · **HIGH**
 
 Found by the **I-2b outcome-fidelity guard** (`tests/test_outcome_fidelity.py`, `aa01373`), which
 derives multi-outcome owners rather than listing them. **I-2 measured "0 unowned" CORRECTLY and could
@@ -1329,7 +1329,9 @@ read that as absence. Now: 409 on a refusal, 404 only on a genuine miss, and a R
 `{"ok": true, "bytes": 4, "attached_to": "f1"}` **with nothing attached**. Now reads `.updated` --
 NOT `bool(res)`, because a REROUTED write is truthy and leaves no row for a screenshot to attach to.
 
-**Q-090-D · MEASURED-STATIC, deliberately NOT reproduced.** `agent.py:BBHAgent._triage` writes back
+**Q-090-D · CLOSED** `ef0db16`. It was the last MEASURED-STATIC pin, and a pin nobody has executed is a claim, so it was reproduced through the real generator and the real db before being closed. Annotating a row that predates the Q-013 gate makes TRUTH (#7) fire on the way back in: the row is DELETED from findings, appended to leads, and the emitted event still says "Triage complete: 2 findings" while the table holds ONE. Nothing in the stream said a row left. `agent.py:4322` now binds the result and reads `written.verdict`, never `bool(...)`. VERIFIED BY COORDINATOR at `66a7012`: `_KNOWN_OPEN` in tests/test_outcome_fidelity.py is now EMPTY, and that ratchet is red in BOTH directions, so a stale pin cannot hide in it. ORIGINAL NOTE FOLLOWS.
+
+**Was: MEASURED-STATIC, deliberately NOT reproduced.** `agent.py:BBHAgent._triage` writes back
 blind. Recorded as static-only rather than claimed as a live defect.
 
 **Reachability was checked, not assumed** -- the mark of the lane that filed it. `is_lead` reads only
