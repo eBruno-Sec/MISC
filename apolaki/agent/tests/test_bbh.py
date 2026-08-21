@@ -2448,7 +2448,17 @@ def test_report_integrity_validator_catches_metric_contradictions():
     leads = [{"title": "eval sink", "severity": "high", "confidence": "candidate"}]
     clean = ri.check_report_consistency(findings, leads, {"score": 50, "label": "High", "note": "formula"},
                                         {"high": 2})
-    assert clean["ok"] and not clean["issues"] and clean["checks_run"] >= 6
+    assert clean["ok"] and not clean["issues"]
+    # `checks_run` counts checks that HAD DATA TO EXAMINE; it used to be the number of check SITES in
+    # report_integrity.py, i.e. 10 for every input, so an empty report told a client "10 automated
+    # consistency checks passed" over findings=[] leads=[] risk=None counts=None attack_surface=None
+    # tool_ledger=None chains=None -- a verdict on data that does not exist. The bare `>= 6` is
+    # replaced by the property that was supposed to make it meaningful: the number must be a
+    # MEASUREMENT, so it MOVES with the report. Asserted in both directions, because a smaller
+    # constant would satisfy a counter that had merely been decremented.
+    assert clean["checks_run"] == 5 and clean["checks_total"] == 10
+    assert ri.check_report_consistency([], [])["checks_run"] == 0
+    assert clean["checks_run"] > ri.check_report_consistency(findings, leads)["checks_run"]
 
     # (2) a lead marked confirmed (the summary-vs-detail XSS conflict) -> caught
     bad = ri.check_report_consistency(findings, [{"title": "XSS", "confidence": "confirmed"}],
@@ -2474,7 +2484,11 @@ def test_report_integrity_validator_catches_metric_contradictions():
 
     # (5) the JSON export always carries the integrity result
     j = json.loads(report.findings_json("T", findings, {"in_scope": ["t"]}, leads=leads))
-    assert j["integrity"]["ok"] is True and j["integrity"]["checks_run"] >= 6
+    # same change as (1): the export must carry the APPLIED count and its denominator, so a consumer
+    # of the JSON can tell a thoroughly cross-checked report from a thin one instead of reading the
+    # checklist's own size back out of every export.
+    assert j["integrity"]["ok"] is True and j["integrity"]["checks_run"] == 5
+    assert j["integrity"]["checks_total"] == 10 and j["integrity"]["checks_skipped"]
     # ...and the HTML/MD render a Report Integrity section
     assert "id='integrity'" in report.generate_html_report("T", findings, {"in_scope": ["t"]}, leads=leads)
     assert "## Report Integrity" in report.generate_report("T", findings, {"in_scope": ["t"]}, leads=leads)

@@ -653,11 +653,18 @@ def generate_report(program: str, findings: list, scope: dict,
     # report-integrity guarantee (metrics agree with findings; leads never inflate risk)
     import report_integrity as _ri
     _integ = _ri.check_report_consistency(findings, leads, risk_score(findings), counts)
-    lines += ["", "## Report Integrity", "",
-              ("> ✓ **Consistent** — " if _integ["ok"] else "> ⚠ **Contradictions found** — ")
-              + _ri.summary_line(_integ)]
+    # Three states, not two — see the HTML renderer: `ok` is True whenever no ERROR exists, which a
+    # report with nothing to check satisfies for free, and a green "Consistent" over zero applied
+    # checks is a verdict on nothing. One projection, two renderers.
+    _n_applied = _integ.get("checks_run", 0)
+    _badge = ("> — **Nothing to cross-check** — " if not _n_applied
+              else ("> ✓ **Consistent** — " if _integ["ok"] else "> ⚠ **Contradictions found** — "))
+    lines += ["", "## Report Integrity", "", _badge + _ri.summary_line(_integ)]
     for _i in _integ["issues"]:
         lines.append(f"> - `{_i['check']}` — {_i['detail']}")
+    if _integ.get("checks_skipped"):
+        lines.append("> - _Not applicable to this report: %s._" % ", ".join(
+            "%s (%s)" % (s["check"], s["reason"]) for s in _integ["checks_skipped"]))
     return "\n".join(lines)
 
 
@@ -3401,14 +3408,30 @@ def generate_html_report(program: str, findings: list, scope: dict,
     import report_integrity as _ri
     integ = _ri.check_report_consistency(findings, leads, rk, counts, attack_surface, tool_ledger)
     _clean = not integ["issues"]
-    _ic = "#1f9d6b" if integ["ok"] else "#c0392b"
+    # A GREEN TICK OVER ZERO APPLIED CHECKS IS THE WHOLE DEFECT, not a cosmetic detail. `ok` is True
+    # whenever no ERROR exists, which an empty report satisfies for free, so "✓ Consistent" rendered
+    # beside a sentence that (before this) claimed 10 checks had passed over no data at all. The
+    # badge now has a third state, and it is deliberately NOT green.
+    _n_applied = integ.get("checks_run", 0)
+    _ic = ("#7d8590" if not _n_applied else ("#1f9d6b" if integ["ok"] else "#c0392b"))
+    _badge = ("— Nothing to cross-check" if not _n_applied
+              else ("✓ Consistent" if _clean
+                    else "⚠ " + str(len([i for i in integ["issues"] if i["level"] == "error"])) + " contradiction(s)"))
+    _skip_html = ""
+    if integ.get("checks_skipped"):
+        # Named, not silently dropped: a smaller numerator with no denominator and no reasons would
+        # trade an overclaim for a mystery.
+        _skip_html = ("<p class='sub'>Not applicable to this report: " + e(", ".join(
+            "%s (%s)" % (s["check"], s["reason"]) for s in integ["checks_skipped"])) + ".</p>")
     integrity_html = (
         "<h2 id='integrity'>Report Integrity</h2>"
         f"<p class='sub'>An automated cross-check that the headline metrics, risk score and "
-        f"confirmed/unconfirmed statuses do not contradict each other. {integ['checks_run']} checks run.</p>"
+        f"confirmed/unconfirmed statuses do not contradict each other. "
+        f"{_n_applied} of {integ.get('checks_total', _n_applied)} checks had data to examine in this "
+        f"report; the count describes THIS report, not the size of the checklist.</p>"
         f"<div class='biz' style='border-left-color:{_ic}'>"
-        f"<p><b style='color:{_ic}'>{'✓ Consistent' if _clean else '⚠ '+str(len([i for i in integ['issues'] if i['level']=='error']))+' contradiction(s)'}</b> — "
-        f"{e(_ri.summary_line(integ))}</p>" +
+        f"<p><b style='color:{_ic}'>{_badge}</b> — "
+        f"{e(_ri.summary_line(integ))}</p>" + _skip_html +
         ("" if _clean else "<ul>" + "".join(
             f"<li><code>{e(i['check'])}</code> — {e(i['detail'])}</li>" for i in integ["issues"]) + "</ul>") +
         "</div>")
