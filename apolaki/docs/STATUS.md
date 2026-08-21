@@ -15,7 +15,8 @@ reproducible release blockers.
 
 ## The release-invariant matrix — measured at `9c8f3a9`
 
-    full suite   3474 passed / 11 skipped / 12 xfailed / 0 failed   isolated snapshot at 977c4b2
+    full suite   3507 passed / 11 skipped / 12 xfailed / 0 failed   isolated snapshot at 2957031
+                 +33 over 3474 accounts exactly: the three new guards define 8+17+8 = 33 tests
     gates        queue_gate OK (79 headers, 60 hashes) · bake_drift OK · liveness 17/17
 
 | # | invariant | measured | denominator |
@@ -26,9 +27,9 @@ reproducible release blockers.
 | I-3 | shared rate policy | ✅ 0 ungated | 178 production modules |
 | I-8 | guard scans its claimed scope | ✅ 4 of 4 | one was RENAMED not widened, deliberately |
 | I-10 | strict xfail has reason + ticket | ✅ 12 of 12 | AST count, not `grep -c` |
-| I-4 | control per confirmed finding | ❌ **303** | of 1391 confirmed; 716 more are static, different meaning |
-| I-5 | no swallowed clean | ❌ **562 of 917** | 61.3% of exception handlers |
-| I-9 | caps preserve highest-value ordering | ❌ unmeasured | — |
+| I-4 | control per confirmed finding | ⏳ CLAIMED closed, NOT yet verified | was 303 runtime of 1391; guard `test_runtime_control_invariant` 17 tests |
+| I-5 | no swallowed clean | ⏳ CLAIMED closed, NOT yet verified | was 562 of 917 handlers; guard `test_silent_failure_invariant` 8 tests |
+| I-9 | caps preserve highest-value ordering | ⏳ CLAIMED closed, NOT yet verified | never measured by us; guard `test_cap_ordering_invariant` 8 tests |
 | I-11 | reachable / framework-invoked / retained-with-reason | ❌ **44 vs ceiling 37** | pin held; three lanes declined to force it |
 
 **I-2b is the invariant this week earned.** I-2 counted EDGES and measured 0 unowned *correctly* —
@@ -40,12 +41,19 @@ that lives in a value.**
 
 | lane | scope | state |
 |---|---|---|
-| Codex (external) | I-4 · I-5 · I-9 | leased; `tools/planner/agent/report/bie/codeintel/zap_client/browser_engine/*_tool` |
-| Claude | — | FREE. I-2b shipped; Q-090-B/C are the next candidate |
+| Codex (external) | I-4 · I-5 · I-9 | DELIVERED and merged `55016f4`; unavailable for the rest of the week |
+| Claude A | verify the 3 new guards by mutation, then Q-090-D | LIVE |
+| Claude B | I-11: the 7 uncalled, then as many of the 37 as resolve | LIVE |
 | Coordinator | queue · STATUS · integration · mutation-verification of every returned lane | — |
 
-**No third implementation lane until one of those returns green.** NOTE for the Codex lease: the
-Coordinator has taken `main.py:confirm_lead` (Q-090-A), so that function is carved out of it.
+**CODEX IS OUT FOR THE WEEK.** Its value was INDEPENDENCE, and a Claude lane I brief is not independent
+of me. The substitute is not another agent -- it is mutation on every claim, including my own, with the
+same suspicion I apply to a returned lane. Five of the last ten instrument errors here were mine and
+every one was caught by RUNNING something, not by reasoning about it.
+
+**Nothing merged is trusted until mutated.** I-4/I-5/I-9 are marked CLAIMED, not closed, precisely
+because 1690 lines and three new guards arrived with no independent check. A guard that cannot fail is
+worse than no guard: it converts an open question into a false assurance, and four have shipped here.
 
 ## The recurring shape, five instances in one week
 
