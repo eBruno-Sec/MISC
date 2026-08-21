@@ -91,6 +91,16 @@ cur = _exec("UPDATE findings SET data=? WHERE mission_id=? AND id=?", ...)
 return bool(getattr(cur, "rowcount", 0))
 ```
 
+**Reachability, graded — checked rather than assumed.** `findings_gate.is_lead` reads only
+`confidence`, and no caller below can set it: `PUT /findings` excludes `confidence` from
+`_EDITABLE_FINDING_KEYS`, `capture_finding_poc` merges only PoC fields, and `confirm_lead` hardcodes
+`"confidence": "confirmed"`. So the **REROUTE** verdict is not reachable from any of the three
+today — **the reproduced defect in all three is the SCOPE (#8) REFUSAL**, reached whenever a mission
+scope narrows after a row was written (retest, operator correction, archive replay), plus the
+`rowcount == 0` case for C. The reroute is a live outcome of `update_finding` itself and stays in
+scope for the fix, because the thing that keeps it unreachable is a `frozenset` in a different
+function, not anything the return type says.
+
 ### Q-090-A — `POST /leads/{sid}/{lid}/confirm` destroys an off-scope lead and reports promotion
 
 `main.py:3926` `fid = db.add_finding(session_id, finding)`, then the lead is removed from
@@ -170,10 +180,20 @@ exactly as `db.FindingWriteId` is a `str` subclass. Two options; **B is recommen
     ...
 ```
 
-The early return happens **before** `ctx["leads"]` is rewritten, so the lead survives. Note the
-second bug this exposes: on the reroute path `add_lead` appends to a **freshly read** context while
-line 3927 writes back the **stale** `ctx` captured at the top of the function — so even a reroute
-loses the appended copy. Returning early avoids both.
+The early return happens **before** `ctx["leads"]` is rewritten, so the lead survives.
+
+**Which verdict is actually reachable here — checked, because the fix should not be sold on a path
+that cannot run.** `confirm_lead` builds `candidate` with `"confidence": "confirmed"` hardcoded
+(`main.py:3888`), and `findings_gate.is_lead` reads **only** `confidence` (`findings_gate.py:27` —
+`_conf` looks at no other key). So the **REROUTE verdict is UNREACHABLE from `confirm_lead`**; the
+reproduced defect is the **REFUSED** (SCOPE #8) verdict alone. The `if not write.stored` form above
+covers both, which is correct and costs nothing, and the `write.verdict == db.REFUSED` branch is the
+one that will actually fire.
+
+Latent, on the reroute path only, therefore currently unreachable and **NOT reproduced**: `add_lead`
+appends to a **freshly read** context while `main.py:3927` writes back the **stale** `ctx` captured
+at the top of the function, so a reroute would lose the appended copy. Recorded so a future change to
+`candidate`'s confidence does not walk into it; returning early avoids it either way.
 
 ```python
 # main.py: update_finding endpoint, replacing lines 3789-3791

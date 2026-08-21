@@ -121,8 +121,9 @@ _KNOWN_OPEN = {
 _DISTINGUISHED = {
     ("db.py", "update_finding", "discarded-return", "db:add_lead"):
         "`add_lead(mid, finding)` inside update_finding's TRUTH (#7) branch. add_lead's no-write "
-        "outcome requires a missing mission row, and `get_finding(mid, fid)` three lines above has "
-        "already proved this mission exists. The id it returns is not reported anywhere.",
+        "outcome requires a missing missions row, and `get_finding(mid, fid)` three lines above has "
+        "returned a findings row for this mission -- which `delete_mission` cannot leave behind, "
+        "since it DELETEs findings BEFORE missions (db.py:140-142). The id is not reported anywhere.",
     ("main.py", "engage", "status-report", "main:_run_source_review"):
         "`'status': 'created'` in /engage's response is the MISSION lifecycle state, not a claim "
         "about the source review -- which publishes its own `stored_findings`, made honest by Q-089 "
