@@ -29,6 +29,11 @@ Fixtures here are copied from reality: the registry is a real `ToolRegistry`, th
 `httpx.Response` objects, and the persona/session shapes are the ones
 tests/test_authz_matrix_driver.py and tests/test_session_lifecycle.py already use
 ({"Cookie": "s=A"}, {"Authorization": "Bearer ..."}).
+
+STRUCTURAL-RATCHET SCOPE: the two AST controls below protect ToolRegistry's concrete identity merge
+boundary in tools.py. They do not claim that every class in the repository with an attribute named
+`_sessions` participates in that mechanism. Their detectors accept an explicit path so the rule can be
+falsified against a planted sibling module without overstating the production scope.
 """
 from __future__ import annotations
 
@@ -185,10 +190,10 @@ def test_an_unknown_persona_degrades_to_anonymous_never_to_the_mission():
 
 # ── the ratchet: a new raw-global reference must not appear ─────────────────────────────────────
 
-def _tools_ast():
+def _toolregistry_identity_ast(path=None):
     import ast
     import pathlib
-    src = pathlib.Path(tools.__file__).read_text(encoding="utf-8")
+    src = pathlib.Path(path or tools.__file__).read_text(encoding="utf-8")
     tree = ast.parse(src)
     owner = {}
     for fn in ast.walk(tree):
@@ -198,13 +203,10 @@ def _tools_ast():
     return src, tree, owner
 
 
-def test_self_sessions_is_read_through_exactly_one_accessor():
-    """RATCHET. Reading `self._sessions` raw yields a plain dict, which the transport silently
-    upgrades to the mission session -- the Q-032 defect. `_identity` is the only sanctioned read;
-    writes are unaffected. A new raw read fails here with the reason, not a diff.
-    """
+def _raw_toolregistry_session_reads(path=None):
+    """Raw per-role reads that bypass ToolRegistry._identity in one source module."""
     import ast
-    src, tree, owner = _tools_ast()
+    _src, tree, owner = _toolregistry_identity_ast(path)
 
     def _is_sessions(n):
         return (isinstance(n, ast.Attribute) and n.attr == "_sessions"
@@ -230,22 +232,25 @@ def test_self_sessions_is_read_through_exactly_one_accessor():
         fn = owner.get(node, "<module>")
         if fn not in ("_identity",):
             bad.append("%s (line %d)" % (fn, node.lineno))
+    return bad
+
+
+def test_toolregistry_reads_self_sessions_through_exactly_one_accessor():
+    """TOOLREGISTRY RATCHET. Reading `self._sessions` raw yields a plain dict, which the transport
+    silently upgrades to the mission session. `_identity` is the only sanctioned read in tools.py;
+    writes are unaffected. A new raw read fails here with the reason, not a diff.
+    """
+    bad = _raw_toolregistry_session_reads()
     assert not bad, (
         "raw read of self._sessions outside the _identity accessor: %s. Use self._identity(role) -- "
         "it returns an Identity, which the transport will not merge the mission session into. A "
         "plain dict from a raw read looks identical and is contaminated at the wire." % bad)
 
 
-def test_the_mission_session_is_merged_with_caller_headers_in_one_sanctioned_place():
-    """RATCHET. The contaminating shape is `{**self.session_headers, **caller_headers}`: it makes a
-    request that is BOTH the mission and somebody else. `_merge_identity` is the one place allowed
-    to decide that, because it is the one place that honours `Identity`.
-
-    `_run_race` is allowlisted: it merges the mission session with explicitly supplied `inp` headers
-    and never resolves a persona role, so it is a mission-identity probe by construction.
-    """
+def _toolregistry_identity_merges(path=None):
+    """Mission/caller identity merges outside ToolRegistry's sanctioned functions."""
     import ast
-    src, tree, owner = _tools_ast()
+    src, tree, owner = _toolregistry_identity_ast(path)
     allowed = {"_merge_identity", "_run_race"}
     bad = []
     for node in ast.walk(tree):
@@ -262,10 +267,48 @@ def test_the_mission_session_is_merged_with_caller_headers_in_one_sanctioned_pla
                 if fn not in allowed:
                     bad.append("%s (line %d)" % (fn, node.lineno))
                 break
+    return bad
+
+
+def test_toolregistry_merges_mission_identity_in_one_sanctioned_place():
+    """TOOLREGISTRY RATCHET. `{**self.session_headers, **caller_headers}` can put two identities on
+    one request. `_merge_identity` is the one place allowed to decide that because it honours
+    `Identity`; `_run_race` is a mission-identity probe by construction and never resolves a persona.
+    """
+    allowed = {"_merge_identity", "_run_race"}
+    bad = _toolregistry_identity_merges()
     assert not bad, (
         "the mission session is merged with caller-supplied headers outside %s: %s. Route the "
         "request through self._merge_identity(headers) so an Identity (including the empty, "
         "anonymous one) is honoured instead of being silently authenticated." % (sorted(allowed), bad))
+
+
+def test_a_raw_identity_read_planted_in_an_unseen_module_is_rejected(tmp_path):
+    """NEGATIVE CONTROL. This module is outside the old hard-coded tools.__file__ scope."""
+    planted = tmp_path / "new_transport.py"
+    planted.write_text(
+        "class ToolRegistryExtension:\n"
+        "    def leak(self, role):\n"
+        "        return self._sessions.get(role)\n",
+        encoding="utf8",
+    )
+    bad = _raw_toolregistry_session_reads(planted)
+    assert bad == ["leak (line 3)"], (
+        "the ToolRegistry identity detector did not reject the planted raw session read")
+
+
+def test_an_identity_merge_planted_in_an_unseen_module_is_rejected(tmp_path):
+    """NEGATIVE CONTROL for the second identity-bypass shape, outside tools.py."""
+    planted = tmp_path / "new_transport.py"
+    planted.write_text(
+        "class ToolRegistryExtension:\n"
+        "    def leak(self, caller_headers):\n"
+        "        return {**self.session_headers, **caller_headers}\n",
+        encoding="utf8",
+    )
+    bad = _toolregistry_identity_merges(planted)
+    assert bad == ["leak (line 3)"], (
+        "the ToolRegistry identity detector did not reject the planted two-identity merge")
 
 
 def test_two_personas_do_not_contaminate_each_other(monkeypatch):
