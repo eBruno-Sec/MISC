@@ -148,6 +148,63 @@ def delete_mission(mid: str) -> None:
 #:   SCHEMA (#6)  `normalize`  — reproduction_steps is ALWAYS a list; safe defaults for always-read fields
 #:   SCOPE  (#8)  `off_scope`  — a provably out-of-scope target is never persisted (fail-open otherwise)
 #:   TRUTH  (#7)  `is_lead`    — a lead-confidence item goes to the leads list, never the findings table
+#
+#: WHAT A WRITE ACTUALLY DID (Q-089). The three invariants above produce three genuinely different
+#: outcomes, and for years they were reported through ONE `str`: the finding id, the LEAD id, or "".
+#: A refusal was distinguishable (falsy); a REROUTE was not — it returns a truthy id exactly like a
+#: store, so `sum(1 for f in fs if db.add_finding(...))` counted rows that were never written and
+#: `/engage` told the operator a source-derived finding was stored when the table held nothing.
+#: Invariant I-2 measured 0 unowned paths and was RIGHT: the ownership is not missing, the OUTCOME
+#: was ambiguous at the boundary. These three names are that outcome's vocabulary.
+STORED = "stored"        #: a row now exists in the findings table
+REROUTED = "rerouted"    #: TRUTH (#7) — the item went to the mission's leads list; NO findings row
+REFUSED = "refused"      #: SCOPE (#8) — provably off-scope; nothing was written anywhere
+
+
+class FindingWriteId(str):
+    """The id `add_finding` returns, carrying WHAT HAPPENED to the write.
+
+    It IS a `str` — deliberately, and that is the whole design. TWENTY-ONE production call sites read
+    this value as an id (`f["id"] = db.add_finding(...)`), json-serialise it, bind it to sqlite,
+    compare and hash it; a wrapper object would have broken every one of them silently, in a way a
+    green suite would not have shown. Subclassing `str` leaves all of that byte-identical and adds
+    the one thing the caller could not previously ask:
+
+        write = db.add_finding(mid, finding)
+        if write.stored:                  # a ROW EXISTS — not merely "something happened"
+            ...
+        write.verdict                     # STORED | REROUTED | REFUSED
+
+    TRUTHINESS IS UNCHANGED ON PURPOSE. A rerouted lead is still truthy (it is a real lead id, and
+    `tests/test_findings_gate.py` pins that), so `if db.add_finding(...)` still answers the OLD
+    question — "did anything happen" — which is never the same as "was it stored". That the old
+    question is asked NOWHERE in production is a repository-wide absence, proved by AST census in
+    `tests/test_finding_write_verdict.py`, not by hoping the type change caught every caller."""
+
+    #: (no __slots__: CPython rejects a nonempty __slots__ on a subtype of a variable-length builtin)
+    def __new__(cls, value: str, verdict: str):
+        self = super().__new__(cls, value or "")
+        self.verdict = verdict
+        return self
+
+    def __reduce__(self):
+        """Rebuild through BOTH arguments, so copy/deepcopy/pickle keep the verdict.
+
+        MEASURED, and it is the reason this method exists: `copy` reconstructs a `str` subclass by
+        calling `cls.__new__(cls, <the string>)`, so without this
+        `copy.deepcopy({"id": db.add_finding(...)})` raised
+        `TypeError: __new__() missing 1 required positional argument: 'verdict'`. That is exactly the
+        back-compat break subclassing `str` was chosen to avoid, and no findings test would have
+        reached it — nothing in production deepcopies a finding today. The one that does it next year
+        would have found it instead."""
+        return (self.__class__, (str(self), self.verdict))
+
+    @property
+    def stored(self) -> bool:
+        """True only when a row was INSERTed into the findings table."""
+        return self.verdict == STORED
+
+
 def _gate(mid: str, finding: dict):
     """Evaluate all three invariants for a write of `finding` into mission `mid`.
 
@@ -165,23 +222,28 @@ def _gate(mid: str, finding: dict):
     return "admit", finding
 
 
-def add_finding(mid: str, finding: dict) -> str:
+def add_finding(mid: str, finding: dict) -> FindingWriteId:
     """Persist a CONFIRMED finding — a write chokepoint, so the central finding-gate is enforced here
     for EVERY producer (deterministic tools, the model's store_finding, API paths):
       * schema-normalize (reproduction_steps -> list, safe defaults)   [#6]
       * REJECT a finding whose target is provably out of the mission scope (returns "" — not written) [#8]
       * ROUTE a lead-confidence finding to the mission's leads list, never the confirmed table          [#7]
-    Fail-open on scope only when scope is absent / the target has no host (we block only proven-off-scope)."""
+    Fail-open on scope only when scope is absent / the target has no host (we block only proven-off-scope).
+
+    RETURNS A `FindingWriteId` — a `str` id (unchanged for every caller that reads it as one) that
+    also carries `.verdict` / `.stored`. Q-089: only ONE of the three outcomes above leaves a row, so
+    a caller that reports a COUNT must ask `.stored`; the truthiness of the id cannot answer it,
+    because a reroute returns the lead's own id."""
     verdict, finding = _gate(mid, finding)
     if verdict == "reject":
-        return ""                                        # off-scope: refuse to persist (safety #8)
-    if verdict == "lead":
-        return add_lead(mid, finding)                    # not a confirmed finding -> leads (truth #7)
+        return FindingWriteId("", REFUSED)                # off-scope: refuse to persist (safety #8)
+    if verdict == "lead":                                 # not a confirmed finding -> leads (truth #7)
+        return FindingWriteId(add_lead(mid, finding), REROUTED)
     fid = finding.get("id") or uuid.uuid4().hex[:12]
     finding["id"] = fid
     _exec("INSERT OR REPLACE INTO findings VALUES(?,?,?,?)",
           (fid, mid, json.dumps(finding), _now()))
-    return fid
+    return FindingWriteId(fid, STORED)
 
 
 def add_lead(mid: str, lead: dict) -> str:

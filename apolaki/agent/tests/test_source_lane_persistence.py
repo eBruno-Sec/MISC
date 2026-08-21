@@ -231,18 +231,15 @@ def test_a_source_derived_finding_gets_no_curl_reproduction():
         "a static call-site finding was given an HTTP reproduction command")
 
 
-@pytest.mark.xfail(strict=True, reason=(
-    "Q-089 (owner: unassigned). MEASURED 2026-08-18 against the running agent. `db.add_finding` returns a TRUTHY id from "
-    "`add_lead` when the TRUTH invariant reroutes a lead-confidence finding to the mission's leads "
-    "list, and `_run_source_review` counts `sum(1 for f in findings if db.add_finding(...))`. A "
-    "canonical source finding carrying confidence='lead' therefore yields status=complete, "
-    "stored_findings=1, rejected_findings=0 -- while the findings table holds 0 rows and the leads "
-    "list holds 1. The /engage response and the mission context both tell the operator a "
-    "source-derived finding was stored when none was. LATENT today because "
-    "`codereview._source_finding` hard-codes confidence='confirmed', so no production producer can "
-    "emit this shape; `_canonical_source_finding` does not constrain confidence, so any future one "
-    "can. Patch proposed in docs/handoff/source_proof.md -- count what the table accepted, and "
-    "report rerouted leads under their own key rather than as stored findings."))
+# Q-089 CLOSED 2026-08-20 -- the strict xfail this test carried is RETIRED here, in the commit that
+# fixed the defect, because a retired marker and a drifted measurement are indistinguishable once
+# they are in separate commits. The defect was in the RETURN TYPE, not in this counter: `add_finding`
+# reported three different outcomes (INSERT / reroute-to-leads / off-scope refusal) through one `str`,
+# and only the refusal was distinguishable, so `sum(1 for f in findings if db.add_finding(...))`
+# counted a rerouted lead as a stored row. It now returns `db.FindingWriteId` -- still a `str` for the
+# 20 call sites that read it as an id -- carrying `.verdict` / `.stored`, and this lane counts
+# `.stored`. Full evidence, including the repository-wide census proving no other production caller
+# asked the truthiness question: docs/handoff/claim_integrity.md and tests/test_finding_write_verdict.py.
 def test_stored_findings_must_never_count_a_finding_the_table_did_not_accept(monkeypatch):
     _fresh_db("q044lead")
     _stub_tree(monkeypatch, [dict(CANONICAL, confidence="lead")])

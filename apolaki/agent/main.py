@@ -456,14 +456,25 @@ async def _run_source_review(session_id: str, source_root: Optional[str]) -> dic
                            "source-derived markers" % rejected),
                 )
             else:
-                stored = sum(1 for finding in findings if db.add_finding(session_id, finding))
+                # Q-089: ASK THE WRITER WHAT IT DID. `sum(1 for f in findings if db.add_finding(...))`
+                # counted the truthiness of the returned id, and a lead-confidence finding rerouted to
+                # the mission's leads list (TRUTH #7) returns the LEAD's id — truthy, with no row in
+                # the findings table. Measured: status=complete, stored_findings=1, 0 rows, 1 lead.
+                # `.stored` is true for exactly one of the three outcomes, so the count is the table's.
+                writes = [db.add_finding(session_id, finding) for finding in findings]
+                stored = sum(1 for w in writes if w.stored)
+                rerouted = sum(1 for w in writes if w.verdict == db.REROUTED)
+                refused = sum(1 for w in writes if w.verdict == db.REFUSED)
                 state["stored_findings"] = stored
                 if stored != len(findings):
+                    # A reroute is CORRECT behaviour, not a persistence failure, so the message names
+                    # it rather than filing it under a bare "rejected" the operator cannot interpret.
                     state.update(
                         status="error",
                         rejected_findings=len(findings) - stored,
-                        error=("source review persistence rejected %d of %d canonical finding(s)"
-                               % (len(findings) - stored, len(findings))),
+                        error=("source review stored %d of %d canonical finding(s): %d rerouted to "
+                               "the mission's leads (lead confidence, no findings row), %d refused "
+                               "as off-scope" % (stored, len(findings), rerouted, refused)),
                     )
                 else:
                     state["status"] = "complete"
@@ -3431,7 +3442,9 @@ async def cloud_posture_ingest(provider: str, session_id: str, account: str = "l
                 "posture": p["posture"], "reason": "context persistence FAILED — no findings written "
                                                    "(context-first abort, no orphaned state)",
                 "results": {"findings_attempted": len(findings), "findings_stored": 0,
-                            "findings_deduped": 0, "findings_failed": 0, "context_persisted": False},
+                            "findings_deduped": 0, "findings_failed": 0,
+                            "findings_rerouted_to_leads": 0, "findings_refused_off_scope": 0,
+                            "context_persisted": False},
                 "manifest": p["manifest"]}
     # context OK -> now write findings, deduped by (provider, account_id, title, target) (CHAD #1).
     # raw: a DEDUPE key set over (title, target, provenance, cloud_account_id) — the accessor's own
@@ -3439,6 +3452,7 @@ async def cloud_posture_ingest(provider: str, session_id: str, account: str = "l
     existing = {(x.get("title"), x.get("target")) for x in (db.get_findings(session_id) or [])
                 if str(x.get("provenance", "")).startswith(prov) and x.get("cloud_account_id") == account_id}
     attempted, stored, deduped, failed = len(findings), 0, 0, 0
+    rerouted, refused = 0, 0
     for f in findings:
         key = (f.get("title"), f.get("target"))
         f["provenance"] = prov_tag
@@ -3449,9 +3463,18 @@ async def cloud_posture_ingest(provider: str, session_id: str, account: str = "l
             deduped += 1
             continue
         try:
-            db.add_finding(session_id, f)
+            # Q-089: `findings_stored` is published to the operator, so it counts ROWS. The gate can
+            # reroute a lead-confidence posture finding to the leads list or refuse an off-scope one;
+            # neither writes a row, and neither is a `failed` write. Counting the call instead of the
+            # outcome is how a number nobody wrote becomes a number everybody quotes.
+            write = db.add_finding(session_id, f)
             existing.add(key)
-            stored += 1
+            if write.stored:
+                stored += 1
+            elif write.verdict == db.REROUTED:
+                rerouted += 1
+            else:
+                refused += 1
         except Exception:
             failed += 1
     live_graph_projected = False
@@ -3470,6 +3493,8 @@ async def cloud_posture_ingest(provider: str, session_id: str, account: str = "l
             "posture": p["posture"],
             "results": {"findings_attempted": attempted, "findings_stored": stored,
                         "findings_deduped": deduped, "findings_failed": failed,
+                        "findings_rerouted_to_leads": rerouted,
+                        "findings_refused_off_scope": refused,
                         "context_persisted": True, "live_graph_projected": live_graph_projected},
             "manifest": p["manifest"], "summary": p["summary"]}
 
@@ -4046,12 +4071,26 @@ async def restore(payload: dict):
     db.create_mission(new_id, mm.get("program", "Imported"), mm.get("mode", "active"),
                       mm.get("objective", ""), payload["scope"], ctx)
     db.update_mission(new_id, status="complete", phase="report")
+    # Q-089: a restore is not a copy. The gate re-evaluates every row against the RESTORED mission's
+    # scope, so a lead-confidence row goes to the leads list and an off-scope row is refused — both
+    # correct, and both previously invisible: the response said `imported: true` and named no number,
+    # so a backup of 40 findings could restore 12 and read as a success.
+    restored, rerouted, refused = 0, 0, 0
     for f in payload.get("findings", []):
         f.pop("id", None)
-        db.add_finding(new_id, f)
+        write = db.add_finding(new_id, f)
+        if write.stored:
+            restored += 1
+        elif write.verdict == db.REROUTED:
+            rerouted += 1
+        else:
+            refused += 1
     for n in payload.get("notes", []):
         db.add_note(new_id, n.get("body", ""))
-    return {"session_id": new_id, "imported": True}
+    return {"session_id": new_id, "imported": True,
+            "findings_in_backup": len(payload.get("findings", []) or []),
+            "findings_restored": restored, "findings_rerouted_to_leads": rerouted,
+            "findings_refused_off_scope": refused}
 
 
 # ── startup ──────────────────────────────────────────────────────
