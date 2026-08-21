@@ -4,6 +4,14 @@
 this file. **Baseline:** `0f2d54c` — 3445 passed / 11 skipped / 12 xfailed / 0 failed.
 **Guard commit:** `aa01373`.
 
+**Full suite, twice, on two isolated committed snapshots — `PYTEST_EXIT=0`, zero `FAILED`/`ERROR`
+(`-rfE`), both identical:** `3470 passed / 11 skipped / 15 xfailed / 0 failed / 0 errors / 0 xpassed`
+(counted from the progress stream; pytest's summary line does not survive the redirect in this
+environment). Against the 3445/11/12/0 baseline the delta is **+25 passed, +3 xfailed** — exactly
+this lane's 25 passing guard tests and 3 Q-090 reproductions, and nothing else moved. Snapshot 1 was
+`aa01373`; snapshot 2 was `3e0e945` (this file's corrections plus two prose strings in the guard),
+run to prove the corrections changed no behaviour.
+
 ---
 
 ## 1. Why I-2 could not see Q-089
