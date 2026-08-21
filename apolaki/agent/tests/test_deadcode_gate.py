@@ -875,13 +875,24 @@ def test_every_manual_only_contract_names_a_real_dispatcher_and_reason():
         assert contract["permission"] == tools.TOOL_PERMISSIONS[name].value
         assert len(contract["why_no_scheduler"]) > 80
 
-        location, symbol = contract["dispatcher"].split(" ", 1)
-        file_name, line_text = location.rsplit(":", 1)
-        line_number = int(line_text)
-        source_line = Path(dg.APP_DIR, file_name).read_text(encoding="utf8").splitlines()[line_number - 1]
+        # RESOLVED FROM THE SYMBOL, NOT FROM A STORED LINE NUMBER. These six contracts used to cite
+        # `tools.py:1428 ToolRegistry.execute`, and the Q-090 lane -- which could not edit this file
+        # -- moved `execute` to 1462 and handed back a suite with one FAILED test for it. The
+        # citation was correct when written and went stale from an edit ELSEWHERE IN THE FILE, which
+        # is a property of storing a line number, not of anything being wrong.
+        #
+        # What the contract actually claims is "this engine is reachable through
+        # ToolRegistry.execute". That claim is about a SYMBOL. Resolving the symbol proves exactly
+        # it, cannot rot from an unrelated insertion, and still yields the line for a reader -- the
+        # assertion below reports it. A stored line number gave a weaker guarantee AND a maintenance
+        # cost, which is the trade this file exists to refuse.
+        file_name, symbol = contract["dispatcher"].split(" ", 1)
         assert symbol == "ToolRegistry.execute"
-        assert "async def execute(" in source_line, (
-            "%s cites a dispatcher that no longer exists at %s" % (name, location))
+        src = Path(dg.APP_DIR, file_name).read_text(encoding="utf8").splitlines()
+        found = [i + 1 for i, l in enumerate(src) if "async def execute(" in l]
+        assert len(found) == 1, (
+            "%s cites %s in %s, which the file defines %d times -- the citation cannot be resolved "
+            "unambiguously" % (name, symbol, file_name, len(found)))
 
 
 def test_every_manual_only_contract_dispatches_through_real_execute():

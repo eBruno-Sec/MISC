@@ -88,7 +88,7 @@ MANUAL_ONLY_TOOL_CONTRACTS = {
     "benchmark_lab": {
         "permission": "active",
         "kind": "operator-utility",
-        "dispatcher": "tools.py:1428 ToolRegistry.execute",
+        "dispatcher": "tools.py ToolRegistry.execute",
         "why_no_scheduler": (
             "Known-lab scoring is an operator benchmark action, not target detection. A production "
             "mission cannot infer that it is authorized to invoke a lab completion oracle."),
@@ -96,7 +96,7 @@ MANUAL_ONLY_TOOL_CONTRACTS = {
     "list_workflows": {
         "permission": "passive",
         "kind": "operator-utility",
-        "dispatcher": "tools.py:1428 ToolRegistry.execute",
+        "dispatcher": "tools.py ToolRegistry.execute",
         "why_no_scheduler": (
             "This lists operator-selectable workflow metadata. The deterministic planner schedules "
             "run_workflow directly and has no reason to spend a target step listing its own packs."),
@@ -104,7 +104,7 @@ MANUAL_ONLY_TOOL_CONTRACTS = {
     "mission_intel": {
         "permission": "passive",
         "kind": "operator-utility",
-        "dispatcher": "tools.py:1428 ToolRegistry.execute",
+        "dispatcher": "tools.py ToolRegistry.execute",
         "why_no_scheduler": (
             "This is a read-only operator/model view of the registry's current intelligence. The "
             "deterministic agent consumes that state in-process rather than scheduling a tool read."),
@@ -112,7 +112,7 @@ MANUAL_ONLY_TOOL_CONTRACTS = {
     "mission_state": {
         "permission": "passive",
         "kind": "operator-utility",
-        "dispatcher": "tools.py:1428 ToolRegistry.execute",
+        "dispatcher": "tools.py ToolRegistry.execute",
         "why_no_scheduler": (
             "This is a read-only operator/model view of investigation state. The deterministic "
             "agent owns that state directly, so scheduling a tool call would only serialize it."),
@@ -120,7 +120,7 @@ MANUAL_ONLY_TOOL_CONTRACTS = {
     "run_external_surface": {
         "permission": "active",
         "kind": "operator-selected-engine",
-        "dispatcher": "tools.py:1428 ToolRegistry.execute",
+        "dispatcher": "tools.py ToolRegistry.execute",
         "why_no_scheduler": (
             "External expansion can query third-party intelligence and fetch the in-scope favicon. "
             "It remains an explicit operator-selected expansion rather than a universal mission step."),
@@ -128,7 +128,7 @@ MANUAL_ONLY_TOOL_CONTRACTS = {
     "run_hash_crack": {
         "permission": "intrusive",
         "kind": "dependency-blocked-engine",
-        "dispatcher": "tools.py:1428 ToolRegistry.execute",
+        "dispatcher": "tools.py ToolRegistry.execute",
         "why_no_scheduler": (
             "The shipped agent image contains neither hashcat nor John, so deterministic scheduling "
             "would guarantee a visible skipped dispatch. It remains manual for runtimes that add an "
