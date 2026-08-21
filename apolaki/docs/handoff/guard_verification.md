@@ -1,0 +1,249 @@
+# Guard verification lane — Q-090 (independent, Breaker-first)
+
+Baseline: HEAD `55016f4` (merge of `codex/q090`). Nothing in this document is read from
+`docs/handoff/codex_q090.md`; every number below was re-measured here, and every mutant was
+verified to have landed before its result was believed.
+
+## Method
+
+All runs use a throwaway container over an **immutable snapshot** of the agent tree taken with
+`git archive HEAD apolaki/agent` (8.1 MB, 178 top-level production modules). `apolaki-agent-1` was
+never touched, nothing was `docker cp`-ed into it, and no image was rebuilt. Mutants each get their
+own snapshot directory; a directory is never edited while a container has it mounted.
+
+```
+MSYS_NO_PATHCONV=1 docker run --rm --network apolaki_default \
+  -v "<scratch>/snap_<id>:/app" -w /app apolaki-agent \
+  python -m pytest <files> -p no:cacheprovider -rfE
+```
+
+Every patch is applied byte-wise with CRLF preserved and asserted to match **exactly once**, then
+diffed against the pristine snapshot so the diff is the mutation and nothing else, then verified a
+second time *through the imported module inside the run container* (`inspect.getsource` /  calling
+the mutated function) — because a mutant that "survives" a mutation that never applied is a false
+all-clear, and that has happened seven times in this repo in three days.
+
+Pristine baseline for the three guard files:
+
+```
+tests/test_silent_failure_invariant.py tests/test_runtime_control_invariant.py \
+tests/test_cap_ordering_invariant.py   ->  33 passed in 14.53s, EXIT=0
+```
+
+## Result summary
+
+| # | Guard | Mutation planted in production code | Outcome |
+|---|-------|--------------------------------------|---------|
+| M1 | I-5 | `tools.py` `_run_enumerate_ids`: `_swallow` recorder reverted to a bare `except:` | **KILLED** |
+| M2 | I-4 | `xss_tool.reflection_finding`: emitter drops its `negative_controls` artifact | **KILLED** |
+| M3a | I-9 | `agent.sweep_targets`: raw `targets[:7]` planted (syntactic) | **KILLED** (static) |
+| M3a2 | I-9 | `crawl.bfs_frontier`: raw `frontier[:5]` in a module owning no contract | **KILLED** (static) |
+| M3b | I-9 | `planner._rank_endpoints` returns discovery order (cap unchanged) | **KILLED** (execution) |
+| M3c | I-9 | `agent.sweep_targets`: `list(targets)[:limit]` — truncate **before** rank | **KILLED** (execution) |
+| M4 | I-4 | `tools._confirm_read_object_idor`: emitter drops its `negative_controls` | **SURVIVED** |
+
+All three guards can fail. None of them is a guard that cannot fail. One of them has a
+coverage boundary that matters (M4, below).
+
+### M1 — I-5 kills a new silent swallow on a load-bearing path
+
+Diff (single hunk, `tools.py:2354`):
+
+```
+-        except Exception as _apolaki_swallowed_2307:
+-            self._swallow(_apolaki_swallowed_2307, 'tools:_run_enumerate_ids:2307', "")
++        except Exception:
+             rbase = None
+```
+
+The protected block is `await self._http_send("GET", ...)` — a real load-bearing request, not a
+fixture. Verified in the imported module (`_apolaki_swallowed_2307` absent from
+`inspect.getsource(tools.ToolRegistry._run_enumerate_ids)`), then:
+
+```
+FAILED tests/test_silent_failure_invariant.py::test_partition_is_non_vacuous_and_matches_the_measured_rebased_tree
+E   AssertionError: ['tools.py:2354:_run_enumerate_ids']
+E   assert 1 == 0
+1 failed, 7 passed
+```
+
+The assertion names the exact planted line. This is also the strongest possible proof the mutation
+landed: the guard reported the file, line and function that were mutated.
+
+### M2 — I-4 kills an emitter that drops its control artifact
+
+`xss_tool.reflection_finding` no longer attaches the `harmless-reflection-canary` control. Verified
+in the imported module by calling the emitter: the finding still grades `confirmed` and carries no
+`negative_controls`.
+
+```
+FAILED tests/test_runtime_control_invariant.py::test_reflected_xss_retains_the_harmless_canary_control
+E   AssertionError: assert 'not_recorded' == 'recorded'
+1 failed, 16 passed
+```
+
+### M3 — I-9 kills both shapes it claims to cover
+
+* **M3a / M3a2 (static inventory).** `raw first-N work caps without the measured contract:
+  [('agent.py', 'sweep_targets', 'targets', '7')]` and
+  `[('crawl.py', 'bfs_frontier', 'frontier', '5')]`. M3a2 matters more than M3a: `crawl.py` owns no
+  entry in the contract table, so the scan demonstrably reaches production modules that were never
+  part of the original inventory. **Disclosure:** M3a is *syntactic only* — it was planted where
+  `targets` is still empty, so it changed no behaviour. It proves the inventory sees a new raw cut;
+  it does not prove a behavioural kill. M3a2 is behavioural (it really truncates the frontier).
+* **M3b (execution).** `planner._rank_endpoints` reduced to `list(endpoints or [])`; the cap constant
+  was not touched.
+  `E AssertionError: the endpoint cap discarded a command sink because it was discovered last`.
+* **M3c (execution, the defect the lease names).** `sweep_targets` truncates before ranking:
+  `_spread_by_shape(rank_targets_for_budget(list(targets)[:limit]))`. Two kills —
+  `E AssertionError: assert {'alpha'} == {'alpha', 'beta', 'gamma'}` and
+  `E AssertionError: early low-value shapes consumed the cap before the attack surface`.
+
+  M3c is also the clearest measurement of the static guard's boundary: the static inventory did
+  **not** fire on it, because the sliced value is a `Call`, not a bare `Name`. The execution tests
+  caught it. Cut-before-rank is covered by execution, not by the inventory.
+
+### M4 — I-4 SURVIVES an uncovered emitter dropping its control
+
+`tools.ToolRegistry._confirm_read_object_idor` (owner-list IDOR) had its
+`{"kind": "attacker-list-absence", ...}` control artifact deleted. Verified absent from the imported
+module's source. Result:
+
+```
+tests/test_runtime_control_invariant.py  ->  17 passed, EXIT=0
+```
+
+This is a **coverage boundary, not a broken guard**. `test_runtime_control_invariant.py` is a list of
+named emitters (7 SQLi builders, `exposure.classify`, `exposure.harvest_finding`,
+`xss.reflection_finding`, `header_trust.finding_header_trust` / `finding_url_override`,
+`_not_found_control`, `_mark_source_derived`). Every emitter it names is genuinely pinned. Emitters
+it does not name — matrix IDOR, created-object IDOR, owner-list IDOR, foreign-owner IDOR, BIE BOLA —
+can drop their control artifact and this file stays green. There is no repository-wide "every
+confirmed behavioural emitter attaches a control" scan of the kind I-5 and I-9 both have.
+
+Whether the *wider* suite catches M4 is being measured with a full-suite run on the M4 snapshot
+against a full-suite run on the pristine snapshot; result appended below when both finish.
+
+## Denominators, re-measured independently
+
+### I-4 (prior: 1391 confirmed, 303 runtime with no recorded control)
+
+Read-only over the named volume (`-v "apolaki_bbh_data:/data"`, `file:/data/bbh.db?mode=ro`). Key
+names were **enumerated off the corpus**, never guessed.
+
+Positive controls that the apparatus was looking: `findings=1783`, `missions=156`,
+`tool_call logs=30173`, and a synthetic finding carrying `negative_controls` is classified
+`recorded` by the same predicate used for the census.
+
+```
+confirmed                 1391
+proof_kind  behavioural    675   source-derived   716
+```
+
+Reproduced exactly under the handoff's key set (`false_positive_check`, `success_oracle`, `timing`,
+`validation`, `baseline`): **recorded 372 / missing 1019 / source-missing 716 / runtime-missing 303**.
+Sensitivity to the definition, which is the reason this number needs stating with its predicate:
+
+| key set | recorded | missing | source-missing | runtime-missing |
+|---|---|---|---|---|
+| 5-key (handoff) | 372 | 1019 | 716 | **303** |
+| + `database_proof` | 374 | 1017 | 716 | 301 |
+| + `oracle` | 1142 | 249 | 0 | 249 |
+| + `oracle` + `database_proof` | 1144 | 247 | 0 | 247 |
+
+Excluding `oracle` is correct: adding it drives source-missing to 0, i.e. it is present on every
+source-derived row, so it is not evidence that a runtime control ran.
+
+**Finding — the shipped predicate gives a different number.** Production decides this question in
+`proof_schema.control_status`, whose `CONTROL_KEYS` are
+`("negative_controls", "controls", "control", "control_evidence", "control_response")`. None of the
+five keys the denominator is built from is in that tuple. Measured over the same corpus with
+production's own function:
+
+```
+control_status over the 1391 confirmed rows:  {'not_recorded': 675, 'not_applicable': 716}
+behavioural confirmed with a production-recognised control:      0
+stored rows carrying ANY proof_schema.CONTROL_KEYS key at all:   0   (of 1783)
+```
+
+So the honest statement of the historical gap is **675 of 675 behavioural confirmations carry no
+control that `report.control_ran` can see**, not 303. The 372 "recorded" rows are recorded only
+under an offline key set that the report path never reads. This does not undercut the Q-090 emitter
+work — that work is forward-looking and stored rows were deliberately not backfilled — but the
+matrix should not carry `303` without naming the predicate, because the number a reader will
+reproduce from production code is `675`.
+
+### I-5 (prior: 917 handlers, 562 silent)
+
+AST **node** counts over the same 178 production modules (`grep -c` counts lines and is reported
+separately so the two instruments are never mixed):
+
+```
+total except handlers (ast.ExceptHandler nodes)          918
+  swallowed, strict pass/continue/break                  322
+  swallowed, + return None/False                         388
+  swallowed, + literal fallback assign (guard predicate) 465
+grep 'except' LINE count, same files, for contrast       952
+```
+
+918 total reproduces the guard's post-fix expectation. 465 = 388 optional + 77 control-plane, which
+is exactly the two ceilings the guard ratchets, with load-bearing at 0. The Coordinator's pre-merge
+`562 / 61.3%` is **not reproducible at HEAD** under any of the three predicates and should be
+retired rather than carried forward: the merge converted ~105 load-bearing handlers into `_swallow`
+recorders, which by construction removes them from the swallowed set.
+
+### I-9 (no prior — measured first here)
+
+```
+production modules scanned                                        178
+top-level modules in the guard's root.glob('*.py') scope          178
+production .py the guard never scans                                0
+bounded slices (upper bound present), whole tree                  822
+  upper expression names cap|max|limit|budget                      67
+  raw first-N over a bare Name in the 15-word work vocabulary      25 nodes -> 20 unique contracts
+  bounded slices over a NON-Name value (invisible to the scan)    425
+  break-at-limit loop caps (first-N with no slice node at all)     22
+```
+
+`25 nodes -> 20 contracts` is an instrument distinction, not a discrepancy: the guard collects a set
+of `(owner, name, upper)` tuples, so repeated identical cuts collapse. The contract table has 20
+entries and the measured set matches it exactly.
+
+The scan's in-scope fraction is `25 / 822` bounded slices. That is by design (most of the other 797
+are hash digests, uuids, parser windows and report previews, not target work), but two shapes carry
+real work caps and are structurally outside it:
+
+* **Non-`Name` sliced values (425).** Includes `agent.py:sweep_targets`
+  `_spread_by_shape(rank_targets_for_budget(targets))[:limit]` — the sweep budget itself. The static
+  contract cannot see the very cut whose ordering M3c proves matters; only the execution tests hold
+  it. That is fine today and fragile tomorrow: delete those two execution tests and the sweep cap
+  has no guard at all.
+* **`break`-at-limit loop caps (22).** `crawl.bfs_frontier` caps the crawl frontier at `limit` in
+  first-occurrence order with a `break`; no slice node exists, so no inventory entry can. MEASURED:
+  both production call sites (`agent.py:2154`, `agent.py:2216`) rank with
+  `rank_targets_for_budget(...)` *before* calling it, so this is correct today — but a future
+  regression that drops that ranking is invisible to the I-9 contract.
+
+## Verdict
+
+* **I-5 — CLOSED and falsifiable.** Kills a real silent swallow on a load-bearing request path and
+  names the exact site. Ratchet ceilings (388 optional / 77 control-plane) mean any *added* silent
+  handler trips something even when the classifier would mislabel it.
+* **I-9 — CLOSED and falsifiable, in two independent halves.** The static inventory kills new raw
+  work cuts repository-wide (proven in a module owning no contract). The execution tests kill
+  cut-before-rank, including the shape the static inventory cannot see. Neither half covers the
+  other; both are load-bearing.
+* **I-4 — falsifiable for every emitter it names, but NOT a repository-wide invariant.** M4 shows a
+  confirmed runtime emitter can drop its control artifact and leave the file green. Combined with
+  the predicate gap in the denominator above, I-4 should be recorded in the matrix as
+  *"closed for the enumerated emitters"* rather than *"runtime confirmations carry controls"*.
+
+## Recommended follow-ups (not done in this lane)
+
+1. Add to `test_runtime_control_invariant.py` an enumerating scan: every production call site that
+   builds a `confidence == "confirmed"` behavioural finding must attach a `proof_schema.CONTROL_KEYS`
+   artifact, with an explicit exemption table carrying measured counts — the shape I-5 and I-9 both
+   already use. That would have killed M4.
+2. State the predicate next to the I-4 number in the matrix (`303` under the 5-key analysis set,
+   `675` under `proof_schema.control_status`).
+3. `tools.py` patch is not required for either; both are test-side.
