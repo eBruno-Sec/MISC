@@ -133,4 +133,60 @@ source-derived markers; the exact control/proof-kind assertions kill both.
 
 ## I-9 cap ordering
 
-In progress.
+### Measured census
+
+- Pre-fix AST census over 178 top-level production modules: `821` bounded slices. The
+  deliberately conservative remote-work-name heuristic found `27` raw first-N call sites.
+  This is not presented as 821 execution budgets: most are byte/parser windows, evidence
+  clipping, identifiers, or report previews.
+- Post-fix census: `822` bounded slices, `67` with an upper expression whose name contains
+  `cap|max|limit|budget`, and `20` unique raw production work-cap contracts. The syntactic
+  total rose because an opaque comprehension was replaced by a named, auditable origin
+  list; it does not represent more discarded work.
+- The repository-wide contract scans every top-level production module, not just
+  `agent.py`/`planner.py`. Every one of the 20 survivors has a named ordering reason.
+  A planted `targets[:7]` in a previously invisible module is detected.
+- The post-rebase I-5 ratchet caught two new silent parse fallbacks introduced by the
+  ranking helpers (`optional 390 > 388`). The helpers now parse their small URL facts
+  without exception fallbacks; the ratchet returned to `388` without raising a ceiling.
+  All three Q-090 invariant files then passed together: `59 passed`.
+
+### Defects closed
+
+- `sweep_targets` still round-robins structural shapes, but now ranks target-observable
+  security value before the spread. With more shapes than slots, a late
+  `/admin/execute?cmd=id` no longer loses to the first three cosmetic directories.
+- Planner inventory is built without an upstream first-1000 cut, then endpoints are
+  ranked before `CAP_ENDPOINTS`. Query, page, REST, XML, JS, WebSocket and form budgets
+  now see the full candidate set before their value cut.
+- Operator roots now precede discovered subdomains for HTTP probing, fingerprinting,
+  Katana, login probes, ZAP, Nuclei and SSL scanning. Alphabetical ordering can no longer
+  spend a host cap entirely on discovered subdomains.
+- Mass-assignment forms are ranked before `CAP_MASS_ASSIGN`; observed read paths are no
+  longer cut before `mass_assign_tool.read_views` applies its semantic rank.
+- Unauthenticated/authenticated crawl frontiers, browser harvest, header trust,
+  candidate promotion, path-SQLi and API-root seeding now rank before truncation.
+- Cloud-bucket and confirmed-IDOR lists are deduplicated and ranked before their caps.
+  Encoded-cookie probing now caps distinct origins, not endpoint paths mislabeled as
+  host bases.
+
+### Proof
+
+- Original fail-before-fix: `4 failed / 3 passed`. The exact failures were a late command
+  endpoint dropped before `CAP_ENDPOINTS`, an exact object template dropped before
+  `_ma_views`, a one-page crawl budget spent on a cosmetic route, and the static guard's
+  raw first-N inventory.
+- Additional sweep fail-before-fix: shape-only spreading selected
+  `alpha/bravo/charlie` and discarded the late admin command sink.
+- Final invariant file: `8 passed / 0 failed`.
+- Focused regression selection: `114 passed / 2 xfailed / 0 failed`; the two xfails are
+  pre-existing selection residuals.
+- Semantic mutants killed by the exact intended assertions:
+  - replace `_rank_endpoints` with discovery order -> late command-sink assertion failed;
+  - restore the upstream 30-path break -> exact mass-assignment view assertion failed;
+  - remove crawl-frontier ranking -> the exact one-page visit assertion failed;
+  - restore shape-only sweep ordering -> late high-value-shape assertion failed.
+- The planted-bypass detector is a positive control on the guard itself, not a declaration.
+
+No cap number, benchmark case, label, denominator, or expected result was changed. Ranking
+uses only target-observable URL/path/parameter facts and stable tie ordering.
