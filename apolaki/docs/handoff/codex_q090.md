@@ -65,6 +65,27 @@ non-empty `false_positive_check`, `success_oracle`, `timing`, `validation`, or `
 carrying it prove database access, but do not rule out the benign explanation. Including
 that positive-proof key would incorrectly change the result to `374 / 1017 / 301 / 81`.
 
+### SQLi emitter slice
+
+- All seven confirmed SQLi builders now retain a canonical, structured
+  `negative_controls` artifact: baseline DBMS-signature absence, quote recovery,
+  contradictory boolean predicate, benign invalid credential, baseline marker absence,
+  zero-delay timing control, or valid-subquery control.
+- UNION escalation now refuses to probe when its fixed marker already exists in the
+  unmodified baseline. This closes a latent marker-collision false-positive path rather
+  than merely adding prose to the finding.
+- Fail-before-fix: `2 failed / 2 passed`; the failures were `control_status=not_recorded`
+  and the absent concrete quote-control artifact.
+- Targeted after fix: `15 passed / 0 failed` across the new invariant tests and the
+  existing SQLi builder/structural tests. The full SQLi-related selection was
+  `74 passed / 2 xfailed / 0 failed` (3407 deselected); both xfails pre-exist and concern
+  the separate bimodal sampling residual.
+- Reproducible in-suite semantic mutants:
+  - remove `negative_controls` from `_base` output -> the exact per-builder control
+    assertion raises on `error`;
+  - force `union_hit(baseline)` false -> the baseline-collision test reaches the forbidden
+    UNION request and raises on the exact no-probe assertion.
+
 ## I-9 cap ordering
 
 In progress.

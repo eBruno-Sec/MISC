@@ -75,7 +75,13 @@ def quote_recovery_finding(url: str, param: str, base_status: int,
                  f"HTTP {base_status} (benign) -> {single_status} (single quote) -> {double_status} (doubled quote)",
                  [f"Set '{param}' to VALUE'  — server error (HTTP {single_status})",
                   f"Set '{param}' to VALUE'' — recovers (HTTP {double_status})",
-                  "Confirm/exploit with a boolean or UNION payload (authorized testing only)"])
+                  "Confirm/exploit with a boolean or UNION payload (authorized testing only)"],
+                 negative_controls=[
+                     {"kind": "unmodified-baseline", "status": base_status,
+                      "result": "the same parameter without a quote did not produce a server error"},
+                     {"kind": "escaped-quote-recovery", "payload_suffix": "''", "status": double_status,
+                      "result": "doubling the quote restored a non-error response"},
+                 ])
 
 
 # ── boolean-based blind ──────────────────────────────────────────
@@ -341,7 +347,10 @@ def analyze_time(control_elapsed: float, sleep_elapsed: float, seconds: int, mar
 
 
 # ── finding builders ─────────────────────────────────────────────
-def _base(url: str, param: str, oracle: str, sev: str, desc: str, evidence: str, steps: list) -> dict:
+def _base(url: str, param: str, oracle: str, sev: str, desc: str, evidence: str,
+          steps: list, *, negative_controls: list) -> dict:
+    if not negative_controls:
+        raise ValueError("a confirmed SQLi finding requires an executed negative control")
     return {
         "title": f"SQL injection ({oracle}) in '{param}'", "param": param,  # Q-046: bind, don't reparse
         "severity": sev, "target": url,
@@ -350,18 +359,25 @@ def _base(url: str, param: str, oracle: str, sev: str, desc: str, evidence: str,
                    "privileges — write files or execute commands on the DB host."),
         "reproduction_steps": steps, "evidence": evidence, "cwe": "CWE-89",
         "family": "sqli", "tags": ["sqli", oracle], "confidence": "confirmed",
+        "negative_controls": negative_controls,
     }
 
 
 def error_finding(url: str, param: str, probe: str, dbms_hits: list) -> dict:
     dbms = ", ".join(sorted({h["dbms"] for h in dbms_hits}))
+    patterns = sorted({str(h.get("pattern") or h.get("dbms") or "") for h in dbms_hits})
     return _base(url, param, "error-based", "high",
                  (f"Injecting {probe!r} into '{param}' produced a {dbms} SQL error absent from the baseline, so the "
                   "parameter is concatenated into a SQL statement."),
                  f"{dbms} error triggered by {probe!r}",
                  [f"Set '{param}' to a value ending in {probe!r}",
                   f"Observe a {dbms} SQL error in the response",
-                  "Extract data with a UNION/error-based query (authorized testing only)"])
+                  "Extract data with a UNION/error-based query (authorized testing only)"],
+                 negative_controls=[{
+                     "kind": "unmodified-baseline-signature-absence",
+                     "signatures": patterns,
+                     "result": "none of the matched DBMS signatures appeared in the baseline response",
+                 }])
 
 
 def boolean_finding(url: str, param: str, pair: dict) -> dict:
@@ -372,7 +388,12 @@ def boolean_finding(url: str, param: str, pair: dict) -> dict:
                  f"TRUE≈baseline, FALSE diverged ({pair['ctx']})",
                  [f"Set '{param}' to {pair['true']!r} — normal page",
                   f"Set '{param}' to {pair['false']!r} — different page",
-                  "Extract data one boolean at a time (substring/ASCII)"])
+                  "Extract data one boolean at a time (substring/ASCII)"],
+                 negative_controls=[{
+                     "kind": "contradictory-predicate",
+                     "payload": pair["false"],
+                     "result": "the always-false response diverged from the reproduced baseline/true response",
+                 }])
 
 
 # ── auth-bypass SQLi (POST/JSON body — e.g. a login email field) ─────────────
@@ -424,7 +445,12 @@ def auth_bypass_finding(url: str, field: str, payload: str, signal: str) -> dict
               f"POST {url}  {field}={payload!r}  ->  {signal}",
               [f"POST the login request with '{field}' set to {payload!r}",
                "Observe authentication succeed without valid credentials (token issued / 200)",
-               "Log in as the first/admin account, or enumerate users via UNION"])
+               "Log in as the first/admin account, or enumerate users via UNION"],
+              negative_controls=[{
+                  "kind": "benign-invalid-credential",
+                  "result": "the structurally identical invalid-credential request did not produce the auth signal",
+                  "signal_absent": signal,
+              }])
     f["impact"] = ("Full authentication bypass: sign in as any user (typically the first/admin row) "
                    "without credentials, then read or modify that account's data.")
     # Q-053 GAP-3: the family a finding carries is decided by WHAT THE ORACLE PROVED, not by which
@@ -541,7 +567,12 @@ def union_finding(url: str, param: str, ncols: int, closing: str, tables: list,
               ev,
               [f"Balance the query: append {closing} then `UNION SELECT` with {ncols} columns",
                "Read the schema from the DB catalogue (e.g. sqlite_master / information_schema)",
-               "Dump the users table's identifier + secret columns"])
+               "Dump the users table's identifier + secret columns"],
+              negative_controls=[{
+                  "kind": "unmodified-baseline-marker-absence",
+                  "marker": UNION_MARK,
+                  "result": "the attacker marker was absent from the unmodified baseline response",
+              }])
     f["impact"] = ("Full read access to the database: dump every user's credentials and all "
                    "application data. Extracted rows are proof the injection is exploitable, not "
                    "merely present.")
@@ -557,7 +588,13 @@ def time_finding(url: str, param: str, item: dict, control_elapsed: float, sleep
                  f"{item['dbms']}: {sleep_elapsed:.1f}s vs control {control_elapsed:.1f}s (injected {seconds}s)",
                  [f"Set '{param}' to {item['payload']!r}",
                   f"Observe the response takes ~{seconds}s longer than the sleep(0) control",
-                  "Extract data via time-based boolean inference"])
+                  "Extract data via time-based boolean inference"],
+                 negative_controls=[{
+                     "kind": "zero-delay-control",
+                     "payload": item.get("control", "sleep(0) control"),
+                     "elapsed_seconds": control_elapsed,
+                     "result": f"control stayed below the injected {seconds}s delay",
+                 }])
 
 
 # ── structural / ORDER BY injection (WAHH ch9) ───────────────────────────────
@@ -587,4 +624,9 @@ def structural_finding(url: str, param: str, dbms_hits: list) -> dict:
                  f"(SELECT 1) ran clean; (SELECT 1 FROM <nonexistent>) -> {dbms} error not in baseline",
                  [f"Set '{param}' to (SELECT 1) — normal response",
                   f"Set '{param}' to (SELECT 1 FROM <nonexistent-table>) — a {dbms} error appears",
-                  "Escalate with boolean inference: replace the column with (SELECT 1 WHERE <cond> OR 1/0=0)"])
+                  "Escalate with boolean inference: replace the column with (SELECT 1 WHERE <cond> OR 1/0=0)"],
+                 negative_controls=[{
+                     "kind": "valid-subquery-control",
+                     "payload": "(SELECT 1)",
+                     "result": "the valid subquery ran without a DBMS error while the invalid twin did not",
+                 }])

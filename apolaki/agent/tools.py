@@ -7945,13 +7945,18 @@ class ToolRegistry:
         conf = sum(1 for f in findings if f.get("confidence") == "confirmed")
         return ToolResult("xxe", url, True, f"{len(findings)} XXE signal(s), {conf} confirmed", findings)
 
-    async def _sqli_union(self, c, get, url: str, p: str, orig: str):
+    async def _sqli_union(self, c, get, url: str, p: str, orig: str, baseline_body: str):
         """Escalate a CONFIRMED reflected SQLi into a UNION data extraction (read-only).
         Discovers the injection context (the closing that balances the query + the column
         count) by marker reflection, then dumps the DB catalogue and a users-like table.
         Nothing target-specific is hardcoded; bounded and scope-guarded. Returns
         {finding, req, resp} or None."""
         import sqli_tool as sqli
+        # The marker is proof only if the unmodified response did not already contain it.
+        # Record that negative control on the emitted finding; otherwise a coincidental
+        # page string can masquerade as attacker-chosen database output.
+        if sqli.union_hit(baseline_body):
+            return None
         # 1) discover (closing, ncols) — stop at the first reflected marker
         ctx = None
         for closing in sqli.UNION_CLOSINGS:
@@ -8062,7 +8067,7 @@ class ToolRegistry:
                 #     into "here is the data it leaks" (and auto-solves data-exfil goals).
                 if confirmed and not union_done:
                     union_done = True
-                    uf = await self._sqli_union(c, get, url, p, orig)
+                    uf = await self._sqli_union(c, get, url, p, orig, base_body)
                     if uf:
                         findings.append(self._attach_poc(uf["finding"], uf["req"], uf["resp"]))
                         ev.append(uf["req"])
