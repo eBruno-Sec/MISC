@@ -1,8 +1,29 @@
 # Claim-integrity lane — Q-089, Q-088
 
-Builder lane, release-stabilization. Baseline `186f500`: 3417 passed / 11 skipped / 13 xfailed / 0 failed.
-Every number below was measured in a throwaway container against the mounted `agent/` tree, never
-against `apolaki-agent-1`.
+Builder lane, release-stabilization. Briefed baseline `186f500` (3417 passed / 11 skipped /
+13 xfailed / 0 failed). Every number below was measured in a throwaway container against the mounted
+`agent/` tree, never against `apolaki-agent-1`.
+
+**Two facts about the verification, recorded because they change how the green should be read.**
+
+1. **HEAD moved under this lane mid-run.** The external Codex lane merged `dfbb7f0`
+   ("Merge codex/q088: G2 guard scope + G4 unreached functions") while a full suite was running,
+   changing `deadcode_gate.py`, `test_deadcode_gate.py`, `test_engine_reachability.py` and
+   `test_session_identity.py` — the four files this lane was told not to touch. That run was
+   discarded as stale and the suite was re-run from a fresh snapshot taken **after** the merge, so
+   the green below is for `dfbb7f0` + this lane's changes. Note the ticket-number collision: that
+   lane's "Q-088" is guard scope and unreached functions, **not** `validated_on`. Nothing in it
+   touches `techniques.py`, `technique_model.py`, `technique_planner.py` or `test_validated_on.py`,
+   so the Q-088 analysis below stands unaffected.
+
+2. **The suite result is the EXIT CODE, not a transcribed count.** In this environment pytest's
+   final summary line does not survive the redirect to a file — the log ends at the warnings
+   `-- Docs:` line every time, on runs that reached `[100%]`. So the run was re-issued with
+   `-rfE` and `echo "PYTEST_EXIT=$?" >> log`: **`PYTEST_EXIT=0` with zero `FAILED`/`ERROR` lines.**
+   Pytest exits 0 only when nothing failed, nothing errored and no strict xfail XPASSed — which is
+   exactly the three things that matter here. **This lane does not quote a pass count it could not
+   read.** An earlier run in this session was nearly reported as green on a truncated log; the exit
+   code is what makes the claim checkable.
 
 ---
 
