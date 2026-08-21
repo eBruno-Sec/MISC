@@ -1284,7 +1284,7 @@ call sites adopting `technique_status()`, which Q-012 already established and ne
 invented-id negative control passes; `/packs` and `/techniques` agree; the four markers XPASS and are
 retired in the commit that closes them.
 
-### Q-090 · Four multi-outcome write paths that report success they did not achieve · **A CLOSED** `9c8f3a9` · **B/C/D open** · **HIGH**
+### Q-090 · Four multi-outcome write paths that report success they did not achieve · **A/B/C CLOSED** `9c8f3a9` `977c4b2` · **D open (measured-static)** · **HIGH**
 
 Found by the **I-2b outcome-fidelity guard** (`tests/test_outcome_fidelity.py`, `aa01373`), which
 derives multi-outcome owners rather than listing them. **I-2 measured "0 unowned" CORRECTLY and could
@@ -1305,12 +1305,14 @@ attestation both destroyed, reported as success, on the endpoint Q-014 built spe
 operator's decision is never silently discarded. Now gated on `fid.stored`; a refusal keeps the lead
 and answers 409 naming the verdict.
 
-**Q-090-B · OPEN.** `PUT /findings/{sid}/{fid}` answers `404 "finding not found in this mission"`
-**with the row present in the table** -- `update_finding`'s scope refusal is `False`, and the handler
-reads that as absence.
+**Q-090-B · CLOSED** `977c4b2`. `PUT /findings/{sid}/{fid}` ANSWERED `404 "finding not found in this mission"`
+**with the row present in the table** -- `update_finding`'s scope refusal was `False`, and the handler
+read that as absence. Now: 409 on a refusal, 404 only on a genuine miss, and a REROUTE returns
+`{"ok": true, "updated": false, ...}` naming where the row went.
 
-**Q-090-C · OPEN.** `POST /findings/{sid}/{fid}/poc` discards the write return entirely and answers
-`{"ok": true, "bytes": 4, "attached_to": "f1"}` **with nothing attached**.
+**Q-090-C · CLOSED** `977c4b2`. `POST /findings/{sid}/{fid}/poc` DISCARDED the write return entirely and answered
+`{"ok": true, "bytes": 4, "attached_to": "f1"}` **with nothing attached**. Now reads `.updated` --
+NOT `bool(res)`, because a REROUTED write is truthy and leaves no row for a screenshot to attach to.
 
 **Q-090-D · MEASURED-STATIC, deliberately NOT reproduced.** `agent.py:BBHAgent._triage` writes back
 blind. Recorded as static-only rather than claimed as a live defect.

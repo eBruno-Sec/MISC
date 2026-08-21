@@ -15,14 +15,14 @@ reproducible release blockers.
 
 ## The release-invariant matrix — measured at `9c8f3a9`
 
-    full suite   3471 passed / 11 skipped / 14 xfailed / 0 failed   isolated snapshot at 9c8f3a9
+    full suite   3474 passed / 11 skipped / 12 xfailed / 0 failed   isolated snapshot at 977c4b2
     gates        queue_gate OK (79 headers, 60 hashes) · bake_drift OK · liveness 17/17
 
 | # | invariant | measured | denominator |
 |---|---|---|---|
 | I-1 | scheduler / parent / **executable** manual contract | ✅ | 6 manual-only of 110 engines, contract traverses the real dispatch boundary |
 | I-2a | exactly one persistence owner | ✅ 0 unowned | 62 finding-producing engines |
-| **I-2b** | **outcome fidelity** | ✅ guard SHIPPED, 1 defect fixed, 3 pinned | 14 multi-outcome owners of 2469 functions; 8 violating sites -> 7 |
+| **I-2b** | **outcome fidelity** | ✅ guard shipped; 3 defects fixed, 1 pinned | 14 multi-outcome owners of 2469 functions; violating sites **8 -> 3** |
 | I-3 | shared rate policy | ✅ 0 ungated | 178 production modules |
 | I-8 | guard scans its claimed scope | ✅ 4 of 4 | one was RENAMED not widened, deliberately |
 | I-10 | strict xfail has reason + ticket | ✅ 12 of 12 | AST count, not `grep -c` |
