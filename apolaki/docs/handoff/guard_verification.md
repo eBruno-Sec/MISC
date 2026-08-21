@@ -121,8 +121,21 @@ it does not name — matrix IDOR, created-object IDOR, owner-list IDOR, foreign-
 can drop their control artifact and this file stays green. There is no repository-wide "every
 confirmed behavioural emitter attaches a control" scan of the kind I-5 and I-9 both have.
 
-Whether the *wider* suite catches M4 is being measured with a full-suite run on the M4 snapshot
-against a full-suite run on the pristine snapshot; result appended below when both finish.
+**The whole suite misses it too.** Two full runs, same command, one snapshot each, run
+concurrently:
+
+```
+pristine 55016f4   3507 passed, 11 skipped, 12 xfailed, 0 failed  in 1064.21s   EXIT=0
+M4 mutant          3507 passed, 11 skipped, 12 xfailed, 0 failed  in 1060.46s   EXIT=0
+```
+
+Byte-identical outcomes. A confirmed runtime IDOR emitter can be shipped with its negative control
+deleted and **not one of 3507 tests notices**. That is the honest scope of I-4 today: it is a pinned
+list of emitters, not an invariant over emitters.
+
+(The pristine number is also worth recording on its own: the `tools.py:1428` stale-dispatcher failure
+the Codex handoff reports as its one remaining red is **not** red at the merge commit — the suite is
+0 failed at `55016f4`.)
 
 ## Denominators, re-measured independently
 
@@ -293,12 +306,47 @@ Targeted verification after the fix (`tests/test_outcome_fidelity.py`, `test_pro
 `test_gate_write_paths.py`, `test_finding_write_verdict.py`, `test_bbh.py`):
 `319 passed, EXIT=0`.
 
+## Part 3 — the I-4 hole closed with a measured artifact ratchet
+
+`test_runtime_control_invariant.py` gains an inventory of every production site that **attaches** a
+`negative_controls` artifact, counted as AST nodes (subscript assignment or dict-literal key), owner
+by `(module, enclosing function)`. MEASURED on the current tree: **19 owners, 20 nodes**.
+
+Only `negative_controls` is counted. The other `proof_schema.CONTROL_KEYS` names collide with
+unrelated dictionaries — `cmdi_tool.time_payloads` uses `control` for a timing payload,
+`main.defense_catalog` uses `controls` for D3FEND rows — and the raw scan over all five keys returns
+41 nodes / 28 owners, most of it noise that would make the inventory move for reasons unrelated to a
+finding's proof. Narrowing was a measurement, not a guess: both totals were computed before choosing.
+
+Deliberately a **deletion-direction ratchet** (`measured >= pinned` per owner), not an equality:
+
+* it is honest — it does not claim every confirmed emitter has a control, which would be false and
+  would make this the fifth guard here that cannot fail;
+* a lane that *adds* a control is never blocked, so it creates no friction during stabilization;
+* removing one is red, and the message names the exact `(module, function)` and both counts.
+
+Two controls ship with it: a positive control planting both attachment shapes plus an emitter with
+no control (the scanner must see the first two and not the third), and a pin-liveness test requiring
+every pinned module to still exist.
+
+Verified both ways:
+
+```
+clean tree                    tests/test_runtime_control_invariant.py  ->  20 passed, EXIT=0
+M4 re-planted (same mutation) ->  FAILED test_no_emitter_quietly_stops_attaching_its_control
+E  {('tools.py', '_confirm_read_object_idor'): {'pinned': 2, 'measured': 1}}
+1 failed, 19 passed
+```
+
+The mutation that survived 3507 tests now dies on the exact site.
+
 ## Recommended follow-ups (not done in this lane)
 
-1. Add to `test_runtime_control_invariant.py` an enumerating scan: every production call site that
-   builds a `confidence == "confirmed"` behavioural finding must attach a `proof_schema.CONTROL_KEYS`
-   artifact, with an explicit exemption table carrying measured counts — the shape I-5 and I-9 both
-   already use. That would have killed M4.
-2. State the predicate next to the I-4 number in the matrix (`303` under the 5-key analysis set,
-   `675` under `proof_schema.control_status`).
-3. `tools.py` patch is not required for either; both are test-side.
+1. State the predicate next to the I-4 number in the matrix (`303` under the 5-key analysis set,
+   `675` under `proof_schema.control_status`). Do not carry a bare `303`.
+2. The ratchet in Part 3 protects controls that exist; it does not make "every confirmed behavioural
+   emitter attaches one" true. Deriving that set requires an emitter census (which call sites build a
+   `confidence == "confirmed"` finding on a behavioural path) with a measured exemption table. That is
+   a Builder job for the lane owning `tools.py`, and it should not be rushed — a census that returns a
+   wrong denominator is how this repo got a false `0 of 1391`.
+3. Neither item needs a `db.py`, `main.py` or `tools.py` patch. No patch is owed from this lane.
