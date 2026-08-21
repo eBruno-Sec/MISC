@@ -4301,20 +4301,43 @@ class BBHAgent:
         self.current_phase = "report"
         yield {"type": "phase", "phase": "report"}
         result = triage_mod.triage(findings)
+        # Q-090-D. `verdict` and `chains` were computed from `findings` BEFORE any write. Writing an
+        # annotation back re-evaluates the finding gate, and two of its four outcomes mean the row is
+        # not carrying the edit: a TRUTH (#7) reroute DELETES the row and appends it to the leads
+        # list, and a SCOPE (#8) refusal leaves the stored row untouched. So the reported set is
+        # rebuilt from what the writes actually did, never from the pre-write list.
+        in_table, left_table, write_refused = [], [], []
         for f in findings:
             ann = result["annotations"].get(f.get("id"))
             if not ann:
+                in_table.append(f)
                 continue
             f["cwe"] = f.get("cwe") or ann["cwe"]
             f["owasp"] = ann["owasp"]
             existing = f.get("analyst_notes", "")
             f["analyst_notes"] = (existing + " | " + ann["analyst_notes"]).strip(" |") if existing else ann["analyst_notes"]
-            db.update_finding(self.mission_id, f["id"], f)   # scoped to (mission, id) — tenant isolation (#10)
+            # scoped to (mission, id) — tenant isolation (#10). READ THE VERDICT, NEVER THE BOOL:
+            # `bool(FindingUpdateResult)` is True for a reroute that DELETED the row, exactly as it is
+            # for a real in-place update, and that ambiguity is the whole defect.
+            written = db.update_finding(self.mission_id, f["id"], f)
+            if written.verdict in (db.UPDATE_REROUTED, db.UPDATE_MISSING):
+                left_table.append({"id": f.get("id"), "verdict": written.verdict})
+                continue                                    # no row remains: it is not in the report
+            if written.verdict == db.UPDATE_REFUSED:
+                write_refused.append({"id": f.get("id"), "verdict": written.verdict})
+            in_table.append(f)                              # the row is still there, annotated or not
+        if left_table:
+            result = triage_mod.triage(in_table)            # the count/chains the table can back
         m = db.get_mission(self.mission_id)
         ctx = (m or {}).get("context", {})
         ctx["chains"] = result["chains"]
         db.update_mission(self.mission_id, context=ctx)
-        yield {"type": "triage", "verdict": result["verdict"], "chains": result["chains"]}
+        event = {"type": "triage", "verdict": result["verdict"], "chains": result["chains"]}
+        if left_table or write_refused:
+            # `main.py` persists every streamed event under its own type, so naming the gap here
+            # makes it durable instead of a line that scrolled past once.
+            event["annotation_gap"] = {"left_the_table": left_table, "write_refused": write_refused}
+        yield event
 
     def _recon_note(self) -> str:
         """Iterative-recon directive. Empty at 1 cycle (default = unchanged)."""

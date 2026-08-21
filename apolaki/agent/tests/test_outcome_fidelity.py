@@ -67,12 +67,15 @@ quietly guards nothing).
 from __future__ import annotations
 
 import ast
+import asyncio
+import json
 import os
 import re
 import tempfile
 
 import pytest
 
+import agent as agentmod
 import db as dbmod
 import main as mainmod
 
@@ -91,11 +94,13 @@ _KNOWN_OPEN = {
     # removal on `fid.stored`, so a SCOPE refusal keeps the lead and answers 409 instead of
     # deleting it and reporting promoted=True. The pin is retired here rather than left behind
     # guarding nothing -- which is the rule the docstring above states and this guard enforces.
-    ("agent.py", "BBHAgent._triage", "discarded-return", "db:update_finding"):
-        "Q-090-D. The triage phase writes CWE/OWASP annotations back per finding and discards each "
-        "return. A refusal or a reroute here removes the row mid-report with no signal; the loop "
-        "continues and the report is generated from a set that no longer matches the table. Lower "
-        "severity than A-C (nothing is reported to an operator) but the same blind write.",
+    #
+    # Q-090-D CLOSED in the commit that removed this entry, and reproduced through the real
+    # generator first (section 5 at the bottom of this file): `_triage` told the operator
+    # "2 findings" while the findings table held ONE row. It now reads `written.verdict`, drops the
+    # rows that left the table, rebuilds the count/chains from what the writes actually did, and
+    # names the gap on the emitted event. The table is now empty and that is the point -- an empty
+    # inventory is the state this guard exists to reach, not a reason to keep a line in it.
 }
 
 #: Reads that DO distinguish the outcomes, or where the status is not a claim about the write. Each
@@ -627,8 +632,13 @@ def test_the_violation_census_is_non_vacuous():
     # 8 -> 7: Q-090-A was FIXED (main.py:confirm_lead now reads `fid.stored`). Lowering a
     # non-vacuity floor is only ever legitimate alongside the fix that removed the site, named in
     # the same commit -- never to accommodate a census that broke.
-    assert len(current) >= 3, (
-        "the violation census found only %d site(s); it was 3 after Q-090-A/B/C closed, so the "
+    # 3 -> 2: Q-090-D was FIXED in the commit that lowered this line. The site removed is
+    # ("agent.py", "BBHAgent._triage", "discarded-return", "db:update_finding"); `_triage` now binds
+    # the write result and reads `written.verdict`, which is what makes the scope distinguished.
+    # The two survivors are both in _DISTINGUISHED, so this floor and that table now agree exactly:
+    # every measured site is an accepted read, and a third would be a new defect.
+    assert len(current) >= 2, (
+        "the violation census found only %d site(s); it was 2 after Q-090-A/B/C/D closed, so the "
         "resolver is broken rather than the tree being clean: %s" % (len(current), current))
     # SHAPE COVERAGE MOVED OFF THE PRODUCTION CENSUS, and the reason is the point of this whole file.
     # This used to assert that all three shapes were still present IN PRODUCTION. Fixing Q-090-B
@@ -902,3 +912,74 @@ def test_q090c_a_poc_that_was_not_written_must_not_be_reported_as_attached(api, 
 
     assert not (body.get("ok") and "poc_screenshot" not in row), (
         "the endpoint answered %r and the finding carries no screenshot" % body)
+
+
+# ══════════════════════════════════════════════════════════════════════════════════════════════════
+# 5. Q-090-D -- the fourth site, reproduced through the REAL `_triage`, not by reading the AST
+#
+# A/B/C above were each reproduced through their real endpoint before being fixed. D was pinned
+# MEASURED-STATIC and never executed, which is the weaker kind of evidence: a pin nobody has run is
+# a claim, and this repo has shipped four guards that could not fail. This section runs the real
+# generator against the real db with nothing stubbed between them.
+# ══════════════════════════════════════════════════════════════════════════════════════════════════
+
+def _drain_triage(sid):
+    """Run the REAL `BBHAgent._triage` against the REAL db. No stub sits between them: the only
+    thing constructed by hand is the two attributes the generator reads off `self`."""
+    scan = object.__new__(agentmod.BBHAgent)
+    scan.mission_id = sid
+    scan.current_phase = "active"
+
+    async def collect():
+        return [event async for event in scan._triage()]
+
+    return asyncio.run(collect())
+
+
+def _pre_gate_row(sid, fid, finding):
+    """A findings row that PREDATES the Q-013 gate.
+
+    `update_finding` was a raw UPDATE until Q-013, so lead-confidence rows really are sitting in the
+    confirmed tables of missions written before it landed -- `add_finding` cannot create one today
+    because it reroutes at INSERT. This is the fixture, not the thing under test; `_triage` and
+    `db.update_finding` both run for real against it."""
+    dbmod._exec("INSERT OR REPLACE INTO findings VALUES(?,?,?,?)",
+                (fid, sid, json.dumps(dict(finding, id=fid)), dbmod._now()))
+
+
+def test_q090d_triage_must_not_report_a_set_the_findings_table_no_longer_holds(tmp_path):
+    """MEASURED 2026-08-21 against the real generator, before the fix: the findings table holds ONE
+    row and the emitted triage event says `Triage complete: 2 findings (2 critical/high) ...`.
+
+    `_triage` annotates each finding and writes it back with `db.update_finding`, discarding every
+    return. Annotating the pre-gate row makes the TRUTH invariant (#7) fire on the way back in: the
+    row is DELETED from the findings table and appended to the leads list. `bool()` of that result
+    is True -- identical to a real in-place update -- so the loop never notices, and the verdict and
+    chains computed *before* the writes go on describing a set the table no longer holds.
+
+    Two assertions, both defect-shaped rather than implementation-shaped: the count the operator is
+    given must match the table, and a row that left the table mid-report must produce a signal."""
+    dbmod.DB_PATH = str(tmp_path / "q090d.db")
+    dbmod._conn = None
+    dbmod.init(dbmod.DB_PATH)
+    sid = "q090d"
+    dbmod.create_mission(sid, "Q-090", "active", "o", SCOPE_APP, {})
+    assert dbmod.add_finding(sid, dict(_FINDING, id="stays", target="http://app:3000/a")).stored
+    _pre_gate_row(sid, "legacy1", dict(_FINDING, target="http://app:3000/b",
+                                       confidence="unconfirmed"))
+    assert len(dbmod.get_findings(sid)) == 2, "precondition: both rows are in the confirmed table"
+
+    events = _drain_triage(sid)
+
+    rows = dbmod.get_findings(sid)
+    assert len(rows) == 1, (
+        "precondition for the defect: writing the annotation back demotes the pre-gate row out of "
+        "the findings table -- %d row(s) remain" % len(rows))
+    triage_events = [event for event in events if event.get("type") == "triage"]
+    assert len(triage_events) == 1, "the triage phase emits exactly one triage event"
+    verdict = triage_events[0]["verdict"]
+    assert "%d findings" % len(rows) in verdict, (
+        "the operator is told a count the findings table does not hold: %r vs %d row(s)"
+        % (verdict, len(rows)))
+    assert dbmod.UPDATE_REROUTED in json.dumps(events, default=str), (
+        "a finding left the findings table mid-report and no emitted event says so: %r" % events)

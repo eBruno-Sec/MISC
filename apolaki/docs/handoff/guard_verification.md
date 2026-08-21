@@ -238,6 +238,61 @@ real work caps and are structurally outside it:
   the predicate gap in the denominator above, I-4 should be recorded in the matrix as
   *"closed for the enumerated emitters"* rather than *"runtime confirmations carry controls"*.
 
+## Part 2 — Q-090-D closed, and reproduced through a live path first
+
+`agent.py:BBHAgent._triage` wrote CWE/OWASP annotations back with `db.update_finding(...)` as a bare
+statement and discarded every return. It was the last `_KNOWN_OPEN` entry in
+`tests/test_outcome_fidelity.py`, pinned MEASURED-STATIC — A, B and C had each been reproduced
+through their real endpoint, D never had. A pin nobody has executed is a claim.
+
+**Reproduced first (section 5 of `test_outcome_fidelity.py`).** The real generator, the real db,
+nothing stubbed between them; the only thing built by hand is the two attributes `_triage` reads off
+`self`. A mission holds two rows: one ordinary confirmed finding and one row that predates the Q-013
+gate (`update_finding` was a raw `UPDATE` until then, so lead-confidence rows really do sit in old
+confirmed tables; `add_finding` cannot create one today). Annotating the pre-gate row makes TRUTH
+(#7) fire on the way back in — the row is DELETED from `findings` and appended to the leads list —
+and `bool()` of that result is True, exactly as for a real in-place update.
+
+MEASURED before the fix, on a pristine `git archive HEAD` snapshot carrying only the new test:
+
+```
+FAILED tests/test_outcome_fidelity.py::test_q090d_triage_must_not_report_a_set_the_findings_table_no_longer_holds
+E   AssertionError: the operator is told a count the findings table does not hold:
+E   'Triage complete: 2 findings (2 critical/high), 3 attack-path chain(s) synthesized.
+E    All findings preserved; annotations are advisory only.' vs 1 row(s)
+1 failed, 29 passed
+```
+
+The verdict says two findings. The table holds one. Nothing in the event stream says a row left.
+
+**The fix.** `_triage` binds the write result and reads `written.verdict` — never `bool(...)`,
+because a REROUTE is truthy and left no row:
+
+* `UPDATE_REROUTED` / `UPDATE_MISSING` -> the finding is dropped from the reported set;
+* `UPDATE_REFUSED` -> the row survives with its stored data, so it stays in the set and the lost
+  annotation is recorded;
+* `UPDATED` -> normal.
+
+If anything left the table, `verdict` and `chains` are recomputed over the rows that are actually
+there, so the count the operator is given is one the table can back. The gap is named on the emitted
+event as `annotation_gap`; `main.py:2891` persists every streamed event under its own type
+(`db.add_log(session_id, event.get("type", "info"), event)`), so this is durable through the existing
+`triage` etype rather than a new log vocabulary. No new write call site was added — the
+`test_proof_gate_reach._RAW_BASELINE` count for `agent.py::BBHAgent._triage` is still 1.
+
+**Retired in the same commit**, as `test_no_pinned_violation_is_stale` requires:
+
+* the `_KNOWN_OPEN` entry for `("agent.py", "BBHAgent._triage", "discarded-return",
+  "db:update_finding")` — the table is now **empty**, which is the state that guard exists to reach;
+* the non-vacuity floor in `test_the_violation_census_is_non_vacuous`, `3 -> 2`, with the removed
+  site named on the line. The two survivors are exactly the two `_DISTINGUISHED` entries, so the
+  floor and that table now agree: every measured site is an accepted read and a third would be a new
+  defect.
+
+Targeted verification after the fix (`tests/test_outcome_fidelity.py`, `test_proof_gate_reach.py`,
+`test_gate_write_paths.py`, `test_finding_write_verdict.py`, `test_bbh.py`):
+`319 passed, EXIT=0`.
+
 ## Recommended follow-ups (not done in this lane)
 
 1. Add to `test_runtime_control_invariant.py` an enumerating scan: every production call site that
