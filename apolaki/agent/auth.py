@@ -206,12 +206,14 @@ async def login(login_url: str, username: str, password: str, timeout: int = 15)
                 # body rather than a Set-Cookie — e.g. Juice Shop's {authentication:{token}}). Check the form
                 # response, then try an explicit JSON POST of {email/username, password} to the login URL.
                 token = _find_token(_safe_json(resp))
+                json_errors = []
                 if not token:
                     for body in ({"email": username, "password": password},
                                  {"username": username, "password": password}):
                         try:
                             jr = await c.post(login_url, json=body)
-                        except Exception:
+                        except Exception as exc:
+                            json_errors.append("%s: %s" % (type(exc).__name__, str(exc)[:120]))
                             continue
                         token = _find_token(_safe_json(jr))
                         if token:
@@ -222,8 +224,10 @@ async def login(login_url: str, username: str, password: str, timeout: int = 15)
                              "user_field": "email", "pass_field": "password"}
                     return {"headers": {"Authorization": "Bearer %s" % token}, "verified": True,
                             "shape": shape, "note": "bearer token captured from JSON login response"}
-                return {"headers": {}, "verified": False,
-                        "note": "no session cookie or bearer token after submit"}
+                note = "no session cookie or bearer token after submit"
+                if json_errors:
+                    note += "; JSON fallback degraded: " + " | ".join(json_errors)
+                return {"headers": {}, "verified": False, "note": note}
             # crude verification: a login page that no longer shows the password field
             verified = "password" not in resp.text.lower()[:5000] or resp.status_code in (301, 302)
             # the EXACT winning request shape (redacted at render time) so the report can reproduce a

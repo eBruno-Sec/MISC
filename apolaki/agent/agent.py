@@ -1124,7 +1124,8 @@ class BBHAgent:
                     break
                 try:
                     r = await self.tools.execute("run_dom_audit", {"url": page}, session_id)
-                except Exception:
+                except Exception as _apolaki_swallowed_1127:
+                    self.tools._swallow(_apolaki_swallowed_1127, 'agent:_validate_candidates_impl:1127', "")
                     continue
                 # Q-064: the THIRD store path, found by the ratchet in tests/test_dispatch_provenance.py
                 # rather than by the ticket. This is the one dispatch in agent.py that neither wrapper
@@ -1342,7 +1343,8 @@ class BBHAgent:
                 if self.mission_id:
                     try:
                         promoted["id"] = db.add_finding(self.mission_id, promoted)
-                    except Exception:
+                    except Exception as _apolaki_swallowed_1345:
+                        self.tools._swallow(_apolaki_swallowed_1345, 'agent:_validate_candidates_impl:1345', "")
                         pass
                 self.findings.append(promoted)
                 confirmed_titles.add(str(lead.get("title")))
@@ -1744,7 +1746,8 @@ class BBHAgent:
             await self.tools.execute("acquire_session",
                                      {"login_url": login_url, "username": user, "password": pw,
                                       "role": "__scan__"}, session_id)
-        except Exception:
+        except Exception as _apolaki_swallowed_1747:
+            self.tools._swallow(_apolaki_swallowed_1747, 'agent:_do_scan_auth:1747', "")
             pass
         sess = (getattr(self.tools, "_sessions", None) or {}).get("__scan__")
         verified = bool(sess)
@@ -1814,7 +1817,8 @@ class BBHAgent:
         if self.mission_id:
             try:
                 f["id"] = db.add_finding(self.mission_id, f)
-            except Exception:
+            except Exception as _apolaki_swallowed_1817:
+                self.tools._swallow(_apolaki_swallowed_1817, 'agent:_do_scan_auth:1817', "")
                 pass
         self.findings.append(f)
         events.append({"type": "finding", "finding": f})
@@ -1995,7 +1999,8 @@ class BBHAgent:
                     return await self._exec_internal("run_service_pack",       # gated (#2)
                                                      {"host": s["host"], "port": s["port"],
                                                       "service": s["service"]}, session_id)
-                except Exception:
+                except Exception as _apolaki_swallowed_1998:
+                    self.tools._swallow(_apolaki_swallowed_1998, 'agent:_run_pack:1998', "")
                     return None
         ran = 0
         for res in await _aio.gather(*[_run_pack(s) for s in _targets]):   # concurrent probes, serial storage
@@ -2006,7 +2011,8 @@ class BBHAgent:
                 if self.mission_id:
                     try:
                         f["id"] = db.add_finding(self.mission_id, f)
-                    except Exception:
+                    except Exception as _apolaki_swallowed_2009:
+                        self.tools._swallow(_apolaki_swallowed_2009, 'agent:_run_service_packs:2009', "")
                         pass
                 self.findings.append(f)
                 events.append({"type": "finding", "finding": f})
@@ -2033,7 +2039,8 @@ class BBHAgent:
                 if self.mission_id:
                     try:
                         f["id"] = db.add_finding(self.mission_id, f)
-                    except Exception:
+                    except Exception as _apolaki_swallowed_2036:
+                        self.tools._swallow(_apolaki_swallowed_2036, 'agent:_probe_cloud_storage:2036', "")
                         pass
                 self.findings.append(f)
                 yield {"type": "finding", "finding": f}
@@ -2139,14 +2146,16 @@ class BBHAgent:
                 try:
                     if self.scope.validate(url)[0]:
                         await self.tools.execute("http_read", {"url": url, "session": role}, session_id)
-                except Exception:
+                except Exception as _apolaki_swallowed_2142:
+                    self.tools._swallow(_apolaki_swallowed_2142, 'agent:_authenticated_recrawl:2142', "")
                     pass
             # authenticated browser pass AS this persona: captures SPA routes + XHR APIs (seed _add_urls)
             try:
                 await self.tools.execute("browser_navigate",
                                          {"url": base, "session": role,
                                           "steps": [{"action": "wait", "ms": 1200}]}, session_id)
-            except Exception:
+            except Exception as _apolaki_swallowed_2149:
+                self.tools._swallow(_apolaki_swallowed_2149, 'agent:_authenticated_recrawl:2149', "")
                 pass
         # Depth-2 BFS (CHAD capability D): the fixed-route + browser pass just discovered new authed
         # links/XHR endpoints. Follow that frontier ONE more level AS the first persona (bounded) so
@@ -2177,9 +2186,11 @@ class BBHAgent:
                             for fm in _crawl.extract_forms(body, u):
                                 if fm.get("action") and self.scope.validate(fm["action"])[0]:
                                     self.tools._add_urls([fm["action"]])
-                    except Exception:
+                    except Exception as _apolaki_swallowed_2180:
+                        self.tools._swallow(_apolaki_swallowed_2180, 'agent:_authenticated_recrawl:2180', "")
                         pass
-        except Exception:
+        except Exception as _apolaki_swallowed_2182:
+            self.tools._swallow(_apolaki_swallowed_2182, 'agent:_authenticated_recrawl:2182', "")
             pass
         return [u for u in (self.tools.urls or []) if u not in before]
 
@@ -2205,7 +2216,8 @@ class BBHAgent:
                 await self.tools.execute("acquire_session",
                                          {"login_url": login_url, "username": user, "password": pw,
                                           "role": role}, session_id)
-            except Exception:
+            except Exception as _apolaki_swallowed_2208:
+                self.tools._swallow(_apolaki_swallowed_2208, 'agent:_reacquire_personas:2208', "")
                 pass
             hdr = (getattr(self.tools, "_sessions", None) or {}).get(role) or {}
             if hdr:
@@ -2241,7 +2253,8 @@ class BBHAgent:
             if self.mission_id:
                 try:
                     f["id"] = db.add_finding(self.mission_id, f)
-                except Exception:
+                except Exception as _apolaki_swallowed_2244:
+                    self.tools._swallow(_apolaki_swallowed_2244, 'agent:_do_session_lifecycle:2244', "")
                     pass
             self.findings.append(f)
             events.append({"type": "finding", "finding": f})
@@ -2342,7 +2355,8 @@ class BBHAgent:
                             await self.tools.execute("acquire_session",
                                                      {"login_url": lu, "username": _ident,
                                                       "password": acct.get("password"), "role": role}, session_id)
-                        except Exception:
+                        except Exception as _apolaki_swallowed_2345:
+                            self.tools._swallow(_apolaki_swallowed_2345, 'agent:_do_persona_authz:2345', "")
                             pass
                         hdr = (getattr(self.tools, "_sessions", None) or {}).get(role) or {}
                         if hdr:
@@ -2367,7 +2381,8 @@ class BBHAgent:
                 try:
                     await self.tools.execute("browser_navigate",
                                              {"url": login_page, "steps": steps, "promote_session": role}, session_id)
-                except Exception:
+                except Exception as _apolaki_swallowed_2370:
+                    self.tools._swallow(_apolaki_swallowed_2370, 'agent:_do_persona_authz:2370', "")
                     pass
                 hdr = (getattr(self.tools, "_sessions", None) or {}).get(role) or {}
                 if hdr:
@@ -2457,7 +2472,8 @@ class BBHAgent:
             if self.mission_id:
                 try:
                     f["id"] = db.add_finding(self.mission_id, f)
-                except Exception:
+                except Exception as _apolaki_swallowed_2460:
+                    self.tools._swallow(_apolaki_swallowed_2460, 'agent:_do_persona_authz:2460', "")
                     pass
             self.findings.append(f)
             events.append({"type": "finding", "finding": f})
@@ -2472,13 +2488,15 @@ class BBHAgent:
                     wr = await self._exec_internal("confirm_authz_write",       # gated INTRUSIVE (#2)
                                                    {"target_url": tgt, "owner_session": pair[0],
                                                     "attacker_session": pair[1]}, session_id)
-                except Exception:
+                except Exception as _apolaki_swallowed_2475:
+                    self.tools._swallow(_apolaki_swallowed_2475, 'agent:_do_persona_authz:2475', "")
                     continue
                 for f in (wr.findings or []):
                     if self.mission_id:
                         try:
                             f["id"] = db.add_finding(self.mission_id, f)
-                        except Exception:
+                        except Exception as _apolaki_swallowed_2481:
+                            self.tools._swallow(_apolaki_swallowed_2481, 'agent:_do_persona_authz:2481', "")
                             pass
                     self.findings.append(f)
                     events.append({"type": "finding", "finding": f})
@@ -2503,7 +2521,8 @@ class BBHAgent:
                     if self.mission_id:
                         try:
                             f["id"] = db.add_finding(self.mission_id, f)
-                        except Exception:
+                        except Exception as _apolaki_swallowed_2506:
+                            self.tools._swallow(_apolaki_swallowed_2506, 'agent:_do_persona_authz:2506', "")
                             pass
                     self.findings.append(f)
                     events.append({"type": "finding", "finding": f})
@@ -2518,7 +2537,8 @@ class BBHAgent:
                                                   "confirmed": len(cres.findings)}
                 except Exception:
                     self._create_object_result = {"ran": True, "confirmed": len(cres.findings)}
-            except Exception:
+            except Exception as _apolaki_swallowed_2521:
+                self.tools._swallow(_apolaki_swallowed_2521, 'agent:_do_persona_authz:2521', "")
                 pass
 
         # 5d) READ-ONLY cross-user BOLA (general, no writes): ownership differential over per-user
@@ -2540,14 +2560,16 @@ class BBHAgent:
                     if self.mission_id:
                         try:
                             f["id"] = db.add_finding(self.mission_id, f)
-                        except Exception:
+                        except Exception as _apolaki_swallowed_2543:
+                            self.tools._swallow(_apolaki_swallowed_2543, 'agent:_do_persona_authz:2543', "")
                             pass
                     self.findings.append(f)
                     events.append({"type": "finding", "finding": f})
                 if rres.findings:
                     events.append({"type": "info", "content": "Read-object BOLA: %d confirmed cross-user "
                                    "read(s) via ownership differential." % len(rres.findings)})
-            except Exception:
+            except Exception as _apolaki_swallowed_2550:
+                self.tools._swallow(_apolaki_swallowed_2550, 'agent:_do_persona_authz:2550', "")
                 pass
 
         # 5e) BROWSER INTELLIGENCE ENGINE (#124): the RUNTIME cross-user proof. 5c/5d prove BOLA over the
@@ -2569,7 +2591,8 @@ class BBHAgent:
                     if self.mission_id:
                         try:
                             f["id"] = db.add_finding(self.mission_id, f)
-                        except Exception:
+                        except Exception as _apolaki_swallowed_2572:
+                            self.tools._swallow(_apolaki_swallowed_2572, 'agent:_do_persona_authz:2572', "")
                             pass
                     self.findings.append(f)
                     events.append({"type": "finding", "finding": f})
@@ -2585,7 +2608,8 @@ class BBHAgent:
                     events.append({"type": "info", "content": "Browser Intelligence Engine ran: %d runtime "
                                    "object hypothes(es) tested, 0 confirmed (authorization held)."
                                    % len((self._bie_result or {}).get("candidates") or [])})
-            except Exception:
+            except Exception as _apolaki_swallowed_2588:
+                self.tools._swallow(_apolaki_swallowed_2588, 'agent:_do_persona_authz:2588', "")
                 pass
 
         # 6) record the capabilities this phase unlocked (feeds the planner + attack graph)
@@ -2690,13 +2714,15 @@ class BBHAgent:
         for o in origins[:3]:
             try:
                 res = await self._exec_internal("run_transport_posture", {"url": o}, session_id)
-            except Exception:
+            except Exception as _apolaki_swallowed_2693:
+                self.tools._swallow(_apolaki_swallowed_2693, 'agent:_do_transport_posture:2693', "")
                 continue
             for f in (res.findings or []):
                 if self.mission_id:
                     try:
                         f["id"] = db.add_finding(self.mission_id, f)
-                    except Exception:
+                    except Exception as _apolaki_swallowed_2699:
+                        self.tools._swallow(_apolaki_swallowed_2699, 'agent:_do_transport_posture:2699', "")
                         pass
                 self.findings.append(f)
                 yield {"type": "finding", "finding": f}
@@ -2754,7 +2780,8 @@ class BBHAgent:
                 if self.mission_id:
                     try:
                         f["id"] = db.add_finding(self.mission_id, f)
-                    except Exception:
+                    except Exception as _apolaki_swallowed_2757:
+                        self.tools._swallow(_apolaki_swallowed_2757, 'agent:_do_header_trust:2757', "")
                         pass
                 self.findings.append(f)
                 yield {"type": "finding", "finding": f}
@@ -2791,7 +2818,8 @@ class BBHAgent:
             if self.mission_id:
                 try:
                     f["id"] = db.add_finding(self.mission_id, f)
-                except Exception:
+                except Exception as _apolaki_swallowed_2794:
+                    self.tools._swallow(_apolaki_swallowed_2794, 'agent:_do_saml:2794', "")
                     pass
             self.findings.append(f)
             yield {"type": "lead", "lead": f}
@@ -2890,7 +2918,8 @@ class BBHAgent:
                         httpx, verify=False, follow_redirects=True, timeout=12,
                         headers={"User-Agent": "apolaki-recon"}) as c:
                     self.tools._harvest_body(u, {}, (await c.get(u)).text)
-            except Exception:
+            except Exception as _apolaki_swallowed_2893:
+                self.tools._swallow(_apolaki_swallowed_2893, 'agent:_probe_for_creds:2893', "")
                 continue
         return list((self.tools.intel.with_sources("credential") or {}).keys())
 
