@@ -190,3 +190,37 @@ source-derived markers; the exact control/proof-kind assertions kill both.
 
 No cap number, benchmark case, label, denominator, or expected result was changed. Ranking
 uses only target-observable URL/path/parameter facts and stable tie ordering.
+
+## Final rebase and verification
+
+- Rebased cleanly onto main `5e5e015`.
+- Combined Q-090 invariants after rebase: `59 passed / 0 failed`.
+- First immutable full run from agent snapshot `c74134b`: `3505 passed / 11 skipped /
+  12 xfailed / 2 failed` in `777.82s`.
+- One failure exposed a real compatibility regression in this lane: the executable
+  manual-only contract constructs `ToolRegistry` without `__init__`, while `execute()`
+  read `_swallowed_total` directly. Both reads now use a zero default; the exact dispatch
+  test passes.
+- The sole remaining failure is outside this lease:
+  `test_every_manual_only_contract_names_a_real_dispatcher_and_reason`. All six
+  `MANUAL_ONLY_TOOL_CONTRACTS` entries in `deadcode_gate.py` pin the dispatcher to
+  `tools.py:1428`; `ToolRegistry.execute` is now at line `1462` after the observable-failure
+  machinery landed. The guard is correctly red. `deadcode_gate.py` and its test are
+  explicitly off-limits, so I did not alter them or plant a fake marker on line 1428.
+
+Coordinator patch required after integration (six identical value replacements):
+
+```diff
+-        "dispatcher": "tools.py:1428 ToolRegistry.execute",
++        "dispatcher": "tools.py:1462 ToolRegistry.execute",
+```
+
+The exact two-test rerun after the owned fix is `1 failed / 1 passed`: only the stale
+off-limits source-line contract remains. This is a stop-condition report, not a weakened
+guard or a claimed green suite.
+
+Final immutable full run from agent snapshot `00803dd`: `3506 passed / 11 skipped /
+12 xfailed / 1 failed` in `802.93s`. The only failure is the same six-entry stale
+`tools.py:1428` dispatcher location above; the executable dispatch contract now passes.
+Because this final update changes only this handoff (outside the archived `agent/` tree),
+the tested agent bytes are the final branch's agent bytes.

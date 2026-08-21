@@ -1468,7 +1468,10 @@ class ToolRegistry:
         logged it, so skipping it here would make a count DROP -- as wrong as one that doubles.
         """
         self._ledger_dispatch(session_id, tool_name, tool_input)
-        swallowed_before = self._swallowed_total
+        # A few contract tests and library callers construct a minimal registry around this dispatch
+        # boundary without running __init__. Treat that as zero prior failures; the first real swallow
+        # still creates the counter through _swallow.
+        swallowed_before = getattr(self, "_swallowed_total", 0)
         active_token = _ACTIVE_TOOL_DISPATCH.set((session_id, tool_name))
         # Q-043. The scope brackets the SAME span as the ledger rows, so the cooldown a dispatch
         # actually paid for is the cooldown its row reports. A process-wide counter read either
@@ -1478,7 +1481,7 @@ class ToolRegistry:
                 res = await self._dispatch_engine(tool_name, tool_input, session_id)
         finally:
             _ACTIVE_TOOL_DISPATCH.reset(active_token)
-        swallowed_count = self._swallowed_total - swallowed_before
+        swallowed_count = getattr(self, "_swallowed_total", 0) - swallowed_before
         if swallowed_count and res is not None:
             latest = self._latest_swallowed or {}
             where = str(latest.get("where") or tool_name)
