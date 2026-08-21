@@ -289,6 +289,19 @@ ALLOWED_UNUSED_NAMED_CALLER = {
         "harness", "tests/test_deadcode_gate.py", "dg.resolve_named_caller(entry)",
         "resolves every entry in this list against the real tree; the test that calls it is the whole "
         "reason an entry here cannot degrade into the word 'allowed'"),
+    "deadcode_gate.tests_only_from_tree": (
+        "harness", "tests/test_deadcode_gate.py", "dg.tests_only_from_tree()",
+        "recomputes TESTS_ONLY from the test corpus so the record is checked against the tree rather "
+        "than believed. Its scheduler is pytest and no mission path can exist -- a production caller "
+        "would mean an engagement was reading the test directory, which is not a thing this platform "
+        "does. Added by the same run that added the record, and the accounting check flagged it "
+        "immediately, which is the check working"),
+    "deadcode_gate.tests_only_drift": (
+        "harness", "tests/test_deadcode_gate.py", "dg.tests_only_drift(",
+        "compares the stored record against the recomputed one in both directions. Lives in the module "
+        "beside the data rather than in the assertion, for the reason _ratchet_message does: a "
+        "comparison written at the call site is re-derived by every caller and drifts from what the "
+        "scan found. Its negative control drives it through three fabricated drifts"),
     "ics_dnp3_s7._dnp3_crc_table": (
         "harness", "tests/test_ics_dnp3_s7.py", "ics._dnp3_crc_table(data)",
         "a SECOND, INDEPENDENT implementation of the DNP3 CRC whose only purpose is to falsify the "
@@ -712,12 +725,231 @@ REMOVED_NOT_WIRED = {
         "rate-policy object, not this module function. SUPERSEDED and measurably so: main.py:1818-1831 "
         "recomputes `total` + `by_status` INLINE for /intel/techniques and ui/index.html:2415 reads "
         "`m.by_status`, so the live path reimplemented this function rather than call it"),
+    "exposure_tool.paths": (
+        "REMOVED Q-088 run 2. `[c['path'] for c in EXPOSURE_CHECKS]`, zero callers of any kind -- no "
+        "production caller, and unlike the other 37 flagged entries NO TEST EITHER, so nothing was "
+        "orphaned by the deletion. SUPERSEDED by direct consumption: `_run_exposure` iterates "
+        "`exp.EXPOSURE_CHECKS` at tools.py:7894 and counts it at tools.py:7908, and the seven other "
+        "`exp.` attributes tools.py uses (classify, git_reconstruct_finding, harvest_finding, "
+        "is_harvestable, looks_like_listing, nullbyte_variants, parse_listing) do not include this one. "
+        "The accessor form was never the definition of 'which paths this engine probes'; the list "
+        "itself is"),
     "remediation_depth.families_covered": (
         "REMOVED Q-088. One line, `sorted(DEPTH)`, zero callers. Its WIRED TWIN is a different module: "
         "`defense_mapping.families_covered` is called twice at main.py:1631-1632, and that name "
         "collision is exactly why a bare-name scan never saw this one. report.py consumes `depth_for` "
         "and `markdown`; nothing consumes the family list"),
 }
+
+
+# The two flagged entries with NO caller of any kind -- not production, not tests, not compose, not a
+# script -- that are RETAINED anyway, each naming the cross-file contract that pins it (Q-088 run 7).
+#
+# "Intentionally retained with a named reason" is one of the four states the invariant permits, and
+# these are the only two entries in this file that claim it. The reason is not a preference: deleting
+# either one turns an invariant suite RED in a file whose owner is a different lane.
+#
+#   bench_all.scan_via_mission     test_rate_policy.py asserts every exemption key matches EXACTLY ONE
+#                                  measured call site. Delete the function, the count goes to 0, red.
+#   hashid_tool.summarize          test_cap_ordering_invariant.py asserts `measured == set(contracted)`
+#                                  -- an EQUALITY. Delete the function, the measured slice vanishes and
+#                                  the contract entry matches nothing, red.
+#
+# WHAT THIS PAIR ACTUALLY DEMONSTRATES, because it is the invariant's own sentence arriving from an
+# unexpected direction. Both functions have zero callers and both are nevertheless CONSTRAINED by a
+# cross-cutting invariant: `hashid_tool.summarize` has a proven first-N ordering property asserted
+# about it and no consumer that could ever observe that property. Tested dead code is not capability --
+# and neither is invariant-constrained dead code. The pin records that the cost of closing these two is
+# a cross-lane edit to a rate-policy or cap-ordering invariant, NOT a one-line deletion, so the next
+# lane sequences it deliberately instead of discovering it from a red suite.
+#
+# SUBTRACTS NOTHING, and mechanically cannot. Both entries remain in `flagged` and both still count
+# toward the ratchet -- the count is 39 against a ceiling of 37 WITH this record in place. An allowlist
+# would have dropped them to 37 and made the ratchet pass by declaration, which is the one move five
+# lanes have now refused. The anchors are CHECKED against the real tree by
+# `test_every_retained_entry_names_a_contract_that_is_really_there`, so a reworded contract fails here
+# rather than silently leaving two functions retained for a reason that no longer exists.
+RETAINED_PINNED_BY_TEST_CONTRACT = {
+    "bench_all.scan_via_mission": (
+        "tests/test_rate_policy.py",
+        '("bench_all.py", "scan_via_mission", "httpx.AsyncClient")',
+        "RETAINED. Zero callers anywhere -- the whole-repo AST index resolves no production and no test "
+        "reference, and the non-Python sweep over compose, scripts/, ui/, Dockerfiles and the Makefile "
+        "returns nothing. Retained because it is a named rate-policy EXEMPTION whose test asserts the "
+        "key matches exactly one measured call site, so removing the function without removing the "
+        "exemption is a red suite in another lane's invariant file"),
+    "hashid_tool.summarize": (
+        "tests/test_cap_ordering_invariant.py",
+        '("hashid_tool.py", "summarize", "cands", "3")',
+        "RETAINED. Zero callers anywhere; every `.summarize(` in the tree is `race_tool.summarize` on a "
+        "race result, a different module with the same name -- the collision that hides these. Retained "
+        "because it is a contracted first-N work cap and the test asserts `measured == set(contracted)` "
+        "as an EQUALITY, so deleting the function strands a contract entry that matches nothing"),
+}
+
+
+# The 37 flagged entries whose ONLY caller is a test, each mapped to the test file(s) that must be
+# edited in the SAME change (Q-088 run 7). Measured by one AST index over all 489 Python files in the
+# repository, import-resolved, with four known-live functions as positive controls.
+#
+# WHY A RECORD AND NOT A DOC. The invariant's own sentence is "tested dead code is not capability", so
+# these 37 are its whole substance -- and the fact that decides what each one COSTS to close lived only
+# in a markdown table in docs/handoff/. Prose is exactly what this gate exists to distrust: this file
+# has already caught a docstring being read as a call (`payloads_for`), a docstring asserting a wiring
+# that did not exist (`capability_matrix.state_rank`), and a negative control whose own text was the
+# evidence it was written to prove absent. A table of deletion costs that no run can contradict is one
+# more paragraph of the same. Stored here, `test_the_tests_only_record_matches_the_tree_exactly`
+# recomputes it from source on every run and fails on any drift in EITHER direction.
+#
+# SUBTRACTS NOTHING. Every entry stays in `flagged` and counts toward the ratchet, exactly as
+# REMOVED_NOT_WIRED subtracts nothing. Its only power is over a reader -- which is the power `resolved`
+# and a handoff table both lack.
+#
+# WHAT IT IS FOR, concretely. A test calling a function is not a use, so each of these resolves only by
+# WIRING it (a production file) or by DELETING IT TOGETHER WITH ITS TESTS. The second file is the one
+# nobody costs correctly: `report.control_ran` is one deletion and THREE proof-integrity suites,
+# `intel_registry.reset` is one deletion and 22 assertions across two files. And `test_bbh.py` carries
+# TEN of the thirty-seven, which makes those ten ONE reviewed decision by that file's owner rather than
+# ten triages -- the single largest cut in the backlog, and the reason "37 triages" was the wrong unit
+# of work for the six lanes that stalled on it.
+#
+# DRIFT IS THE POINT. If another lane adds a test for one of these, its deletion cost went UP and this
+# record must say so; if a lane wires one, it leaves `flagged` and the entry must go. Both fail loudly.
+TESTS_ONLY = {
+    "action_envelope.mark": ("test_action_envelope.py",),
+    "api_protocols.inventory": ("test_api_protocols.py",),
+    "archive_intel.mark_validated": ("test_archive_intel.py", "test_asset_graph.py"),
+    "archive_intel.needs_validation": ("test_archive_intel.py",),
+    "bench_all.bench": ("test_bench_all.py",),
+    "bie.har_response_for": ("test_bie.py",),
+    "bie.observe": ("test_bie.py",),
+    "bie.resolve_locator": ("test_bie.py",),
+    "candidate_pipeline.plan_targets": ("test_candidate_pipeline.py",),
+    "cloud_iam.collect_live": ("test_cloud_iam.py",),
+    "codereview_graph.hypotheses": ("test_codereview_graph.py",),
+    "codereview_graph.link_runtime_to_source": ("test_codereview_graph.py",),
+    "db.get_snapshot": ("test_bbh.py",),
+    "fingerprint.fingerprint": ("test_bbh.py", "test_tech_fingerprint_facts.py"),
+    "graph_model.neighbors": ("test_bbh.py",),
+    "graph_model.related_findings": ("test_bbh.py",),
+    "ics_dnp3_s7.is_read_only": ("test_ics_dnp3_s7.py", "test_ics_real_stack.py"),
+    "intel_connectors.reset": ("test_intel_connectors.py", "test_intel_registry.py"),
+    "intel_registry.reset": ("test_intel_promotion.py", "test_intel_registry.py"),
+    "mission_export.summary": ("test_mission_export.py",),
+    "ot_context.declare_protocol_safety": ("test_ot_context.py",),
+    "race_tool.best_round": ("test_bbh.py",),
+    "report.control_ran": ("test_evidence_contract_by_proof_kind.py",
+                           "test_nested_negative_control.py",
+                           "test_proof_claim_matches_artifact.py"),
+    "report_integrity.cvss_version_of": ("test_report_integrity_cvss.py",),
+    "saml_tool.finding": ("test_saml_tool.py",),
+    "security.expand_cidr": ("test_bbh.py",),
+    "service_router.known_services": ("test_service_router.py",),
+    "service_router.plan": ("test_service_router.py",),
+    "sqli_tool.looks_like_login": ("test_bbh.py",),
+    "ssrf_tool.bypass_payloads": ("test_bbh.py",),
+    "stealth.describe": ("test_stealth.py",),
+    "technique_store.dedup_key": ("test_technique_pipeline.py",),
+    "techniques.techniques_for_lab": ("test_techniques.py",),
+    "tool_provenance.argv_hash": ("test_tool_provenance.py",),
+    "waf_bypass_tool.pad": ("test_waf_bypass.py",),
+    "web_security.is_url_in_scope": ("test_bbh.py", "test_scope_path.py"),
+    "xxe_tool.looks_like_xml": ("test_bbh.py",),
+}
+
+
+def tests_only_from_tree(app_dir: str = None) -> dict:
+    """Recompute TESTS_ONLY from source: flagged entry -> the test files that strictly reference it.
+
+    ONE index, queried per entry. A per-function re-walk of the corpus (40 x ~250 parses) timed out for
+    an earlier lane; this parses each file once.
+
+    STRICT resolution only -- `from m import f`, `from m import f as a`, `import m as x` then `x.f`.
+    A bare string constant equal to the name is deliberately NOT a reference here, because this reader
+    runs over the test corpus and the file that checks this record is itself a test file: counting
+    strings would let a record's own paperwork satisfy the record. That is the same self-reference this
+    module has already been bitten by twice (`payloads_for`, and run 2's fabricated negative control).
+    """
+    app = app_dir or APP_DIR
+    tests_dir = os.path.join(app, "tests")
+    out, parsed = {}, 0
+    wanted = {}
+    for entry in TESTS_ONLY:
+        mod, fn = entry.rsplit(".", 1)
+        wanted.setdefault(mod, set()).add(fn)
+    for name in sorted(os.listdir(tests_dir)):
+        if not name.endswith(".py"):
+            continue
+        # NO `except SyntaxError` HERE, DELIBERATELY, and the reason is measured rather than stylistic.
+        # The obvious `try: ... except SyntaxError: continue` is a silent swallow: it would let this
+        # record go quietly incomplete on a test module that stopped parsing, and an incomplete record
+        # under-reports deletion cost, which is the one direction that hurts. It also trips
+        # test_silent_failure_invariant.py's control-plane cap -- MEASURED, 77 -> 78 -- so the invariant
+        # suite priced the handler before this file talked itself into keeping it. A test corpus that
+        # does not parse is a broken suite, and it should fail loudly here rather than be absorbed.
+        #
+        # The warning suppression stays for the reason `scan()` suppresses it 400 lines up: this is a
+        # SECOND reader that compiles `tests/*.py`, so it re-emits every SyntaxWarning those files
+        # carry, attributed to `<unknown>:<line>` and to whichever test triggered the read. MEASURED
+        # while writing this -- `invalid escape sequence '\w'` from tests/test_client_request_source.py,
+        # which pytest already reports correctly against that file.
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore", SyntaxWarning)
+            tree = ast.parse(open(os.path.join(tests_dir, name), encoding="utf8").read())
+        parsed += 1
+        local, alias = {}, {}
+        for node in ast.walk(tree):
+            if isinstance(node, ast.ImportFrom):
+                mod = (node.module or "").split(".")[-1]
+                for a in node.names:
+                    local[a.asname or a.name] = (mod, a.name)
+            elif isinstance(node, ast.Import):
+                for a in node.names:
+                    alias[a.asname or a.name] = a.name.split(".")[-1]
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Name):
+                hit = local.get(node.id)
+                if hit and hit[1] in wanted.get(hit[0], ()):
+                    out.setdefault("%s.%s" % hit, set()).add(name)
+            elif isinstance(node, ast.Attribute):
+                recv = _dotted(node.value)
+                mod = alias.get(recv)
+                if mod and node.attr in wanted.get(mod, ()):
+                    out.setdefault("%s.%s" % (mod, node.attr), set()).add(name)
+    return {"map": {k: tuple(sorted(v)) for k, v in out.items()}, "files_parsed": parsed}
+
+
+def tests_only_drift(record: dict, measured: dict) -> dict:
+    """Compare the stored record against the tree, in BOTH directions.
+
+    A record checked one way rots the other way, which this module has now recorded three times. So
+    four distinct drifts, each with its own follow-up:
+
+      claimed_not_found  the record says a test file references the entry and it does not. The claim
+                         was wrong, or the test was rewritten. A deletion costed off this record would
+                         have edited a file for no reason.
+      found_not_claimed  a test file references the entry and the record omits it. THIS IS THE
+                         DANGEROUS ONE: the deletion cost went UP and the record understates it, so
+                         whoever deletes the function from this table gets a red suite in a file the
+                         table never named.
+      absent_entry       the record names an entry the tree no longer references at all -- it was
+                         wired or deleted, and the record is stale.
+      unrecorded_entry   handled by the caller against the live scan, not here.
+    """
+    claimed_not_found, found_not_claimed, absent = {}, {}, []
+    for entry, files in record.items():
+        got = set(measured.get(entry, ()))
+        if not got:
+            absent.append(entry)
+            continue
+        missing = sorted(set(files) - got)
+        extra = sorted(got - set(files))
+        if missing:
+            claimed_not_found[entry] = missing
+        if extra:
+            found_not_claimed[entry] = extra
+    return {"claimed_not_found": claimed_not_found, "found_not_claimed": found_not_claimed,
+            "absent_entry": sorted(absent)}
 
 
 def _ratchet_message(kind, count, baseline, newly, resolved, recorded, unaccounted=()):

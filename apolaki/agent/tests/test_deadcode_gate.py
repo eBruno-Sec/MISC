@@ -468,11 +468,16 @@ def test_the_triaged_islands_are_still_counted():
 
 
 @pytest.mark.xfail(strict=True, reason=(
-    "Q-088, MEASURED at 2957031 plus this run's removals: 40 qualified candidates against the unchanged "
+    "Q-088, MEASURED at 6c7ed00 plus this run's removal: 39 qualified candidates against the unchanged "
     "ceiling of 37, with zero unaccounted entries. The earlier 61 was the first honest AST measurement; "
-    "reviewed callers and removals lowered it to 44, and run 6 deleted four proven-unused functions "
-    "(see REMOVED_NOT_WIRED) to reach 40. Three candidates remain above the defensible ceiling. Raising "
-    "37 to 40 would weaken the ratchet to make it pass, which four lanes have now declined to do. "
+    "reviewed callers and removals lowered it to 44, run 6 deleted four proven-unused functions to "
+    "reach 40, and run 7 deleted the fifth, `exposure_tool.paths` (see REMOVED_NOT_WIRED). Two "
+    "candidates remain above the defensible ceiling and BOTH ARE BLOCKED BY LANE, not by evidence: "
+    "`bench_all.scan_via_mission` and `hashid_tool.summarize` have zero callers anywhere, but each is "
+    "pinned by an exact-match contract in an invariant suite another lane owns (test_rate_policy.py:133, "
+    "asserted count == 1; test_cap_ordering_invariant.py:202, asserted measured == set(contracted)), so "
+    "deleting either from here would strand a red test in a file this lane may not repair. Raising "
+    "37 to 39 would weaken the ratchet to make it pass, which five lanes have now declined to do. "
     "STRICT: when real wiring/removal takes the count to 37, this XPASSes and the marker must be "
     "retired deliberately -- and note that at 34 `test_the_baseline_is_not_slack` fires first and "
     "demands the CEILING be tightened."))
@@ -1417,11 +1422,19 @@ def test_the_transitive_pass_measures_laundering_and_not_something_else(tmp_path
 
 
 # Backticked `_private` tokens in this gate's prose that belong to some OTHER module, or to no module at
-# all. Two entries, each naming where it lives -- the same contract every allowlist in `deadcode_gate.py`
-# carries, applied to its paperwork. A third costs a deliberate edit here.
+# all. Each names where it lives -- the same contract every allowlist in `deadcode_gate.py` carries,
+# applied to its paperwork. A new one costs a deliberate edit here.
+#
+# The third entry arrived by this check FIRING, which is the only way an entry here should ever be
+# added: run 7 wrote a REMOVED_NOT_WIRED reason citing `_run_exposure` as the live consumer that made
+# the deleted accessor redundant, and the gate refused prose naming a private helper it does not
+# define. The citation is worth keeping -- it is the evidence for the deletion -- so it is declared
+# foreign with its home named rather than reworded into vagueness.
 PROSE_FOREIGN = {
     "_intel": "tools.py's import alias for the intel module; the Q-078 blind-spot example",
     "_run_x": "a naming PATTERN in the string-dispatch rule, not a function that exists anywhere",
+    "_run_exposure": "tools.py:7860, the exposure engine that consumes EXPOSURE_CHECKS directly and so "
+                     "made exposure_tool.paths redundant; cited as the proof for that removal",
 }
 
 
@@ -1457,3 +1470,161 @@ def test_the_gate_s_prose_only_names_helpers_that_exist():
     # PROSE_FOREIGN claiming to be somebody else's.
     squatting = sorted(n for n in PROSE_FOREIGN if n in defined)
     assert not squatting, "PROSE_FOREIGN claims %s is foreign, but this module defines it" % squatting
+
+
+# ── I-11: every flagged function has a NAMED disposition, and the names are checked ────────────
+
+def test_the_tests_only_record_matches_the_tree_exactly():
+    """The 37 flagged entries whose only caller is a test, and the files each deletion must edit WITH it.
+
+    WHY THIS IS A TEST AND NOT A TABLE IN A DOC. The invariant's own sentence is "tested dead code is
+    not capability", so these 37 are its entire substance -- and the fact that decides what each one
+    COSTS to close (which test file dies with it) lived only in markdown. This module has already been
+    bitten three times by trusting prose: a docstring read as a call, a docstring asserting a wiring
+    that did not exist, and a negative control whose own text was the evidence it was written to prove
+    absent. A table of deletion costs that no run can contradict is one more instance of the same.
+
+    BOTH DIRECTIONS, because a record checked one way rots the other way. The dangerous direction is
+    `found_not_claimed`: a test file references the entry and the record omits it, so the deletion cost
+    went UP and whoever costed a deletion off this record gets a red suite in a file it never named."""
+    measured = dg.tests_only_from_tree()
+
+    # POSITIVE CONTROL: a blind reader would report every entry absent and no drift in the other
+    # direction, so the walk must be shown to have read a real corpus before any zero is believed.
+    assert measured["files_parsed"] > 100, (
+        "only %d test modules parsed; the reader is not reading the corpus, so 'no drift' would be a "
+        "statement about the reader" % measured["files_parsed"])
+    assert len(measured["map"]) > 30, (
+        "the reader resolved only %d of the recorded entries; an index this empty cannot falsify "
+        "anything" % len(measured["map"]))
+
+    drift = dg.tests_only_drift(dg.TESTS_ONLY, measured["map"])
+    assert not drift["claimed_not_found"], (
+        "TESTS_ONLY names test files that do NOT reference the entry. Either the claim was wrong or "
+        "the test was rewritten; a deletion costed off this record would edit a file for no reason: %r"
+        % drift["claimed_not_found"])
+    assert not drift["found_not_claimed"], (
+        "these entries are referenced by test files the record does not name, so deleting them costs "
+        "MORE than this record says. Add the file(s) -- that is the whole point of the record: %r"
+        % drift["found_not_claimed"])
+    assert not drift["absent_entry"], (
+        "these are recorded as tests-only and NOTHING references them now. If one was wired it left "
+        "`flagged` and the entry must go; if it was deleted it belongs in REMOVED_NOT_WIRED: %r"
+        % drift["absent_entry"])
+
+
+def test_the_tests_only_drift_check_can_actually_fail():
+    """NEGATIVE CONTROL, in three directions. A record whose checker cannot fail is not a record.
+
+    The victim is chosen FROM the record at runtime and the fake file name is assembled at runtime.
+    That is not decoration: this file is part of the corpus other resolvers in this module read, and
+    run 2 recorded a negative control here whose own text became the evidence it was written to prove
+    absent. `tests_only_from_tree` ignores string constants for exactly that reason; this control keeps
+    the discipline anyway instead of relying on it."""
+    victim = sorted(dg.TESTS_ONLY)[0]
+    real_files = dg.TESTS_ONLY[victim]
+    ghost = "test_" + "nothing_of_the_sort" + ".py"
+    measured = dg.tests_only_from_tree()["map"]
+    assert measured.get(victim), "the control needs a victim the tree really references"
+
+    # 1. the record claims a file that does not reference the entry
+    fabricated = dict(dg.TESTS_ONLY)
+    fabricated[victim] = tuple(real_files) + (ghost,)
+    d1 = dg.tests_only_drift(fabricated, measured)
+    assert d1["claimed_not_found"] == {victim: [ghost]}, (
+        "a fabricated test file was accepted as a real reference: %r" % d1)
+
+    # 2. a real referencing file is missing from the record
+    trimmed = dict(dg.TESTS_ONLY)
+    trimmed[victim] = ()
+    d2 = dg.tests_only_drift(trimmed, measured)
+    assert d2["found_not_claimed"].get(victim), (
+        "dropping every recorded file for %s produced no drift at all: %r" % (victim, d2))
+
+    # 3. an entry nothing references is reported ABSENT rather than silently skipped
+    d3 = dg.tests_only_drift({"no_such_module.no_such_function": ("test_bbh.py",)}, measured)
+    assert d3["absent_entry"] == ["no_such_module.no_such_function"], d3
+
+    # ...and the real record through the same helper is clean, so the three failures above are the
+    # helper working rather than a helper that fails on everything handed to it.
+    assert dg.tests_only_drift(dg.TESTS_ONLY, measured) == {
+        "claimed_not_found": {}, "found_not_claimed": {}, "absent_entry": []}
+
+
+def test_every_flagged_function_has_a_named_disposition(qual):
+    """I-11 ITSELF: "reachable, framework-invoked with proof, intentionally retained with a named
+    reason, or removed". Every flagged entry must appear in exactly one record that says which.
+
+    Stricter than the accounting check beside it, and deliberately so. `unaccounted` asks whether
+    anyone has ever MEASURED an entry, and RECORDED_QUALIFIED is a historical measurement -- so a name
+    can sit in it forever with no verdict attached. This asks the invariant's actual question, what is
+    the DISPOSITION, and a new island answers neither record, by name, whatever it is called.
+
+    It cannot be satisfied by raising QUALIFIED_BASELINE: the ceiling does not appear in it."""
+    flagged = set(qual["unused"])
+    dispositioned = set(dg.TESTS_ONLY) | set(dg.RETAINED_PINNED_BY_TEST_CONTRACT)
+
+    assert flagged, "the scan flagged nothing, so this check would pass vacuously"
+    no_verdict = sorted(flagged - dispositioned)
+    assert not no_verdict, (
+        "these are flagged as dead and NO record says what should happen to them. I-11 allows four "
+        "states -- reachable, framework-invoked with proof, retained with a named reason, removed -- "
+        "and 'measured once' is not one of them. Put each in TESTS_ONLY with the test files that must "
+        "die with it, or in RETAINED_PINNED_BY_TEST_CONTRACT with the contract that pins it: %r"
+        % no_verdict)
+
+    stale = sorted(dispositioned - flagged)
+    assert not stale, (
+        "these carry a disposition but are no longer flagged -- wired or deleted -- so the record is "
+        "now a statement about a tree that does not exist: %r" % stale)
+
+    both = sorted(set(dg.TESTS_ONLY) & set(dg.RETAINED_PINNED_BY_TEST_CONTRACT))
+    assert not both, "an entry has ONE disposition, not a choice of two: %r" % both
+
+
+def test_every_retained_entry_names_a_contract_that_is_really_there():
+    """"Retained with a named reason" is worth nothing unless somebody checks the reason is still true.
+
+    Both retained entries have ZERO callers; they are kept only because an invariant suite owned by
+    another lane pins them with an exact-match contract. So the anchor is resolved against the real
+    tree: the file must exist, the anchor must be in it, and the anchor must contain the function's own
+    name, so an entry cannot cite a contract that has nothing to do with it. A reworded contract fails
+    HERE rather than leaving two functions retained for a reason that quietly stopped applying."""
+    assert dg.RETAINED_PINNED_BY_TEST_CONTRACT, "nothing to check; this would pass vacuously"
+    for entry, (rel, anchor, why) in dg.RETAINED_PINNED_BY_TEST_CONTRACT.items():
+        bare = entry.rsplit(".", 1)[1]
+        path = Path(dg.APP_DIR, rel)
+        assert path.exists(), "%s cites %s, which is not in this checkout" % (entry, rel)
+        text = path.read_text(encoding="utf8")
+        assert anchor in text, (
+            "%s is RETAINED because of a contract in %s and that contract is GONE -- so either the "
+            "reason to keep it expired and it can now be deleted, or the anchor rotted: %r"
+            % (entry, rel, anchor))
+        assert bare in anchor, (
+            "%s cites an anchor that does not mention it, so the anchor proves nothing: %r"
+            % (entry, anchor))
+        assert why.strip().startswith("RETAINED"), entry
+        assert len(why.split()) >= 25, (
+            "%s: a retention reason carries the proof it is uncalled AND why it is kept anyway" % entry)
+        # A retained entry is NOT excused: it still counts. Anything else is an allowlist in disguise.
+        assert entry not in dg.ALLOWED_UNUSED_QUALIFIED, entry
+        assert entry not in dg.ALLOWED_UNUSED_NAMED_CALLER, entry
+        assert entry not in dg.REMOVED_NOT_WIRED, entry
+
+
+def test_a_retained_entry_cannot_cite_a_contract_that_is_not_there():
+    """NEGATIVE CONTROL for the retention check: a fabricated anchor must not be found.
+
+    Assembled at runtime and asserted absent from both files before use, because writing it as a
+    literal would put the anchor into a file the checker reads -- the exact defect run 2 recorded in
+    this file, reappearing one record later."""
+    ghost = '("no_such_module.py", "' + "no_such_contracted_function" + '", "x")'
+    for name in ("deadcode_gate.py", "tests/test_deadcode_gate.py"):
+        assert ghost not in Path(dg.APP_DIR, name).read_text(encoding="utf8"), (
+            "the fabrication is present in %s, so this control would prove its own premise" % name)
+    entry, (rel, real_anchor, _why) = sorted(dg.RETAINED_PINNED_BY_TEST_CONTRACT.items())[0]
+    text = Path(dg.APP_DIR, rel).read_text(encoding="utf8")
+    assert ghost not in text, "the fabricated anchor is in the cited file; pick another"
+    # ...and the REAL anchor for the same entry IS present, so the reader is demonstrably looking.
+    assert real_anchor in text, (
+        "positive control failed: the real anchor for %s is not in %s" % (entry, rel))

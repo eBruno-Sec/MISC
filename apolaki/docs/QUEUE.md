@@ -1299,6 +1299,69 @@ call sites adopting `technique_status()`, which Q-012 already established and ne
 invented-id negative control passes; `/packs` and `/techniques` agree; the four markers XPASS and are
 retired in the commit that closes them.
 
+### Q-092 · `_cmd` discards the exit code, so a failed external tool is byte-identical to a clean scan · **READY** · **CRITICAL**
+
+**Q-091 (dalfox) is not a one-off. It is one of at least 24.** This is the shared root cause, and it is
+one line.
+
+`tools.py:1594 _cmd` MEASURES the exit code and then throws it away at the return edge:
+
+```python
+_out_text, _exit = out.decode(errors="replace"), proc.returncode
+return _out_text, err.decode(errors="replace")      # <- _exit is not returned
+```
+
+`_exit` is used only by the provenance record in the `finally` block. **No caller can check the exit
+status, because `_cmd` never hands it back.** 14 wrappers check `err.startswith("__MISSING__")`, which
+catches only a MISSING BINARY; 2 check a returncode anywhere in the file. A tool that runs and fails is
+indistinguishable from a tool that runs and finds nothing.
+
+**This is I-2b, in the external-tool path.** Outcome fidelity lives in a VALUE on the RETURN edge --
+the exact invariant `FindingWriteId` (Q-089) and `FindingUpdateResult` (Q-090) were built to satisfy
+for DB writes. `_cmd` has the identical defect and it is why 24 engines have never produced anything.
+
+**TWO CONFIRMED LIVE, both against authorized targets:**
+
+| tool | corpus | live reproduction | verdict |
+|---|---|---|---|
+| `run_dalfox` | **0 findings / 171 runs** | emits a JSON ARRAY (`[
+{}]`), parser reads JSONL; every line invalid standalone | parser can never yield >0 (Q-091) |
+| `run_nuclei` | **0 findings / 155 runs** | `nuclei -json` -> `EXIT=2`, stdout 37 bytes: `flag provided but not defined: -json` | **has never run at all in this build** |
+
+nuclei v3 renamed `-json` to `-jsonl`. nuclei exits 2 before scanning, writes the error to STDOUT (so
+`err` is empty and the `__MISSING__` check passes), and `json.loads("flag provided but not defined:
+-json")` raises into a bare `except Exception: pass`. 155 invocations, every one reported as a clean
+scan. **nuclei is Apolaki's primary breadth scanner.**
+
+**EVERY external-binary wrapper in `agent.py:143 _CONFIRMED_BY_TOOL` is in the zero list:**
+`run_nuclei` 0/155, `run_dalfox` 0/171, `check_takeover` 0/140, `run_sqlmap` 0/58. The tools Apolaki
+trusts MOST as confirmatory have collectively never confirmed anything.
+
+**CORPUS CENSUS -- 24 tools with >=10 runs and a zero histogram with no outlier** (runs in parens):
+`run_ssi`(940) `run_waf_bypass`(592) `run_sqli_structural`(592) `run_css_injection`(592)
+`run_form_nosqli`(464) `run_oauth`(416) `run_client_checks`(348) `run_nosqli`(342)
+`run_deserialization`(335) `run_github_recon`(316) `run_form_cmdi`(238) `run_upload_test`(236)
+`run_dalfox`(171) `run_nuclei`(155) `check_takeover`(140) `run_session_token`(82) `run_exposure`(59)
+`run_sqlmap`(58) `run_path_sqli`(58) `run_cache_poison`(57) `run_llm_probe`(46)
+`run_cache_deception`(24) `run_ssrf`(23) `run_username_enum`(15).
+
+**A zero histogram is a SIGNATURE, not a verdict.** Some of these are legitimately zero: a target with
+no LLM yields nothing from `run_llm_probe`, and that is correct behaviour. The census says only that
+these 24 share dalfox's signature, and dalfox and nuclei both turned out structurally broken when
+reproduced. **Each needs the same treatment: run it live, capture the RAW tool output, and compare it
+against what the parser yields.** Do not mark any of them broken or healthy from the histogram alone.
+
+**FIX, at the chokepoint (do this first, it is what makes the other 22 findable):**
+1. `_cmd` returns the exit status as a value on the return edge. Do not add a second out-parameter that
+   callers can ignore -- Q-089's lesson is that the carrier must be the thing they already read.
+2. A non-zero exit with unparseable output becomes `ToolResult(..., ran=False, error=...)`, never
+   `ran=True, "0 findings"`.
+3. Every bare `except Exception: pass` around a tool-output parse records a `_swallow`.
+
+**GATE:** an engine-liveness test asserting that a tool which exits non-zero produces `ran=False`. The
+negative control is the one that matters: it must FAIL against today's `_cmd`, which cannot express the
+distinction at all.
+
 ### Q-091 · dalfox has NEVER produced a finding: a JSONL parser reading JSON-array output · **READY** · **HIGH**
 
 **This closes Q-053 GAP-2, which was unfalsifiable as posed.** "Why are there zero dalfox findings in

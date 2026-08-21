@@ -62,10 +62,6 @@ EXPOSURE_CHECKS = [
 ]
 
 
-def paths() -> list:
-    return [c["path"] for c in EXPOSURE_CHECKS]
-
-
 def _matches(sigs: list, body: str) -> str:
     for s in sigs:
         if re.search(s, body or "", re.I | re.M):
