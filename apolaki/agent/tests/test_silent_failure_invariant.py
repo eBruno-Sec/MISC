@@ -384,7 +384,10 @@ _SWALLOW_RECORDERS = {
     ("tools.py", "_confirm_authz_write"): 3,
     ("tools.py", "_confirm_create_object_idor"): 5,
     ("tools.py", "_confirm_read_object_idor"): 3,
-    ("tools.py", "_form_xss_browser_confirm"): 3,
+    ("tools.py", "_discover_params"): 1,
+    ("tools.py", "_fetch"): 1,
+    ("tools.py", "_form_xss_browser_confirm"): 4,
+    ("tools.py", "_get"): 1,
     ("tools.py", "_gql_post"): 1,
     ("tools.py", "_locate"): 1,
     ("tools.py", "_post"): 2,
@@ -418,11 +421,13 @@ _SWALLOW_RECORDERS = {
     ("tools.py", "_run_xpath"): 1,
     ("tools.py", "_run_xss"): 5,
     ("tools.py", "_run_xxe"): 2,
+    ("tools.py", "_send"): 2,
     ("tools.py", "_sl_login"): 1,
     ("tools.py", "_sl_logout_variant"): 2,
     ("tools.py", "_sl_marker"): 1,
     ("tools.py", "_sl_mint"): 1,
     ("tools.py", "_sl_pwchange_variant"): 2,
+    ("tools.py", "_socket_service_probe"): 2,
     ("tools.py", "_submit"): 1,
     ("tools.py", "_timed"): 1,
     ("tools.py", "_traversal_differential"): 1,
@@ -433,6 +438,10 @@ _SWALLOW_RECORDERS = {
     ("tools.py", "_ws_handshake"): 2,
     ("tools.py", "get"): 2,
     ("tools.py", "probe"): 1,
+    ("tools.py", "q"): 1,
+    ("tools.py", "read_state"): 1,
+    ("tools.py", "send"): 1,
+    ("tools.py", "worker"): 1,
 }
 
 
@@ -553,8 +562,17 @@ def test_literal_return_discards_are_censused_and_capped():
     """MEASURED at 6c7ed00, unmutated: 89 handlers, 15 of them on load-bearing paths.
 
     Ceilings, not equalities: FIXING one of these must never turn this red, and
-    adding an 90th must.  The load-bearing 15 are named on failure so the list can
-    only be argued down one site at a time.
+    adding a 90th must.  The load-bearing survivors are named on failure so the list
+    can only be argued down one site at a time.
+
+    LOWERED 15 -> 3 in the same commit that fixed the first 12.  Those twelve now route
+    through `self._swallow` before returning the SAME empty value, so the handler is no
+    longer a bare literal-return discard and drops out of this census entirely.  Each
+    one has an oracle in `tests/test_silent_failure_residue.py` that forces the
+    protected call to raise and asserts the ledger names the owner; all twelve were
+    measured RED against `git archive HEAD` (66a7012) production and green after.
+    The remaining 3 are module-level helpers with no ToolRegistry `self`:
+    bie.session_fingerprint, dns_recon.doh, enip_audit_tool._list_identity_tcp.
     """
     rows = _partition(predicate=_literal_return_swallow)
     counts = Counter(row["category"] for row in rows)
@@ -562,4 +580,4 @@ def test_literal_return_discards_are_censused_and_capped():
              for r in rows if r["category"] == "load-bearing"]
     assert counts["optional"] <= 61
     assert counts["control-plane"] <= 13
-    assert counts["load-bearing"] <= 15, named
+    assert counts["load-bearing"] <= 3, named

@@ -2454,7 +2454,10 @@ class ToolRegistry:
                     tc["succeeded"] += 1
                     tc["by_role"][role]["succeeded"] += 1
                 return st, r.text[:8000]
-            except Exception:
+            except Exception as _apolaki_exc:
+                # I-5: (0, "") is also what a genuine refusal returns, so a crashed request
+                # would otherwise read as "this persona was denied" -- a false authz PASS.
+                self._swallow(_apolaki_exc, "authz_matrix.fetch", url)
                 return 0, ""
 
         cells, resp = [], {}
@@ -2871,7 +2874,10 @@ class ToolRegistry:
             try:
                 r, _ = await self._http_send("GET", u, headers or {}, None, True)
                 return {"status": r.status_code, "body": r.text or ""}
-            except Exception:
+            except Exception as _apolaki_exc:
+                # I-5: status 0 + empty body feeds ht.judge_header_trust as a clean
+                # "header not trusted" verdict.  A crashed probe must not prove absence.
+                self._swallow(_apolaki_exc, "header_trust.get", u)
                 return {"status": 0, "body": ""}
 
         baseline = await _get(url)
@@ -3406,7 +3412,10 @@ class ToolRegistry:
         ftp: USER anonymous -> 230. Best-effort — any failure is a clean negative."""
         try:
             reader, writer = await asyncio.wait_for(asyncio.open_connection(host, port), timeout=4)
-        except Exception:
+        except Exception as _apolaki_exc:
+            # I-5: "connect failed" and "service present but authenticated" both return
+            # confirmed=False.  Record which one actually happened.
+            self._swallow(_apolaki_exc, "service_pack.socket_connect", "%s:%s" % (host, port))
             return {"confirmed": False}
         try:
             if service == "redis":
@@ -3422,7 +3431,10 @@ class ToolRegistry:
                 resp = await asyncio.wait_for(reader.read(128), timeout=3)
                 return {"confirmed": b"230" in resp,
                         "evidence": "FTP USER anonymous -> %r (anonymous access)" % resp[:48]}
-        except Exception:
+        except Exception as _apolaki_exc:
+            # I-5: the protocol exchange crashed AFTER the socket opened -- a stronger signal
+            # than a clean negative, and previously indistinguishable from one.
+            self._swallow(_apolaki_exc, "service_pack.socket_exchange", "%s:%s" % (host, port))
             return {"confirmed": False}
         finally:
             try:
@@ -3605,7 +3617,10 @@ class ToolRegistry:
             try:
                 r, _ = await self._http_send(method, url, headers, _set(base_body, param, val), True)
                 return r.status_code, r.text[:400]
-            except Exception:
+            except Exception as _apolaki_exc:
+                # I-5: status 0 is read as "not accepted", so a crashed send REMOVES a value
+                # from the accepted list -- the failure direction that hides the bug.
+                self._swallow(_apolaki_exc, "numeric_abuse.send", url)
                 return 0, ""
         cs, _ = await _send(control)
         accepted = []
@@ -4770,7 +4785,10 @@ class ToolRegistry:
             if out:
                 cache[ckey] = out
             return out[:limit]
-        except Exception:
+        except Exception as _apolaki_exc:
+            # I-5: an empty param list silently disables every downstream dom_trace/dom_audit
+            # for this page -- exactly the in-mission loss the retry above was added for.
+            self._swallow(_apolaki_exc, "param_discovery.discover", url)
             return []
 
     async def _run_xss(self, inp: dict) -> ToolResult:
@@ -5469,7 +5487,10 @@ class ToolRegistry:
                         await browser.close()
                     except Exception:
                         pass
-        except Exception:
+        except Exception as _apolaki_exc:
+            # I-5: (False, "") is the "XSS did not execute" verdict.  A browser that never
+            # started must not be reported as a target that refused the payload.
+            self._swallow(_apolaki_exc, "form_xss.browser_confirm", page_url)
             return False, ""
         return False, ""
 
@@ -5675,7 +5696,10 @@ class ToolRegistry:
                                 c.cookies.clear()
                                 rr = await c.get(url, headers={"Cookie": _ch(ck)})
                                 return {"status": rr.status_code, "len": len(rr.text)}
-                            except Exception:
+                            except Exception as _apolaki_exc:
+                                # I-5: ep.evaluate compares four of these.  A crashed probe
+                                # collapses the differential to "no oracle", never to a finding.
+                                self._swallow(_apolaki_exc, "encoded_cookie.send", url)
                                 return {"status": 0, "len": 0}
 
                         base = await _send(orig)
@@ -6583,7 +6607,10 @@ class ToolRegistry:
             try:
                 r = await c.get(target, headers=headers)
                 return r.status_code, r.headers.get("location", "")
-            except Exception:
+            except Exception as _apolaki_exc:
+                # I-5: oauth.analyze_redirect_response reads (0, "") as "variant rejected",
+                # which is the clean verdict for an open-redirect probe that never ran.
+                self._swallow(_apolaki_exc, "oauth.send", target)
                 return 0, ""
 
         async with _target_client(verify=False, follow_redirects=False, timeout=15) as c:
@@ -7579,7 +7606,10 @@ class ToolRegistry:
                 _browser_engine.target_rate_policy.observe(str(r.url) or verify_url,
                                                            r.status_code, r.headers)
                 return {"status": r.status_code, "length": len(r.content), "body": r.text[:2000]}
-            except Exception:
+            except Exception as _apolaki_exc:
+                # I-5: race.verify_delta on an empty state reports "not changed", i.e. the
+                # race did not win -- the same output as a target that is not racy.
+                self._swallow(_apolaki_exc, "race.read_state", verify_url or "")
                 return {}
 
         best, best_verify, best_score = [], None, (-1, -1)
@@ -7605,7 +7635,10 @@ class ToolRegistry:
                         _browser_engine.target_rate_policy.observe(str(r.url) or url,
                                                                    r.status_code, r.headers)
                         return {"status": r.status_code, "length": len(r.content)}
-                    except Exception:
+                    except Exception as _apolaki_exc:
+                        # I-5: race.summarize counts status-0 workers as non-successes, so a
+                        # burst that crashed instead of racing scores as a target that held.
+                        self._swallow(_apolaki_exc, "race.worker", url)
                         return {"status": 0, "length": 0}
 
                 tasks = [asyncio.create_task(worker()) for _ in range(count)]
@@ -8413,7 +8446,10 @@ class ToolRegistry:
                 try:
                     r = await c.get(t)
                     return r.status_code, r.text
-                except Exception:
+                except Exception as _apolaki_exc:
+                    # I-5: the column-count and marker loops read an empty body as "this
+                    # width/mode did not work", so a crashed query silently narrows the sweep.
+                    self._swallow(_apolaki_exc, "sqli_metadata.query", t)
                     return 0, ""
 
             for p in params[:3]:
