@@ -69,7 +69,7 @@ def test_update_finding_enforces_schema_invariant():
     mid, fid = "m", _seed()
     assert dbmod.update_finding(mid, fid, {"title": "legit", "confidence": "confirmed",
                                            "target": "http://app:3000/x",
-                                           "reproduction_steps": "1) do a 2) do b"}) is True
+                                           "reproduction_steps": "1) do a 2) do b"}).verdict == dbmod.UPDATED
     row = dbmod.get_finding(mid, fid)
     assert isinstance(row["reproduction_steps"], list) and len(row["reproduction_steps"]) == 2
     assert gate_violations(mid) == []
@@ -79,7 +79,7 @@ def test_update_finding_refuses_offscope_target():
     """#8: an update that moves a finding out of scope is REFUSED — the row keeps its in-scope target."""
     mid, fid = "m", _seed()
     assert dbmod.update_finding(mid, fid, {"title": "off", "confidence": "confirmed",
-                                           "target": "http://evil.example.com/p"}) is False
+                                           "target": "http://evil.example.com/p"}).verdict == dbmod.UPDATE_REFUSED
     row = dbmod.get_finding(mid, fid)
     assert row["target"] == "http://app:3000/x"                 # unchanged, not overwritten
     assert gate_violations(mid) == []
@@ -90,7 +90,7 @@ def test_update_finding_cannot_park_a_lead_in_the_confirmed_table():
     not leave a lead-confidence row sitting in the confirmed-findings table."""
     mid, fid = "m", _seed()
     assert dbmod.update_finding(mid, fid, {"title": "maybe", "confidence": "lead",
-                                           "target": "http://app:3000/x"}) is True
+                                           "target": "http://app:3000/x"}).verdict == dbmod.UPDATE_REROUTED
     assert [f for f in dbmod.get_findings(mid) if f.get("id") == fid] == []
     leads = (dbmod.get_mission(mid).get("context") or {}).get("leads") or []
     assert any(l.get("title") == "maybe" for l in leads)
@@ -106,12 +106,12 @@ def test_update_finding_keeps_tenant_isolation_and_legitimate_merges():
     dbmod.create_mission("m2", "P", "active", "o", SCOPE, {})
     fid = dbmod.add_finding("m1", {"title": "f1", "confidence": "confirmed",
                                    "target": "http://app:3000/x"})
-    assert dbmod.update_finding("m2", fid, {"title": "hacked"}) is False      # tenant isolation (#10)
+    assert dbmod.update_finding("m2", fid, {"title": "hacked"}).verdict == dbmod.UPDATE_MISSING  # tenant isolation (#10)
     assert dbmod.get_findings("m1")[0]["title"] == "f1"
     merged = dict(dbmod.get_finding("m1", fid))
     merged["poc_screenshot"] = "iVBOR..."                                    # capture_finding_poc shape
     merged["analyst_notes"] = "triage: CWE-639"                              # _triage shape
-    assert dbmod.update_finding("m1", fid, merged) is True
+    assert dbmod.update_finding("m1", fid, merged).verdict == dbmod.UPDATED
     row = dbmod.get_finding("m1", fid)
     assert row["poc_screenshot"] == "iVBOR..." and row["analyst_notes"] == "triage: CWE-639"
 

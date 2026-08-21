@@ -93,11 +93,11 @@ def test_cross_mission_update_delete_isolation():
     dbmod.create_mission("m2", "P", "active", "o", {"in_scope": ["app"]}, {})
     fid = dbmod.add_finding("m1", {"title": "f1", "confidence": "confirmed"})
     # m2 cannot update or delete m1's finding by its id (#10)
-    assert dbmod.update_finding("m2", fid, {"title": "hacked"}) is False
+    assert dbmod.update_finding("m2", fid, {"title": "hacked"}).verdict == dbmod.UPDATE_MISSING
     assert dbmod.delete_finding("m2", fid) is False
     assert dbmod.get_findings("m1")[0]["title"] == "f1"          # untouched
     # the owning mission CAN
-    assert dbmod.update_finding("m1", fid, {"title": "f1b", "confidence": "confirmed"}) is True
+    assert dbmod.update_finding("m1", fid, {"title": "f1b", "confidence": "confirmed"}).verdict == dbmod.UPDATED
     assert dbmod.get_finding("m1", fid)["title"] == "f1b"
     assert dbmod.delete_finding("m1", fid) is True
     assert dbmod.get_findings("m1") == []

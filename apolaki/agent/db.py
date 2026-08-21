@@ -161,6 +161,66 @@ REROUTED = "rerouted"    #: TRUTH (#7) — the item went to the mission's leads 
 REFUSED = "refused"      #: SCOPE (#8) — provably off-scope; nothing was written anywhere
 
 
+#: Q-090-B/C. `update_finding` has FOUR outcomes and returned `bool`, so `False` meant three
+#: different things and `True` meant two. The callers could not tell them apart and both of them
+#: reported something untrue:
+#:
+#:   main.py:3789  `if not db.update_finding(...)` -> 404 "finding not found in this mission"
+#:                 -- answered on an OFF-SCOPE refusal, with the row sitting in the table.
+#:   main.py:3825  discards the return entirely -> {"ok": true, "bytes": 4, "attached_to": "f1"}
+#:                 -- answered when nothing was attached.
+#:
+#: Same shape as Q-089 one function over. `bool` CANNOT be subclassed in Python, so this carries the
+#: legacy truthiness through `__bool__` instead: every existing `if db.update_finding(...)` keeps its
+#: exact behaviour, and a caller that needs the outcome asks for it.
+UPDATED = "updated"          #: the row was updated in place (#6)
+UPDATE_REROUTED = "rerouted" #: TRUTH (#7) — the row LEFT the findings table for the leads list
+UPDATE_REFUSED = "refused"   #: SCOPE (#8) — off-scope; the write did not happen, the old row stands
+UPDATE_MISSING = "missing"   #: no such finding in THIS mission (tenant isolation #10)
+
+
+class FindingUpdateResult:
+    """What `update_finding` did, in a value that is still usable as the bool it used to be.
+
+    `__bool__` reproduces the OLD truthiness exactly -- True for UPDATED and UPDATE_REROUTED, False
+    for UPDATE_REFUSED and UPDATE_MISSING -- so no existing caller changes behaviour by upgrading.
+    That is deliberate and it is also the trap: **truthiness is what was ambiguous**. A REROUTED
+    update is truthy and leaves NO row in the findings table, exactly as a REROUTED add is. Any
+    caller reporting a COUNT or a STATUS must read `.updated` or `.verdict`, never `bool(...)`, and
+    `tests/test_outcome_fidelity.py` enforces that repository-wide.
+    """
+
+    __slots__ = ("verdict",)
+
+    def __init__(self, verdict: str):
+        self.verdict = verdict
+
+    def __bool__(self) -> bool:
+        return self.verdict in (UPDATED, UPDATE_REROUTED)
+
+    @property
+    def updated(self) -> bool:
+        """True ONLY when a row remains in the findings table carrying the edit."""
+        return self.verdict == UPDATED
+
+    def __repr__(self) -> str:
+        return "FindingUpdateResult(%r)" % self.verdict
+
+    def __eq__(self, other):
+        # Legacy call sites and tests compare against True/False. Preserve that, and keep the
+        # verdict comparable too, so neither style silently stops matching.
+        if isinstance(other, FindingUpdateResult):
+            return self.verdict == other.verdict
+        if isinstance(other, bool):
+            return bool(self) is other
+        if isinstance(other, str):
+            return self.verdict == other
+        return NotImplemented
+
+    def __hash__(self):
+        return hash(self.verdict)
+
+
 class FindingWriteId(str):
     """The id `add_finding` returns, carrying WHAT HAPPENED to the write.
 
@@ -327,17 +387,22 @@ def update_finding(mid: str, fid: str, finding: dict) -> bool:
     verdict, finding = _gate(mid, finding)
     finding["id"] = fid
     if verdict == "reject":
-        return False                                     # off-scope: refuse the write (safety #8)
+        return FindingUpdateResult(UPDATE_REFUSED)       # off-scope: refuse the write (safety #8)
     if verdict == "lead":
         # only reroute a row that actually belongs to this mission — never let a foreign fid create a
         # lead here (tenant isolation #10 must hold on this branch too).
         if get_finding(mid, fid) is None:
-            return False
+            return FindingUpdateResult(UPDATE_MISSING)
         delete_finding(mid, fid)
         add_lead(mid, finding)                           # demoted out of the confirmed table (truth #7)
-        return True
+        return FindingUpdateResult(UPDATE_REROUTED)
     cur = _exec("UPDATE findings SET data=? WHERE mission_id=? AND id=?", (json.dumps(finding), mid, fid))
-    return bool(getattr(cur, "rowcount", 0))
+    # Q-090-B/C: FOUR outcomes, and the old `bool` collapsed them into two. `False` meant off-scope
+    # OR foreign-fid OR no-such-row; `True` meant a real update OR a reroute that DELETED the row.
+    # `FindingUpdateResult.__bool__` reproduces the old truthiness byte-for-byte, so this change is
+    # invisible to every existing caller — and `.updated`/`.verdict` are now askable by the two
+    # handlers that were reporting the wrong thing.
+    return FindingUpdateResult(UPDATED if getattr(cur, "rowcount", 0) else UPDATE_MISSING)
 
 
 def delete_finding(mid: str, fid: str) -> bool:

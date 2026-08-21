@@ -3786,9 +3786,24 @@ async def update_finding(session_id: str, fid: str, finding: dict):
     for k in _EDITABLE_FINDING_KEYS:
         if k in (finding or {}):
             merged[k] = finding[k]
-    if not db.update_finding(session_id, fid, merged):
+    # Q-090-B. This was `if not db.update_finding(...): raise HTTPException(404, "finding not found
+    # in this mission")` -- and `update_finding` returned False for THREE different reasons, only one
+    # of which is "not found". An off-scope edit was answered as a missing row, with the row sitting
+    # in the table; and a REROUTE was truthy, so `{"ok": True}` was returned after the row had been
+    # DELETED and moved to leads. Each outcome now gets the answer it earns.
+    res = db.update_finding(session_id, fid, merged)
+    if res.verdict == db.UPDATE_REFUSED:
+        raise HTTPException(409, "the edit was refused: the finding would move out of this mission's "
+                                 "scope. The stored finding is unchanged.")
+    if res.verdict == db.UPDATE_MISSING:
         raise HTTPException(404, "finding not found in this mission")
-    return {"ok": True}
+    if res.verdict == db.UPDATE_REROUTED:
+        # Truthful, and the operator needs to know: the row is GONE from findings. Answering
+        # {"ok": True} here is what made this indistinguishable from an ordinary edit.
+        return {"ok": True, "updated": False, "verdict": res.verdict,
+                "note": "the edit demoted this finding to a lead; it is no longer in the findings "
+                        "table and now appears under this mission's leads"}
+    return {"ok": True, "updated": True, "verdict": res.verdict}
 
 
 @app.delete("/findings/{session_id}/{fid}")
@@ -3822,7 +3837,17 @@ async def capture_finding_poc(session_id: str, fid: str):
     merged = dict(finding)
     merged["poc_screenshot"] = shot["png_b64"][:1200000]
     merged["poc_url"] = url
-    db.update_finding(session_id, fid, merged)            # scoped to (mission, id) — tenant isolation (#10)
+    # Q-090-C. The return was DISCARDED, so this answered {"ok": true, "bytes": 4,
+    # "attached_to": "f1"} whatever happened -- including when the write was refused and nothing was
+    # attached at all. A PoC endpoint that reports an attachment it did not make is the same class as
+    # Q-082's fabricated curl reproductions: the report asserting work that never occurred.
+    res = db.update_finding(session_id, fid, merged)      # scoped to (mission, id) — tenant isolation (#10)
+    if not res.updated:
+        # `.updated` and NOT `bool(res)`: a REROUTED write is truthy and leaves no findings row, so
+        # the screenshot would have been "attached" to a row that no longer exists.
+        return {"ok": False, "attached_to": None, "verdict": res.verdict,
+                "note": "the screenshot was captured but NOT attached: the finding write returned "
+                        "%s, so no findings row carries it" % res.verdict}
     return {"ok": True, "bytes": shot.get("bytes"), "attached_to": fid}
 
 

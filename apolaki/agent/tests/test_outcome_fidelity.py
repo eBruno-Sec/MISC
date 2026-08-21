@@ -91,22 +91,6 @@ _KNOWN_OPEN = {
     # removal on `fid.stored`, so a SCOPE refusal keeps the lead and answers 409 instead of
     # deleting it and reporting promoted=True. The pin is retired here rather than left behind
     # guarding nothing -- which is the rule the docstring above states and this guard enforces.
-    ("main.py", "update_finding", "boolean-read", "db:update_finding"):
-        "Q-090-B. `if not db.update_finding(...): raise HTTPException(404, 'finding not found')`. "
-        "False means EITHER 'no such finding in this mission' OR 'the write was refused as "
-        "off-scope', and the second is answered with the first's message. MEASURED: the row is "
-        "present in the table and the API answers 404.",
-    ("main.py", "update_finding", "status-report", "db:update_finding"):
-        "Q-090-B (same site, the other half). `return {'ok': True}` is reached for the REROUTE "
-        "verdict too, which DELETEs the row from findings and appends it to the leads list -- the "
-        "edit is reported as ok while the finding left the confirmed table.",
-    ("main.py", "capture_finding_poc", "discarded-return", "db:update_finding"):
-        "Q-090-C. `db.update_finding(session_id, fid, merged)` as a bare statement; the return is "
-        "thrown away. MEASURED: with the write refused, the endpoint still answers "
-        "{'ok': true, 'bytes': 4, 'attached_to': 'f1'} and no screenshot is stored.",
-    ("main.py", "capture_finding_poc", "status-report", "db:update_finding"):
-        "Q-090-C (same site, the reported half). The {'ok': True, ...} literal is a constant, so it "
-        "is true of the request, never of the write.",
     ("agent.py", "BBHAgent._triage", "discarded-return", "db:update_finding"):
         "Q-090-D. The triage phase writes CWE/OWASP annotations back per finding and discards each "
         "return. A refusal or a reroute here removes the row mid-report with no signal; the loop "
@@ -643,11 +627,22 @@ def test_the_violation_census_is_non_vacuous():
     # 8 -> 7: Q-090-A was FIXED (main.py:confirm_lead now reads `fid.stored`). Lowering a
     # non-vacuity floor is only ever legitimate alongside the fix that removed the site, named in
     # the same commit -- never to accommodate a census that broke.
-    assert len(current) >= 7, (
-        "the violation census found only %d site(s); it was 7 after Q-090-A closed, so the "
+    assert len(current) >= 3, (
+        "the violation census found only %d site(s); it was 3 after Q-090-A/B/C closed, so the "
         "resolver is broken rather than the tree being clean: %s" % (len(current), current))
-    assert {row[2] for row in current} >= {"boolean-read", "status-report", "discarded-return"}, (
-        "one of the three violation shapes stopped being detected at all: %s" % current)
+    # SHAPE COVERAGE MOVED OFF THE PRODUCTION CENSUS, and the reason is the point of this whole file.
+    # This used to assert that all three shapes were still present IN PRODUCTION. Fixing Q-090-B
+    # removed the last `boolean-read` from the tree, so the assertion started failing on a CLEAN
+    # result -- it could not tell "the detector broke" from "the codebase stopped doing it", which is
+    # the exact confusion a non-vacuity control exists to resolve.
+    #
+    # The guarantee it was reaching for is that the DETECTOR can still see all three shapes, and that
+    # is a property of the detector, not of production. It belongs on the planted bypasses below,
+    # where every shape is deliberately present and always will be. Asserted there instead:
+    # `test_every_violation_shape_is_provably_detectable`. Production is then free to reach zero,
+    # which is the goal, without silently disarming the guard on its way.
+    assert {row[2] for row in current} <= {"boolean-read", "status-report", "discarded-return"}, (
+        "the census reported a shape this guard does not model: %s" % current)
 
 
 # ══════════════════════════════════════════════════════════════════════════════════════════════════
@@ -705,7 +700,9 @@ def test_the_derivation_does_not_call_a_single_outcome_writer_multi_outcome(tmp_
     assert ("store", "add_thing") not in _multi_outcome_owners(root=root)
 
 
-@pytest.mark.parametrize("planted,shape", [
+#: Every planted bypass, named so the parametrized test AND the shape-coverage control read the
+#: SAME specimens. Two copies would let one drift and quietly stop covering a shape.
+_PLANTED = [
     ("import store\ndef f(m, x):\n    if store.add_thing(m, x):\n        return 1\n",
      "boolean-read"),
     ("import store as _s\ndef f(m, xs):\n    return sum(1 for x in xs if _s.add_thing(m, x))\n",
@@ -726,7 +723,10 @@ def test_the_derivation_does_not_call_a_single_outcome_writer_multi_outcome(tmp_
      "status-report"),
     ("import store\ndef f(m, x):\n    store.add_thing(m, x)\n    return None\n",
      "discarded-return"),
-])
+]
+
+
+@pytest.mark.parametrize("planted,shape", _PLANTED)
 def test_the_guard_goes_red_on_a_planted_bypass(tmp_path, planted, shape):
     """THE MANDATORY PLANTED BYPASS, one per binding form and per violation shape -- including the
     aliased and from-imported spellings a `mod.attr(` text scan misses, and the `sum(1 for ...)` that
@@ -737,6 +737,28 @@ def test_the_guard_goes_red_on_a_planted_bypass(tmp_path, planted, shape):
     assert planted_rows, "the census did not flag a planted bypass:\n%s" % planted
     assert any(r[2] == shape for r in planted_rows), (
         "flagged, but not as a %s: %s\n%s" % (shape, planted_rows, planted))
+
+
+def test_every_violation_shape_is_provably_detectable(tmp_path):
+    """SHAPE COVERAGE, moved here from the production census.
+
+    The census used to assert all three shapes were still present IN PRODUCTION. That made a CLEAN
+    tree indistinguishable from a broken detector -- and it started failing the moment Q-090-B removed
+    the last `boolean-read` from the codebase, i.e. on a success. Whether the detector can SEE a shape
+    is a property of the detector; it belongs where the shapes are guaranteed to exist.
+
+    Every shape is asserted against a freshly planted specimen, so production is free to reach zero
+    without disarming the guard on the way down.
+    """
+    seen = set()
+    for i, (planted, shape) in enumerate(_PLANTED):
+        # `i`, not `len(seen)`: several specimens share a shape, so a set-length index collides and
+        # the second one raises FileExistsError. Caught by running it.
+        rows = _outcome_fidelity_violations(root=_fake_tree(tmp_path / ("p%d" % i), planted))
+        seen |= {r[2] for r in rows if r[0] == "pkg/caller.py"}
+    assert seen >= {"boolean-read", "status-report", "discarded-return"}, (
+        "the detector can no longer see every violation shape it claims to model; detected only %s"
+        % sorted(seen))
 
 
 def test_the_guard_does_not_flag_an_ordinary_id_use(tmp_path):
@@ -844,7 +866,6 @@ def test_q090a_confirming_an_off_scope_lead_must_not_destroy_it_and_claim_promot
         % (len(rows), len(leads)))
 
 
-@pytest.mark.xfail(strict=True, reason=_Q090 + " Q-090-B: a refusal is answered as a 404.")
 def test_q090b_a_refused_edit_must_not_be_reported_as_a_missing_finding(api):
     """MEASURED: the row is in the table and `PUT /findings/{sid}/{fid}` answers 404 "finding not
     found in this mission". `db.update_finding` returns False for BOTH "no such finding" and "the
@@ -863,7 +884,6 @@ def test_q090b_a_refused_edit_must_not_be_reported_as_a_missing_finding(api):
         % (response.status_code, response.json().get("detail")))
 
 
-@pytest.mark.xfail(strict=True, reason=_Q090 + " Q-090-C: poc attaches nothing and answers ok.")
 def test_q090c_a_poc_that_was_not_written_must_not_be_reported_as_attached(api, monkeypatch):
     """MEASURED: {"ok": true, "bytes": 4, "attached_to": "f1"} with no `poc_screenshot` on the row.
     `capture_finding_poc` calls `db.update_finding` as a bare statement and throws the return away --
