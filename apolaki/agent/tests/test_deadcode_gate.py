@@ -468,7 +468,7 @@ def test_the_triaged_islands_are_still_counted():
 
 
 @pytest.mark.xfail(strict=True, reason=(
-    "MEASURED at bd912f4 and rechecked after rebasing onto a650065: 44 qualified candidates against "
+    "Q-088, MEASURED at bd912f4 and rechecked after rebasing through 186f500: 44 qualified candidates against "
     "the unchanged ceiling of 37, with zero unaccounted entries. The earlier 61 was the first honest "
     "AST measurement; reviewed callers and "
     "removals lowered it, but seven candidates remain above the defensible ceiling. Raising 37 to 44 "

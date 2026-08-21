@@ -8,8 +8,8 @@ Branch: `codex/q088`
 - Actual `main` at worktree creation: `bd912f4cc2324e3018eff54dcbfae8b3a5fbaf78`.
 - Clean worktree agent-tree SHA: `0610129e060bd47b7fb0b4da143281e5569d845a`.
 - Full isolated suite at `bd912f4`: `3409 passed, 11 skipped, 13 xfailed, 0 failed` in 736.10s.
-- Rebased cleanly onto `a650065`; 44/37/0 qualified accounting and 14/14 method accounting were
-  unchanged after the rebase.
+- Rebased cleanly first onto `a650065`, then onto `186f500` after main advanced during the first final
+  suite. The 44/37/0 qualified accounting and 14/14 method accounting were unchanged after both.
 - Missions before heavy work: 0 running (1 row returned).
 
 ## G2 guard scope
@@ -72,9 +72,12 @@ G4 semantic mutants:
 
 - G2 targeted: `17 passed in 11.86s`.
 - G4 targeted: `68 passed, 1 xfailed in 179.82s`.
+- First post-rebase full snapshot at `54ad24c`: `3426 passed, 11 skipped, 13 xfailed, 0 failed`
+  in 756.82s. Main advanced during the run, so this is evidence but not the handback run.
 - Full isolated suite after final rebase: in progress.
 
 ## Commits
 
-- `a4b4f92` - G2 repository scope plus falsifiable ToolRegistry-scoped identity detectors (rebased).
-- `f262568` - G4 checked manual-only contracts for the exact six unscheduled methods (rebased).
+- `5e8b70b` - G2 repository scope plus falsifiable ToolRegistry-scoped identity detectors (rebased).
+- `7c49e80` - G4 checked manual-only contracts for the exact six unscheduled methods (rebased).
+- Final measurement commit: in progress.
