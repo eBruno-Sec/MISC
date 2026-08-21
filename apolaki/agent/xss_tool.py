@@ -189,7 +189,7 @@ def reflection_finding(url: str, param: str, context: str, where: str = "query",
     # always stay candidate for the browser-execution pass (or a human).
     proven = context in EXECUTABLE_ON_REFLECTION and bool(evidence)
     label = "confirmed" if proven else "candidate"
-    return {
+    finding = {
         "title": f"Reflected XSS ({context}) in '{param}'", "param": param,  # Q-046
         "severity": "high", "target": set_param(url, param, BREAKOUTS[context]) if where == "query" else url,
         "description": (f"User input in the {where} parameter '{param}' reflects into a {context} context with the "
@@ -203,6 +203,13 @@ def reflection_finding(url: str, param: str, context: str, where: str = "query",
         "evidence": evidence,
         "cwe": "CWE-79", "family": "xss", "tags": ["xss"], "confidence": label,
     }
+    if proven:
+        finding["negative_controls"] = [{
+            "kind": "harmless-reflection-canary",
+            "payload": CANARY,
+            "result": "the canary located the response context without introducing the breakout element",
+        }]
+    return finding
 
 
 def execution_finding(url: str, param: str, payload: str, where: str) -> dict:

@@ -220,13 +220,14 @@ async def register(register_url: str, label: str = "user", account: dict = None,
                 # returns JSON (the created user); an SPA catch-all route returns 200 index.html for
                 # ANY path, so require a JSON body — otherwise /register on an Angular app would look
                 # "created" without creating anything.
-                resp, created = None, False
+                resp, created, json_errors = None, False, []
                 for body in ({"email": acct["email"], "password": acct["password"],
                               "passwordRepeat": acct["password"], "username": acct["username"]},
                              {"username": acct["username"], "password": acct["password"]}):
                     try:
                         resp = await c.post(register_url, json=body)
-                    except Exception:
+                    except Exception as exc:
+                        json_errors.append("%s: %s" % (type(exc).__name__, str(exc)[:120]))
                         continue
                     if resp.status_code < 400:
                         ct = (resp.headers.get("content-type") or "").lower()
@@ -240,6 +241,8 @@ async def register(register_url: str, label: str = "user", account: dict = None,
                             created = True
                             break
                 note = f"json signup -> {resp.status_code if resp is not None else 'n/a'}"
+                if json_errors:
+                    note += "; degraded: " + " | ".join(json_errors)
             # capture any session the signup established
             cookie = "; ".join(f"{k}={v}" for k, v in c.cookies.items())
             headers = {"Cookie": cookie} if cookie else {}

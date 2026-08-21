@@ -148,6 +148,66 @@ _CHAT_SINK = _re.compile(
 _LOGIN_PATHS = ("/rest/user/login", "/api/login", "/api/auth/login", "/login",
                 "/api/authenticate", "/auth/login", "/user/login", "/api/sessions")
 
+_VALUE_PARAM = set(_URLISH_PARAM + _FILE_PARAM + _CMD_PARAM + (
+    "id", "uid", "user", "account", "role", "admin", "search", "filter", "sort", "order",
+    "category", "product", "item", "page", "name"))
+_VALUE_PATH = _re.compile(
+    r"/(?:admin|manage|internal|private|account|profile|users?|auth|login|session|execute|exec|"
+    r"command|upload|import|export|graphql|api|rest|debug|config|backup)(?:/|$)", _re.I)
+
+
+def _url_value(url: str) -> int:
+    """Security value visible before probing, used only to decide a bounded prefix."""
+    raw = str(url or "").split("#", 1)[0]
+    before_query, marker, query = raw.partition("?")
+    names = [part.partition("=")[0].lower() for part in query.split("&") if part] if marker else []
+    path = before_query.split("://", 1)[-1]
+    path = "/" + path.partition("/")[2] if "/" in path else "/"
+    score = 1 if names else 0
+    score += 4 * sum(name in _VALUE_PARAM for name in names)
+    score += 3 if _VALUE_PATH.search(path) else 0
+    return score
+
+
+def _rank_urls(urls) -> list:
+    """Highest target-observable security value first; stable for ties."""
+    return sorted(list(urls or []), key=_url_value, reverse=True)
+
+
+def _endpoint_value(endpoint: dict) -> int:
+    params = [str(p).lower() for p in (endpoint.get("params") or [])]
+    score = 1 if params else 0
+    score += 4 * sum(p in _VALUE_PARAM for p in params)
+    score += 4 if endpoint.get("body_sink") else 0
+    score += 3 if _VALUE_PATH.search(str(endpoint.get("path") or "/")) else 0
+    return score
+
+
+def _rank_endpoints(endpoints) -> list:
+    return sorted(list(endpoints or []), key=_endpoint_value, reverse=True)
+
+
+def _rank_live_hosts(hosts, roots=()) -> list:
+    """Operator roots first, then URL security value; stable for ties."""
+    root_set = {str(root).lower() for root in (roots or [])}
+    ranked = _rank_urls(hosts)
+    return sorted(ranked, key=lambda url: _host(url).lower() in root_set, reverse=True)
+
+
+def _rank_host_names(hosts, roots=()) -> list:
+    """Operator roots first; discovered hosts retain deterministic lexical order."""
+    root_set = {str(root).lower() for root in (roots or [])}
+    unique = sorted({str(host) for host in (hosts or []) if host})
+    return sorted(unique, key=lambda host: host.lower() in root_set, reverse=True)
+
+
+def _form_value(form: dict) -> int:
+    names = [str((p or {}).get("name") or "").lower()
+             for p in (form.get("body_params") or []) if isinstance(p, dict)]
+    return (_url_value(form.get("action") or "")
+            + 4 * sum(name in _VALUE_PARAM for name in names)
+            + (1 if str(form.get("method") or "").upper() in _WRITE_METHODS else 0))
+
 # Q-050. A real-time transport endpoint the mission OBSERVED. `tools.py:604` recorded that
 # `run_ws_hijack` was "implemented, permission-registered and reachable from NOTHING", and held it
 # out of the sweep deliberately, pending a measurement -- putting a brand-new confirming engine on
@@ -479,14 +539,14 @@ def next_batch(state: dict) -> list:
             _obs.get((ep.get("host") or "", ep.get("path") or "")) or {})
         return _b_url(merged) or (_b(ep.get("host") or "") + (ep.get("path") or ""))
 
-    def _observed_get_paths(host: str, cap: int = CAP_REST) -> list:
+    def _observed_get_paths(host: str) -> list:
         """Distinct paths OBSERVED on `host`, for `run_mass_assign`'s re-read ranking (Q-050).
 
         Observed, never invented: these are the URLs the crawl and the API's own spec import put on
         the surface, stripped of their query strings. `mass_assign_tool.read_views` then keeps only
-        the ones sharing a leading segment with the write path and ranks them, so passing a bounded
-        list here costs nothing and passing an invented one would be the recorded
-        probe-with-an-invented-value defect.
+        the ones sharing a leading segment with the write path, ranks them, and applies the actual
+        five-request cap. Capping here first made that semantic rank ceremonial: a precise object
+        template discovered after thirty generic paths was discarded before the rank could see it.
 
         Paths the mission observed as WRITES are excluded. `_ma_views` is capped
         (`ToolRegistry._MA_MAX_VIEWS`), so every write path in the list displaces a real read view:
@@ -506,8 +566,6 @@ def next_batch(state: dict) -> list:
                 continue
             seen.add(p)
             out.append(p)
-            if len(out) >= cap:
-                break
         return out
 
     def fresh(steps):
@@ -554,35 +612,34 @@ def next_batch(state: dict) -> list:
 
     # ── phase B: live-host discovery ──
     b = []
-    targets = sorted(set(roots) | set(subs))
+    targets = _rank_host_names(set(roots) | set(subs), roots)
     if targets:
         # key on target count so a later recon cycle (more subdomains) re-runs httpx
         b.append(_step("run_httpx", {"targets": targets, "bases": bases}, f"run_httpx:{len(targets)}"))
     b.append(_step("check_takeover", {}, "check_takeover"))
     # http_probe each in-scope host root once (extracts links + params → surface)
-    host_roots = []
-    for h in sorted(set(roots) | set(subs) | set(url_hosts)):
-        host_roots.append(h)
+    host_roots = _rank_host_names(set(roots) | set(subs) | set(url_hosts), roots)
     for h in host_roots[:CAP_HOSTS]:
         b.append(_step("http_probe", {"url": _b(h)}, f"http_probe:{h}"))
     # JS-aware crawl of each in-scope root — essential for SPAs/APIs (e.g. Angular
     # apps) whose real surface, endpoints and params live in JS/XHR, not static
     # HTML that http_probe can parse. ACTIVE, so passive mode skips it via _allowed.
-    for h in sorted(set(roots) | set(subs))[:CAP_HOSTS]:
+    for h in targets[:CAP_HOSTS]:
         b.append(_step("run_katana", {"url": _b(h)}, f"run_katana:{h}"))
     b = fresh(b)
     if b:
         return b
 
     # ── phase C: fingerprint live hosts ──
-    c = [_step("run_fingerprint", {"url": u}, f"run_fingerprint:{u}") for u in live_hosts[:CAP_HOSTS]]
+    c = [_step("run_fingerprint", {"url": u}, f"run_fingerprint:{u}")
+         for u in _rank_live_hosts(live_hosts, roots)[:CAP_HOSTS]]
     c = fresh(c)
     if c:
         return c
 
     # ── phase D: enrich (openapi / graphql / js) ──
     d = []
-    js_urls = [u for u in urls if u.split("?")[0].lower().endswith(".js")]
+    js_urls = _rank_urls([u for u in urls if u.split("?")[0].lower().endswith(".js")])
     openapi_seen, graphql_seen = set(), set()
     for u in urls:
         low = u.lower()
@@ -609,8 +666,8 @@ def next_batch(state: dict) -> list:
     # http_probe parameterized/product pages so their POST forms (method + body
     # fields) are captured into recon["forms"] BEFORE phase-E probes run — that is
     # what lets run_xxe reach a POST XML body sink like the stock-check form.
-    inv_d = surface_mod.build_inventory(urls)
-    for ep in [e for e in inv_d if e.get("parameterized")][:CAP_ENDPOINTS]:
+    inv_d = surface_mod.build_inventory(urls, cap=max(1000, len(urls)))
+    for ep in _rank_endpoints([e for e in inv_d if e.get("parameterized")])[:CAP_ENDPOINTS]:
         u = _b_url(ep.get("example")) or (_b(ep['host']) + ep['path'])
         d.append(_step("http_probe", {"url": u}, f"http_probe:{ep['host']}{ep['path']}"))
     # Also http_probe a bounded sample of discovered non-asset HTML pages so their
@@ -626,7 +683,7 @@ def next_batch(state: dict) -> list:
             continue
         seen_pg.add(pg)
         page_urls.append(pg)
-    for u in page_urls[:CAP_FORM_PAGES]:
+    for u in _rank_urls(page_urls)[:CAP_FORM_PAGES]:
         d.append(_step("http_probe", {"url": u}, f"http_probe:page:{_host(u)}{_path(u)}"))
     # http_probe high-value NON-parameterized REST/sensitive endpoints (basket, ftp,
     # users, security-questions, 2fa, …). The parameterized filter above skips them, so
@@ -646,16 +703,16 @@ def next_batch(state: dict) -> list:
             continue
         seen_rest.add(u)
         rest_urls.append(u)
-    for u in rest_urls[:CAP_REST]:
+    for u in _rank_urls(rest_urls)[:CAP_REST]:
         d.append(_step("http_probe", {"url": u}, f"http_probe:rest:{_host(u)}{_path(u)}"))
     d = fresh(d)
     if d:
         return d
 
     # ── phase E: surface-driven probes ──
-    inv = surface_mod.build_inventory(urls)
-    param_eps = [e for e in inv if e.get("parameterized")][:CAP_ENDPOINTS]
-    host_bases = sorted({e["host"] for e in inv})[:CAP_HOSTS]
+    inv = surface_mod.build_inventory(urls, cap=max(1000, len(urls)))
+    param_eps = _rank_endpoints([e for e in inv if e.get("parameterized")])[:CAP_ENDPOINTS]
+    host_bases = _rank_host_names({e["host"] for e in inv}, roots)[:CAP_HOSTS]
     e_steps = []
     # DOM audit (headless browser, client-side confirmation) — bounded because it
     # is slow: the live-host roots + a few HTML pages, skipping static assets.
@@ -736,7 +793,8 @@ def next_batch(state: dict) -> list:
             xxe_seen.add(act)
             e_steps.append(_step("run_xxe", {"url": act, "method": "POST",
                                              "fields": fm.get("fields", [])}, f"run_xxe:{act}"))
-    xml_eps = [e for e in inv if e.get("body_sink") or _XML_SINK.search(e.get("path") or "")][:CAP_HOSTS]
+    xml_eps = _rank_endpoints(
+        [e for e in inv if e.get("body_sink") or _XML_SINK.search(e.get("path") or "")])[:CAP_HOSTS]
     for ep in xml_eps:
         u = _ex(ep)
         if u not in xxe_seen:
@@ -771,7 +829,7 @@ def next_batch(state: dict) -> list:
     # form on a plain page that http_probe never happened to fetch is still tested
     # (run_form_cmdi fetches + parses the page's forms itself).
     seen_page = set()
-    for u in urls:
+    for u in _rank_urls(urls):
         raw = u.split("?")[0].split("#")[0]
         if _is_static(raw):
             continue
@@ -801,13 +859,14 @@ def next_batch(state: dict) -> list:
     # so the engine skips its own content-discovery fetch entirely and sends nothing beyond the
     # handshake and its cookie-stripped negative control.
     ws_seen = set()
+    ws_candidates = []
     for u in urls:
         cand = _ws_candidate(u)
         if not cand or cand in ws_seen:
             continue
         ws_seen.add(cand)
-        if len(ws_seen) > CAP_WS_ENDPOINTS:
-            break
+        ws_candidates.append(cand)
+    for cand in _rank_urls(ws_candidates)[:CAP_WS_ENDPOINTS]:
         import ws_tool as _wst
         e_steps.append(_step("run_ws_hijack",
                              {"url": _wst.http_origin_of(cand) + "/", "ws_urls": [cand]},
@@ -819,7 +878,7 @@ def next_batch(state: dict) -> list:
             e_steps.append(_step("run_auth_sqli", {"url": base}, f"run_auth_sqli:{base}"))
             e_steps.append(_step("run_form_nosqli", {"url": base}, f"run_form_nosqli:{base}"))
     # plus a curated set of well-known login paths per in-scope host root
-    for h in sorted(set(roots) | set(subs))[:CAP_HOSTS]:
+    for h in targets[:CAP_HOSTS]:
         for lp in _LOGIN_PATHS:
             u = _b(h) + lp
             if u not in auth_seen:
@@ -855,7 +914,8 @@ def next_batch(state: dict) -> list:
         e_steps.append(_step("run_dalfox", {"url": u}, f"run_dalfox:{ep['host']}{ep['path']}"))
     # CSRF token check + race/rate-limit on state-changing POST forms.
     sc_seen = set()
-    for fm in (state.get("recon", {}).get("forms") or []):
+    for fm in sorted((state.get("recon", {}).get("forms") or []),
+                     key=_form_value, reverse=True):
         act = fm.get("action")
         if act and str(fm.get("method", "GET")).upper() == "POST" and act not in sc_seen:
             sc_seen.add(act)
@@ -896,7 +956,8 @@ def next_batch(state: dict) -> list:
     # INTRUSIVE -- it writes objects -- so `_allowed()` schedules it in Full mode only, the same
     # gate already holding run_stored_xss / run_race / run_deserialization.
     ma_seen = set()
-    for fm in (state.get("recon", {}).get("forms") or []):
+    for fm in sorted((state.get("recon", {}).get("forms") or []),
+                     key=_form_value, reverse=True):
         act = fm.get("action")
         meth = str(fm.get("method") or "").upper()
         if not act or act in ma_seen or meth not in _WRITE_METHODS:
@@ -985,7 +1046,7 @@ def next_batch(state: dict) -> list:
     # It runs late and is capped. Results are truth-first advisory leads.
     if nmap_vuln_on:
         nv_steps = [_step("run_nmap_vuln", {"target": h}, f"run_nmap_vuln:{h}")
-                    for h in sorted(set(roots) | set(subs))[:CAP_ZAP]]
+                    for h in targets[:CAP_ZAP]]
         nv_steps = fresh(nv_steps)
         if nv_steps:
             return nv_steps
@@ -993,7 +1054,7 @@ def next_batch(state: dict) -> list:
     # ── phase F4: heavy nuclei — full vuln template set (opt-in), truth-first leads ──
     if nuclei_heavy_on:
         hn_steps = [_step("run_nuclei", {"target": _b(h), "heavy": True}, f"run_nuclei:heavy:{h}")
-                    for h in sorted(set(roots) | set(subs))[:CAP_HOSTS]]
+                    for h in targets[:CAP_HOSTS]]
         hn_steps = fresh(hn_steps)
         if hn_steps:
             return hn_steps

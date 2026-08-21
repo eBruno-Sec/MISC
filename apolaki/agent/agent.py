@@ -339,6 +339,36 @@ def target_shape(url: str) -> str:
     return "/".join(segs) + "|" + ",".join(params)
 
 
+_HIGH_VALUE_ROUTE = re.compile(
+    r"/(?:admin|manage|internal|private|account|profile|users?|auth|login|session|execute|exec|"
+    r"command|upload|import|export|graphql|api|rest|debug|config|backup)(?:/|$)", re.I)
+_HIGH_VALUE_PARAM = re.compile(
+    r"^(?:id|uid|user|account|role|admin|cmd|command|exec|code|file|path|page|template|url|uri|"
+    r"redirect|next|return|target|callback|webhook|query|search|filter|sort|order)$", re.I)
+
+
+def target_security_value(url: str) -> int:
+    """Observable security value used only when a budget forces a cut.
+
+    Inputs are target-owned URL facts, never a benchmark label, response, or expected result. Ties
+    retain discovery order because Python's sort is stable.
+    """
+    raw = str(url or "").split("#", 1)[0]
+    before_query, marker, query = raw.partition("?")
+    params = [part.partition("=")[0] for part in query.split("&") if part] if marker else []
+    path = before_query.split("://", 1)[-1]
+    path = "/" + path.partition("/")[2] if "/" in path else "/"
+    score = 1 if params else 0
+    score += 4 * sum(bool(_HIGH_VALUE_PARAM.search(name)) for name in params)
+    score += 3 if _HIGH_VALUE_ROUTE.search(path) else 0
+    return score
+
+
+def rank_targets_for_budget(targets) -> list:
+    """Highest observable security value first; equal-value work stays in discovery order."""
+    return sorted(list(targets or []), key=target_security_value, reverse=True)
+
+
 def _spread_by_shape(targets: list) -> list:
     """Round-robin the targets across their structural shapes, preserving first-seen order inside each
     shape. Deterministic: same input, same output, so a re-run probes the same endpoints."""
@@ -426,7 +456,9 @@ def sweep_targets(urls, forms, in_scope, limit: int = SWEEP_TARGET_CAP) -> list:
                 targets.append(merged)
     if len(targets) <= limit:
         return targets
-    return _spread_by_shape(targets)[:limit]
+    # Shape spreading prevents one large route family consuming the budget. Security-value ranking
+    # before that spread also prevents an early collection of low-value shapes consuming every slot.
+    return _spread_by_shape(rank_targets_for_budget(targets))[:limit]
 
 
 # ── Q-050 · the observation that gives `run_hash_id` a deterministic trigger ─────────────────
@@ -1018,7 +1050,7 @@ class BBHAgent:
         if not targets:
             return
         promoted_paths = set()
-        for tgt in list(targets.values())[:15]:          # bounded browser sweep
+        for tgt in rank_targets_for_budget(list(targets.values()))[:15]:  # bounded browser sweep
             if self.stop_event.is_set():
                 break
             params = list(parse_qs(urlparse(tgt).query).keys())
@@ -1112,7 +1144,8 @@ class BBHAgent:
             if recs:
                 yield {"type": "info", "content": "Candidate validation: %d confirmed via promotion." % len(recs)}
             return
-        app_pages = cp.application_pages(getattr(self.tools, "urls", []) or [])[:8]
+        app_pages = rank_targets_for_budget(
+            cp.application_pages(getattr(self.tools, "urls", []) or []))[:8]
         browser_ok = _t.xss_confirm_status() is not False and bool(getattr(_t, "_chrome_path", lambda: None)())
 
         # ── one browser DOM audit sweep over the application pages, reused by every DOM family ──
@@ -1124,7 +1157,8 @@ class BBHAgent:
                     break
                 try:
                     r = await self.tools.execute("run_dom_audit", {"url": page}, session_id)
-                except Exception:
+                except Exception as _apolaki_swallowed_1127:
+                    self.tools._swallow(_apolaki_swallowed_1127, 'agent:_validate_candidates_impl:1127', "")
                     continue
                 # Q-064: the THIRD store path, found by the ratchet in tests/test_dispatch_provenance.py
                 # rather than by the ticket. This is the one dispatch in agent.py that neither wrapper
@@ -1305,7 +1339,8 @@ class BBHAgent:
                 import re as _re
                 blob = str(lead.get("evidence") or "") + " " + str(lead.get("target") or "")
                 base = self._primary_base()
-                paths = sorted(set(_re.findall(r"/[A-Za-z0-9_\-/.]{2,60}", blob)))[:8]
+                paths = rank_targets_for_budget(
+                    sorted(set(_re.findall(r"/[A-Za-z0-9_\-/.]{2,60}", blob))))[:8]
                 rec["attempted"] = True
                 state = cp.DISMISSED
                 added = 0
@@ -1342,7 +1377,8 @@ class BBHAgent:
                 if self.mission_id:
                     try:
                         promoted["id"] = db.add_finding(self.mission_id, promoted)
-                    except Exception:
+                    except Exception as _apolaki_swallowed_1345:
+                        self.tools._swallow(_apolaki_swallowed_1345, 'agent:_validate_candidates_impl:1345', "")
                         pass
                 self.findings.append(promoted)
                 confirmed_titles.add(str(lead.get("title")))
@@ -1369,7 +1405,11 @@ class BBHAgent:
         if self.strategy not in ("low_ai", "agentic") or not self._ai_usable() or not self._budget_left():
             return
         import surface as surface_mod
-        inv = surface_mod.build_inventory(getattr(self.tools, "urls", []) or [])[:40]
+        _surface_urls = getattr(self.tools, "urls", []) or []
+        inv = surface_mod.build_inventory(_surface_urls, cap=max(1000, len(_surface_urls)))
+        inv = sorted(inv, key=lambda ep: target_security_value(
+            ep.get("example") or ("https://" + ep.get("host", "") + ep.get("path", "/"))),
+                     reverse=True)[:40]
         if not inv:
             return
         surf = "\n".join(f"- {e['host']}{e['path']}"
@@ -1744,7 +1784,8 @@ class BBHAgent:
             await self.tools.execute("acquire_session",
                                      {"login_url": login_url, "username": user, "password": pw,
                                       "role": "__scan__"}, session_id)
-        except Exception:
+        except Exception as _apolaki_swallowed_1747:
+            self.tools._swallow(_apolaki_swallowed_1747, 'agent:_do_scan_auth:1747', "")
             pass
         sess = (getattr(self.tools, "_sessions", None) or {}).get("__scan__")
         verified = bool(sess)
@@ -1814,7 +1855,8 @@ class BBHAgent:
         if self.mission_id:
             try:
                 f["id"] = db.add_finding(self.mission_id, f)
-            except Exception:
+            except Exception as _apolaki_swallowed_1817:
+                self.tools._swallow(_apolaki_swallowed_1817, 'agent:_do_scan_auth:1817', "")
                 pass
         self.findings.append(f)
         events.append({"type": "finding", "finding": f})
@@ -1995,7 +2037,8 @@ class BBHAgent:
                     return await self._exec_internal("run_service_pack",       # gated (#2)
                                                      {"host": s["host"], "port": s["port"],
                                                       "service": s["service"]}, session_id)
-                except Exception:
+                except Exception as _apolaki_swallowed_1998:
+                    self.tools._swallow(_apolaki_swallowed_1998, 'agent:_run_pack:1998', "")
                     return None
         ran = 0
         for res in await _aio.gather(*[_run_pack(s) for s in _targets]):   # concurrent probes, serial storage
@@ -2006,7 +2049,8 @@ class BBHAgent:
                 if self.mission_id:
                     try:
                         f["id"] = db.add_finding(self.mission_id, f)
-                    except Exception:
+                    except Exception as _apolaki_swallowed_2009:
+                        self.tools._swallow(_apolaki_swallowed_2009, 'agent:_run_service_packs:2009', "")
                         pass
                 self.findings.append(f)
                 events.append({"type": "finding", "finding": f})
@@ -2020,7 +2064,8 @@ class BBHAgent:
         response harvest), actively run the public-listing oracle (run_cloud_probe) through the gated
         dispatch. A confirmed public bucket becomes a real finding + graph node. Scope-gated, read-only GET,
         no credentials; skipped in passive mode (run_cloud_probe is ACTIVE, so _exec_internal blocks it)."""
-        buckets = list(getattr(self.tools, "cloud_bucket_urls", []) or [])
+        buckets = rank_targets_for_budget(list(dict.fromkeys(
+            getattr(self.tools, "cloud_bucket_urls", []) or [])))
         probed = 0
         seen = set()
         for url in buckets[:8]:
@@ -2033,7 +2078,8 @@ class BBHAgent:
                 if self.mission_id:
                     try:
                         f["id"] = db.add_finding(self.mission_id, f)
-                    except Exception:
+                    except Exception as _apolaki_swallowed_2036:
+                        self.tools._swallow(_apolaki_swallowed_2036, 'agent:_probe_cloud_storage:2036', "")
                         pass
                 self.findings.append(f)
                 yield {"type": "finding", "finding": f}
@@ -2098,7 +2144,8 @@ class BBHAgent:
         for _round in range(depth):
             if visited >= budget:
                 break
-            cands = [u for u in (getattr(self.tools, "urls", None) or []) if u not in seen]
+            cands = rank_targets_for_budget(
+                [u for u in (getattr(self.tools, "urls", None) or []) if u not in seen])
             if not cands:
                 break
             # the frontier is whatever the remaining page budget can still afford. A single number
@@ -2139,14 +2186,16 @@ class BBHAgent:
                 try:
                     if self.scope.validate(url)[0]:
                         await self.tools.execute("http_read", {"url": url, "session": role}, session_id)
-                except Exception:
+                except Exception as _apolaki_swallowed_2142:
+                    self.tools._swallow(_apolaki_swallowed_2142, 'agent:_authenticated_recrawl:2142', "")
                     pass
             # authenticated browser pass AS this persona: captures SPA routes + XHR APIs (seed _add_urls)
             try:
                 await self.tools.execute("browser_navigate",
                                          {"url": base, "session": role,
                                           "steps": [{"action": "wait", "ms": 1200}]}, session_id)
-            except Exception:
+            except Exception as _apolaki_swallowed_2149:
+                self.tools._swallow(_apolaki_swallowed_2149, 'agent:_authenticated_recrawl:2149', "")
                 pass
         # Depth-2 BFS (CHAD capability D): the fixed-route + browser pass just discovered new authed
         # links/XHR endpoints. Follow that frontier ONE more level AS the first persona (bounded) so
@@ -2162,7 +2211,8 @@ class BBHAgent:
             deep_role = (roles or [None])[0]
             seen = set(before)
             for _round in range(max_depth - 1):     # depth-1 (routes + browser) already done above
-                discovered = [u for u in (self.tools.urls or []) if u not in seen]
+                discovered = rank_targets_for_budget(
+                    [u for u in (self.tools.urls or []) if u not in seen])
                 frontier = _crawl.bfs_frontier(discovered, base, seen, limit=30)
                 if not frontier:
                     break
@@ -2177,9 +2227,11 @@ class BBHAgent:
                             for fm in _crawl.extract_forms(body, u):
                                 if fm.get("action") and self.scope.validate(fm["action"])[0]:
                                     self.tools._add_urls([fm["action"]])
-                    except Exception:
+                    except Exception as _apolaki_swallowed_2180:
+                        self.tools._swallow(_apolaki_swallowed_2180, 'agent:_authenticated_recrawl:2180', "")
                         pass
-        except Exception:
+        except Exception as _apolaki_swallowed_2182:
+            self.tools._swallow(_apolaki_swallowed_2182, 'agent:_authenticated_recrawl:2182', "")
             pass
         return [u for u in (self.tools.urls or []) if u not in before]
 
@@ -2205,7 +2257,8 @@ class BBHAgent:
                 await self.tools.execute("acquire_session",
                                          {"login_url": login_url, "username": user, "password": pw,
                                           "role": role}, session_id)
-            except Exception:
+            except Exception as _apolaki_swallowed_2208:
+                self.tools._swallow(_apolaki_swallowed_2208, 'agent:_reacquire_personas:2208', "")
                 pass
             hdr = (getattr(self.tools, "_sessions", None) or {}).get(role) or {}
             if hdr:
@@ -2241,7 +2294,8 @@ class BBHAgent:
             if self.mission_id:
                 try:
                     f["id"] = db.add_finding(self.mission_id, f)
-                except Exception:
+                except Exception as _apolaki_swallowed_2244:
+                    self.tools._swallow(_apolaki_swallowed_2244, 'agent:_do_session_lifecycle:2244', "")
                     pass
             self.findings.append(f)
             events.append({"type": "finding", "finding": f})
@@ -2342,7 +2396,8 @@ class BBHAgent:
                             await self.tools.execute("acquire_session",
                                                      {"login_url": lu, "username": _ident,
                                                       "password": acct.get("password"), "role": role}, session_id)
-                        except Exception:
+                        except Exception as _apolaki_swallowed_2345:
+                            self.tools._swallow(_apolaki_swallowed_2345, 'agent:_do_persona_authz:2345', "")
                             pass
                         hdr = (getattr(self.tools, "_sessions", None) or {}).get(role) or {}
                         if hdr:
@@ -2367,7 +2422,8 @@ class BBHAgent:
                 try:
                     await self.tools.execute("browser_navigate",
                                              {"url": login_page, "steps": steps, "promote_session": role}, session_id)
-                except Exception:
+                except Exception as _apolaki_swallowed_2370:
+                    self.tools._swallow(_apolaki_swallowed_2370, 'agent:_do_persona_authz:2370', "")
                     pass
                 hdr = (getattr(self.tools, "_sessions", None) or {}).get(role) or {}
                 if hdr:
@@ -2423,7 +2479,7 @@ class BBHAgent:
                     urls.append(s if s.startswith("http") else base.rstrip("/") + "/" + s.lstrip("/"))
             except Exception:
                 pass
-        operations = _am.candidate_operations(urls)
+        operations = _am.candidate_operations(rank_targets_for_budget(urls))
         for u in urls:                                  # + privileged-looking paths for the vertical (BFLA) check
             try:
                 p = _up(u).path
@@ -2457,7 +2513,8 @@ class BBHAgent:
             if self.mission_id:
                 try:
                     f["id"] = db.add_finding(self.mission_id, f)
-                except Exception:
+                except Exception as _apolaki_swallowed_2460:
+                    self.tools._swallow(_apolaki_swallowed_2460, 'agent:_do_persona_authz:2460', "")
                     pass
             self.findings.append(f)
             events.append({"type": "finding", "finding": f})
@@ -2465,20 +2522,23 @@ class BBHAgent:
         # 5b) horizontal WRITE test — Full mode only (state-changing), on objects already proven
         #     cross-user READABLE, using the same persona pair. Bounded + restore-capable.
         if self.mode == "full" and pair:
-            read_idor = [f["target"] for f in (res.findings or [])
-                         if f.get("family") == "idor" and "write" not in (f.get("tags") or [])]
+            read_idor = rank_targets_for_budget(list(dict.fromkeys(
+                f["target"] for f in (res.findings or [])
+                if f.get("family") == "idor" and "write" not in (f.get("tags") or []))))
             for tgt in read_idor[:5]:
                 try:
                     wr = await self._exec_internal("confirm_authz_write",       # gated INTRUSIVE (#2)
                                                    {"target_url": tgt, "owner_session": pair[0],
                                                     "attacker_session": pair[1]}, session_id)
-                except Exception:
+                except Exception as _apolaki_swallowed_2475:
+                    self.tools._swallow(_apolaki_swallowed_2475, 'agent:_do_persona_authz:2475', "")
                     continue
                 for f in (wr.findings or []):
                     if self.mission_id:
                         try:
                             f["id"] = db.add_finding(self.mission_id, f)
-                        except Exception:
+                        except Exception as _apolaki_swallowed_2481:
+                            self.tools._swallow(_apolaki_swallowed_2481, 'agent:_do_persona_authz:2481', "")
                             pass
                     self.findings.append(f)
                     events.append({"type": "finding", "finding": f})
@@ -2503,7 +2563,8 @@ class BBHAgent:
                     if self.mission_id:
                         try:
                             f["id"] = db.add_finding(self.mission_id, f)
-                        except Exception:
+                        except Exception as _apolaki_swallowed_2506:
+                            self.tools._swallow(_apolaki_swallowed_2506, 'agent:_do_persona_authz:2506', "")
                             pass
                     self.findings.append(f)
                     events.append({"type": "finding", "finding": f})
@@ -2518,7 +2579,8 @@ class BBHAgent:
                                                   "confirmed": len(cres.findings)}
                 except Exception:
                     self._create_object_result = {"ran": True, "confirmed": len(cres.findings)}
-            except Exception:
+            except Exception as _apolaki_swallowed_2521:
+                self.tools._swallow(_apolaki_swallowed_2521, 'agent:_do_persona_authz:2521', "")
                 pass
 
         # 5d) READ-ONLY cross-user BOLA (general, no writes): ownership differential over per-user
@@ -2540,14 +2602,16 @@ class BBHAgent:
                     if self.mission_id:
                         try:
                             f["id"] = db.add_finding(self.mission_id, f)
-                        except Exception:
+                        except Exception as _apolaki_swallowed_2543:
+                            self.tools._swallow(_apolaki_swallowed_2543, 'agent:_do_persona_authz:2543', "")
                             pass
                     self.findings.append(f)
                     events.append({"type": "finding", "finding": f})
                 if rres.findings:
                     events.append({"type": "info", "content": "Read-object BOLA: %d confirmed cross-user "
                                    "read(s) via ownership differential." % len(rres.findings)})
-            except Exception:
+            except Exception as _apolaki_swallowed_2550:
+                self.tools._swallow(_apolaki_swallowed_2550, 'agent:_do_persona_authz:2550', "")
                 pass
 
         # 5e) BROWSER INTELLIGENCE ENGINE (#124): the RUNTIME cross-user proof. 5c/5d prove BOLA over the
@@ -2559,8 +2623,9 @@ class BBHAgent:
             try:
                 # feed it the objects the earlier phases already proved the owner owns, plus the app's own
                 # authenticated routes, so the browser starts from evidence rather than guessing.
-                owned = [f.get("target") for f in (self.findings or [])
-                         if f.get("family") in ("idor", "bola") and f.get("target")][:5]
+                owned = rank_targets_for_budget(list(dict.fromkeys(
+                    f.get("target") for f in (self.findings or [])
+                    if f.get("family") in ("idor", "bola") and f.get("target"))))[:5]
                 bres = await self._exec_internal("confirm_browser_persona_bola",
                                                  {"base_url": base, "owner": pair[0], "attacker": pair[1],
                                                   "owner_object_urls": owned,
@@ -2569,7 +2634,8 @@ class BBHAgent:
                     if self.mission_id:
                         try:
                             f["id"] = db.add_finding(self.mission_id, f)
-                        except Exception:
+                        except Exception as _apolaki_swallowed_2572:
+                            self.tools._swallow(_apolaki_swallowed_2572, 'agent:_do_persona_authz:2572', "")
                             pass
                     self.findings.append(f)
                     events.append({"type": "finding", "finding": f})
@@ -2585,7 +2651,8 @@ class BBHAgent:
                     events.append({"type": "info", "content": "Browser Intelligence Engine ran: %d runtime "
                                    "object hypothes(es) tested, 0 confirmed (authorization held)."
                                    % len((self._bie_result or {}).get("candidates") or [])})
-            except Exception:
+            except Exception as _apolaki_swallowed_2588:
+                self.tools._swallow(_apolaki_swallowed_2588, 'agent:_do_persona_authz:2588', "")
                 pass
 
         # 6) record the capabilities this phase unlocked (feeds the planner + attack graph)
@@ -2690,13 +2757,15 @@ class BBHAgent:
         for o in origins[:3]:
             try:
                 res = await self._exec_internal("run_transport_posture", {"url": o}, session_id)
-            except Exception:
+            except Exception as _apolaki_swallowed_2693:
+                self.tools._swallow(_apolaki_swallowed_2693, 'agent:_do_transport_posture:2693', "")
                 continue
             for f in (res.findings or []):
                 if self.mission_id:
                     try:
                         f["id"] = db.add_finding(self.mission_id, f)
-                    except Exception:
+                    except Exception as _apolaki_swallowed_2699:
+                        self.tools._swallow(_apolaki_swallowed_2699, 'agent:_do_transport_posture:2699', "")
                         pass
                 self.findings.append(f)
                 yield {"type": "finding", "finding": f}
@@ -2739,7 +2808,7 @@ class BBHAgent:
                 targets.append(s)
 
         total, ran, first_error = 0, 0, ""
-        for t in targets[:6]:
+        for t in rank_targets_for_budget(targets)[:6]:
             try:
                 res = await self._exec_internal("run_header_trust", {"url": t}, session_id)
                 ran += 1
@@ -2754,7 +2823,8 @@ class BBHAgent:
                 if self.mission_id:
                     try:
                         f["id"] = db.add_finding(self.mission_id, f)
-                    except Exception:
+                    except Exception as _apolaki_swallowed_2757:
+                        self.tools._swallow(_apolaki_swallowed_2757, 'agent:_do_header_trust:2757', "")
                         pass
                 self.findings.append(f)
                 yield {"type": "finding", "finding": f}
@@ -2791,7 +2861,8 @@ class BBHAgent:
             if self.mission_id:
                 try:
                     f["id"] = db.add_finding(self.mission_id, f)
-                except Exception:
+                except Exception as _apolaki_swallowed_2794:
+                    self.tools._swallow(_apolaki_swallowed_2794, 'agent:_do_saml:2794', "")
                     pass
             self.findings.append(f)
             yield {"type": "lead", "lead": f}
@@ -2890,7 +2961,8 @@ class BBHAgent:
                         httpx, verify=False, follow_redirects=True, timeout=12,
                         headers={"User-Agent": "apolaki-recon"}) as c:
                     self.tools._harvest_body(u, {}, (await c.get(u)).text)
-            except Exception:
+            except Exception as _apolaki_swallowed_2893:
+                self.tools._swallow(_apolaki_swallowed_2893, 'agent:_probe_for_creds:2893', "")
                 continue
         return list((self.tools.intel.with_sources("credential") or {}).keys())
 
@@ -3852,7 +3924,7 @@ class BBHAgent:
         sig_seen = set()                           # (path, sorted-param-names) already surfaced ONCE
         for _depth in range(2):                    # homepage + one level of rendered links
             nxt, links = [], []
-            for u in frontier[:10]:
+            for u in rank_targets_for_budget(frontier)[:10]:
                 u = u.split("#")[0]
                 if u in seen or not self.scope.validate(u)[0]:
                     continue
@@ -3921,7 +3993,7 @@ class BBHAgent:
         # every documented endpoint into self.tools.urls via _add_urls) and probe GraphQL (run_graphql
         # auto-discovers /graphql + introspection). Cheap: a few GETs per distinct base host; both self-skip a
         # non-API/non-GraphQL host. This is what lets the injection/authz engines below reach an API target.
-        _bases = []
+        _bases = list(self._scope_origins())
         # derive base hosts from the crawl AND the scope's target roots — a linkless JSON API leaves the crawl
         # empty, so the scope roots are what let the API sweep start at all (this was the vampi 0% root cause).
         for u in (list(self.tools.urls or []) + list(self.scope.base_urls() or [])):
@@ -3949,7 +4021,7 @@ class BBHAgent:
         # which the query-string injection sweep below never touches. Fuzz the id segment of each distinct
         # numeric-path endpoint (the API half's flagship injection vector). Bounded + deduped by path shape.
         _seen_psig = set()
-        for u in list(dict.fromkeys(self.tools.urls or [])):
+        for u in rank_targets_for_budget(list(dict.fromkeys(self.tools.urls or []))):
             if self.stop_event.is_set():
                 return
             pr = urlparse(u)
@@ -3982,7 +4054,13 @@ class BBHAgent:
                "run_xss + run_dom_trace (~19 s each, measured)."
                % (len(targets), min(SWEEP_BROWSER_CAP, len(targets)))}
         # encoded-cookie/param injection once per distinct host base (cookies are host-wide)
-        for hb in list(dict.fromkeys("%s://%s" % (urlparse(t).scheme, urlparse(t).netloc) + urlparse(t).path for t in targets))[:6]:
+        _cookie_origins = list(self._scope_origins())
+        for t in targets:
+            _p = urlparse(t)
+            _origin = "%s://%s" % (_p.scheme, _p.netloc)
+            if _origin not in _cookie_origins:
+                _cookie_origins.append(_origin)
+        for hb in _cookie_origins[:6]:
             try:
                 async for ev in self._run_tool("run_encoded_cookie", {"url": hb}, session_id):
                     if "_content" not in ev:

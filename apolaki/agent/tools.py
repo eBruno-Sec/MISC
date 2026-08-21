@@ -10,6 +10,7 @@ Round-Table rule-based playbook generator. Optional external binaries (katana,
 dalfox, sqlmap) degrade gracefully to a skip if not installed.
 """
 import asyncio
+import contextvars
 import json
 import os
 import re
@@ -36,6 +37,12 @@ from scope import ScopeEngine, PermissionLevel
 # (`fetch_openapi`); naming it here means the Q-043 backoff decoration can RECOGNISE a Q-067 verdict
 # and leave it alone, rather than prepending to it and re-breaking the prefix match Q-067 turns on.
 NEGATIVE_RESULT_TOKEN = "NOT PRESENT:"
+
+# The dispatch currently executing in this asyncio context.  A ContextVar is load-bearing:
+# engines can overlap, so a process/global "current tool" would attribute one task's swallowed
+# exception to another.  Agent-side swallows occur outside execute() and deliberately fall back
+# to their explicit `where` owner instead.
+_ACTIVE_TOOL_DISPATCH = contextvars.ContextVar("apolaki_active_tool_dispatch", default=None)
 
 
 def _target_client(*args, _rate_policy=True, **kwargs):
@@ -144,6 +151,30 @@ class ToolResult:
             if isinstance(existing, str) and existing.strip():
                 continue                             # the inner producer already named itself
             f["engine"] = name
+
+
+def _not_found_control(observation: dict):
+    """Structured artifact from a randomized missing-path request, or None if it never ran."""
+    if not isinstance(observation, dict) or observation.get("error") or not observation.get("status"):
+        return None
+    body = observation.get("body", "") or ""
+    return {
+        "kind": "not-found-baseline",
+        "status": int(observation["status"]),
+        "response_length": len(body),
+        "result": "the randomized missing-path response did not match the reported sensitive resource",
+    }
+
+
+def _mark_source_derived(findings: list) -> list:
+    """Bind static-review proof kind before findings leave the production JS/source engine."""
+    for finding in findings or []:
+        if not isinstance(finding, dict) or finding.get("confidence") != "confirmed":
+            continue
+        finding.setdefault("provenance", "source-derived")
+        finding.setdefault("lane", "code-assisted")
+        finding.setdefault("analysis", "static-call-site")
+    return findings
 
 
 TOOL_PERMISSIONS = {
@@ -1240,6 +1271,9 @@ class ToolRegistry:
         # Every engine-path handler records here instead of vanishing, so a run can report "N checks
         # failed to execute" and a benchmark miss can be attributed to a crash rather than an oracle.
         self.swallowed = []
+        self._swallowed_total = 0
+        self._latest_swallowed = None
+        self._observer_error = None
         # IDS-evasion profile for our own port scan (#113). Mission-wide, so every nmap call inherits the
         # operator's choice instead of each caller having to remember to pass it.
         self.stealth = stealth or "off"
@@ -1434,11 +1468,27 @@ class ToolRegistry:
         logged it, so skipping it here would make a count DROP -- as wrong as one that doubles.
         """
         self._ledger_dispatch(session_id, tool_name, tool_input)
+        # A few contract tests and library callers construct a minimal registry around this dispatch
+        # boundary without running __init__. Treat that as zero prior failures; the first real swallow
+        # still creates the counter through _swallow.
+        swallowed_before = getattr(self, "_swallowed_total", 0)
+        active_token = _ACTIVE_TOOL_DISPATCH.set((session_id, tool_name))
         # Q-043. The scope brackets the SAME span as the ledger rows, so the cooldown a dispatch
         # actually paid for is the cooldown its row reports. A process-wide counter read either
         # side of this would bill one engine for a concurrent engine's wait.
-        with _browser_engine.rate_wait_scope() as rate_wait:
-            res = await self._dispatch_engine(tool_name, tool_input, session_id)
+        try:
+            with _browser_engine.rate_wait_scope() as rate_wait:
+                res = await self._dispatch_engine(tool_name, tool_input, session_id)
+        finally:
+            _ACTIVE_TOOL_DISPATCH.reset(active_token)
+        swallowed_count = getattr(self, "_swallowed_total", 0) - swallowed_before
+        if swallowed_count and res is not None:
+            latest = self._latest_swallowed or {}
+            where = str(latest.get("where") or tool_name)
+            note = "DEGRADED: %d load-bearing check(s) failed to execute; latest=%s" % (
+                swallowed_count, where)
+            current = str(getattr(res, "output", "") or "")
+            res.output = note + ((" " + current) if current else "")
         self._ledger_outcome(session_id, tool_name, res, rate_wait=rate_wait)
         return res
 
@@ -1619,14 +1669,16 @@ class ToolRegistry:
             if not url.endswith(".map"):
                 try:
                     body = (await c.get(url)).text
-                except Exception:
+                except Exception as _apolaki_swallowed_1644:
+                    self._swallow(_apolaki_swallowed_1644, 'tools:_run_sourcemap:1644', "")
                     body = ""
             for map_url in ([url] if url.endswith(".map") else sm.candidate_map_urls(url, body)):
                 if not self.scope.validate(map_url)[0]:
                     continue
                 try:
                     r = await c.get(map_url)
-                except Exception:
+                except Exception as _apolaki_swallowed_1651:
+                    self._swallow(_apolaki_swallowed_1651, 'tools:_run_sourcemap:1651', "")
                     continue
                 if r.status_code != 200:
                     continue
@@ -1829,8 +1881,17 @@ class ToolRegistry:
                     return None
                 try:
                     return await c.get(u)
-                except Exception:
+                except Exception as _apolaki_swallowed_1854:
+                    self._swallow(_apolaki_swallowed_1854, 'tools:get:1854', "")
                     return None
+            baseline = await get(origin + "/bbh-nonexistent-" + os.urandom(6).hex())
+            baseline_control = None
+            if baseline is not None:
+                baseline_control = {
+                    "kind": "not-found-baseline", "status": baseline.status_code,
+                    "response_length": len(baseline.text or ""),
+                    "result": "random sibling did not return the sensitive file content",
+                }
             for d in exp.DIR_CANDIDATES[:20]:
                 if harvested >= 60:
                     break
@@ -1847,8 +1908,14 @@ class ToolRegistry:
                     if fr is None:
                         continue
                     if fr.status_code == 200 and exp._SENSITIVE_SIG.search(fr.text or ""):
+                        if baseline_control is None:
+                            self._swallow(RuntimeError("direct-harvest baseline did not complete"),
+                                          "dir_harvest.not_found_control", furl)
+                            continue
                         harvested += 1
-                        findings.append(self._attach_poc(exp.harvest_finding(furl, fp, False, fr.text), furl, fr))
+                        findings.append(self._attach_poc(
+                            exp.harvest_finding(furl, fp, False, fr.text,
+                                                negative_control=baseline_control), furl, fr))
                     elif fr.status_code in (401, 403):
                         for nb in exp.nullbyte_variants(fp):
                             nbr = await get(origin + "/" + nb.lstrip("/"))
@@ -2047,7 +2114,8 @@ class ToolRegistry:
                 for body in ({"email": user, "password": pw}, {"username": user, "password": pw}):
                     try:
                         r = await c.post(url, json=body)
-                    except Exception:
+                    except Exception as _apolaki_swallowed_2072:
+                        self._swallow(_apolaki_swallowed_2072, 'tools:_acquire_session:2072', "")
                         continue
                     if r.status_code in (200, 201):
                         try:
@@ -2084,7 +2152,8 @@ class ToolRegistry:
                                 "content_type": "application/json", "user_field": _user_key,
                                 "pass_field": "password", "auth_kind": "cookie"}
                             break
-        except Exception:
+        except Exception as _apolaki_swallowed_2109:
+            self._swallow(_apolaki_swallowed_2109, 'tools:_acquire_session:2109', "")
             pass
         # 2) fallback: form login
         if not auth_header:
@@ -2282,7 +2351,8 @@ class ToolRegistry:
         hi = min(int(inp.get("end", lo + 20)), lo + 50)   # hard request cap
         try:
             rbase, _ = await self._http_send("GET", tmpl.replace("{id}", "99999999"), headers, None, True)
-        except Exception:
+        except Exception as _apolaki_swallowed_2307:
+            self._swallow(_apolaki_swallowed_2307, 'tools:_run_enumerate_ids:2307', "")
             rbase = None
         accessible = []
         for i in range(lo, hi + 1):
@@ -2291,7 +2361,8 @@ class ToolRegistry:
                 continue
             try:
                 r, _ = await self._http_send("GET", u, headers, None, True)
-            except Exception:
+            except Exception as _apolaki_swallowed_2316:
+                self._swallow(_apolaki_swallowed_2316, 'tools:_run_enumerate_ids:2316', "")
                 continue
             if r.status_code == 200 and len(r.text) > 2:
                 distinct = (rbase is None or r.status_code != rbase.status_code
@@ -2440,7 +2511,8 @@ class ToolRegistry:
                                             object_specific = csim < 0.9
                                             ctrl_note = ("attacker also read %s -> 200 with DIFFERENT data "
                                                          "(similarity %.3f) — endpoint is object-specific" % (ctrl_req, csim))
-                            except Exception:
+                            except Exception as _apolaki_swallowed_2465:
+                                self._swallow(_apolaki_swallowed_2465, 'tools:_run_authz_matrix:2465', "")
                                 pass
                         if owned:
                             # CONFIRMED only with positive ownership evidence: the object carries the
@@ -2457,6 +2529,13 @@ class ToolRegistry:
                                 "evidence": ("anon %s -> %s (denied); '%s' and '%s' -> 200 identical (similarity %.3f); "
                                              "ownership proof: object carries owner identity '%s'"
                                              % (req, sn, owner, attacker, sim, marker)),
+                                "negative_controls": [
+                                    {"kind": "anonymous-denial", "status": sn,
+                                     "result": "the same object was not public"},
+                                    {"kind": "owner-identity-mismatch", "owner": owner,
+                                     "attacker": attacker,
+                                     "result": "the returned object identified a different principal"},
+                                ],
                                 "remediation": "Enforce object-level authorization: verify the session owns the id server-side."})
                             try:
                                 self.state.add_capability(self._Capability.FOREIGN_OBJECT_READ,
@@ -2558,7 +2637,8 @@ class ToolRegistry:
                     gr, _ = await self._http_send("GET", base + cpath,
                                                   {**owner_h, "Content-Type": "application/json"}, None, True)
                     data = json.loads(gr.text or "")
-                except Exception:
+                except Exception as _apolaki_swallowed_2583:
+                    self._swallow(_apolaki_swallowed_2583, 'tools:_confirm_create_object_idor:2583', "")
                     continue
                 items = _co.first_object_list(data)          # general envelope unwrap (data/Books/results/…)
                 sample = items[0] if items else None
@@ -2585,7 +2665,8 @@ class ToolRegistry:
             try:
                 cr, _ = await self._http_send(cs["method"], url,
                                               {**owner_h, "Content-Type": "application/json"}, body, True)
-            except Exception:
+            except Exception as _apolaki_swallowed_2610:
+                self._swallow(_apolaki_swallowed_2610, 'tools:_confirm_create_object_idor:2610', "")
                 continue
             attempts += 1
             oid = _co.extract_id(cr.status_code, cr.text, (dict(cr.headers or {})).get("Location", ""))
@@ -2600,7 +2681,8 @@ class ToolRegistry:
                     try:
                         rr, _ = await self._http_send("GET", rurl, atk_h, None, True)
                         read_s, read_b = rr.status_code, (rr.text or "")[:8000]
-                    except Exception:
+                    except Exception as _apolaki_swallowed_2625:
+                        self._swallow(_apolaki_swallowed_2625, 'tools:_confirm_create_object_idor:2625', "")
                         pass
             if allow_write and oid and spec.get("delete"):
                 durl = base + spec["delete"].replace("{id}", oid)
@@ -2608,7 +2690,8 @@ class ToolRegistry:
                     try:
                         dr, _ = await self._http_send("DELETE", durl, atk_h, None, True)
                         del_s = dr.status_code
-                    except Exception:
+                    except Exception as _apolaki_swallowed_2633:
+                        self._swallow(_apolaki_swallowed_2633, 'tools:_confirm_create_object_idor:2633', "")
                         pass
             v = _co.verdict(marker=marker, create_status=cr.status_code, create_body=cr.text or "",
                             object_id=oid, read_status=read_s, read_body=read_b, delete_status=del_s)
@@ -2617,6 +2700,11 @@ class ToolRegistry:
             tgt = base + (spec.get("read") or cs["path"]).replace("{id}", oid or "")
             f = _co.to_finding(v, target=tgt, owner_role=owner, attacker_role=attacker)
             if f:
+                f["negative_controls"] = [{
+                    "kind": "owner-created-object", "object_id": oid,
+                    "marker": marker,
+                    "result": "the owner created this exact object before the attacker accessed it",
+                }]
                 findings.append(f)
             # cleanup: the OWNER removes the object we created (best-effort; harmless if already gone)
             cleaned = None
@@ -2624,7 +2712,8 @@ class ToolRegistry:
                 try:
                     cd, _ = await self._http_send("DELETE", base + spec["delete"].replace("{id}", oid), owner_h, None, True)
                     cleaned = cd.status_code
-                except Exception:
+                except Exception as _apolaki_swallowed_2649:
+                    self._swallow(_apolaki_swallowed_2649, 'tools:_confirm_create_object_idor:2649', "")
                     cleaned = 0
             # Per-attempt evidence so ran/attempts/created/confirmed distinguish "created but attacker
             # DENIED" from "creation FAILED" (CHAD #6): endpoint, create status, object id, attacker
@@ -2661,7 +2750,8 @@ class ToolRegistry:
             try:
                 orr, _ = await self._http_send("GET", curl, owner_h, None, True)
                 arr, _ = await self._http_send("GET", curl, atk_h, None, True)
-            except Exception:
+            except Exception as _apolaki_swallowed_2686:
+                self._swallow(_apolaki_swallowed_2686, 'tools:_confirm_read_object_idor:2686', "")
                 continue
             owner_only = _ro.owner_only_ids(orr.text, arr.text)
             confirmed_here = 0
@@ -2671,10 +2761,16 @@ class ToolRegistry:
                     continue
                 try:
                     xr, _ = await self._http_send("GET", rurl, atk_h, None, True)
-                except Exception:
+                except Exception as _apolaki_swallowed_2696:
+                    self._swallow(_apolaki_swallowed_2696, 'tools:_confirm_read_object_idor:2696', "")
                     continue
                 if _ro.confirm_read(xr.status_code, xr.text or "", oid):
-                    findings.append(_ro.finding(cpath, oid, inp.get("owner"), inp.get("attacker"), rurl))
+                    finding = _ro.finding(cpath, oid, inp.get("owner"), inp.get("attacker"), rurl)
+                    finding["negative_controls"] = [{
+                        "kind": "attacker-list-absence", "object_id": oid,
+                        "result": "the object id appeared in the owner's listing but not the attacker's listing",
+                    }]
+                    findings.append(finding)
                     confirmed_here += 1
             # Owner-attribution oracle (fits SHARED-listing APIs like VAmPI): an object whose DETAIL is
             # attributed to a DIFFERENT principal and leaks a sensitive field the listing hid = cross-user
@@ -2691,13 +2787,19 @@ class ToolRegistry:
                         continue
                     try:
                         xr2, _ = await self._http_send("GET", rurl, atk_h, None, True)
-                    except Exception:
+                    except Exception as _apolaki_swallowed_2716:
+                        self._swallow(_apolaki_swallowed_2716, 'tools:_confirm_read_object_idor:2716', "")
                         continue
                     hit = _ro.foreign_sensitive_read(xr2.status_code, xr2.text or "", idents)
                     if not hit:
                         continue
                     f = _ro.foreign_finding(cpath, oid, hit, inp.get("attacker"), rurl)
                     if hit.get("confidence") == "confirmed":
+                        f["negative_controls"] = [{
+                            "kind": "attacker-identity-control",
+                            "owner": hit.get("owner"), "attacker_identities": list(idents),
+                            "result": "the object owner used a comparable identity scheme and was not the reader",
+                        }]
                         findings.append(f)
                         confirmed_here += 1
                     else:
@@ -2865,7 +2967,8 @@ class ToolRegistry:
                     out["favicon"] = {"hash": h, "bytes": len(r.content),
                                       "pivots": _rx.favicon_pivot_queries(h)}
                     break
-            except Exception:
+            except Exception as _apolaki_swallowed_2890:
+                self._swallow(_apolaki_swallowed_2890, 'tools:_run_external_surface:2890', "")
                 continue
         # 3) permuted subdomain candidates (offline)
         out["permutations"] = _rx.permute(host, max_out=int(inp.get("max_permutations") or 120))
@@ -2935,19 +3038,22 @@ class ToolRegistry:
             except Exception:
                 sc = r.headers.get("set-cookie")
                 set_cookies = [sc] if sc else []
-        except Exception:
+        except Exception as _apolaki_swallowed_2960:
+            self._swallow(_apolaki_swallowed_2960, 'tools:_run_transport_posture:2960', "")
             pass
         allow, trace_status, trace_body = "", 0, ""
         marker = _tp.trace_marker()
         try:
             ro, _ = await self._http_send("OPTIONS", origin + "/", {}, None, True)
             allow = (ro.headers or {}).get("allow", "") or (ro.headers or {}).get("Allow", "")
-        except Exception:
+        except Exception as _apolaki_swallowed_2967:
+            self._swallow(_apolaki_swallowed_2967, 'tools:_run_transport_posture:2967', "")
             pass
         try:                            # TRACE is a safe, non-state-changing echo
             rt, _ = await self._http_send("TRACE", origin + "/", {"X-Apolaki-Probe": marker}, None, True)
             trace_status, trace_body = rt.status_code, (rt.text or "")
-        except Exception:
+        except Exception as _apolaki_swallowed_2972:
+            self._swallow(_apolaki_swallowed_2972, 'tools:_run_transport_posture:2972', "")
             pass
 
         findings = _tp.findings_for(origin, protocols=probe.get("protocols"),
@@ -3080,7 +3186,8 @@ class ToolRegistry:
         for method in ("PATCH", "PUT"):
             try:
                 rw, _ = await self._http_send(method, target, {**attacker_h, "Content-Type": "application/json"}, body, True)
-            except Exception:
+            except Exception as _apolaki_swallowed_3105:
+                self._swallow(_apolaki_swallowed_3105, 'tools:_confirm_authz_write:3105', "")
                 continue
             if rw.status_code < 400:
                 wrote = method
@@ -3091,7 +3198,8 @@ class ToolRegistry:
             ra, _ = await self._http_send("GET", target, owner_h, None, True)
             after = ra.text
             changed = (str(value) in after and str(value) not in orig)
-        except Exception:
+        except Exception as _apolaki_swallowed_3116:
+            self._swallow(_apolaki_swallowed_3116, 'tools:_confirm_authz_write:3116', "")
             pass
         # RESTORE the original value (best-effort) — never leave the object mutated
         restored = False
@@ -3100,7 +3208,8 @@ class ToolRegistry:
                 try:
                     rr, _ = await self._http_send(method, target, {**owner_h, "Content-Type": "application/json"},
                                                   {field: obj.get(field)}, True)
-                except Exception:
+                except Exception as _apolaki_swallowed_3125:
+                    self._swallow(_apolaki_swallowed_3125, 'tools:_confirm_authz_write:3125', "")
                     continue
                 if rr.status_code < 400:
                     restored = True
@@ -3182,7 +3291,8 @@ class ToolRegistry:
                                         "GET %s -> 200 (%db) with no authentication; oracle: %s"
                                         % (url, len(r.text), chk["oracle"]),
                                         critical=service in ("docker", "kubelet")))
-                except Exception:
+                except Exception as _apolaki_swallowed_3207:
+                    self._swallow(_apolaki_swallowed_3207, 'tools:_run_service_pack:3207', "")
                     pass
         elif service in ("redis", "ftp"):
             probe = await self._socket_service_probe(service, host, int(port))
@@ -3398,17 +3508,20 @@ class ToolRegistry:
                 final_url = page.url
                 try:
                     dom = (await page.evaluate("document.body ? document.body.innerText : ''"))[:3000]
-                except Exception:
+                except Exception as _apolaki_swallowed_3423:
+                    self._swallow(_apolaki_swallowed_3423, 'tools:_browser_navigate:3423', "")
                     dom = ""
                 try:
                     storage = await page.evaluate(
                         "({local:Object.fromEntries(Object.entries(localStorage)),"
                         " session:Object.fromEntries(Object.entries(sessionStorage))})")
-                except Exception:
+                except Exception as _apolaki_swallowed_3429:
+                    self._swallow(_apolaki_swallowed_3429, 'tools:_browser_navigate:3429', "")
                     storage = {"local": {}, "session": {}}
                 try:
                     scripts = await page.evaluate("Array.from(document.scripts).map(s=>s.src).filter(Boolean).slice(0,50)")
-                except Exception:
+                except Exception as _apolaki_swallowed_3433:
+                    self._swallow(_apolaki_swallowed_3433, 'tools:_browser_navigate:3433', "")
                     scripts = []
                 try:
                     cookies = await ctx.cookies()
@@ -3579,7 +3692,8 @@ class ToolRegistry:
                 async with _target_client(verify=False, timeout=10, headers={"User-Agent": _UA}) as c:
                     html = (await c.get(base)).text
                 lab = labs.detect(html)
-            except Exception:
+            except Exception as _apolaki_swallowed_3604:
+                self._swallow(_apolaki_swallowed_3604, 'tools:_benchmark_lab:3604', "")
                 lab = None
         if not lab:
             return ToolResult("benchmark_lab", base, True,
@@ -3762,9 +3876,35 @@ class ToolRegistry:
 
         Bounded so a pathological target cannot grow this without limit.
         """
+        rec = {"where": str(where or "unknown")[:160], "target": str(target or "")[:200],
+               "error": "%s: %s" % (type(exc).__name__, str(exc)[:160])}
+        self._swallowed_total = getattr(self, "_swallowed_total", len(self.swallowed)) + 1
+        self._latest_swallowed = rec
         if len(self.swallowed) < 500:
-            self.swallowed.append({"where": where, "target": target[:200],
-                                   "error": "%s: %s" % (type(exc).__name__, str(exc)[:160])})
+            self.swallowed.append(rec)
+
+        # Durable at the producer.  Some load-bearing catches live in agent.py OUTSIDE
+        # ToolRegistry.execute(), so surfacing only a dispatch-local delta would preserve the old
+        # false clean on the sweep and authenticated recrawl paths.  Reuse the existing tool_error
+        # vocabulary consumed by main._tool_ledger; a normal tool_result may still follow because a
+        # partial engine can preserve its successful findings while being visibly degraded.
+        active = _ACTIVE_TOOL_DISPATCH.get()
+        active_session, active_tool = active if active else (None, None)
+        mission_id = active_session or getattr(self, "mission_id", None)
+        if mission_id:
+            try:
+                db.add_log(mission_id, "tool_error", {
+                    "tool": active_tool or rec["where"],
+                    "error": "DEGRADED: swallowed exception at %s: %s" %
+                             (rec["where"], rec["error"]),
+                    "target": rec["target"],
+                })
+            except Exception as observer_exc:
+                # Control-plane persistence failure cannot be allowed to abort target testing.
+                # This handler is outside the load-bearing census: it protects the observer, not
+                # a target request, oracle, finding write, or engine dispatch.
+                self._observer_error = "%s: %s" % (
+                    type(observer_exc).__name__, str(observer_exc)[:160])
 
     def _ni(self, std: int, deep: int, insane: int) -> int:
         """Intensity-scaled cap: the native probes widen their parameter/payload breadth
@@ -3901,7 +4041,8 @@ class ToolRegistry:
             for i, q in enumerate(dorks):
                 try:
                     r = await c.get(f"{base}/search/code", params={"q": q, "per_page": 10})
-                except Exception:
+                except Exception as _apolaki_swallowed_3951:
+                    self._swallow(_apolaki_swallowed_3951, 'tools:_run_github_recon:3951', "")
                     continue
                 if r.status_code in (403, 429):             # rate limited — stop politely
                     rate_limited = True
@@ -4373,7 +4514,8 @@ class ToolRegistry:
         try:
             r = await c.post(endpoint, json=payload)
             return r.json()
-        except Exception:
+        except Exception as _apolaki_swallowed_4423:
+            self._swallow(_apolaki_swallowed_4423, 'tools:_gql_post:4423', "")
             return None
 
     async def _run_graphql(self, inp: dict) -> ToolResult:
@@ -4648,13 +4790,15 @@ class ToolRegistry:
                     continue
                 try:
                     r = await c.get(cu, headers=headers)
-                except Exception:
+                except Exception as _apolaki_swallowed_4698:
+                    self._swallow(_apolaki_swallowed_4698, 'tools:_run_xss:4698', "")
                     continue
                 for ctx in xt.contexts_of(r.text):
                     bu = xt.set_param(url, p, xt.BREAKOUTS[ctx])
                     try:
                         rb = await c.get(bu, headers=headers)
-                    except Exception:
+                    except Exception as _apolaki_swallowed_4704:
+                        self._swallow(_apolaki_swallowed_4704, 'tools:_run_xss:4704', "")
                         continue
                     idx = xt.breakout_index(rb.text, ctx)
                     if idx != -1:
@@ -4679,12 +4823,14 @@ class ToolRegistry:
                         break
                     try:
                         r = await c.get(url, headers={**headers, _hn: xt.CANARY})
-                    except Exception:
+                    except Exception as _apolaki_swallowed_4729:
+                        self._swallow(_apolaki_swallowed_4729, 'tools:_run_xss:4729', "")
                         continue
                     for ctx in xt.contexts_of(r.text):
                         try:
                             rb = await c.get(url, headers={**headers, _hn: xt.BREAKOUTS[ctx]})
-                        except Exception:
+                        except Exception as _apolaki_swallowed_4734:
+                            self._swallow(_apolaki_swallowed_4734, 'tools:_run_xss:4734', "")
                             continue
                         idx = xt.breakout_index(rb.text, ctx)
                         if idx == -1:
@@ -4693,7 +4839,8 @@ class ToolRegistry:
                         reflected.append(("header:" + _hn, xt.reflection_finding(
                             url, "header:" + _hn, ctx, where="request header", evidence=_ev)))
                         break
-        except Exception:
+        except Exception as _apolaki_swallowed_4743:
+            self._swallow(_apolaki_swallowed_4743, 'tools:_run_xss:4743', "")
             pass
 
         # 2) execution confirmation in a real browser (also catches DOM-only XSS)
@@ -4794,7 +4941,8 @@ class ToolRegistry:
                             await _browser_engine.rate_limited_goto(
                                 pg, tu, wait_until="load", timeout=8000)
                             await pg.wait_for_timeout(350)
-                        except Exception:
+                        except Exception as _apolaki_swallowed_4844:
+                            self._swallow(_apolaki_swallowed_4844, 'tools:probe:4844', "")
                             pass
                         msg = st["msg"]
                     finally:
@@ -4899,7 +5047,8 @@ class ToolRegistry:
                         await _browser_engine.rate_limited_goto(
                             page, u, wait_until="load", timeout=int(per * 1000))
                         await page.wait_for_timeout(450)
-                    except Exception:
+                    except Exception as _apolaki_swallowed_4949:
+                        self._swallow(_apolaki_swallowed_4949, 'tools:_browser_dialog_scan:4949', "")
                         pass
                     match = next((m for m in fired["msgs"] if marker in str(m)), None)
                     if match is not None:
@@ -5006,7 +5155,8 @@ class ToolRegistry:
                                     xp.finding(act, field, "form field", ev["oracle"]),
                                     act, None, method="POST"))
                                 break
-        except Exception:
+        except Exception as _apolaki_swallowed_5056:
+            self._swallow(_apolaki_swallowed_5056, 'tools:_run_xpath:5056', "")
             pass
         return ToolResult("xpath", url, True, "%d XPath injection finding(s)" % len(findings), findings)
 
@@ -5105,7 +5255,8 @@ class ToolRegistry:
                                     lp.finding(act, field, "form field", ev["oracle"]),
                                     act, None, method="POST"))
                                 break
-        except Exception:
+        except Exception as _apolaki_swallowed_5155:
+            self._swallow(_apolaki_swallowed_5155, 'tools:_run_ldap:5155', "")
             pass
         return ToolResult("ldap", url, True, "%d LDAP injection finding(s)" % len(findings), findings)
 
@@ -5163,7 +5314,8 @@ class ToolRegistry:
                         if ev["confirmed"]:
                             findings.append(self._attach_poc(
                                 si.finding(act, "form field", field, ev["oracle"]), act, None, method="POST"))
-        except Exception:
+        except Exception as _apolaki_swallowed_5213:
+            self._swallow(_apolaki_swallowed_5213, 'tools:_run_ssi:5213', "")
             pass
         return ToolResult("ssi", url, True, "%d SSI injection finding(s)" % len(findings), findings)
 
@@ -5204,7 +5356,8 @@ class ToolRegistry:
                         g = await c.get(url)
                         fresh = fx.parse_forms(g.text, url)
                         ff = next((x for x in fresh if x["action"] == action and field in x["text_fields"]), None)
-                    except Exception:
+                    except Exception as _apolaki_swallowed_5254:
+                        self._swallow(_apolaki_swallowed_5254, 'tools:_submit:5254', "")
                         ff = None
                     body = fx.body_with(ff or {"fields": {}}, field, value) if ff else {field: value}
                     rr = await c.post(action, data=body,
@@ -5294,16 +5447,19 @@ class ToolRegistry:
                                 val = pl if fn == field else (form["fields"].get(fn) or "x")
                                 try:
                                     await page.fill('[name="%s"]' % fn, val, timeout=2000)
-                                except Exception:
+                                except Exception as _apolaki_swallowed_5344:
+                                    self._swallow(_apolaki_swallowed_5344, 'tools:_form_xss_browser_confirm:5344', "")
                                     pass
                             # submit the form that owns the target field (carries the fresh CSRF token)
                             try:
                                 await page.eval_on_selector('[name="%s"]' % field,
                                                             "el => { const f = el.form; if (f) f.requestSubmit ? f.requestSubmit() : f.submit(); }")
-                            except Exception:
+                            except Exception as _apolaki_swallowed_5350:
+                                self._swallow(_apolaki_swallowed_5350, 'tools:_form_xss_browser_confirm:5350', "")
                                 pass
                             await page.wait_for_timeout(500)
-                        except Exception:
+                        except Exception as _apolaki_swallowed_5353:
+                            self._swallow(_apolaki_swallowed_5353, 'tools:_form_xss_browser_confirm:5353', "")
                             pass
                         if fired["msg"] and xt.MARK in str(fired["msg"]):
                             await browser.close()
@@ -5435,7 +5591,8 @@ class ToolRegistry:
                     continue
                 try:
                     r = await c.get(tgt)
-                except Exception:
+                except Exception as _apolaki_swallowed_5485:
+                    self._swallow(_apolaki_swallowed_5485, 'tools:_run_param_mine:5485', "")
                     continue
                 reflected = (canary in r.text) and not base_reflects
                 changed = (r.status_code != base_status) or (abs(len(r.text) - base_len) > max(64, base_len * 0.02))
@@ -5613,7 +5770,8 @@ class ToolRegistry:
                     await _browser_engine.rate_limited_goto(
                         page, u, wait_until="domcontentloaded", timeout=12000)
                     await page.wait_for_timeout(600)
-                except Exception:
+                except Exception as _apolaki_swallowed_5663:
+                    self._swallow(_apolaki_swallowed_5663, 'tools:_render:5663', "")
                     pass
                 try:
                     sig["final_url"] = page.url or ""
@@ -5622,7 +5780,8 @@ class ToolRegistry:
                 try:
                     dom = await page.evaluate(dt.DOM_SCAN_JS, canary)
                     sig.update({k: dom.get(k, sig[k]) for k in ("in_href", "in_src", "in_attr", "in_text")})
-                except Exception:
+                except Exception as _apolaki_swallowed_5672:
+                    self._swallow(_apolaki_swallowed_5672, 'tools:_render:5672', "")
                     pass
             finally:
                 await ctx.close()
@@ -5823,12 +5982,14 @@ class ToolRegistry:
                         await page.wait_for_timeout(900)
                     else:
                         await page.wait_for_timeout(350)
-                except Exception:
+                except Exception as _apolaki_swallowed_5873:
+                    self._swallow(_apolaki_swallowed_5873, 'tools:_audit_one:5873', "")
                     pass
                 pp_value, body = None, ""
                 try:
                     pp_value = await page.evaluate("window.Object.prototype[" + repr(dom.PP_KEY) + "]")
-                except Exception:
+                except Exception as _apolaki_swallowed_5878:
+                    self._swallow(_apolaki_swallowed_5878, 'tools:_audit_one:5878', "")
                     pass
                 try:
                     # read full HTML for CSTI (the evaluated marker can land in markup, not just visible
@@ -5836,7 +5997,8 @@ class ToolRegistry:
                     body = await page.evaluate(
                         "document.documentElement.outerHTML" if probe["class"] == "csti"
                         else "document.documentElement.innerText")
-                except Exception:
+                except Exception as _apolaki_swallowed_5886:
+                    self._swallow(_apolaki_swallowed_5886, 'tools:_audit_one:5886', "")
                     pass
                 f = dom.build_finding({**probe, "base": url}, pp_value=pp_value, nav_targets=navs,
                                       dialog_msg=fired["msg"], body=body, evil_reqs=evil_reqs)
@@ -5857,7 +6019,8 @@ class ToolRegistry:
                             "return i<0?'':h.slice(Math.max(0,i-120),i+160);}", "49" + dom.MARK)
                         if _snip:
                             f["dom_snippet"] = _snip
-                    except Exception:
+                    except Exception as _apolaki_swallowed_5907:
+                        self._swallow(_apolaki_swallowed_5907, 'tools:_audit_one:5907', "")
                         pass
                 return f
             finally:
@@ -5941,7 +6104,8 @@ class ToolRegistry:
                                 rr = await self._http(su, "GET", capture=False)
                                 if rr.get("body"):
                                     app_js.append(rr["body"])
-                        except Exception:
+                        except Exception as _apolaki_swallowed_5991:
+                            self._swallow(_apolaki_swallowed_5991, 'tools:_run_dom_audit:5991', "")
                             pass
                         ranked = {}
                         for s in app_js:
@@ -6108,7 +6272,8 @@ class ToolRegistry:
                 continue
             try:
                 rr = await self._http(su, "GET", capture=False)
-            except Exception:
+            except Exception as _apolaki_swallowed_6158:
+                self._swallow(_apolaki_swallowed_6158, 'tools:_wm_audit:6158', "")
                 continue
             if isinstance(rr, dict) and rr.get("body"):
                 labelled.append((su, rr["body"]))
@@ -6322,7 +6487,7 @@ class ToolRegistry:
         seen_comp = set()
         for label, text in sources:
             res = cr.review(text, label)
-            findings += res["findings"]
+            findings += _mark_source_derived(res["findings"])
             endpoints += res["endpoints"]
             # SCA: fingerprint library version from content + URL, map exact,
             # evidence-backed versions to known CVEs (guardrail: no version, no CVE).
@@ -6557,6 +6722,10 @@ class ToolRegistry:
         # baseline: a definitely-nonexistent path (catch-all SPA detection)
         baseline = await self._http(f"{base_url}/bbh-nonexistent-{os.urandom(4).hex()}", capture=False)
         base_body = baseline.get("body", "")
+        baseline_control = _not_found_control(baseline)
+        if baseline_control is None:
+            self._swallow(RuntimeError("content-discovery baseline did not complete"),
+                          "content_discovery.not_found_control", base_url)
         hits, findings = [], []
         sem = asyncio.Semaphore(12)
 
@@ -6572,6 +6741,11 @@ class ToolRegistry:
                 urlparse(url).path, r["status"], r["body"],
                 r["headers"].get("content-type", ""), base_body)
             if hit and hit["severity"] not in ("info",):
+                if hit.get("confidence") == "confirmed" and baseline_control is not None:
+                    hit["negative_controls"] = [dict(baseline_control)]
+                elif hit.get("confidence") == "confirmed":
+                    hit["confidence"] = "candidate"
+                    hit["proof_gap"] = "randomized not-found control did not complete"
                 findings.append({**hit, "url": url, "target": url})
 
         async def probe(word):
@@ -7001,7 +7175,8 @@ class ToolRegistry:
                             _fm["action"], "POST", hdrs, _ue(fx.body_with(_fm, _f, p)), capture=False),
                         parameter=field, target=fm["action"], baseline=fbase,
                         carrier="POST body field"))
-        except Exception:
+        except Exception as _apolaki_swallowed_7051:
+            self._swallow(_apolaki_swallowed_7051, 'tools:_run_web_probes:7051', "")
             pass
         # traversal through a CUSTOM REQUEST HEADER. Third carrier, same oracle: an app that reads its
         # filename from a header is invisible to probes that only rewrite the URL or the body.
@@ -7080,7 +7255,8 @@ class ToolRegistry:
                     "confidence": "confirmed",
                     "remediation": "Disable the TRACE method on the web server.",
                     "tags": ["http-methods", "xst", "trace"]})
-        except Exception:
+        except Exception as _apolaki_swallowed_7130:
+            self._swallow(_apolaki_swallowed_7130, 'tools:_run_web_probes:7130', "")
             pass
         # Report checks that FAILED TO EXECUTE alongside the ones that ran. "0 signals" with two crashed
         # probes is a completely different statement from "0 signals" with everything green, and until
@@ -7121,7 +7297,8 @@ class ToolRegistry:
                                          "success_oracle": "an ACAO header that reflects or over-permits the "
                                                            "requesting origin, returned by the server itself",
                                          "family": "cors", "tags": ["cors"]})
-                except Exception:
+                except Exception as _apolaki_swallowed_7171:
+                    self._swallow(_apolaki_swallowed_7171, 'tools:_run_injection_probes:7171', "")
                     pass
                 # host-header injection
                 try:
@@ -7138,7 +7315,8 @@ class ToolRegistry:
                                          "success_oracle": "the injected host appears in the response body "
                                                            "or redirect target, so the app trusts the Host header",
                                          "family": "host_header", "tags": ["hostheader"]})
-                except Exception:
+                except Exception as _apolaki_swallowed_7188:
+                    self._swallow(_apolaki_swallowed_7188, 'tools:_run_injection_probes:7188', "")
                     pass
                 # open redirect
                 for probe in ws.build_redirect_probes(url):
@@ -7159,7 +7337,8 @@ class ToolRegistry:
                                              "family": "open_redirect",
                                              "tags": ["redirect"]})
                             break
-                    except Exception:
+                    except Exception as _apolaki_swallowed_7209:
+                        self._swallow(_apolaki_swallowed_7209, 'tools:_run_injection_probes:7209', "")
                         pass
                 # SSTI
                 for probe in ws.build_ssti_probes(url):
@@ -7180,7 +7359,8 @@ class ToolRegistry:
                                                                "appears in the response and is absent from baseline",
                                              "family": "ssti", "tags": ["ssti"]})
                             break
-                    except Exception:
+                    except Exception as _apolaki_swallowed_7230:
+                        self._swallow(_apolaki_swallowed_7230, 'tools:_run_injection_probes:7230', "")
                         pass
                 # CRLF / response-header injection
                 for probe in ws.build_crlf_probes(url):
@@ -7207,7 +7387,8 @@ class ToolRegistry:
                                                               "(not in the body), so the injected CR/LF actually split the header stream.")}
                             findings.append(self._attach_poc(_crlf, probe.url, cl))
                             break
-                    except Exception:
+                    except Exception as _apolaki_swallowed_7257:
+                        self._swallow(_apolaki_swallowed_7257, 'tools:_run_injection_probes:7257', "")
                         pass
         except Exception as e:
             return ToolResult("injection_probes", url, False, "", [], str(e))
@@ -7240,7 +7421,8 @@ class ToolRegistry:
                     probe = "%s%s%s=%s" % (url, sep, cbp, marker)
                     try:
                         r = await c.get(probe)
-                    except Exception:
+                    except Exception as _apolaki_swallowed_7290:
+                        self._swallow(_apolaki_swallowed_7290, 'tools:_run_jsonp:7290', "")
                         continue
                     body = r.text or ""
                     if not re.search(r"(?:^|[^\w.$])" + re.escape(marker) + r"\s*\(", body):
@@ -7408,7 +7590,8 @@ class ToolRegistry:
                 warm = await c.request("OPTIONS", url, headers=headers)
                 _browser_engine.target_rate_policy.observe(str(warm.url) or url,
                                                            warm.status_code, warm.headers)
-            except Exception:
+            except Exception as _apolaki_swallowed_7458:
+                self._swallow(_apolaki_swallowed_7458, 'tools:_run_race:7458', "")
                 pass
             for _ in range(rounds):
                 await _browser_engine.target_rate_policy.wait_async(url)
@@ -7679,6 +7862,10 @@ class ToolRegistry:
         base_url = inp["base_url"].rstrip("/")
         baseline = await self._http(f"{base_url}/bbh-nonexistent-{os.urandom(4).hex()}", capture=False)
         base_body = baseline.get("body", "")
+        baseline_control = _not_found_control(baseline)
+        if baseline_control is None:
+            self._swallow(RuntimeError("exposure baseline did not complete"),
+                          "exposure.not_found_control", base_url)
         findings, confirmed_git, evid = [], [], []
         sem = asyncio.Semaphore(10)
 
@@ -7693,6 +7880,11 @@ class ToolRegistry:
             f = exp.classify(check, r.get("status", 0), r.get("body", ""),
                              r["headers"].get("content-type", ""), base_body)
             if f:
+                if baseline_control is not None:
+                    f["negative_controls"] = [dict(baseline_control)]
+                else:
+                    f["confidence"] = "candidate"
+                    f["proof_gap"] = "randomized not-found control did not complete"
                 f["target"] = url
                 findings.append(f)
                 evid.append(url)
@@ -7701,8 +7893,14 @@ class ToolRegistry:
 
         await asyncio.gather(*[probe(c) for c in exp.EXPOSURE_CHECKS])
         if any(p in confirmed_git for p in (".git/HEAD", ".git/config", ".git/index")):
-            findings.append({**exp.git_reconstruct_finding(confirmed_git),
-                             "target": f"{base_url}/.git/"})
+            reconstructed = {**exp.git_reconstruct_finding(confirmed_git),
+                             "target": f"{base_url}/.git/"}
+            if baseline_control is not None:
+                reconstructed["negative_controls"] = [dict(baseline_control)]
+            else:
+                reconstructed["confidence"] = "candidate"
+                reconstructed["proof_gap"] = "randomized not-found control did not complete"
+            findings.append(reconstructed)
         self.recon.setdefault("exposure", []).extend(f["title"] for f in findings)
         if self.mission_id and evid:
             await self._http(evid[0], "GET", capture=True)
@@ -7733,7 +7931,8 @@ class ToolRegistry:
                 payload = xxe.build_inband_xml(file_uri, sample)
                 try:
                     r = await c.post(url, headers=headers, content=payload.encode())
-                except Exception:
+                except Exception as _apolaki_swallowed_7783:
+                    self._swallow(_apolaki_swallowed_7783, 'tools:_run_xxe:7783', "")
                     continue
                 hit = xxe.analyze_inband(r.text)
                 if hit:
@@ -7745,7 +7944,8 @@ class ToolRegistry:
                 purl = collab.probe_url(token)
                 try:
                     await c.post(url, headers=headers, content=xxe.build_oob_xml(purl, sample).encode())
-                except Exception:
+                except Exception as _apolaki_swallowed_7795:
+                    self._swallow(_apolaki_swallowed_7795, 'tools:_run_xxe:7795', "")
                     pass
                 inter = []
                 for _ in range(6):
@@ -7767,7 +7967,8 @@ class ToolRegistry:
                     try:
                         await c.post(url, headers=headers, content=body.encode(),
                                      timeout=httpx.Timeout(to))
-                    except Exception:
+                    except Exception as _apolaki_swallowed_7817:
+                        self._swallow(_apolaki_swallowed_7817, 'tools:_timed:7817', "")
                         pass
                     return _time.perf_counter() - t0
 
@@ -7831,13 +8032,18 @@ class ToolRegistry:
         conf = sum(1 for f in findings if f.get("confidence") == "confirmed")
         return ToolResult("xxe", url, True, f"{len(findings)} XXE signal(s), {conf} confirmed", findings)
 
-    async def _sqli_union(self, c, get, url: str, p: str, orig: str):
+    async def _sqli_union(self, c, get, url: str, p: str, orig: str, baseline_body: str):
         """Escalate a CONFIRMED reflected SQLi into a UNION data extraction (read-only).
         Discovers the injection context (the closing that balances the query + the column
         count) by marker reflection, then dumps the DB catalogue and a users-like table.
         Nothing target-specific is hardcoded; bounded and scope-guarded. Returns
         {finding, req, resp} or None."""
         import sqli_tool as sqli
+        # The marker is proof only if the unmodified response did not already contain it.
+        # Record that negative control on the emitted finding; otherwise a coincidental
+        # page string can masquerade as attacker-chosen database output.
+        if sqli.union_hit(baseline_body):
+            return None
         # 1) discover (closing, ncols) — stop at the first reflected marker
         ctx = None
         for closing in sqli.UNION_CLOSINGS:
@@ -7948,7 +8154,7 @@ class ToolRegistry:
                 #     into "here is the data it leaks" (and auto-solves data-exfil goals).
                 if confirmed and not union_done:
                     union_done = True
-                    uf = await self._sqli_union(c, get, url, p, orig)
+                    uf = await self._sqli_union(c, get, url, p, orig, base_body)
                     if uf:
                         findings.append(self._attach_poc(uf["finding"], uf["req"], uf["resp"]))
                         ev.append(uf["req"])
@@ -7998,7 +8204,8 @@ class ToolRegistry:
                         async def _post(value, _f=form, _fld=field):
                             try:
                                 return await c.post(_f["action"], data=fx.body_with(_f, _fld, value))
-                            except Exception:
+                            except Exception as _apolaki_swallowed_8048:
+                                self._swallow(_apolaki_swallowed_8048, 'tools:_post:8048', "")
                                 return None
                         # The field's OWN value, never an invented one. These forms default to "" and the
                         # app's real value often rides in the query string, so probing a made-up "1" can
@@ -8040,7 +8247,8 @@ class ToolRegistry:
                                     timing="TRUE payload tracked the baseline; FALSE payload diverged"))
                                 ev.append(form["action"])
                                 break
-            except Exception:
+            except Exception as _apolaki_swallowed_8090:
+                self._swallow(_apolaki_swallowed_8090, 'tools:_run_sqli:8090', "")
                 pass
 
             # 5) CUSTOM REQUEST HEADERS. Some apps route the value through a request header instead of a
@@ -8093,7 +8301,8 @@ class ToolRegistry:
                             _tgt, "header:" + _hn, _hb.status_code, _sq.status_code, _dq.status_code),
                             _req, _sq))
                         ev.append(_tgt)
-            except Exception:
+            except Exception as _apolaki_swallowed_8143:
+                self._swallow(_apolaki_swallowed_8143, 'tools:_run_sqli:8143', "")
                 pass
 
         if self.mission_id and ev:
@@ -8332,7 +8541,8 @@ class ToolRegistry:
                 return None
             try:
                 return await c.get(target)
-            except Exception:
+            except Exception as _apolaki_swallowed_8382:
+                self._swallow(_apolaki_swallowed_8382, 'tools:get:8382', "")
                 return None
 
         async with _target_client(verify=False, follow_redirects=True, headers=headers, timeout=15) as c:
@@ -8766,7 +8976,8 @@ class ToolRegistry:
                                     break
                         if findings:
                             break
-            except Exception:
+            except Exception as _apolaki_swallowed_8816:
+                self._swallow(_apolaki_swallowed_8816, 'tools:_run_form_cmdi:8816', "")
                 pass
         # COOKIE CARRIER. The fourth door, and the one this engine never had. An app that shells out
         # with a value taken from a cookie is reached by none of the above: the query string, the form
@@ -8816,7 +9027,8 @@ class ToolRegistry:
                             break
                         if findings:
                             break
-            except Exception:
+            except Exception as _apolaki_swallowed_8866:
+                self._swallow(_apolaki_swallowed_8866, 'tools:_run_form_cmdi:8866', "")
                 pass
         summary = (f"command injection CONFIRMED in the form body ({findings[0]['target']})" if findings
                    else "no body command injection in the page's forms")
@@ -9052,7 +9264,8 @@ class ToolRegistry:
                         frame_bytes += chunk
                         if len(frame_bytes) >= 64:
                             break
-                except asyncio.TimeoutError:
+                except asyncio.TimeoutError as _apolaki_swallowed_9102:
+                    self._swallow(_apolaki_swallowed_9102, 'tools:_ws_handshake:9102', "")
                     pass                       # silence is a real answer here, not a failure
             return {"accepted": accepted, "frames": _cswsh.decode_frames(frame_bytes),
                     "status": parsed.get("status", 0), "error": ""}
@@ -9262,7 +9475,8 @@ class ToolRegistry:
                     # sets a cookie, so a sequential token there was invisible to a Set-Cookie-only scan.
                     for tname, tval in stt.tokens_from_body(r.text).items():
                         samples.setdefault(tname, []).append(tval)
-        except Exception:
+        except Exception as _apolaki_swallowed_9312:
+            self._swallow(_apolaki_swallowed_9312, 'tools:_run_session_token:9312', "")
             pass
         findings = []
         for name, vals in samples.items():
@@ -9411,7 +9625,8 @@ class ToolRegistry:
                 if res:
                     name, ev = res
                     findings.append(self._attach_poc(sf.finding(form["action"], name, ev), form["action"], None))
-        except Exception:
+        except Exception as _apolaki_swallowed_9461:
+            self._swallow(_apolaki_swallowed_9461, 'tools:_run_session_fixation:9461', "")
             pass
         return ToolResult("session_fixation", url, True, "%d session-fixation finding(s)" % len(findings), findings)
 
