@@ -13,16 +13,16 @@ Feature work is FROZEN. The unit of progress is a **measured invariant closed wi
 not a ticket closed. Two lists, and new discoveries do not interrupt a live lane unless they are
 reproducible release blockers.
 
-## The release-invariant matrix — measured at `0f2d54c`
+## The release-invariant matrix — measured at `9c8f3a9`
 
-    full suite   3445 passed / 11 skipped / 12 xfailed / 0 failed   isolated snapshot
-    gates        queue_gate OK (78 headers, 59 hashes) · bake_drift OK · liveness 17/17
+    full suite   3471 passed / 11 skipped / 14 xfailed / 0 failed   isolated snapshot at 9c8f3a9
+    gates        queue_gate OK (79 headers, 60 hashes) · bake_drift OK · liveness 17/17
 
 | # | invariant | measured | denominator |
 |---|---|---|---|
 | I-1 | scheduler / parent / **executable** manual contract | ✅ | 6 manual-only of 110 engines, contract traverses the real dispatch boundary |
 | I-2a | exactly one persistence owner | ✅ 0 unowned | 62 finding-producing engines |
-| **I-2b** | **outcome fidelity** | ⏳ guard being built | split out by Q-089 |
+| **I-2b** | **outcome fidelity** | ✅ guard SHIPPED, 1 defect fixed, 3 pinned | 14 multi-outcome owners of 2469 functions; 8 violating sites -> 7 |
 | I-3 | shared rate policy | ✅ 0 ungated | 178 production modules |
 | I-8 | guard scans its claimed scope | ✅ 4 of 4 | one was RENAMED not widened, deliberately |
 | I-10 | strict xfail has reason + ticket | ✅ 12 of 12 | AST count, not `grep -c` |
@@ -41,10 +41,11 @@ that lives in a value.**
 | lane | scope | state |
 |---|---|---|
 | Codex (external) | I-4 · I-5 · I-9 | leased; `tools/planner/agent/report/bie/codeintel/zap_client/browser_engine/*_tool` |
-| Claude | I-2b outcome-fidelity guard | LIVE; writes only its own new test file |
+| Claude | — | FREE. I-2b shipped; Q-090-B/C are the next candidate |
 | Coordinator | queue · STATUS · integration · mutation-verification of every returned lane | — |
 
-**No third implementation lane until one of those returns green.**
+**No third implementation lane until one of those returns green.** NOTE for the Codex lease: the
+Coordinator has taken `main.py:confirm_lead` (Q-090-A), so that function is carved out of it.
 
 ## The recurring shape, five instances in one week
 

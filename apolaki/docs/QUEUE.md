@@ -1284,6 +1284,46 @@ call sites adopting `technique_status()`, which Q-012 already established and ne
 invented-id negative control passes; `/packs` and `/techniques` agree; the four markers XPASS and are
 retired in the commit that closes them.
 
+### Q-090 · Four multi-outcome write paths that report success they did not achieve · **A CLOSED** `9c8f3a9` · **B/C/D open** · **HIGH**
+
+Found by the **I-2b outcome-fidelity guard** (`tests/test_outcome_fidelity.py`, `aa01373`), which
+derives multi-outcome owners rather than listing them. **I-2 measured "0 unowned" CORRECTLY and could
+never have seen any of these**: I-2 counts EDGES; these defects live in a VALUE on the return edge.
+
+**The denominators, because the guard is only worth its cost if it found more than the one we knew
+about**: 178 modules · 2469 functions · 88 transitive writers · **14 multi-outcome owners · 11
+truthiness-ambiguous · 8 violating call sites**. `db.add_finding` (Q-089) was NOT the only one --
+`db.update_finding` carries the same defect one function over: its reroute branch DELETEs the row,
+appends to leads, and returns `True`, indistinguishable from a real UPDATE; a scope refusal returns
+`False`, indistinguishable from "no such finding".
+
+**Q-090-A · CLOSED `9c8f3a9` · it was LIVE DATA LOSS.** `POST /leads/{sid}/{lid}/confirm` on an
+off-scope lead: `add_finding` refuses, writes no row, returns a falsy id -- and the lead was removed
+from the mission context anyway. MEASURED end to end: **0 findings rows, 0 leads**, HTTP 200
+`{"promoted": true, "machine_proof": true, "finding_id": ""}`. The lead and the operator's
+attestation both destroyed, reported as success, on the endpoint Q-014 built specifically so an
+operator's decision is never silently discarded. Now gated on `fid.stored`; a refusal keeps the lead
+and answers 409 naming the verdict.
+
+**Q-090-B · OPEN.** `PUT /findings/{sid}/{fid}` answers `404 "finding not found in this mission"`
+**with the row present in the table** -- `update_finding`'s scope refusal is `False`, and the handler
+reads that as absence.
+
+**Q-090-C · OPEN.** `POST /findings/{sid}/{fid}/poc` discards the write return entirely and answers
+`{"ok": true, "bytes": 4, "attached_to": "f1"}` **with nothing attached**.
+
+**Q-090-D · MEASURED-STATIC, deliberately NOT reproduced.** `agent.py:BBHAgent._triage` writes back
+blind. Recorded as static-only rather than claimed as a live defect.
+
+**Reachability was checked, not assumed** -- the mark of the lane that filed it. `is_lead` reads only
+`confidence` and no caller can set it, so the REROUTE verdict is unreachable from all three endpoints
+today; the reproduced defect in each case is the SCOPE refusal. Both patch options for the reroute
+path are in `docs/handoff/outcome_fidelity.md` §4.
+
+**B and C are one fix**: teach the two handlers to distinguish `update_finding`'s outcomes, the way
+`confirm_lead` now distinguishes `add_finding`'s. **Do not fix them as two independent handlers** --
+that is the symptom-grouping failure this queue keeps recording.
+
 ### Q-089 · `db.add_finding` returns truthy from `add_lead` · **CLOSED** `7b82202` `1c357c8` · verified by Coordinator mutation
 
 **MEASURED 2026-08-18 against the running agent**, and it is a PERSISTENCE-OWNERSHIP defect rather
