@@ -153,6 +153,30 @@ class ToolResult:
             f["engine"] = name
 
 
+def _not_found_control(observation: dict):
+    """Structured artifact from a randomized missing-path request, or None if it never ran."""
+    if not isinstance(observation, dict) or observation.get("error") or not observation.get("status"):
+        return None
+    body = observation.get("body", "") or ""
+    return {
+        "kind": "not-found-baseline",
+        "status": int(observation["status"]),
+        "response_length": len(body),
+        "result": "the randomized missing-path response did not match the reported sensitive resource",
+    }
+
+
+def _mark_source_derived(findings: list) -> list:
+    """Bind static-review proof kind before findings leave the production JS/source engine."""
+    for finding in findings or []:
+        if not isinstance(finding, dict) or finding.get("confidence") != "confirmed":
+            continue
+        finding.setdefault("provenance", "source-derived")
+        finding.setdefault("lane", "code-assisted")
+        finding.setdefault("analysis", "static-call-site")
+    return findings
+
+
 TOOL_PERMISSIONS = {
     "run_subfinder": PermissionLevel.PASSIVE,
     "run_crtsh": PermissionLevel.PASSIVE,
@@ -1857,6 +1881,14 @@ class ToolRegistry:
                 except Exception as _apolaki_swallowed_1854:
                     self._swallow(_apolaki_swallowed_1854, 'tools:get:1854', "")
                     return None
+            baseline = await get(origin + "/bbh-nonexistent-" + os.urandom(6).hex())
+            baseline_control = None
+            if baseline is not None:
+                baseline_control = {
+                    "kind": "not-found-baseline", "status": baseline.status_code,
+                    "response_length": len(baseline.text or ""),
+                    "result": "random sibling did not return the sensitive file content",
+                }
             for d in exp.DIR_CANDIDATES[:20]:
                 if harvested >= 60:
                     break
@@ -1873,8 +1905,14 @@ class ToolRegistry:
                     if fr is None:
                         continue
                     if fr.status_code == 200 and exp._SENSITIVE_SIG.search(fr.text or ""):
+                        if baseline_control is None:
+                            self._swallow(RuntimeError("direct-harvest baseline did not complete"),
+                                          "dir_harvest.not_found_control", furl)
+                            continue
                         harvested += 1
-                        findings.append(self._attach_poc(exp.harvest_finding(furl, fp, False, fr.text), furl, fr))
+                        findings.append(self._attach_poc(
+                            exp.harvest_finding(furl, fp, False, fr.text,
+                                                negative_control=baseline_control), furl, fr))
                     elif fr.status_code in (401, 403):
                         for nb in exp.nullbyte_variants(fp):
                             nbr = await get(origin + "/" + nb.lstrip("/"))
@@ -2488,6 +2526,13 @@ class ToolRegistry:
                                 "evidence": ("anon %s -> %s (denied); '%s' and '%s' -> 200 identical (similarity %.3f); "
                                              "ownership proof: object carries owner identity '%s'"
                                              % (req, sn, owner, attacker, sim, marker)),
+                                "negative_controls": [
+                                    {"kind": "anonymous-denial", "status": sn,
+                                     "result": "the same object was not public"},
+                                    {"kind": "owner-identity-mismatch", "owner": owner,
+                                     "attacker": attacker,
+                                     "result": "the returned object identified a different principal"},
+                                ],
                                 "remediation": "Enforce object-level authorization: verify the session owns the id server-side."})
                             try:
                                 self.state.add_capability(self._Capability.FOREIGN_OBJECT_READ,
@@ -2652,6 +2697,11 @@ class ToolRegistry:
             tgt = base + (spec.get("read") or cs["path"]).replace("{id}", oid or "")
             f = _co.to_finding(v, target=tgt, owner_role=owner, attacker_role=attacker)
             if f:
+                f["negative_controls"] = [{
+                    "kind": "owner-created-object", "object_id": oid,
+                    "marker": marker,
+                    "result": "the owner created this exact object before the attacker accessed it",
+                }]
                 findings.append(f)
             # cleanup: the OWNER removes the object we created (best-effort; harmless if already gone)
             cleaned = None
@@ -2712,7 +2762,12 @@ class ToolRegistry:
                     self._swallow(_apolaki_swallowed_2696, 'tools:_confirm_read_object_idor:2696', "")
                     continue
                 if _ro.confirm_read(xr.status_code, xr.text or "", oid):
-                    findings.append(_ro.finding(cpath, oid, inp.get("owner"), inp.get("attacker"), rurl))
+                    finding = _ro.finding(cpath, oid, inp.get("owner"), inp.get("attacker"), rurl)
+                    finding["negative_controls"] = [{
+                        "kind": "attacker-list-absence", "object_id": oid,
+                        "result": "the object id appeared in the owner's listing but not the attacker's listing",
+                    }]
+                    findings.append(finding)
                     confirmed_here += 1
             # Owner-attribution oracle (fits SHARED-listing APIs like VAmPI): an object whose DETAIL is
             # attributed to a DIFFERENT principal and leaks a sensitive field the listing hid = cross-user
@@ -2737,6 +2792,11 @@ class ToolRegistry:
                         continue
                     f = _ro.foreign_finding(cpath, oid, hit, inp.get("attacker"), rurl)
                     if hit.get("confidence") == "confirmed":
+                        f["negative_controls"] = [{
+                            "kind": "attacker-identity-control",
+                            "owner": hit.get("owner"), "attacker_identities": list(idents),
+                            "result": "the object owner used a comparable identity scheme and was not the reader",
+                        }]
                         findings.append(f)
                         confirmed_here += 1
                     else:
@@ -6424,7 +6484,7 @@ class ToolRegistry:
         seen_comp = set()
         for label, text in sources:
             res = cr.review(text, label)
-            findings += res["findings"]
+            findings += _mark_source_derived(res["findings"])
             endpoints += res["endpoints"]
             # SCA: fingerprint library version from content + URL, map exact,
             # evidence-backed versions to known CVEs (guardrail: no version, no CVE).
@@ -6659,6 +6719,10 @@ class ToolRegistry:
         # baseline: a definitely-nonexistent path (catch-all SPA detection)
         baseline = await self._http(f"{base_url}/bbh-nonexistent-{os.urandom(4).hex()}", capture=False)
         base_body = baseline.get("body", "")
+        baseline_control = _not_found_control(baseline)
+        if baseline_control is None:
+            self._swallow(RuntimeError("content-discovery baseline did not complete"),
+                          "content_discovery.not_found_control", base_url)
         hits, findings = [], []
         sem = asyncio.Semaphore(12)
 
@@ -6674,6 +6738,11 @@ class ToolRegistry:
                 urlparse(url).path, r["status"], r["body"],
                 r["headers"].get("content-type", ""), base_body)
             if hit and hit["severity"] not in ("info",):
+                if hit.get("confidence") == "confirmed" and baseline_control is not None:
+                    hit["negative_controls"] = [dict(baseline_control)]
+                elif hit.get("confidence") == "confirmed":
+                    hit["confidence"] = "candidate"
+                    hit["proof_gap"] = "randomized not-found control did not complete"
                 findings.append({**hit, "url": url, "target": url})
 
         async def probe(word):
@@ -7790,6 +7859,10 @@ class ToolRegistry:
         base_url = inp["base_url"].rstrip("/")
         baseline = await self._http(f"{base_url}/bbh-nonexistent-{os.urandom(4).hex()}", capture=False)
         base_body = baseline.get("body", "")
+        baseline_control = _not_found_control(baseline)
+        if baseline_control is None:
+            self._swallow(RuntimeError("exposure baseline did not complete"),
+                          "exposure.not_found_control", base_url)
         findings, confirmed_git, evid = [], [], []
         sem = asyncio.Semaphore(10)
 
@@ -7804,6 +7877,11 @@ class ToolRegistry:
             f = exp.classify(check, r.get("status", 0), r.get("body", ""),
                              r["headers"].get("content-type", ""), base_body)
             if f:
+                if baseline_control is not None:
+                    f["negative_controls"] = [dict(baseline_control)]
+                else:
+                    f["confidence"] = "candidate"
+                    f["proof_gap"] = "randomized not-found control did not complete"
                 f["target"] = url
                 findings.append(f)
                 evid.append(url)
@@ -7812,8 +7890,14 @@ class ToolRegistry:
 
         await asyncio.gather(*[probe(c) for c in exp.EXPOSURE_CHECKS])
         if any(p in confirmed_git for p in (".git/HEAD", ".git/config", ".git/index")):
-            findings.append({**exp.git_reconstruct_finding(confirmed_git),
-                             "target": f"{base_url}/.git/"})
+            reconstructed = {**exp.git_reconstruct_finding(confirmed_git),
+                             "target": f"{base_url}/.git/"}
+            if baseline_control is not None:
+                reconstructed["negative_controls"] = [dict(baseline_control)]
+            else:
+                reconstructed["confidence"] = "candidate"
+                reconstructed["proof_gap"] = "randomized not-found control did not complete"
+            findings.append(reconstructed)
         self.recon.setdefault("exposure", []).extend(f["title"] for f in findings)
         if self.mission_id and evid:
             await self._http(evid[0], "GET", capture=True)

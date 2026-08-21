@@ -231,7 +231,7 @@ ORACLE_OVERRIDE = ("a path denied on the request line is served when named in an
 def finding_header_trust(url: str, header: str, value: str, rationale: str, probes: dict,
                          verdict: dict) -> dict:
     confirmed = verdict.get("verdict") == "confirmed"
-    return {
+    finding = {
         "title": "Authorization decided by the client-controlled '%s' header — %s" % (header, url),
         "severity": "high" if confirmed else "medium",
         "confidence": "confirmed" if confirmed else "lead",
@@ -258,12 +258,20 @@ def finding_header_trust(url: str, header: str, value: str, rationale: str, prob
                         "the proxy overwrite the header and reject it from untrusted sources."),
         "found_by": "header_trust_tool",
     }
+    if confirmed:
+        finding["negative_controls"] = [
+            {"kind": "header-absent", "status": _status(probes.get("baseline")),
+             "len": len(_body(probes.get("baseline"))), "result": "access denied"},
+            {"kind": "implausible-header-value", "status": _status(probes.get("value_control")),
+             "len": len(_body(probes.get("value_control"))), "result": "access denied again"},
+        ]
+    return finding
 
 
 def finding_url_override(base: str, denied_path: str, header: str, probes: dict, verdict: dict) -> dict:
     confirmed = verdict.get("verdict") == "confirmed"
     target = base.rstrip("/") + denied_path
-    return {
+    finding = {
         "title": "Front-end ACL bypassed via the '%s' header — %s" % (header, target),
         "severity": "high" if confirmed else "medium",
         "confidence": "confirmed" if confirmed else "lead",
@@ -287,3 +295,12 @@ def finding_url_override(base: str, denied_path: str, header: str, probes: dict,
                         "the application on the path it actually serves."),
         "found_by": "header_trust_tool",
     }
+    if confirmed:
+        finding["negative_controls"] = [
+            {"kind": "direct-denied-path", "status": _status(probes.get("direct")),
+             "len": len(_body(probes.get("direct"))), "result": "front end denied the target path"},
+            {"kind": "permitted-path-body", "status": _status(probes.get("permitted")),
+             "len": len(_body(probes.get("permitted"))),
+             "result": "override response differed from the ordinary permitted page"},
+        ]
+    return finding

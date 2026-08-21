@@ -87,7 +87,14 @@ def classify(check: dict, status: int, body: str, content_type: str = "",
     matched = _matches(check["sig"], body or "")
     if not matched:
         return None
-    return exposure_finding(check, matched)
+    finding = exposure_finding(check, matched)
+    if baseline_body:
+        finding["negative_controls"] = [{
+            "kind": "not-found-baseline",
+            "response_length": len(baseline_body),
+            "result": "the same host's randomized not-found response differed and lacked the file signature",
+        }]
+    return finding
 
 
 def exposure_finding(check: dict, matched: str) -> dict:
@@ -193,9 +200,10 @@ _SENSITIVE_SIG = re.compile(
     r"aws_access_key|-----BEGIN", re.I)
 
 
-def harvest_finding(url: str, path: str, via_nullbyte: bool, snippet: str) -> dict:
+def harvest_finding(url: str, path: str, via_nullbyte: bool, snippet: str,
+                    *, negative_control: dict = None) -> dict:
     how = "a poison-null-byte extension bypass" if via_nullbyte else "direct request"
-    return {
+    finding = {
         "title": f"Exposed sensitive file: {path.rsplit('/', 1)[-1]}"
                  + (" (null-byte bypass)" if via_nullbyte else ""),
         "severity": "high", "target": url, "family": "backup_exposure",
@@ -212,3 +220,12 @@ def harvest_finding(url: str, path: str, via_nullbyte: bool, snippet: str) -> di
                   + (["poison-null-byte"] if via_nullbyte else []),
         "confidence": "confirmed",
     }
+    if negative_control:
+        finding["negative_controls"] = [dict(negative_control)]
+    elif via_nullbyte:
+        finding["negative_controls"] = [{
+            "kind": "plain-path-refusal",
+            "path": path,
+            "result": "the unmodified path returned 401/403 before the encoded-null twin returned content",
+        }]
+    return finding

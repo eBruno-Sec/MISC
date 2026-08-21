@@ -86,6 +86,51 @@ that positive-proof key would incorrectly change the result to `374 / 1017 / 301
   - force `union_hit(baseline)` false -> the baseline-collision test reaches the forbidden
     UNION request and raises on the exact no-probe assertion.
 
+### Remaining runtime producers
+
+- `backup_exposure`: direct harvests now require and retain a randomized not-found
+  response; poison-null-byte findings retain the original path's 401/403 refusal. If the
+  direct baseline fails, the engine records degraded state and does not confirm.
+- `exposure`: both the dedicated exposure pass and content discovery retain their real
+  randomized not-found observation. A failed baseline demotes any body-signature result to
+  `candidate` and records the proof gap instead of emitting a confirmed false clean.
+- `sensitive_exposure`: confirmed output from the production JS/source-review path is now
+  typed `source-derived` before emission. Its request-control status is therefore honestly
+  `not_applicable`; candidates are not relabelled. The ten historical "working credential"
+  rows have no current production title emitter (`rg` finds only test fixtures), so there is
+  no emitter to patch and stored rows were deliberately not backfilled.
+- `xss`: confirmed structural reflection retains the harmless canary request that located
+  the context before the breakout was sent.
+- `access_control` / `idor`: header-trust, URL-override, matrix IDOR, created-object IDOR,
+  owner-list IDOR and foreign-owner IDOR now carry the exact denial/ownership controls used
+  by their production paths. BIE BOLA already carried its three browser controls.
+- `vulnerable_component`: the current production caller supplies no behaviour proof and
+  therefore emits a lead, not a confirmed finding. The confirmed builder path already
+  requires a trigger plus trigger-absent behaviour proof and stores both in its evidence and
+  `success_oracle`.
+- `security_misconfig` is the documented no-negative-twin family: missing response headers
+  and missing cookie attributes are direct absence propositions over the response actually
+  received. Constructing a negative twin would require changing the target's configuration;
+  it is not a meaningful request differential. TRACE is different and already uses the
+  random-marker echo control.
+- The one blank-family `Manual: exposed .git` row is operator-authored historical data, not
+  a production engine emitter. `main.py` owns manual finding ingestion and is off-limits.
+
+The attempted DOM clean-baseline patch was **not retained**. A real unmodified browser render
+correctly invalidated the existing concurrency fixture because its `_confirm_proto` callback
+returns the positive marker for every navigation, including the unmodified URL. Five existing
+tests then failed: four non-vacuity confirmations and the early-exit budget. Fixing that fixture
+requires editing `tests/test_dom_audit_concurrency.py`, which this lease does not own. The honest
+follow-up is: teach the fake callback to return clean state for the exact base URL, retain the
+single unmodified browser render, then attach it to CSTI/prototype-pollution/open-redirect findings.
+No declaration-only artifact was substituted.
+
+Fail-before-fix for the non-SQLi producers was `4 failed / 7 passed`: exposure,
+null-byte harvest, reflected XSS and header trust all read `not_recorded`. Targeted after
+the retained fixes: `87 passed / 0 failed` across the producer, access-control and source
+lane tests. Additional in-suite mutants delete an exposure artifact and delete all three
+source-derived markers; the exact control/proof-kind assertions kill both.
+
 ## I-9 cap ordering
 
 In progress.

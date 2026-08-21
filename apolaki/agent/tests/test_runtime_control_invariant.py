@@ -8,9 +8,12 @@ import asyncio
 
 import pytest
 
+import exposure_tool as exposure
+import header_trust_tool as header_trust
 import proof_schema
 import sqli_tool as sqli
-from tools import ToolRegistry
+import xss_tool as xss
+from tools import ToolRegistry, _mark_source_derived, _not_found_control
 
 
 def _sqli_findings():
@@ -141,3 +144,123 @@ def test_semantic_mutant_bypassing_union_baseline_is_killed(monkeypatch):
     monkeypatch.setattr(sqli, "union_hit", lambda _body: False)
     with pytest.raises(AssertionError, match="no UNION probe may run"):
         _assert_union_baseline_blocks()
+
+
+def test_exposure_emitter_retains_the_not_found_twin():
+    check = {
+        "name": "Environment file exposed", "path": ".env", "severity": "high",
+        "family": "config_exposure", "sig": [r"DB_PASSWORD="],
+    }
+    finding = exposure.classify(
+        check, 200, "DB_PASSWORD=secret", "text/plain", "ordinary not-found page",
+    )
+    assert finding is not None
+    assert proof_schema.control_status(finding) == proof_schema.CONTROL_RECORDED
+    assert finding["negative_controls"][0]["kind"] == "not-found-baseline"
+    assert finding["negative_controls"][0]["response_length"] == len("ordinary not-found page")
+
+
+def test_null_byte_harvest_retains_the_plain_path_refusal():
+    finding = exposure.harvest_finding(
+        "https://target.test/files/secret.bak%2500.md", "files/secret.bak", True,
+        "confidential password=secret",
+    )
+    assert proof_schema.control_status(finding) == proof_schema.CONTROL_RECORDED
+    assert finding["negative_controls"][0]["kind"] == "plain-path-refusal"
+
+
+def test_direct_harvest_retains_the_random_not_found_twin():
+    control = {
+        "kind": "not-found-baseline", "status": 404, "response_length": 18,
+        "result": "random sibling did not return sensitive content",
+    }
+    finding = exposure.harvest_finding(
+        "https://target.test/files/secret.bak", "files/secret.bak", False,
+        "confidential password=secret", negative_control=control,
+    )
+    assert proof_schema.control_status(finding) == proof_schema.CONTROL_RECORDED
+    assert finding["negative_controls"] == [control]
+
+
+def test_reflected_xss_retains_the_harmless_canary_control():
+    finding = xss.reflection_finding(
+        "https://target.test/search?q=hello", "q", "html",
+        evidence='...<bbh-xss-marker data-x="1">...',
+    )
+    assert finding["confidence"] == "confirmed"
+    assert proof_schema.control_status(finding) == proof_schema.CONTROL_RECORDED
+    assert finding["negative_controls"][0]["payload"] == xss.CANARY
+
+
+def test_header_trust_retains_both_denial_controls():
+    probes = {
+        "baseline": {"status": 403, "body": "denied"},
+        "with_header": {"status": 200, "body": "private account"},
+        "value_control": {"status": 403, "body": "denied"},
+    }
+    finding = header_trust.finding_header_trust(
+        "https://target.test/admin", "X-Forwarded-For", "127.0.0.1", "loopback trusted",
+        probes, {"verdict": "confirmed", "reason": "only the valid value granted access"},
+    )
+    assert proof_schema.control_status(finding) == proof_schema.CONTROL_RECORDED
+    kinds = {item["kind"] for item in finding["negative_controls"]}
+    assert kinds == {"header-absent", "implausible-header-value"}
+
+    override = header_trust.finding_url_override(
+        "https://target.test", "/admin", "X-Rewrite-URL",
+        {"direct": {"status": 403, "body": "denied"},
+         "permitted": {"status": 200, "body": "home"},
+         "overridden": {"status": 200, "body": "private account"}},
+        {"verdict": "confirmed", "reason": "override served the denied resource"},
+    )
+    assert proof_schema.control_status(override) == proof_schema.CONTROL_RECORDED
+    assert {item["kind"] for item in override["negative_controls"]} == {
+        "direct-denied-path", "permitted-path-body",
+    }
+
+
+def test_random_not_found_control_requires_an_observation_that_ran():
+    assert _not_found_control({"status": 404, "body": "missing"}) == {
+        "kind": "not-found-baseline", "status": 404, "response_length": 7,
+        "result": "the randomized missing-path response did not match the reported sensitive resource",
+    }
+    assert _not_found_control({"status": 0, "body": ""}) is None
+    assert _not_found_control({"status": 404, "body": "", "error": "timeout"}) is None
+
+
+def test_js_review_confirmation_is_typed_as_source_derived_before_emission():
+    finding = {
+        "title": "Credential exposed in a source comment", "confidence": "confirmed",
+        "family": "sensitive_exposure", "evidence": "source line 7",
+    }
+    assert _mark_source_derived([finding]) == [finding]
+    assert proof_schema.proof_kind(finding) == proof_schema.SOURCE_DERIVED
+    assert proof_schema.control_status(finding) == proof_schema.CONTROL_NOT_APPLICABLE
+
+
+def test_source_marker_leaves_nonconfirmed_review_output_unchanged():
+    candidate = {"confidence": "candidate", "family": "sensitive_exposure"}
+    _mark_source_derived([candidate, "raw review note"])
+    assert "provenance" not in candidate
+
+
+def test_semantic_mutant_dropping_exposure_control_is_killed():
+    check = {
+        "name": "Environment file exposed", "path": ".env", "severity": "high",
+        "family": "config_exposure", "sig": [r"DB_PASSWORD="],
+    }
+    mutant = exposure.classify(
+        check, 200, "DB_PASSWORD=secret", "text/plain", "ordinary not-found page",
+    )
+    mutant.pop("negative_controls")
+    with pytest.raises(AssertionError, match="recorded"):
+        assert proof_schema.control_status(mutant) == proof_schema.CONTROL_RECORDED
+
+
+def test_semantic_mutant_dropping_source_provenance_is_killed():
+    mutant = {"title": "source secret", "confidence": "confirmed", "family": "sensitive_exposure"}
+    _mark_source_derived([mutant])
+    for key in ("provenance", "lane", "analysis"):
+        mutant.pop(key)
+    with pytest.raises(AssertionError, match="source-derived"):
+        assert proof_schema.proof_kind(mutant) == proof_schema.SOURCE_DERIVED
