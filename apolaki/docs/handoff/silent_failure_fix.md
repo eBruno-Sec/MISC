@@ -620,3 +620,57 @@ today. But every one of them is context-blind by the measurement above: any futu
 module-level recorder placed behind them is a dead island by construction, and the
 failure mode is silent. Worth a sweep by whoever owns the beyond-web packs.
 
+
+---
+
+## FINAL SHIP GATE (MEASURED)
+
+Full suite on an isolated `git archive HEAD` snapshot of `9f8293d` (482 .py files),
+run in a throwaway container attached to `apolaki_default` so the lab-dependent tests
+actually run instead of skipping (Q-094):
+
+    docker run --rm --network apolaki_default \
+      -v "<snapshot>/apolaki/agent:/app" -w /app apolaki-agent \
+      python -m pytest tests/ -p no:cacheprovider -rfE -q
+
+    SHIPGATE_EXIT=0
+    total tests : 3585
+    passed (.)  : 3562
+    skipped (s) : 11
+    xfailed (x) : 12
+    failed (F/E): 0
+    FAILED lines: 0    ERROR lines: 0
+
+The counts are read from the progress characters, NOT from pytest's summary line: that
+line does not survive redirect in this environment, and the exit code was captured with
+`$?` directly off the `docker run` rather than off a pipeline. Reporting a pipeline's
+exit as the suite's is how a red run gets called green here.
+
+Against the lane-open baseline of 3519 passed / 11 skipped / 12 xfailed / 0 failed, the
+suite has grown by 43 passing tests and lost none.
+
+### Before / after across the whole lane
+
+| gate run | commit | failures |
+|----------|--------|----------|
+| lane open | `66a7012` | 0 (3519 passed) |
+| after slices 1-4 | `7a7b90b` | 4, all `test_deadcode_gate.py` (the 4 liveness ones cleared by slice 5) |
+| final | `9f8293d` | **0** (3562 passed) |
+
+### Write-boundary audit
+
+Every file touched by this lane's commits:
+
+    apolaki/agent/bie.py
+    apolaki/agent/dns_recon.py
+    apolaki/agent/enip_audit_tool.py
+    apolaki/agent/tests/test_silent_failure_invariant.py
+    apolaki/agent/tests/test_silent_failure_residue.py
+    apolaki/agent/tools.py
+    apolaki/docs/handoff/silent_failure_fix.md
+
+None of `deadcode_gate.py`, `exposure_tool.py`, `tests/test_deadcode_gate.py`,
+`docs/handoff/island_triage.md`, `docs/handoff/tool_liveness_audit.md`,
+`tests/test_external_tool_liveness.py`, `docs/QUEUE.md` or `docs/STATUS.md` was modified.
+The 8 tests those two guard files own went green by fixing production, not by editing
+them.
