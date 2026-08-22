@@ -370,3 +370,149 @@ one of the 342 runs reached the oracle with at least one parameter.** So this is
 not input starvation.
 
 **VERDICT: pending live differential -- see section 9b below.**
+
+---
+
+# 10. THE HEADLINE: `_http` HAS THE SAME DEFECT AS `_cmd`, AND IT IS BIGGER
+
+Q-092 says a tool that runs and fails must not be byte-identical to a tool that runs and finds
+nothing. `_cmd` has that defect for SUBPROCESSES. **`_http` has it for HTTP, it reaches all 21
+pure-Python engines instead of the 14 that shell out, and 25.5% of the dispatches in the corpus
+went through it to a target that could not possibly answer.**
+
+## 10.1 A third instrument: the corpus records every tool's INPUT
+
+`logs.etype='tool_call'` carries `{"tool","input","permission"}` -- 30173 rows. It says exactly what
+URL each dispatch was pointed at. Reading it turned the audit around: several of these engines are
+not silent because their oracle is weak, they are silent because **the request never completed.**
+
+## 10.2 MEASURED: `_http` reports transport failure as a VALUE its callers do not read
+
+```
+reg._http("https://juice-shop:3000/rest/products/search?q=apple", "GET", capture=False)
+  -> {'status': 0,
+      'error': '[SSL: WRONG_VERSION_NUMBER] wrong version number (_ssl.c:1010)',
+      'body': ''            <-- 0 bytes
+      ...}
+reg._http("http://juice-shop:3000/rest/products/search?q=apple",  "GET", capture=False)
+  -> {'status': 200, 'body': <921 bytes>}
+reg._http("https:///.well-known/ai-plugin.json", "GET", capture=False)
+  -> {'status': 0, 'error': "Request URL is missing an 'http://' or 'https://' protocol.", 'body': ''}
+```
+
+`_http` does the honest thing: it RETURNS `status` and `error`. The wrappers then do
+`r.get("body", "") or ""` and never look at either. An empty body from a dead connection is
+indistinguishable from an empty body from a clean page -- **the falsy-default failure mode, on the
+return edge, exactly as Q-089/Q-090/Q-092 describe it.**
+
+## 10.3 MEASURED: the wrappers report a CLEAN SCAN over a connection that never opened
+
+Every request in each run below failed with `SSL: WRONG_VERSION_NUMBER`. Dispatched through the
+real `ToolRegistry.execute`:
+
+```
+url = "https://juice-shop:3000/rest/products/search?q=apple"      (juice-shop speaks PLAIN HTTP)
+
+run_waf_bypass       -> success=True  '0 WAF-bypass finding(s)'          error=None   <-- SILENT
+run_sqli_structural  -> success=True  '0 structural SQLi finding(s)'     error=None   <-- SILENT
+run_css_injection    -> success=True  '0 CSS injection finding(s)'       error=None   <-- SILENT
+run_ssi              -> success=True  'DEGRADED: 1 load-bearing check(s) failed to execute;
+                                       latest=tools:_run_ssi:5213 0 SSI injection finding(s)'
+run_nosqli           -> success=True  'DEGRADED: 8 load-bearing check(s) failed to execute;
+                                       latest=tools:get:8382 tested 1 param(s), 0 confirmed'
+registry swallowed total = 9, latest = ConnectError: [SSL: WRONG_VERSION_NUMBER]
+```
+
+Two of the five are saved by the Q-08x swallow ledger, because they wrap their requests in a
+`try/except` that reaches `_swallow`. **The other three are not, and cannot be: they never raise.**
+`_http` catches the transport error itself and hands back a dict, so there is no exception for a
+ledger to catch -- the failure arrives as data and is dropped by a default. The swallow ledger is
+the right mechanism aimed at the wrong half of the problem.
+
+## 10.4 MEASURED: how much of the corpus went to an unreachable target
+
+Host reachability verified live first, because a wrong instrument is the expensive thing here:
+
+```
+juice-shop:3000        http-> 200 (9903B)   https-> ERR SSL: WRONG_VERSION_NUMBER
+juice-shop-bench:3000  http-> 200 (9903B)   https-> ERR SSL: WRONG_VERSION_NUMBER
+vampi:5000             http-> 200 (271B)    https-> ERR SSL: WRONG_VERSION_NUMBER
+dvga:5013              http-> 200 (8136B)   https-> ERR SSL: WRONG_VERSION_NUMBER
+dvwa:80                http-> 302 (0B)      https-> ERR SSL: WRONG_VERSION_NUMBER
+owaspbench:8443        http-> 400 (62B)     https-> 404 (682B)        <- genuinely TLS
+benchmarkpython:8443   http-> ERR ReadError https-> 302 (227B)        <- genuinely TLS
+```
+
+Classifying all 6622 `tool_call` rows for these 19 tools by whether the URL's scheme could reach its
+host at all. "doomed" = `https://` to a plaintext-only host; "empty" = no host in the URL:
+
+| tool | doomed | empty host | reachable | % unreachable |
+|---|---|---|---|---|
+| `run_path_sqli` | 55 | 0 | 3 | **94.8%** |
+| `run_session_token` | 71 | 0 | 11 | **86.6%** |
+| `run_username_enum` | 12 | 0 | 3 | **80.0%** |
+| `run_client_checks` | 275 | 0 | 73 | **79.0%** |
+| `run_upload_test` | 2 | 318 | 246 | **56.5%** |
+| `run_form_cmdi` | 2 | 318 | 248 | **56.3%** |
+| `run_ssi` | 351 | 0 | 589 | **37.3%** |
+| `run_waf_bypass` | 76 | 0 | 516 | 12.8% |
+| `run_sqli_structural` | 76 | 0 | 516 | 12.8% |
+| `run_css_injection` | 76 | 0 | 516 | 12.8% |
+| `run_llm_probe` | 0 | 6 | 46 | 11.5% |
+| `run_oauth` | 3 | 37 | 605 | 6.2% |
+| `run_cache_poison` | 1 | 0 | 67 | 1.5% |
+| `run_form_nosqli` | 8 | 0 | 714 | 1.1% |
+| `run_nosqli` / `run_deserialization` / `run_sqlmap` / `run_cache_deception` / `run_ssrf` | 0 | 0 | all | 0.0% |
+
+**TOTAL: 1008 doomed + 679 empty-host = 1687 of 6622 dispatches (25.5%) could not have reached
+their target, and every one of them was reported as a completed scan.**
+
+`run_client_checks` is the sharpest case: proven in section 7 to work and to produce a real finding,
+yet **79% of its 348 corpus runs were fired at `https://` URLs for plaintext hosts.** Its zero
+histogram is not one phenomenon, it is two -- 73 honest true negatives and 275 requests that never
+opened a socket.
+
+The `https:///` empty-host URLs (318 each for `run_form_cmdi` and `run_upload_test`, 37 for
+`run_oauth`, 6 for `run_llm_probe`) come from a URL builder that lost its netloc; targets recorded
+literally as `https:///`, `https:///.well-known/ai-plugin.json`, `https:///.well-known/gpc.json`.
+
+## 10.5 PROPOSED PATCH (diff only -- `tools.py` is another lane's file)
+
+The carrier must be the thing callers already read (Q-089's lesson), so this does NOT add an
+out-parameter. `_http` already returns `status`/`error`; the fix is to make the FAILURE VISIBLE at
+the ToolResult edge rather than asking 21 wrappers to remember to check.
+
+```diff
+--- a/agent/tools.py
++++ b/agent/tools.py
+@@ class ToolRegistry:
++    # I-2b, HTTP path. A transport failure returns `status == 0` with an `error` and an EMPTY
++    # body. Every engine reads `r.get("body", "") or ""`, so a dead connection and a clean page
++    # are the same value. Count the dead ones here, at the single choke point every engine
++    # already goes through, and let `execute` fail the ToolResult when a run made NO successful
++    # request at all. Mirrors _cmd's exit-code fix: outcome fidelity on the return edge.
++    async def _http(self, url, method="GET", headers=None, body=None, capture=False, **kw):
++        res = await self.__http_inner(url, method, headers, body, capture, **kw)
++        if not res.get("status"):
++            self._http_dead = getattr(self, "_http_dead", 0) + 1
++            self._http_dead_last = {"url": url, "error": res.get("error")}
++        else:
++            self._http_live = getattr(self, "_http_live", 0) + 1
++        return res
+@@ async def execute(self, tool_name, tool_input, session_id):
+-        swallowed_count = getattr(self, "_swallowed_total", 0) - swallowed_before
++        swallowed_count = getattr(self, "_swallowed_total", 0) - swallowed_before
++        # A dispatch that made requests and had EVERY one fail did not scan anything. Reporting
++        # success=True with zero findings there is the false-clean this ticket exists to kill.
++        dead = getattr(self, "_http_dead", 0) - dead_before
++        live = getattr(self, "_http_live", 0) - live_before
++        if res is not None and dead and not live:
++            res.success = False
++            res.error = "NO REQUEST COMPLETED: %d/%d failed; last=%s" % (
++                dead, dead, (getattr(self, "_http_dead_last", {}) or {}).get("error"))
+```
+
+Second, independent patch: the URL builder that emitted 679 `https:///` URLs and 1008 `https://`
+URLs for plaintext hosts must not emit them. That is a separate lane's defect (target
+construction), and it is worth its own ticket -- fixing `_http`'s honesty makes it VISIBLE, it does
+not make it stop happening.
