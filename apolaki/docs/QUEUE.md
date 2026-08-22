@@ -1334,6 +1334,178 @@ current HEAD with the lane's commits passes 56/56 networked.
 **GATE:** assert the skip count does not exceed the networked figure. The negative control is a run
 without the network, which must go red rather than quietly reporting a smaller suite as green.
 
+### Q-093 - `_http` drops the transport outcome the same way `_cmd` drops the exit code, and 3241 dispatches never reached a target - **READY** - **CRITICAL**
+
+**This is Q-092 in the HTTP path.** Q-092 is about 14 wrappers that shell out. `_http` is the
+transport for **all 21 pure-Python engines**, and it has the identical defect with a wider blast
+radius. Found while auditing Q-092's 22 remaining zero-histogram tools
+(`docs/handoff/tool_liveness_audit.md`).
+
+**MEASURED, live, on `apolaki_default`:**
+
+```
+reg._http("https://juice-shop:3000/rest/products/search?q=apple", "GET", capture=False)
+  -> {'status': 0, 'error': '[SSL: WRONG_VERSION_NUMBER] wrong version number (_ssl.c:1010)',
+      'body': ''}                       # 0 bytes
+reg._http("http://juice-shop:3000/rest/products/search?q=apple", "GET", capture=False)
+  -> {'status': 200, 'body': <921 bytes>}
+reg._http("https:///.well-known/ai-plugin.json", "GET", capture=False)
+  -> {'status': 0, 'error': "Request URL is missing an 'http://' or 'https://' protocol.", 'body': ''}
+```
+
+`_http` is honest -- it RETURNS `status` and `error`. **The callers never read either.** Every
+engine does `r.get("body", "") or ""`, so an empty body from a dead connection is the same value as
+an empty body from a clean page. This is the falsy-default failure mode on the return edge, the
+same invariant `FindingWriteId` (Q-089) and `FindingUpdateResult` (Q-090) exist to satisfy.
+
+**MEASURED: the wrappers report a completed scan over a connection that never opened.** Every
+request in each run below failed with `SSL: WRONG_VERSION_NUMBER`, dispatched through the real
+`ToolRegistry.execute`, url = `https://juice-shop:3000/rest/products/search?q=apple`:
+
+```
+run_waf_bypass       -> success=True  '0 WAF-bypass finding(s)'       error=None   <-- SILENT
+run_sqli_structural  -> success=True  '0 structural SQLi finding(s)'  error=None   <-- SILENT
+run_css_injection    -> success=True  '0 CSS injection finding(s)'    error=None   <-- SILENT
+run_ssi              -> success=True  'DEGRADED: 1 load-bearing check(s) failed ...'
+run_nosqli           -> success=True  'DEGRADED: 8 load-bearing check(s) failed ...'
+```
+
+**The Q-08x swallow ledger cannot close this.** It catches two of the five, because those two wrap
+their requests in a `try/except` that reaches `_swallow`. The other three never raise: `_http`
+catches the transport error itself and returns a dict, so the failure arrives **as data** and is
+dropped by a default. There is no exception for a ledger to catch. The ledger is the right
+mechanism aimed at the wrong half of the problem.
+
+**SCALE, two populations, both stated with their denominator:**
+
+| population | empty host | https to plaintext host | unreachable | of | rate |
+|---|---|---|---|---|---|
+| the 19 url-bearing tools of the Q-092 audit | 679 | 1008 | **1687** | 6622 | **25.5%** |
+| corpus-wide, all tools | 1495 | 1746 | **3241** | 27222 | **11.9%** |
+
+Host reachability was verified live before the classification was trusted:
+
+```
+juice-shop:3000        http-> 200 (9903B)   https-> ERR SSL: WRONG_VERSION_NUMBER
+juice-shop-bench:3000  http-> 200 (9903B)   https-> ERR SSL: WRONG_VERSION_NUMBER
+vampi:5000             http-> 200 (271B)    https-> ERR SSL: WRONG_VERSION_NUMBER
+dvga:5013              http-> 200 (8136B)   https-> ERR SSL: WRONG_VERSION_NUMBER
+dvwa:80                http-> 302 (0B)      https-> ERR SSL: WRONG_VERSION_NUMBER
+owaspbench:8443        http-> 400 (62B)     https-> 404 (682B)      <- genuinely TLS
+benchmarkpython:8443   http-> ERR ReadError https-> 302 (227B)      <- genuinely TLS
+```
+
+**These dispatches are NOT hiding in an error table.** `agent.py:840` logs a `ToolResult` with an
+`error` as `tool_error`/`scope_block` and everything else as `tool_result`. There are 4
+`tool_error` rows for all 22 audited tools. The 1687 unreachable dispatches sit in `tool_result`
+wearing a clean-scan summary.
+
+**THE CASE THAT MAKES IT CONCRETE -- `run_client_checks`.** A tool proven to work, whose single
+zero histogram is two different phenomena:
+
+```
+corpus split of its 348 dispatches:
+    DOOMED    275   https://vampi:5000 (167), https://juice-shop:3000 (96),
+                    https://juice-shop-bench:3000 (12)
+    REACHABLE  73   https://ginandjuice.shop (36), https://owaspbench:8443 (24),
+                    http://vampi:5000 (13)
+
+live A/B, same engine, same page, one reachable scheme and one that cannot open a socket:
+    https://vampi:5000/       success=True  '0 client/config finding(s)'  error=None
+    http://vampi:5000/        success=True  '0 client/config finding(s)'  error=None
+    https://juice-shop:3000/  success=True  '0 client/config finding(s)'  error=None
+    http://juice-shop:3000/   success=True  '0 client/config finding(s)'  error=None
+
+the same engine on a target that DOES have the defect:
+    run_client_checks {"url": "http://dvwa/index.php"} (authenticated)
+      -> success=True  '1 client/config finding(s)'  n=1
+         "Reverse tabnabbing - target=_blank link without rel=noopener"
+         (DVWA /index.php carries 7 unprotected cross-origin target=_blank links)
+```
+
+The engine has three real states -- reachable+finding, reachable+clean, unreachable -- and the last
+two produce byte-identical results. **79.0% of this tool's history is "never ran" being read as
+"clean".**
+
+**TWO ROOT CAUSES, TWO FIXES. They are independent and must not be conflated.**
+
+**(A) `_http` does not carry the transport outcome to the ToolResult edge.** Fix at the chokepoint,
+not in 21 engines. The carrier must be the thing callers already read (Q-089's lesson), so this
+adds no out-parameter callers can ignore:
+
+```diff
+--- a/agent/tools.py
++++ b/agent/tools.py
+@@ class ToolRegistry:
++    # I-2b, HTTP path. A transport failure returns `status == 0` with an `error` and an EMPTY
++    # body. Every engine reads `r.get("body", "") or ""`, so a dead connection and a clean page
++    # are the same value. Count the dead ones at the single choke point every engine already
++    # goes through, and let `execute` fail the ToolResult when a dispatch made NO successful
++    # request at all. Mirrors _cmd's exit-code fix: outcome fidelity on the return edge.
++    async def _http(self, url, method="GET", headers=None, body=None, capture=False, **kw):
++        res = await self.__http_inner(url, method, headers, body, capture, **kw)
++        if not res.get("status"):
++            self._http_dead = getattr(self, "_http_dead", 0) + 1
++            self._http_dead_last = {"url": url, "error": res.get("error")}
++        else:
++            self._http_live = getattr(self, "_http_live", 0) + 1
++        return res
+@@ async def execute(self, tool_name, tool_input, session_id):
++        dead_before = getattr(self, "_http_dead", 0)
++        live_before = getattr(self, "_http_live", 0)
+...
+-        swallowed_count = getattr(self, "_swallowed_total", 0) - swallowed_before
++        swallowed_count = getattr(self, "_swallowed_total", 0) - swallowed_before
++        # A dispatch that made requests and had EVERY one fail did not scan anything. Reporting
++        # success=True with zero findings there is the false-clean this ticket exists to kill.
++        dead = getattr(self, "_http_dead", 0) - dead_before
++        live = getattr(self, "_http_live", 0) - live_before
++        if res is not None and dead and not live:
++            res.success = False
++            res.error = "NO REQUEST COMPLETED: %d request(s) failed; last=%s" % (
++                dead, (getattr(self, "_http_dead_last", {}) or {}).get("error"))
+```
+
+Note the `dead and not live` condition: a dispatch where SOME requests failed is degraded, not
+dead, and the existing `DEGRADED:` line already covers it. Only "made requests, every one failed"
+becomes `success=False`. A dispatch that made no requests at all is untouched.
+
+**(B) The target builder emits URLs that cannot be requested.** This is a SEPARATE root cause with
+a separate fix, and (A) only makes it visible -- it does not stop it happening.
+
+Two distinct malformations, both MEASURED in `logs.etype='tool_call'`:
+
+1. **Scheme mismatch -- 1746 corpus-wide.** `https://` is attached to lab hosts that serve only
+   plaintext (`vampi:5000`, `juice-shop:3000`, `juice-shop-bench:3000`, `dvga:5013`, `dvwa`). The
+   builder is upgrading or defaulting the scheme without regard to what the host answers on.
+2. **Lost netloc -- 1495 corpus-wide.** URLs recorded literally as `https:///`,
+   `https:///.well-known/ai-plugin.json`, `https:///.well-known/assetlinks.json`,
+   `https:///.well-known/gpc.json`. A builder joined a path onto an origin that was the empty
+   string, producing a URL with **no host at all**. httpx rejects these before any connection
+   (`Request URL is missing an 'http://' or 'https://' protocol`). Worst hit:
+   `run_form_cmdi` 318/568 and `run_upload_test` 318/566 -- **56% of both tools' entire history.**
+   `run_oauth` 37, `run_llm_probe` 6.
+
+   The empty-netloc case is the more dangerous of the two because it is unconditional: no target
+   configuration can make `https:///` resolve, so those dispatches were never capable of doing
+   anything, on any target, ever.
+
+**GATE.** Three properties, each with the negative control that must fail before the fix:
+
+1. A dispatch whose every request failed yields `success=False` with an `error`, not
+   `success=True, "0 findings"`. Negative control: it must FAIL today -- measured above, today it
+   is `success=True, error=None`.
+2. A dispatch where some requests succeeded and some failed stays `success=True` and keeps its
+   existing `DEGRADED:` line. This must PASS today and after, so the fix cannot be "fail
+   everything".
+3. No product code path constructs a URL with an empty netloc. Fact-checked against real builder
+   output, not against a declaration -- this project has shipped guards that check declarations
+   eleven times.
+
+**RELATION TO Q-092.** Same invariant (I-2b, outcome fidelity on the return edge), different
+transport. Q-092's `_cmd` fix does NOT touch this: `_http`'s failures never reach a subprocess.
+Fixing one and calling the class closed would leave the larger half open.
+
 ### Q-092 · `_cmd` discards the exit code, so a failed external tool is byte-identical to a clean scan · **READY** · **CRITICAL**
 
 **Q-091 (dalfox) is not a one-off. It is one of at least 24.** This is the shared root cause, and it is
