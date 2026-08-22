@@ -76,6 +76,105 @@ def _swallow(exc: BaseException, where: str, target: str = "") -> bool:
     return True
 
 
+def _dalfox_rows(out: str):
+    """Parse `dalfox --format json` output.  Returns `(rows, parse_error_or_None)`.
+
+    THE DEFECT (Q-091), and it is the I-5 shape.  dalfox emits a JSON ARRAY; this was
+    parsed one line at a time, each line through `json.loads` under `except: pass`.
+
+    MEASURED against the authorized local Juice Shop lab: a run with no results writes
+    exactly `[\\n{}]` -- 6 bytes, 2 lines, exit 0, empty stderr.  `json.loads("[")` raises
+    and `json.loads("{}]")` raises, and both were swallowed.  This is STRUCTURAL, not
+    data-dependent: with real results the lines are `[`, `{...},`, `{...}]`, and the array
+    wrapper plus the trailing commas make every line invalid JSON standalone.  So
+    `len(findings)` was pinned at 0 for EVERY possible dalfox output.  Corpus confirmation:
+    171 run_dalfox invocations, "N XSS signals" histogram `{0: 171}` with no outlier, 0 of
+    1783 findings mentioning dalfox, and zero rows saying "not installed".
+
+    `{}` is dalfox's "nothing found" placeholder, NOT a finding.  Switching to the array
+    without dropping empty objects would convert 171 silent zeros into 171 empty-dict FALSE
+    POSITIVES, which is strictly worse than the bug.
+
+    JSONL is still accepted.  dalfox has emitted one object per line under other
+    flags/versions, and a parser that only understands the one shape we happened to measure
+    is this same defect rebuilt.
+
+    A parse failure is returned, never swallowed: "0 findings" and "I could not read the
+    output" are different facts and the caller must be able to tell them apart.
+    """
+    text = (out or "").strip()
+    if not text:
+        return [], None                    # a genuinely empty run, not a parse failure
+    errors = []
+    try:
+        doc = json.loads(text)
+    except Exception as exc:
+        errors.append(exc)
+    else:
+        if isinstance(doc, dict):
+            doc = [doc]
+        if isinstance(doc, list):
+            return [r for r in doc if isinstance(r, dict) and r], None
+        errors.append(ValueError("dalfox JSON is %s, expected an array" % type(doc).__name__))
+    rows = []
+    for line in text.split("\n"):
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            row = json.loads(line)
+        except Exception as exc:
+            errors.append(exc)
+            continue
+        if isinstance(row, dict) and row:
+            rows.append(row)
+    if rows:
+        return rows, None
+    return [], (errors[0] if errors else None)
+
+
+def _dalfox_finding(url: str, row: dict) -> dict:
+    """Shape one dalfox row into the finding contract, as a CANDIDATE.
+
+    Q-048 measured the other half of this integration: raw dalfox rows carry no `severity`
+    and no `family`, and `agent._auto_store` skips any row without a `severity`.  So even a
+    correctly parsed dalfox result reached nothing.  Fixing only the parser would have moved
+    the silent zero one step downstream instead of removing it.
+
+    `confidence` is set EXPLICITLY and it is load-bearing.  `run_dalfox` is in
+    `agent._CONFIRMED_BY_TOOL`, and `agent._is_confirmed` auto-promotes an UNGRADED row from
+    such a tool straight to CONFIRMED.  Parsing the array without grading would therefore
+    turn 171 silent zeros into auto-confirmed XSS findings -- a worse failure than the one
+    being repaired.  dalfox is an external scanner: its signal is a LEAD until one of the
+    native oracles confirms it, which is the same truth-first rule `_run_nuclei` applies to
+    its heavy template set.
+
+    Keys are read defensively through `.get`, because this lane captured dalfox's EMPTY
+    output but never a multi-entry one, and the whole row is preserved verbatim under `raw`
+    so nothing is lost to a wrong guess about a field name.
+    """
+    detail = ""
+    for key in ("message_str", "message", "evidence", "poc", "data"):
+        if str(row.get(key) or "").strip():
+            detail = str(row[key])
+            break
+    param = str(row.get("param") or "")
+    return {
+        "title": "dalfox XSS signal" + (" on parameter '%s'" % param if param else ""),
+        # severity is what makes the row visible to the pipeline at all; dalfox's own value
+        # wins when it has one.
+        "severity": str(row.get("severity") or "medium").lower(),
+        "confidence": "candidate",
+        "target": url,
+        "param": param,
+        "payload": str(row.get("payload") or ""),
+        "evidence": detail[:400],
+        "detail": detail[:400],
+        "tool": "dalfox",
+        "raw": row,
+    }
+
+
 def _target_client(*args, _rate_policy=True, **kwargs):
     """Create a target HTTP client with the shared per-origin safety policy."""
     import httpx
@@ -10804,12 +10903,17 @@ class ToolRegistry:
         out, err = await self._cmd(cmd, timeout=timeout)
         if err.startswith("__MISSING__"):
             return ToolResult("dalfox", url, False, "", [], "dalfox not installed")
-        findings = []
-        for line in out.strip().split("\n"):
-            try:
-                findings.append(json.loads(line))
-            except Exception:
-                pass
+        rows, parse_error = _dalfox_rows(out)
+        if parse_error is not None:
+            # I-5 / Q-091.  `ran=True` plus "0 XSS signals" is byte-identical to a clean
+            # scan, so an integration that parses NOTHING is indistinguishable from a
+            # target with no XSS.  Record it and say so in the output instead of counting
+            # a parse failure as a result.
+            self._swallow(parse_error, "dalfox.parse", url)
+            return ToolResult("dalfox", url, True,
+                              "dalfox output could not be parsed (%d bytes) - this is NOT a "
+                              "clean result" % len(out or ""), [])
+        findings = [_dalfox_finding(url, row) for row in rows]
         return ToolResult("dalfox", url, True, f"{len(findings)} XSS signals", findings)
 
     async def _run_sqlmap(self, inp: dict) -> ToolResult:

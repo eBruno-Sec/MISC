@@ -190,7 +190,11 @@ def test_partition_is_non_vacuous_and_matches_the_measured_rebased_tree():
     assert all_handlers >= 917
     # Independent re-measurement at 1c357c8.  The lease's 562 has no executable
     # predicate; applying its written definition produces 570, partitioned here.
-    assert counts["optional"] <= 388
+    # LOWERED 388 -> 387: `_run_dalfox`'s `except: pass` around a per-line `json.loads` is
+    # gone (Q-091 -- it parsed a JSON ARRAY line by line, so it discarded every line of
+    # every possible dalfox output).  Ratcheted rather than left slack, so the seat that
+    # handler occupied cannot be silently refilled.
+    assert counts["optional"] <= 387
     assert counts["control-plane"] <= 77
     assert counts["load-bearing"] == 0, [
         "%s:%d:%s" % (r["module"], r["line"], r["function"])
@@ -402,6 +406,7 @@ _SWALLOW_RECORDERS = {
     ("tools.py", "_run_authz_matrix"): 1,
     ("tools.py", "_run_bfla"): 3,
     ("tools.py", "_run_content_discovery"): 1,
+    ("tools.py", "_run_dalfox"): 1,
     ("tools.py", "_run_dir_harvest"): 1,
     ("tools.py", "_run_dom_audit"): 3,
     ("tools.py", "_run_dom_trace"): 2,

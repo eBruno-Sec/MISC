@@ -256,6 +256,77 @@ why the end-to-end tests above can exist at all. If one is ever called from `pla
 future test uses to detect that, and is asserted in both directions by
 `test_module_level_swallow_reports_whether_it_actually_recorded`.
 
+### Slice 3 - Q-091, a live instance of this defect class (committed)
+
+Routed in by the Coordinator mid-lane; `tools.py` was already in this lane's write set.
+
+`_run_dalfox` parsed dalfox `--format json` output line by line under `except: pass`.
+dalfox emits a JSON ARRAY. The Coordinator's measurement against the authorized local
+Juice Shop lab: a no-result run writes exactly `[\n{}]` - 6 bytes, 2 lines, exit 0, empty
+stderr. `json.loads("[")` raises and `json.loads("{}]")` raises, both swallowed. This is
+STRUCTURAL: with real results the lines are `[`, `{...},`, `{...}]`, and the array wrapper
+plus trailing commas make every line invalid JSON standalone. `len(findings)` was pinned
+at 0 for every possible dalfox output. Corpus: 171 invocations, "N XSS signals" histogram
+`{0: 171}`, 0 of 1783 findings mentioning dalfox. With `ran=True` that is byte-identical
+to a clean scan - this lane's invariant, with 171 invocations of evidence.
+
+`test_dalfox_every_line_of_a_real_array_is_invalid_json_standalone` pins the mechanism
+itself, so the reason can never be mistaken for a data quirk.
+
+**Both hazards the Coordinator named are handled, and a third that was one level deeper.**
+
+1. *Empty dicts.* `{}` is dalfox's "nothing found" placeholder. `_dalfox_rows` drops empty
+   objects, so the measured `[{}]` stays a real zero. Otherwise the fix converts 171
+   silent zeros into 171 empty-dict false positives - worse than the bug.
+2. *A gate that proves nothing.* The kill tests feed the REAL bytes and a real multi-entry
+   array. MEASURED against a `git archive HEAD` snapshot (ddb4d78, old parser confirmed
+   present at tools.py:10810), 3 FAILED:
+   `test_dalfox_multi_entry_array_is_actually_parsed`,
+   `test_dalfox_findings_are_leads_and_can_never_be_auto_confirmed`,
+   `test_dalfox_unparseable_output_is_recorded_not_counted_as_zero`.
+   The three controls (`[{}]` stays zero, JSONL still parses, the mechanism test) pass on
+   BOTH sides on purpose - a control that only passes after the fix is not a control.
+3. *THE DEEPER HAZARD, found by reading the pipeline rather than the ticket.* Fixing only
+   the parser would have been worse than the bug. Two measured reasons:
+   - `agent._auto_store` (agent.py:1003) skips any finding without `severity`, and raw
+     dalfox rows have none. `asvs_model.py:193` had already recorded this as Q-048/GAP-2.
+     So a "fixed" parser would still have delivered nothing, while the count now read
+     non-zero - a green number over the same dead path.
+   - Worse: `run_dalfox` is in `agent._CONFIRMED_BY_TOOL`, and `agent._is_confirmed`
+     auto-promotes an UNGRADED row from such a tool straight to CONFIRMED. Parsing the
+     array without grading would have turned 171 silent zeros into auto-confirmed XSS
+     findings.
+   `_dalfox_finding` therefore shapes each row with an explicit `severity` and
+   `confidence: "candidate"`, matching the truth-first rule `_run_nuclei` already applies
+   to its heavy template set: an external scanner's signal is a LEAD until a native oracle
+   confirms it. `test_dalfox_findings_are_leads_and_can_never_be_auto_confirmed` asserts
+   through the REAL `BBHAgent._is_confirmed`, not a restatement of it.
+
+Unparseable output is no longer counted as zero: `self._swallow(parse_error,
+"dalfox.parse", url)` plus an output that says so and deliberately does NOT contain the
+phrase "0 XSS signals", which is the phrase that used to lie.
+
+Field names are read defensively through `.get` and the whole row is preserved under
+`raw`: this lane captured dalfox's EMPTY output but never a multi-entry one, so no key
+name is asserted as known.
+
+Census after slice 3:
+
+    LITERAL-RETURN 74 {'optional': 61, 'control-plane': 13}   load-bearing: 0
+    SWALLOWED     464 {'optional': 387, 'control-plane': 77}  load-bearing: 0
+    RECORDERS total=177 owners=94                             LOSSES {}
+
+`counts["optional"]` ceiling LOWERED 388 -> 387, because the deleted `except: pass` is one
+fewer censused swallow. Ratcheted rather than left slack, so that seat cannot be quietly
+refilled. `_SWALLOW_RECORDERS` floor gains `("tools.py", "_run_dalfox"): 1`.
+
+### Not fixed here, deliberately
+
+`_run_dalfox` findings still carry no `family` key, so they map to no ASVS objective
+(Q-048/GAP-2, `asvs_model.py:193`). Adding one would change objective mapping owned by
+`asvs_model.py`, which is not in this lane's write set, and the ASVS model does not list
+`run_dalfox` for VAL-03 anyway. Flagged, not silently taken.
+
 ### Adjacent finding, NOT fixed here (out of scope, no owner assigned)
 
 `tools.py` has 24 remaining `run_in_executor(None, ...)` call sites (dnp3, s7comm, vnc,

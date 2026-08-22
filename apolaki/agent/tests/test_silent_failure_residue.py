@@ -431,6 +431,104 @@ def test_bie_session_fingerprint_crash_is_not_reported_as_two_identical_sessions
     assert "DEGRADED" in result.output
 
 
+# ══════════════════════════════════════════════════════════════════════════════
+# SLICE 3 -- Q-091, a LIVE instance of this defect class in the dalfox integration.
+#
+# `_run_dalfox` parsed a JSON ARRAY line by line under `except: pass`, so `len(findings)`
+# was pinned at 0 for every possible dalfox output while `ran=True` -- byte-identical to a
+# clean scan, across 171 measured invocations.
+#
+# `DALFOX_EMPTY` is the REAL output measured against the authorized local Juice Shop lab
+# (6 bytes, 2 lines, exit 0, empty stderr).  `DALFOX_TWO` is built to the array structure
+# stated by that same measurement -- `[`, `{...},`, `{...}]` -- so every line is invalid
+# JSON standalone, which is the property that pinned the count.
+# ══════════════════════════════════════════════════════════════════════════════
+
+DALFOX_EMPTY = "[\n{}]"
+DALFOX_TWO = ('[\n{"type":"V","param":"q","payload":"<svg onload=alert(1)>",'
+              '"severity":"high","message_str":"triggered XSS Vector"},\n'
+              '{"type":"R","param":"search","payload":"\\"><script>alert(1)</script>",'
+              '"severity":"medium","message_str":"reflected"}]')
+
+
+def _dalfox_result(monkeypatch, reg, out, err=""):
+    async def _cmd(*_args, **_kwargs):
+        return out, err
+    monkeypatch.setattr(reg, "_cmd", _cmd)
+    return asyncio.run(reg._run_dalfox({"url": "https://target.tld/search?q=1"}))
+
+
+def test_dalfox_every_line_of_a_real_array_is_invalid_json_standalone():
+    """The mechanism, pinned.  This is WHY the old line-by-line parser could never find
+    anything -- it is structural, not a property of the data."""
+    for line in DALFOX_TWO.split("\n"):
+        with pytest.raises(Exception):
+            json.loads(line)
+    # ...while the document as a whole is a perfectly ordinary array of two objects.
+    assert len(json.loads(DALFOX_TWO)) == 2
+
+
+def test_dalfox_multi_entry_array_is_actually_parsed(monkeypatch):
+    """The kill.  The old parser returns 0 here; anything but 2 is the bug."""
+    reg = _registry()
+    result = _dalfox_result(monkeypatch, reg, DALFOX_TWO)
+    assert len(result.findings) == 2, result.output
+    assert "2 XSS signals" in result.output
+    assert [f["param"] for f in result.findings] == ["q", "search"]
+    assert _wheres(reg) == []              # a successful parse records nothing
+
+
+def test_dalfox_measured_empty_output_stays_a_real_zero(monkeypatch):
+    """The false-positive guard the fix must not trade for the bug.
+
+    dalfox writes `[{}]` when it finds nothing, and `{}` is not a finding.  Counting it
+    would turn 171 silent zeros into 171 empty-dict false positives.  This assertion also
+    passes against the OLD parser, and that is the point: it is a control, not the kill.
+    """
+    reg = _registry()
+    result = _dalfox_result(monkeypatch, reg, DALFOX_EMPTY)
+    assert result.findings == []
+    assert "0 XSS signals" in result.output
+    assert _wheres(reg) == []              # a real zero is NOT a degradation
+
+
+def test_dalfox_findings_are_leads_and_can_never_be_auto_confirmed(monkeypatch):
+    """`run_dalfox` is in `agent._CONFIRMED_BY_TOOL`, and `agent._is_confirmed` promotes an
+    UNGRADED row from such a tool to CONFIRMED.  Parsing the array without grading would
+    convert 171 silent zeros into auto-confirmed XSS findings."""
+    import agent as agent_mod
+
+    reg = _registry()
+    result = _dalfox_result(monkeypatch, reg, DALFOX_TWO)
+    assert "run_dalfox" in agent_mod._CONFIRMED_BY_TOOL      # the reason grading is required
+    for finding in result.findings:
+        # severity present, or agent._auto_store drops the row before it reaches anything
+        assert finding["severity"]
+        assert finding["confidence"] == "candidate"
+        assert finding["raw"]                                # nothing lost to a wrong guess
+    # the real routing function, not a restatement of it
+    assert agent_mod.BBHAgent._is_confirmed(None, "run_dalfox", result.findings[0]) is False
+
+
+def test_dalfox_unparseable_output_is_recorded_not_counted_as_zero(monkeypatch):
+    """The I-5 assertion.  A dalfox that printed a panic must not read as a clean target."""
+    reg = _registry()
+    result = _dalfox_result(monkeypatch, reg, "panic: runtime error: index out of range\n\tmain.go:42")
+    assert result.findings == []
+    assert "dalfox.parse" in _wheres(reg)
+    assert "could not be parsed" in result.output
+    assert "0 XSS signals" not in result.output     # the phrase that used to lie
+
+
+def test_dalfox_jsonl_output_is_still_accepted(monkeypatch):
+    """A parser that only understands the one shape we measured is the same defect again."""
+    reg = _registry()
+    jsonl = '{"param":"q","severity":"high"}\n{"param":"r","severity":"low"}'
+    result = _dalfox_result(monkeypatch, reg, jsonl)
+    assert [f["param"] for f in result.findings] == ["q", "r"]
+    assert _wheres(reg) == []
+
+
 # ── the whole slice, as one assertion ─────────────────────────────────────────
 
 def test_every_repaired_owner_is_reachable_from_a_real_execution_path():
