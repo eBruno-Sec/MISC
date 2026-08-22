@@ -667,3 +667,62 @@ Identical on both sides, even though the baseline bodies differ by 15657 bytes (
 injection base.** Proven for `run_sqlmap`. `run_ssrf` is 100% valueless too and is the other
 candidate -- audited in its own section below. Blast radius is therefore much smaller than the
 79.9% headline, and saying so is the point of measuring it.
+
+---
+
+# 13. DELIVERABLE 2 -- the gate: `agent/tests/test_external_tool_liveness.py`
+
+**IT FAILS TODAY, DELIBERATELY, AND THAT IS THE DELIVERABLE.** MEASURED:
+
+```
+docker run --rm -v ".../agent:/app" -w /app apolaki-agent \
+    python -m pytest tests/test_external_tool_liveness.py -p no:cacheprovider -rfE
+-> 4 failed, 3 passed in 2.65s      (pytest exit 1)
+
+FAILED test_cmd_hands_back_the_exit_status
+FAILED test_cmd_reports_a_zero_exit_as_zero
+FAILED test_wrapper_reports_not_ran_when_the_tool_exits_nonzero
+FAILED test_a_failed_run_is_distinguishable_from_a_clean_run
+```
+
+The last one prints the defect in a single line of pytest output:
+
+```
+E  AssertionError: a tool that exited 2 without scanning and a tool that scanned and found
+   nothing produce the identical ToolResult; ...
+E  assert (True, False) != (True, False)
+```
+
+`(success, bool(error))` is `(True, False)` for BOTH a sqlmap that exited 2 without scanning and a
+sqlmap that scanned cleanly. That equality is Q-092.
+
+**The 3 that PASS are the half that makes the guard trustworthy**, and they are not decoration:
+
+| test | passes today | what it rules out |
+|---|---|---|
+| `test_the_rig_itself_can_tell_the_two_apart` | yes | that the 4 failures are a broken fixture. Asserts the two fake binaries really exit 2 and 0 at the OS level, and that NEITHER stdout carries a confirmation marker -- so the exit code is the only axis that separates them |
+| `test_missing_binary_is_still_reported` | yes | that the rig drives a different code path than the one named. The `__MISSING__` signal, the one outcome `_cmd` does surface, still works |
+| `test_wrapper_reports_success_when_the_tool_runs_cleanly` | yes | a "fix" that satisfies the guard by failing every run. A tool that exits 0 and finds nothing must stay `success=True` |
+
+Design notes, so the next lane does not weaken it by accident:
+
+- **The fake binaries are real executables on PATH** (`#!/bin/sh`, `chmod 0755`), not a stubbed
+  `_cmd`. Stubbing `_cmd` would test the stub; the entire question is what a genuine non-zero
+  `proc.returncode` does at the return edge.
+- **`_exit_status_of` is permissive about SHAPE and strict about PRESENCE.** Q-092 prescribes the
+  value on the return edge but not its packaging, so a 3-tuple, a namedtuple field or a small
+  result object all satisfy it. Only "the caller cannot obtain the exit status at all" fails. This
+  is what lets the guard survive the fix without being rewritten to match it.
+- **`test_cmd_reports_a_zero_exit_as_zero` is paired with the non-zero one on purpose**, so a
+  repaired `_cmd` cannot satisfy the guard by returning a constant.
+- `success` is this codebase's spelling of the ticket's `ran`:
+  `ToolResult(tool, target, success, output, findings, error)`.
+- The module carries `skipif(os.name == "nt")` because the fixture is a POSIX shell script. The
+  suite's authority is the Linux agent image, which is where the 4-failed/3-passed result above was
+  measured. It is a platform guard, not a pass.
+
+**Consequence to flag to the Coordinator: committing this file makes the suite red on exactly these
+4 tests until the `_cmd` chokepoint is repaired.** That is what Q-092's GATE clause asked for ("it
+must FAIL against today's `_cmd`, which cannot express the distinction at all"). It is not a
+weakened or vacuous guard: 3 controls pass, and the 4 failures name a defect that is reproducible
+by hand in one command.
