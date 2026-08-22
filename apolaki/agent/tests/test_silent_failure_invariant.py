@@ -391,6 +391,9 @@ _SWALLOW_RECORDERS = {
     ("tools.py", "_audit_one"): 4,
     ("tools.py", "_benchmark_lab"): 1,
     ("tools.py", "_browser_dialog_scan"): 1,
+    # Q-092: the external-tool chokepoint.  Deleting this one recorder re-silences every
+    # subprocess wrapper at once, and no per-wrapper row would move to show it.
+    ("tools.py", "_cmd"): 1,
     ("tools.py", "_browser_navigate"): 3,
     ("tools.py", "_confirm_authz_write"): 3,
     ("tools.py", "_confirm_create_object_idor"): 5,

@@ -12,25 +12,58 @@ Lane opened 2026-08-21 from HEAD `66a7012` (verified green 3519 passed / 11 skip
 | 2 | 3 module-level helpers + the executor boundary that would have made one an island | `196dfda` |
 | 3 | Q-091 dalfox: a live instance of this exact defect class, 171 invocations of evidence | `f9a8815` |
 | 4 | no-island check on all 11 recorder owners | `7871871` |
+| 5 | Q-092 `_cmd`: exit status on the RETURN edge via `CmdResult`, 18 call sites, one shared predicate | pending |
 
-Census movement, MEASURED at each step with the guard's own predicates:
+Slice 5 also turns GREEN the 4 guards in `tests/test_external_tool_liveness.py` that
+another lane wrote to fail by design until Q-092 landed. That file was not modified.
 
-    literal-return load-bearing:  15 -> 3 -> 0
-    _swallowed optional:         388 -> 388 -> 387
-    swallow recorders:           160 -> 172 -> 176 -> 177   (losses: {} throughout)
+## Census: before vs after, and the ceilings (the direct answer)
 
-Ceilings were LOWERED three times and raised zero times. `_SWALLOW_RECORDERS` is a
-FLOOR, and raising it (14 new owners) is tightening, not loosening.
+Both snapshots measured with the SAME predicates, run inside a throwaway container:
+`git archive 66a7012` (lane open) versus the working tree.
 
-23 new tests in `agent/tests/test_silent_failure_residue.py`, counted by running the
+    ########## BEFORE (66a7012, lane open) ##########
+    literal-return : load-bearing=15  optional=61  control-plane=13   total=89
+    _swallowed     : load-bearing=0   optional=388 control-plane=77   total=465
+    recorders      : total=160 owners=80
+
+    ########## AFTER (HEAD) ##########
+    literal-return : load-bearing=0   optional=61  control-plane=13   total=74
+    _swallowed     : load-bearing=0   optional=387 control-plane=77   total=464
+    recorders      : total=177 owners=94
+
+The real counts moved down. The ceilings moved down WITH them, so no slack was left
+behind for the next regression to hide in:
+
+| assertion | before | after | real count now | SLACK |
+|-----------|--------|-------|----------------|-------|
+| literal-return `load-bearing` | `<= 15` | `== 0` | 0 | **0** |
+| literal-return `optional` | `<= 61` | `<= 61` | 61 | **0** |
+| literal-return `control-plane` | `<= 13` | `<= 13` | 13 | **0** |
+| `_swallowed` `optional` | `<= 388` | `<= 387` | 387 | **0** |
+| `_swallowed` `control-plane` | `<= 77` | `<= 77` | 77 | **0** |
+| `_swallowed` `load-bearing` | `== 0` | `== 0` | 0 | **0** |
+
+**Every ceiling now sits exactly on the measured count.** The load-bearing one was
+additionally converted from `<=` to `==`, so it is no longer a budget at all. Two
+ceilings were lowered (15 -> 0, 388 -> 387); the three that did not move were already
+touching their real count, because this lane fixed no `optional` or `control-plane`
+handler. No ceiling was raised at any point.
+
+`_SWALLOW_RECORDERS` is a FLOOR, not a ceiling. Raising it (80 -> 94 owners, 160 -> 177
+recorders) is tightening: it makes each new recorder undeletable without a red test.
+
+31 new tests in `agent/tests/test_silent_failure_residue.py`, counted by running the
 file, not by counting `def`s:
 
-* **19 are kills** - measured RED against a `git archive HEAD` snapshot before the
-  matching fix, green after. 12 at slice 1, 4 at slice 2, 3 at slice 3.
-* **4 are CONTROLS** that pass on BOTH sides on purpose, and are labelled as such in
+* **25 are kills** - measured RED against a `git archive HEAD` snapshot before the
+  matching fix, green after. 12 at slice 1, 4 at slice 2, 3 at slice 3, 6 at slice 5.
+* **6 are CONTROLS** that pass on BOTH sides on purpose, and are labelled as such in
   the file: the ContextVar propagation measurement, dalfox's `[{}]` staying a real
-  zero, dalfox JSONL still parsing, and the line-by-line mechanism proof. A control
-  that only passes after the fix is not a control.
+  zero, dalfox JSONL still parsing, the line-by-line mechanism proof, a non-zero exit
+  that still produced output, and exit 0 with no output. A control that only passes
+  after the fix is not a control - two of these had to be rewritten when they turned
+  out to fail pre-fix on a missing symbol rather than on behaviour.
 
 ## The defect this lane fixes
 
@@ -348,6 +381,123 @@ Census after slice 3:
 `counts["optional"]` ceiling LOWERED 388 -> 387, because the deleted `except: pass` is one
 fewer censused swallow. Ratcheted rather than left slack, so that seat cannot be quietly
 refilled. `_SWALLOW_RECORDERS` floor gains `("tools.py", "_run_dalfox"): 1`.
+
+### Q-091 empty-dict filter: VERIFIED PRESENT (re-checked on request)
+
+The filter is in `_dalfox_rows`, on both parse paths, and it is the `and r` / `and row`
+truth test that drops `{}`:
+
+    tools.py:117    return [r for r in doc if isinstance(r, dict) and r], None   # array path
+    tools.py:129    if isinstance(row, dict) and row:                            # JSONL path
+
+`isinstance(r, dict)` alone would KEEP `{}`, which is why the truth test is the
+load-bearing half. Pinned by `test_dalfox_measured_empty_output_stays_a_real_zero`,
+which feeds the measured `"[\n{}]"` and asserts `findings == []`, `"0 XSS signals"`, and
+an EMPTY swallow ledger (a real zero is not a degradation). That test passes against the
+old parser too, on purpose: it is the false-positive control, not the kill.
+
+Without it, the measured `[{}]` would have produced one empty-dict finding per run: 171
+silent zeros converted into 171 false positives, and because `run_dalfox` is in
+`agent._CONFIRMED_BY_TOOL` they would have been auto-CONFIRMED. Both halves are guarded.
+
+### Slice 4 - Q-092, the `_cmd` chokepoint (committed)
+
+Routed in by the Coordinator. Same defect class as the 15, one level lower: at a
+chokepoint 18 call sites share.
+
+`_cmd` captured `proc.returncode` into `_exit` and used it ONLY for the provenance record
+in its `finally` block. It never crossed the return edge. A tool that exited non-zero
+having produced nothing returned `("", stderr)`, every caller parsed the empty stdout into
+zero findings, and the wrapper reported `ran=True`. A crashed external tool and a clean
+target were byte-identical rows.
+
+**The carrier is `CmdResult`: the same object callers already unpack.** An AST census of
+the 18 `self._cmd(` call sites:
+
+    TOTAL self._cmd call sites: 18
+    CHECK a sentinel within 6 lines (12)
+    DO NOT check any sentinel (6)
+
+`CmdResult` is a `tuple` subclass of length 2. Every `out, err = await self._cmd(...)`
+site keeps working untouched, `result == ("out", "err")` still holds, and the exit status
+rides on `result.exit_code`. Two alternatives were rejected on the evidence above: a third
+tuple element would break every 2-target unpack in the file AND could be ignored by the 6
+sites that already ignore `err`'s content; a `self._last_exit` attribute is exactly the
+side channel Q-089 forbids.
+
+**MY FIRST ATTEMPT WAS WRONG, and another lane's guard caught it.** I originally put the
+status only in an `__EXIT__` sentinel on `err`, emitted only when the exit was non-zero
+AND stdout was empty. That satisfied the Coordinator's wording but FAILED four guards in
+`tests/test_external_tool_liveness.py` - a file I hold read-only, whose guards were
+written to fail by design until Q-092 landed, and which are the authoritative contract:
+
+* `test_cmd_hands_back_the_exit_status` - the fake binary exits 2 **with a banner on
+  stdout**. My rule did not fire, so no status was recoverable at all.
+* `test_cmd_reports_a_zero_exit_as_zero` - a CLEAN run must report 0, which a
+  failure-only sentinel can never do. Explicitly paired with the above "so the repaired
+  `_cmd` cannot satisfy the guard by hard-coding a failure constant".
+* `test_wrapper_reports_not_ran_when_the_tool_exits_nonzero` - the measured sqlmap case:
+  exit 2, usage error on stderr, ASCII banner on stdout. Stdout was non-empty, so my rule
+  let `_run_sqlmap` keep answering `success=True, "No SQLi confirmed"`.
+
+The lesson is the one this whole lane is about: **stdout being non-empty is not the same
+as the run having produced a result.** sqlmap's banner is bytes on stdout and is not a
+finding. So `_cmd` now reports the status UNCONDITIONALLY and the CALLER decides whether
+it salvaged anything.
+
+Changes as shipped:
+1. `CmdResult(out, err, exit_code)` returned on all six `_cmd` return paths. `exit_code`
+   is `None` when no process exit was observed (binary missing, budget refused, timeout,
+   spawn raised) - None means "unknown", never "fine".
+2. `_cmd_failure(result, parsed=None) -> str`. One predicate for every failure mode: the
+   three `__` sentinels plus `exit_code not in (0, None)`. `parsed` is the caller's own
+   answer to "did I get anything out of this run?" - defaulting it to `None` means the
+   safe direction (report the failure) is what you get by not thinking about it.
+3. The `__EXIT__` sentinel is KEPT on top of that for the unambiguous
+   non-zero-and-no-stdout case, because it is what makes the 12 sentinel-reading sites
+   fail loudly without each having to reason about exit codes.
+4. `_cmd` calls `self._swallow(...)` on that path, so the failure also surfaces through
+   `execute()`'s DEGRADED line at all 18 sites and could never sit as an island.
+5. All 12 checking sites now bind the whole result (`out, err = _cmd_r = await ...`) and
+   call `_cmd_failure(_cmd_r)`. `err.startswith("__MISSING__")` appears ZERO times in
+   `tools.py`; a site still hand-rolling it would see `__MISSING__` and keep missing the
+   exit code. Existing messages are preserved and katana's and ffuf's hints are kept.
+
+All 7 tests in `tests/test_external_tool_liveness.py` now pass - the 4 that were failing
+by design plus their 3 controls. That file was not modified.
+
+MEASURED against `git archive HEAD` (b33edb6, `CmdResult` count 0, `_cmd_failure` count
+0, 12 hand-rolled checks present), **6 kills**:
+
+    FAILED test_cmd_failure_predicate_covers_every_sentinel_cmd_can_emit
+    FAILED test_cmd_puts_the_exit_status_on_the_return_edge
+    FAILED test_cmd_result_is_still_the_pair_every_caller_unpacks
+    FAILED test_a_non_zero_exit_the_caller_salvaged_is_not_reported_as_a_failure
+    FAILED test_a_crashed_external_tool_is_ran_false_not_a_clean_zero
+    FAILED test_every_cmd_caller_now_shares_the_one_failure_predicate
+
+and green after. The end-to-end kill runs through a real `execute("run_nuclei", ...)`
+dispatch and asserts `success is False` and that the string `"0 findings"` is absent -
+the phrase that used to lie.
+
+**2 both-sides controls, rewritten so they are runnable against the pristine tree.** They
+first referenced `tools._cmd_failure`, which does not exist pre-fix, so they failed for a
+mechanical reason rather than a behavioural one - a control that cannot run before the fix
+is not a control. Re-expressed without that symbol, both now pass on BOTH sides: a
+non-zero exit that still produced output keeps its output and is not flagged, and exit 0
+with no output stays a clean run.
+
+`test_a_non_zero_exit_the_caller_salvaged_is_not_reported_as_a_failure` is counted as a
+KILL rather than a control, honestly: it is the false-positive guard for the `parsed=`
+escape hatch, but it exercises a function that does not exist pre-fix, so it cannot run on
+the pristine tree and is not a both-sides control.
+
+Regression sweep over every suite that touches an external-tool wrapper
+(`test_bbh`, `test_tool_provenance`, `test_dispatch_provenance`,
+`test_nmap_service_wiring`, `test_external_tool_liveness`, `test_tool_ledger_status`,
+`test_liveness`): **0 failures**, exit 0. This matters because `_cmd`'s return TYPE
+changed; the sweep is what proves the 2-tuple compatibility claim empirically rather than
+by reading the class.
 
 ### No-island check on every recorder added by this lane (MEASURED)
 

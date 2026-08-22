@@ -529,6 +529,140 @@ def test_dalfox_jsonl_output_is_still_accepted(monkeypatch):
     assert _wheres(reg) == []
 
 
+# ══════════════════════════════════════════════════════════════════════════════
+# SLICE 4 -- Q-092, the `_cmd` chokepoint.  Same defect class, 18 call sites wide.
+#
+# `_cmd` captured `proc.returncode` into `_exit` and used it ONLY for the provenance
+# record in its `finally`.  It never crossed the return edge, so a tool that exited
+# non-zero having produced nothing returned ("", stderr) and every caller parsed the
+# empty stdout into zero findings and reported ran=True.
+#
+# The carrier is `err`, because 12 of the 18 call sites already branch on an
+# `__`-sentinel there.  A third tuple element would break every
+# `out, err = await self._cmd(...)` unpack in the file and could be ignored (Q-089).
+# ══════════════════════════════════════════════════════════════════════════════
+
+class _FakeProc:
+    def __init__(self, code, out=b"", err=b""):
+        self.returncode = code
+        self._out, self._err = out, err
+
+    async def communicate(self):
+        return self._out, self._err
+
+
+def _fake_exec(monkeypatch, code, out=b"", err=b""):
+    """Every external binary is present and exits `code`."""
+    async def _exec(*_args, **_kwargs):
+        return _FakeProc(code, out, err)
+    monkeypatch.setattr(tools.shutil, "which", lambda name: "/usr/bin/%s" % name)
+    monkeypatch.setattr(tools.asyncio, "create_subprocess_exec", _exec)
+
+
+def test_cmd_failure_predicate_covers_every_sentinel_cmd_can_emit():
+    """One predicate, so a caller cannot keep handling `__MISSING__` while still
+    treating a crash as a clean zero.  A non-sentinel error is NOT a failure."""
+    assert _cmd_failure_of("__MISSING__nuclei") == "nuclei not installed"
+    assert "budget" in _cmd_failure_of("__BUDGET__ mission request budget exhausted")
+    assert _cmd_failure_of("__EXIT__2: bad flag").startswith("external tool failed")
+    assert _cmd_failure_of("") == ""
+    assert _cmd_failure_of("warning: deprecated option") == ""    # stderr noise is not failure
+
+
+def _cmd_failure_of(err):
+    return tools._cmd_failure(err)
+
+
+def test_cmd_puts_the_exit_status_on_the_return_edge(monkeypatch):
+    """The kill.  Before: ('', 'bad flag') -- the exit code died in the finally block."""
+    reg = _registry()
+    _fake_exec(monkeypatch, 2, out=b"", err=b"nuclei: unknown flag")
+    out, err = asyncio.run(reg._cmd(["nuclei", "-u", "https://target.tld"]))
+    assert out == ""
+    assert err.startswith("__EXIT__2"), err
+    assert "nuclei: unknown flag" in err          # the real stderr is not thrown away
+    assert "external_tool.nuclei" in _wheres(reg)  # and it reaches the I-5 ledger
+
+
+def test_cmd_does_not_fail_a_tool_that_exits_non_zero_with_real_output(monkeypatch):
+    """CONTROL, and the false-positive guard.  Plenty of tools exit non-zero while
+    printing perfectly good results; failing those trades this false negative for one in
+    the other direction.  The rule is scoped to 'produced NOTHING parseable'."""
+    reg = _registry()
+    _fake_exec(monkeypatch, 1, out=b'{"template-id":"x"}\n', err=b"partial error")
+    out, err = asyncio.run(reg._cmd(["nuclei", "-u", "https://target.tld"]))
+    # Written WITHOUT `_cmd_failure` on purpose: a control has to be runnable against the
+    # pristine tree too, and this one passes on both sides.
+    assert out == '{"template-id":"x"}\n'          # results preserved
+    assert not err.startswith("__EXIT__"), err     # not reported as a failure
+    assert _wheres(reg) == []                      # and not recorded as a degradation
+
+
+def test_exit_zero_with_no_output_is_still_a_clean_run(monkeypatch):
+    """CONTROL.  A tool that legitimately found nothing must stay ran=True."""
+    reg = _registry()
+    _fake_exec(monkeypatch, 0, out=b"", err=b"")
+    out, err = asyncio.run(reg._cmd(["nuclei", "-u", "https://target.tld"]))
+    assert (out, err) == ("", "")                  # runnable pre-fix; passes on both sides
+    assert _wheres(reg) == []
+
+
+def test_cmd_result_is_still_the_pair_every_caller_unpacks(monkeypatch):
+    """The compatibility invariant.  `CmdResult` carries `exit_code` WITHOUT becoming a
+    3-tuple, so all 18 `out, err = await self._cmd(...)` sites keep working untouched."""
+    reg = _registry()
+    _fake_exec(monkeypatch, 0, out=b"hello", err=b"")
+    result = asyncio.run(reg._cmd(["nuclei"]))
+    out, err = result                                  # the unpack every call site does
+    assert (out, err) == ("hello", "")
+    assert len(result) == 2 and isinstance(result, tuple)
+    assert result == ("hello", "")                     # equal to the plain pair it replaced
+    assert result.exit_code == 0                       # ...and the status rides along
+
+
+def test_a_non_zero_exit_the_caller_salvaged_is_not_reported_as_a_failure(monkeypatch):
+    """CONTROL for the other direction.  `_cmd` cannot know what parseable means per tool,
+    so the caller gets an explicit say: a wrapper that DID extract results from a non-zero
+    run passes them as `parsed` and is not failed.  Without this escape hatch the fix would
+    trade a false negative for a false positive."""
+    reg = _registry()
+    _fake_exec(monkeypatch, 1, out=b'{"template-id":"x"}\n', err=b"partial error")
+    result = asyncio.run(reg._cmd(["nuclei"]))
+    assert tools._cmd_failure(result) != ""                       # unclaimed -> failure
+    assert tools._cmd_failure(result, parsed=[{"id": "x"}]) == ""  # salvaged -> ran
+
+
+def test_a_crashed_external_tool_is_ran_false_not_a_clean_zero(monkeypatch):
+    """The end-to-end kill, through the real dispatch.
+
+    Before this fix `run_nuclei` returned success=True with "0 findings" when nuclei
+    exited 2 without running -- a crashed scanner and a clean target were the same row.
+    """
+    reg = _registry()
+    _fake_exec(monkeypatch, 2, out=b"", err=b"could not read templates")
+    result = asyncio.run(reg.execute("run_nuclei", {"target": "https://target.tld"}, "m-residue"))
+    assert result.success is False, result.output
+    assert "external tool failed" in (result.error or "")
+    assert "0 findings" not in (result.output or "")   # the phrase that used to lie
+    assert "external_tool.nuclei" in _wheres(reg)
+
+
+def test_every_cmd_caller_now_shares_the_one_failure_predicate():
+    """No islands, and no half-taught caller.  A site that still hand-rolls
+    `err.startswith("__MISSING__")` sees `__MISSING__` and misses `__EXIT__`."""
+    import inspect as _inspect
+    src = _inspect.getsource(tools)
+    assert 'err.startswith("__MISSING__")' not in src
+    # every sentinel _cmd can emit is produced by _cmd and consumed by the predicate
+    for sentinel in ("__MISSING__", "__BUDGET__", "__EXIT__"):
+        assert sentinel in src, sentinel
+    # the predicate is fed the whole CmdResult, not just `err` -- passing the bare string
+    # would silently lose `exit_code`, which is the half that catches sqlmap's exit-2 banner
+    assert src.count("_cmd_failure(_cmd_r)") >= 12
+    assert src.count("_cmd_failure(err)") == 0
+    assert src.count("_cmd_r = await self._cmd(") >= 12
+
+
 # ── the whole slice, as one assertion ─────────────────────────────────────────
 
 def test_every_repaired_owner_is_reachable_from_a_real_execution_path():

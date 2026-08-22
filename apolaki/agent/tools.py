@@ -76,6 +76,55 @@ def _swallow(exc: BaseException, where: str, target: str = "") -> bool:
     return True
 
 
+class CmdResult(tuple):
+    """What `_cmd` hands back.  Q-092.
+
+    STILL EXACTLY THE `(stdout, stderr)` PAIR every caller already unpacks -- it is a 2-tuple
+    and every `out, err = await self._cmd(...)` site keeps working untouched -- with the process
+    exit status carried ON it as a value on the return edge.
+
+    A third tuple element was rejected: 6 of the 18 call sites ignore `err`'s content today and
+    would ignore a third slot just as easily, and it would break every 2-target unpack in this
+    file.  A `self._last_exit` attribute was rejected harder: that is precisely the side channel
+    Q-089 forbids, and outcome fidelity has to travel on the value the caller already reads.
+
+    `exit_code` is None when no process exit was observed -- the binary was missing, the budget
+    refused it, it timed out, or the spawn raised.  None means "unknown", never "fine".
+    """
+
+    def __new__(cls, out, err, exit_code=None):
+        obj = super().__new__(cls, (out, err))
+        obj.exit_code = exit_code
+        return obj
+
+
+def _cmd_failure(result, parsed=None) -> str:
+    """Why an external tool run should be reported as NOT RUN, or "" if it ran.  Q-092.
+
+    ONE predicate for every way `ToolRegistry._cmd` can fail, so a caller cannot keep handling
+    `__MISSING__` (12 of 18 did) while still reporting a crash as a clean zero (all 18 did).
+    Returns a reason string rather than a bool on purpose: the caller has to put it somewhere a
+    human reads, which is what makes the failure a verdict instead of a silent branch.
+
+    `parsed` is the caller's own answer to "did I actually get anything out of this run?".
+    `_cmd` cannot know what parseable means for a given tool -- sqlmap's ASCII banner is stdout
+    but it is not a result -- so a non-zero exit is a failure UNLESS the caller says it salvaged
+    something.  Defaulting `parsed` to None means the safe direction (report the failure) is the
+    one you get by not thinking about it.
+    """
+    text = str(result[1] if isinstance(result, tuple) and len(result) > 1 else (result or ""))
+    if text.startswith("__MISSING__"):
+        return "%s not installed" % text[len("__MISSING__"):].strip()
+    if text.startswith("__BUDGET__"):
+        return text[len("__BUDGET__"):].strip() or "mission request budget exhausted"
+    if text.startswith("__EXIT__"):
+        return "external tool failed (exit %s)" % text[len("__EXIT__"):].strip()
+    code = getattr(result, "exit_code", None)
+    if code not in (0, None) and not parsed:
+        return "external tool failed (exit %s): %s" % (code, text.strip()[:160] or "no stderr")
+    return ""
+
+
 def _dalfox_rows(out: str):
     """Parse `dalfox --format json` output.  Returns `(rows, parse_error_or_None)`.
 
@@ -1727,11 +1776,11 @@ class ToolRegistry:
     # ── helpers ──────────────────────────────────────────────────
     async def _cmd(self, cmd: list, timeout: int = 180) -> tuple:
         if not shutil.which(cmd[0]):
-            return "", f"__MISSING__{cmd[0]}"
+            return CmdResult("", f"__MISSING__{cmd[0]}")
         weight = self._TOOL_WEIGHT.get(os.path.basename(str(cmd[0])), 25)
         if not self.budget.charge(weight):
-            return "", (f"__BUDGET__ mission request budget exhausted "
-                        f"(external tool '{os.path.basename(str(cmd[0]))}' costs {weight})")
+            return CmdResult("", (f"__BUDGET__ mission request budget exhausted "
+                                  f"(external tool '{os.path.basename(str(cmd[0]))}' costs {weight})"))
         _binary = os.path.basename(str(cmd[0]))
         _out_text, _exit = "", None
         try:
@@ -1739,13 +1788,35 @@ class ToolRegistry:
                 *cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE)
             out, err = await asyncio.wait_for(proc.communicate(), timeout=timeout)
             _out_text, _exit = out.decode(errors="replace"), proc.returncode
-            return _out_text, err.decode(errors="replace")
+            _err_text = err.decode(errors="replace")
+            # Q-092.  THE DEFECT: the exit status was captured RIGHT HERE and used only for the
+            # provenance record in the `finally` below, so it never crossed the return edge.  A
+            # tool that exited non-zero having produced nothing returned ("", stderr); every
+            # caller parsed the empty stdout into zero findings and reported ran=True.  A crashed
+            # external tool and a clean target were byte-identical -- I-5, at the chokepoint that
+            # 18 call sites share.
+            #
+            # The status now rides on `CmdResult` (see its docstring for why not a third tuple
+            # slot and why not `self._last_exit`).  The `__EXIT__` sentinel below is kept ON TOP
+            # of that for the one unambiguous case -- non-zero AND nothing on stdout -- because
+            # it is what makes the 12 sentinel-reading call sites fail loudly without each of
+            # them having to reason about exit codes.
+            if _exit not in (0, None) and not _out_text.strip():
+                # Visible even before a caller is taught the sentinel: `execute()` turns any
+                # swallow during a dispatch into a DEGRADED line, so this cannot sit as an island.
+                self._swallow(
+                    RuntimeError("%s exited %s with no output: %s"
+                                 % (_binary, _exit, _err_text.strip()[:160] or "(no stderr)")),
+                    "external_tool.%s" % _binary, " ".join(str(c) for c in cmd)[:200])
+                return CmdResult("", "__EXIT__%s: %s"
+                                 % (_exit, _err_text.strip() or "(no stderr)"), _exit)
+            return CmdResult(_out_text, _err_text, _exit)
         except asyncio.TimeoutError:
             _out_text = "Command timed out"
-            return "", "Command timed out"
+            return CmdResult("", "Command timed out")
         except Exception as e:
             _out_text = str(e)
-            return "", str(e)
+            return CmdResult("", str(e))
         finally:
             # Codex #14: durable provenance for every external tool run (fail-safe — never breaks the scan).
             try:
@@ -4072,10 +4143,11 @@ class ToolRegistry:
         domain = inp["domain"]
         # deep/insane: query ALL sources (-all) for a wider subdomain surface (slower).
         allsrc = ["-all"] if getattr(self, "intensity", "standard") in ("deep", "insane") else []
-        out, err = await self._cmd(["subfinder", "-d", domain, "-silent", "-json"] + allsrc,
+        out, err = _cmd_r = await self._cmd(["subfinder", "-d", domain, "-silent", "-json"] + allsrc,
                                    timeout=240 if allsrc else 120)
-        if err.startswith("__MISSING__"):
-            return ToolResult("subfinder", domain, False, "", [], "subfinder not installed")
+        _failed = _cmd_failure(_cmd_r)
+        if _failed:
+            return ToolResult("subfinder", domain, False, "", [], _failed)
         subs = []
         for line in out.strip().split("\n"):
             if not line.strip():
@@ -4249,14 +4321,14 @@ class ToolRegistry:
                 for t in targets[:400]:
                     f.write((bases.get(t) or t) + "\n")
                 tmp = f.name
-            out, err = await self._cmd(
+            out, err = _cmd_r = await self._cmd(
                 ["httpx", "-l", tmp, "-ports", ports, "-status-code", "-title",
                  "-tech-detect", "-silent", "-json"], timeout=300)
         finally:
             if tmp and os.path.exists(tmp):
                 os.unlink(tmp)
         hosts = []
-        missing = err.startswith("__MISSING__")
+        missing = bool(_cmd_failure(_cmd_r))
         if not missing:
             for line in out.strip().split("\n"):
                 if not line.strip():
@@ -4386,9 +4458,10 @@ class ToolRegistry:
 
     async def _run_whatweb(self, inp: dict) -> ToolResult:
         target = inp["target"]
-        out, err = await self._cmd(["whatweb", "--log-json=/dev/stdout", "-q", target], timeout=60)
-        if err.startswith("__MISSING__"):
-            return ToolResult("whatweb", target, False, "", [], "whatweb not installed")
+        out, err = _cmd_r = await self._cmd(["whatweb", "--log-json=/dev/stdout", "-q", target], timeout=60)
+        _failed = _cmd_failure(_cmd_r)
+        if _failed:
+            return ToolResult("whatweb", target, False, "", [], _failed)
         findings = []
         for line in out.strip().split("\n"):
             if not line.strip():
@@ -4466,9 +4539,10 @@ class ToolRegistry:
         from security import safe_flags
         flag_tokens = safe_flags(flags, ("-s", "-p", "-T", "--top-ports", "-Pn", "-n", "--open")
                                  + _stealth.EVASION_FLAGS)
-        out, err = await self._cmd(["nmap"] + flag_tokens + ["-oX", "-", target], timeout=360)
-        if err.startswith("__MISSING__"):
-            return ToolResult("nmap", target, False, "", [], "nmap not installed")
+        out, err = _cmd_r = await self._cmd(["nmap"] + flag_tokens + ["-oX", "-", target], timeout=360)
+        _failed = _cmd_failure(_cmd_r)
+        if _failed:
+            return ToolResult("nmap", target, False, "", [], _failed)
         ports = []
         try:
             root = ET.fromstring(out)
@@ -4501,9 +4575,10 @@ class ToolRegistry:
         # service ones; --script-timeout caps any single slow script.
         cmd = ["nmap", "-sV", "--script", "vuln and not dos", "--script-timeout", "120s",
                "-oX", "-", target]
-        out, err = await self._cmd(cmd, timeout=int(inp.get("timeout", 900)))
-        if err.startswith("__MISSING__"):
-            return ToolResult("nmap_vuln", target, False, "", [], "nmap not installed")
+        out, err = _cmd_r = await self._cmd(cmd, timeout=int(inp.get("timeout", 900)))
+        _failed = _cmd_failure(_cmd_r)
+        if _failed:
+            return ToolResult("nmap_vuln", target, False, "", [], _failed)
         findings = nmap_nse.parse_nse_vuln(out, target)
         self.recon.setdefault("nmap_vuln", []).extend(findings)
         return ToolResult("nmap_vuln", target, True,
@@ -4541,9 +4616,10 @@ class ToolRegistry:
             _iserver = os.getenv("INTERACTSH_SERVER", "").strip()
             if _iserver:
                 ncmd += ["-iserver", _iserver]
-        out, err = await self._cmd(ncmd, timeout=timeout)
-        if err.startswith("__MISSING__"):
-            return ToolResult("nuclei", target, False, "", [], "nuclei not installed")
+        out, err = _cmd_r = await self._cmd(ncmd, timeout=timeout)
+        _failed = _cmd_failure(_cmd_r)
+        if _failed:
+            return ToolResult("nuclei", target, False, "", [], _failed)
         findings = []
         for line in out.strip().split("\n"):
             if not line.strip():
@@ -4635,19 +4711,23 @@ class ToolRegistry:
         crawl = ["-silent", "-jc", "-d", str(depth)] + deep_flags
         if auth_h:
             cmd = ["katana", "-u", url] + crawl + no_logout + auth_h  # authenticated crawl
-            out, err = await self._cmd(cmd, timeout=t_base)
+            out, err = _cmd_r = await self._cmd(cmd, timeout=t_base)
         else:
-            out, err = await self._cmd(
+            out, err = _cmd_r = await self._cmd(
                 ["katana", "-u", url] + crawl + ["-headless", "-no-sandbox", "-aff"] + no_logout,
                 timeout=t_base + 40)
-        if err.startswith("__MISSING__"):
-            return ToolResult("katana", url, False, "", [], _MISSING)
+        _failed = _cmd_failure(_cmd_r)
+        if _failed:
+            return ToolResult("katana", url, False, "", [],
+                              _MISSING if "not installed" in _failed else _failed)
         # Nothing crawled (no headless browser, or an empty pass): retry a plain crawl
         # (carrying auth headers if we have them) so we still capture the surface.
         if not out.strip():
-            out, err = await self._cmd(["katana", "-u", url] + crawl + no_logout + auth_h, timeout=max(120, t_base - 20))
-            if err.startswith("__MISSING__"):
-                return ToolResult("katana", url, False, "", [], _MISSING)
+            out, err = _cmd_r = await self._cmd(["katana", "-u", url] + crawl + no_logout + auth_h, timeout=max(120, t_base - 20))
+            _failed = _cmd_failure(_cmd_r)
+            if _failed:
+                return ToolResult("katana", url, False, "", [],
+                                  _MISSING if "not installed" in _failed else _failed)
         urls = [u.strip() for u in out.splitlines() if u.strip().startswith("http")]
         urls = [u for u in urls if self.scope.validate(u)[0]]
         self._add_urls(urls)
@@ -6866,10 +6946,12 @@ class ToolRegistry:
         wl = inp.get("wordlist", "/usr/share/wordlists/dirb/common.txt")
         fc = inp.get("filter_codes", "404,403")
         method = inp.get("method", "GET")
-        out, err = await self._cmd(
+        out, err = _cmd_r = await self._cmd(
             ["ffuf", "-u", url, "-w", wl, "-fc", fc, "-X", method, "-json", "-s", "-t", "50"], timeout=240)
-        if err.startswith("__MISSING__"):
-            return ToolResult("ffuf", url, False, "", [], "ffuf not installed (use run_content_discovery instead)")
+        _failed = _cmd_failure(_cmd_r)
+        if _failed:
+            return ToolResult("ffuf", url, False, "", [],
+                              _failed + " (use run_content_discovery instead)")
         findings = []
         try:
             data = json.loads(out)
@@ -8514,8 +8596,8 @@ class ToolRegistry:
         _ck = _hdrs.get("Cookie") or _hdrs.get("cookie")
         if _ck:
             cmd += ["--cookie", _ck]
-        out, err = await self._cmd(cmd, timeout=420)
-        if err.startswith("__MISSING__") or (
+        out, err = _cmd_r = await self._cmd(cmd, timeout=420)
+        if _cmd_failure(_cmd_r) or (
                 "is vulnerable" not in out and "sqlmap identified" not in out and "the following injection" not in out):
             return "", ""
         proof = _parse_sqlmap_proof(out)                 # parameter, techniques, payloads, DBMS
@@ -10900,9 +10982,10 @@ class ToolRegistry:
             if str(_v).strip():
                 cmd += ["-H", f"{_k}: {_v}"]
         timeout = {"standard": 240, "deep": 480, "insane": 720}.get(intensity, 240)
-        out, err = await self._cmd(cmd, timeout=timeout)
-        if err.startswith("__MISSING__"):
-            return ToolResult("dalfox", url, False, "", [], "dalfox not installed")
+        out, err = _cmd_r = await self._cmd(cmd, timeout=timeout)
+        _failed = _cmd_failure(_cmd_r)
+        if _failed:
+            return ToolResult("dalfox", url, False, "", [], _failed)
         rows, parse_error = _dalfox_rows(out)
         if parse_error is not None:
             # I-5 / Q-091.  `ran=True` plus "0 XSS signals" is byte-identical to a clean
@@ -10952,9 +11035,10 @@ class ToolRegistry:
         if data:
             cmd += ["--data", data]
         settings = " ".join(cmd[3:])                       # everything after `sqlmap -u <url>`
-        out, err = await self._cmd(cmd, timeout=timeout)
-        if err.startswith("__MISSING__"):
-            return ToolResult("sqlmap", url, False, "", [], "sqlmap not installed")
+        out, err = _cmd_r = await self._cmd(cmd, timeout=timeout)
+        _failed = _cmd_failure(_cmd_r)
+        if _failed:
+            return ToolResult("sqlmap", url, False, "", [], _failed)
         vuln = "is vulnerable" in out or "sqlmap identified" in out
         if not vuln:
             # No confirmation → NOT a finding (truth-first). Severity-less data item so
