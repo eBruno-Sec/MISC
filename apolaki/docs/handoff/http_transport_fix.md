@@ -277,11 +277,13 @@ Landed as `xfail(strict=True)` (`..xxxx....`, EXIT=0), marks applied per-key fro
 
 | slice | state |
 |---|---|
-| (A) gate `tests/test_http_transport_outcome.py` | **COMMITTED** `1d85fe3` (as strict xfail) |
-| (B) gate `tests/test_planner_target_addressability.py` | **COMMITTED** this commit (as strict xfail) |
-| (A) fix in `agent/tools.py` + xfail removal | in working tree, green on its own gate and verified live; **HELD until the full suite returns** |
-| (B) fix in `agent/planner.py` | NOT STARTED |
-| the 4 `_run_hash_crack` sites (brief item 4) | NOT STARTED |
+| (A) gate `tests/test_http_transport_outcome.py` | **DONE** — filed red as strict xfail `1d85fe3`, markers deleted by the fix |
+| (A) fix in `agent/tools.py` | **DONE** `c08db26` — gate `FFF.....F` -> `.........`, verified live on the lab, 2 mutants killed |
+| (B) gate `tests/test_planner_target_addressability.py` | **DONE** — filed red as strict xfail `8df4535`, markers deleted by the fix |
+| (B) fix in `agent/planner.py` | **DONE** `86c8dfb` — gate `..FFFF....` -> `.........`, 2 mutants killed |
+| full suite | **GREEN** with (A): 3571 / 11s / 12xf / **0 failed** (baseline 3562 + exactly the 9 new tests). Combined (A)+(B) run on a `git archive HEAD` snapshot: see s12 |
+| the 4 `_run_hash_crack` sites (brief item 4) | **HELD, not attempted** — hashcat and john are both MISSING from the image so no fix is verifiable, and the naive fix is wrong (hashcat exits 1 for "exhausted"). Defect + safe approach recorded in s6 |
+| `agent._reject_hostless_step` skips the `urls` list | **OPEN, out of this lane's write scope.** No live producer feeds it after (B) — see s11 |
 
 ---
 
