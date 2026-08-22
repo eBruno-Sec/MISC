@@ -310,8 +310,59 @@ fires today, but the `"<" in body` precondition is satisfied by ANY HTML page, s
 standing between a soft-404 and a fabricated cross-domain-policy finding is the wildcard matcher.
 A content-type / root-element check would be the durable guard.
 
-**VERDICT: CORRECTLY QUIET on the corpus targets, PROVEN CAPABLE on DVWA.** No patch needed for the
-zero. One hardening suggestion recorded above.
+**VERDICT: CORRECTLY QUIET on the 73 runs that reached a target; the other 275 NEVER RAN.** See
+7b -- this tool is the case that proves the two phenomena are distinct.
+
+### 7b. `run_client_checks` is the whole argument in one experiment
+
+This engine is the sharpest evidence in the audit because it is **provably working** and its zero
+histogram is **two different phenomena wearing one number**.
+
+Exact corpus split of all 348 dispatches, by scheme and host:
+
+```
+DOOMED  (https:// to a host that speaks only plaintext) = 275
+    https://vampi:5000              167
+    https://juice-shop:3000          96
+    https://juice-shop-bench:3000    12
+REACHABLE                                                =  73
+    https://ginandjuice.shop         36
+    https://owaspbench:8443          24
+    http://vampi:5000                13
+```
+
+**The A/B, live, dispatched through the real `ToolRegistry.execute`.** Same engine, same page, one
+reachable scheme and one that cannot open a socket:
+
+```
+https://vampi:5000/        success=True  '0 client/config finding(s)'  n=0  error=None
+http://vampi:5000/         success=True  '0 client/config finding(s)'  n=0  error=None
+    raw http://vampi:5000/ -> 200, 271 B, _blank count = 0, reverse_tabnabbing() = []
+
+https://juice-shop:3000/   success=True  '0 client/config finding(s)'  n=0  error=None
+http://juice-shop:3000/    success=True  '0 client/config finding(s)'  n=0  error=None
+    raw http://juice-shop:3000/ -> 200, 9903 B, _blank count = 0, reverse_tabnabbing() = []
+```
+
+**The two ToolResults are byte-identical, and one of them never opened a socket.**
+
+Put beside the DVWA run from section 7, the engine has exactly three real states and the reporting
+collapses two of them:
+
+| state | live evidence | what the operator sees |
+|---|---|---|
+| reachable + finding present | DVWA `/index.php`, 7 unprotected `target=_blank` links | `1 client/config finding(s)` |
+| reachable + genuinely clean | vampi 271 B / juice-shop 9903 B, 0 `_blank` | `0 client/config finding(s)` |
+| **UNREACHABLE** | `https://` to a plaintext host, `SSL: WRONG_VERSION_NUMBER`, 0 bytes | `0 client/config finding(s)` |
+
+Rows 2 and 3 are indistinguishable to every consumer -- the operator, the report, the ledger and
+the corpus census alike. **79.0% of this engine's history (275/348) is row 3 being read as row 2.**
+
+This also settles the question the census alone could not answer. `run_client_checks` is not weakly
+oracled and not badly targeted in the "wrong page" sense: it works, it found a real finding on the
+first authorized target that actually had one, and its 73 reachable runs are honest true negatives
+on pages measured to contain nothing for it to find. Its zero is 73 true negatives plus 275
+non-events.
 
 ---
 
