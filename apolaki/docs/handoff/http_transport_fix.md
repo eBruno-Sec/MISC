@@ -456,3 +456,21 @@ internal `_exec_internal`), the tally is set there, and `_http` books into it fr
 without any engine being edited. Proven by execution, not by registration: the live A/B in s3 and s7
 went through the real `execute`, and the durable `tool_error` row is the observable effect.
 
+---
+
+## 10. MUTATION TEST — four mutants, all killed, each with a DIFFERENT signature
+
+A gate that goes red for every mutation is not discriminating, it is just brittle. Each mutant below
+was applied to a throwaway copy of the HEAD snapshot and reddens a *specific* set.
+
+| # | mutant | result | what it proves |
+|---|---|---|---|
+| 1 | `_http_failure` returns `""` unconditionally (the defect restored) | `FFF.....F` — the 4 dead-transport tests | the gate detects the ORIGINAL defect, and its signature is byte-identical to the pre-fix run |
+| 2 | `_http_failure` returns a reason unconditionally ("fail everything") | `FFFFFFFFF` — all 9 | the 5 negative controls are real. Note the 3 dead tests fail here too, on `"WRONG_VERSION_NUMBER" in res.error` — **the gate requires the error to NAME the cause, not merely to be non-empty** |
+| 3 | `bare_host_ok` disabled (strict scheme on every key) | `......F...` — only `test_a_bare_host_target_is_still_accepted` | the exemption for `run_nmap_vuln` / `run_dork_gen` is load-bearing and pinned; this is exactly the "delete a whole phase while looking like a fix" mistake |
+| 4 | `_addressable` reverted to the hardcoded `("url","base_url")` | `..F.F.....` — the two `target` tests | the key DERIVATION is what closes the `target` half |
+
+Mutant 4 leaves the `urls` tests green because the fix closes that key **twice** — the
+`_TARGET_LIST_KEYS` loop in the guard AND the `addressable_target` filter at the `js_urls` build
+site. Both halves are independently load-bearing, which is the property I wanted and did not assume.
+
