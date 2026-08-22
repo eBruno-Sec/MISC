@@ -502,3 +502,49 @@ driven with host-less input and, after the fix, emit none; and after (A), any th
 being silent. Gate clause 3 is met for the step-building path, which is where all 1495 corpus
 dispatches came from.
 
+---
+
+## 12. SHIP GATE — FINAL, both fixes, isolated snapshot
+
+`git archive HEAD apolaki/agent` into a clean directory (never `cp -r` of the working tree), mounted
+into a throwaway container on `apolaki_default`. **The shared `apolaki-agent-1` was never touched.**
+
+The mount was verified non-empty BEFORE trusting the result, because a bad `-v` path mounts an empty
+volume and pytest then reports success having collected nothing:
+
+```
+py files: 178   test files: 301
+tests/test_http_transport_outcome.py  tests/test_planner_target_addressability.py
+grep -c _ACTIVE_HTTP_TALLY tools.py  -> 4        # (A) present
+grep -c addressable_target planner.py -> 5       # (B) present
+```
+
+```
+SHIP GATE (A+B, git archive HEAD snapshot, --network apolaki_default)
+  passed=3581  skipped=11  xfailed=12  xpassed=0  FAILED=0  ERROR=0   total=3604
+  FAILED lines: 0
+SHIPGATE_EXIT=0
+```
+
+| | baseline `2dd1f7a` | ship gate | delta |
+|---|---|---|---|
+| passed | 3562 | **3581** | **+19 = 9 (A gate) + 10 (B gate), exactly** |
+| skipped | 11 | 11 | 0 |
+| xfailed | 12 | 12 | 0 — **both strict-xfail markers were deleted by their fixes, not left behind** |
+| failed | 0 | **0** | 0 |
+
+**Not a single test lost.** Instrument discipline: exit code captured with `$?` directly off
+`docker run`, never off a pipeline; failures counted with `grep -c '^FAILED'`, never `grep -c F`
+(the deprecation prose contains "FastAPI" and "Lifespan Events"); pass/skip/xfail counted off the
+progress characters, since the summary line does not survive redirect here.
+
+Commits after the snapshot touch `docs/handoff/http_transport_fix.md` only, so HEAD's CODE is
+byte-identical to what was gated (`git diff --name-only 86c8dfb..HEAD`).
+
+**One note for the Coordinator:** `e4e2fb0` (Q-095, `docs/QUEUE.md` only, +64 lines) landed at
+02:44 in my window, so the "only writer in this repo" assumption did not hold. It was harmless — no
+code, and it predates my first commit. This lane's 8 commits touched exactly four files:
+`agent/tools.py`, `agent/planner.py`, the two new test files, and this handoff. `docs/QUEUE.md` and
+`docs/STATUS.md` were never staged by me; every commit used
+`git commit --only -F - -- <explicit paths>` and `git add -A` was never used.
+
