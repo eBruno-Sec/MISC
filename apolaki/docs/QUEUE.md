@@ -1299,6 +1299,41 @@ call sites adopting `technique_status()`, which Q-012 already established and ne
 invented-id negative control passes; `/packs` and `/techniques` agree; the four markers XPASS and are
 retired in the commit that closes them.
 
+### Q-094 · The documented test command omits `--network`, and 10 tests answer by SKIPPING · **READY** · **HIGH**
+
+MEASURED by the I-11 lane, same tree, same commit, only the docker flag differs:
+
+```
+without --network apolaki_default:   2 failed, 3526 passed, 19 skipped
+with    --network apolaki_default:   0 failed, 3536 passed, 11 skipped
+```
+
+**The networkless run does not merely fail more. It TESTS LESS.** Ten tests convert from real
+assertions into skips, and only the failing half is visible. Failures get chased; a skip count prints
+as a number nobody diffs. This is the concrete mechanism behind the standing rule that **SKIPPED is
+never a pass**, and it has been silently shrinking every suite run made with the documented command.
+
+**The two failures actively misattribute themselves.** `test_truthful_metadata.py::
+test_the_engine_now_reports_the_leak_end_to_end` and `::test_the_engine_reports_ONE_canonical_
+coordinate_whichever_reader_ran` print `assert 0 == 1` FIRST and bury `[Errno -2] Name or service not
+known` inside a `ToolResult` repr further down. **That reads as a broken oracle, not a missing
+network.** A reader chases the assertion.
+
+Attribution settled in both directions, which is what makes this environmental rather than a code
+defect: pristine `66a7012` (containing none of the lane's work) fails IDENTICALLY networkless, and
+current HEAD with the lane's commits passes 56/56 networked.
+
+**FIX, two parts, and the second matters more:**
+1. Add `--network apolaki_default` to the documented container command everywhere it appears
+   (CLAUDE.md, the avengers-assemble skill, docs). Cheap, and stops the misattribution.
+2. **Make the skips LOUD.** A test that skips for want of an environment must not be
+   indistinguishable from a test that ran. Ratchet the skip count so a rise is red, or mark these
+   `pytest.fail` when the network is expected. A guard that answers "skipped" to a question it exists
+   to answer is a guard that cannot fail, which is the same defect class as I-4/I-5/I-9.
+
+**GATE:** assert the skip count does not exceed the networked figure. The negative control is a run
+without the network, which must go red rather than quietly reporting a smaller suite as green.
+
 ### Q-092 · `_cmd` discards the exit code, so a failed external tool is byte-identical to a clean scan · **READY** · **CRITICAL**
 
 **Q-091 (dalfox) is not a one-off. It is one of at least 24.** This is the shared root cause, and it is
