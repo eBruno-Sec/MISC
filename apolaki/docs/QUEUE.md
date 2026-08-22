@@ -1351,6 +1351,51 @@ these 24 share dalfox's signature, and dalfox and nuclei both turned out structu
 reproduced. **Each needs the same treatment: run it live, capture the RAW tool output, and compare it
 against what the parser yields.** Do not mark any of them broken or healthy from the histogram alone.
 
+**CORRECTION TO THIS TICKET, from the live audit (`d40374e`, `ddb4d78`). I filed the framing above
+and it was wrong in a way that would have sent readers hunting in the wrong place.**
+
+**21 of the 22 remaining zero-histogram wrappers never shell out at all.** They are pure Python, so
+`_cmd`'s discarded exit code cannot be their cause. `_cmd` explains dalfox, nuclei and sqlmap. It does
+not explain the rest, and looking for subprocess bugs in a tool that never spawns a subprocess is
+wasted effort. The census signature was right; my attribution of its cause was not.
+
+**The actual dominant cause is `_http`, which has the identical defect for HTTP.** It reaches all 21
+pure-Python engines rather than the 14 that shell out. `_http` does the honest thing and RETURNS
+`status` and `error`; the callers do not read them. Same shape as `_cmd`, same shape as Q-089/Q-090:
+**the outcome is measured correctly and dropped at the return edge.**
+
+MEASURED by the audit lane over its 19 tools: 1008 doomed + 679 empty-host = **1687 of 6622 dispatches
+(25.5%)** could not have reached their target, every one reported as a completed scan. INDEPENDENTLY
+RE-MEASURED by me over ALL tools: 27222 url/target dispatches, 1495 with an empty `https` host, 1746
+`https` to a plaintext-only lab host, **3241 unreachable (11.9%)**. Different denominators, not a
+conflict: the lane's rate is higher because it scoped to the zero-histogram tools, and the corpus-wide
+absolute count is nearly double. Quote whichever, but always with its denominator.
+
+Transport reality, reproduced by me on `apolaki_default`:
+
+```
+http://juice-shop:3000/rest/products/search?q=a   -> 200 (16578B)
+https://juice-shop:3000/rest/products/search?q=a  -> ERR ConnectError
+https:///.well-known/ai-plugin.json               -> ERR UnsupportedProtocol
+```
+
+**TWO DISTINCT ROOT CAUSES, needing separate fixes** (do not conflate them):
+1. **Scheme mismatch** - `https://` fired at a plaintext-only host. 1746 dispatches.
+2. **A URL builder that lost its netloc** - targets recorded literally as `https:///`,
+   `https:///.well-known/ai-plugin.json`, `https:///.well-known/gpc.json`. 1495 dispatches.
+
+**`run_client_checks` is the case that proves the two phenomena are distinct**, and it is the one to
+lead with: the tool demonstrably WORKS and produced a live true positive on DVWA (`e003f55`), yet 275
+of its 348 corpus runs were fired at `https://` URLs for plaintext hosts. **Its zero histogram is not
+one phenomenon, it is two** - 73 honest true negatives and 275 requests that never opened a socket.
+
+Confirmed CORRECTLY QUIET so far, which shrinks the real blast radius: `run_ssi`, `run_waf_bypass`,
+`run_sqli_structural` (`3f24850`). Confirmed BROKEN: `run_sqlmap` exits 2 reported clean, and all 58
+corpus runs used valueless params that miss a SQLi the same command confirms with a value (`8377afd`).
+
+**`_http` gets its own ticket (Q-093), being drafted by the audit lane.** Fixing `_http`'s honesty is
+what makes the remaining engines' real behaviour VISIBLE; it does not by itself fix any engine.
+
 **FIX, at the chokepoint (do this first, it is what makes the other 22 findable):**
 1. `_cmd` returns the exit status as a value on the return edge. Do not add a second out-parameter that
    callers can ignore -- Q-089's lesson is that the carrier must be the thing they already read.
