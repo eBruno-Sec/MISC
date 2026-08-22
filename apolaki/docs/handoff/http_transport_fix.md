@@ -283,3 +283,47 @@ Landed as `xfail(strict=True)` (`..xxxx....`, EXIT=0), marks applied per-key fro
 | (B) fix in `agent/planner.py` | NOT STARTED |
 | the 4 `_run_hash_crack` sites (brief item 4) | NOT STARTED |
 
+---
+
+## 5. (B) FIX — the guard now derives its keys from the declaration it drifted from
+
+`agent/planner.py`, three changes:
+
+1. **`addressable_target(v, bare_host_ok=False)`** — one public definition of "this value names
+   something that can be requested". `bare_host_ok` is the single real difference between the
+   declared keys and is NOT cosmetic: `run_nmap_vuln` gets `juice-shop:3000` and `run_dork_gen` a
+   bare domain. It defaults to `False`, so a new call site gets the STRICT reading by not thinking
+   about it. An empty string is refused in both modes — `_b("")` returns `""` *specifically* to say
+   "there is no base for this host", and letting it flow on as a target is the same falsy-default
+   failure the empty string was introduced to stop.
+2. **`_addressable` iterates `_TARGET_KEYS` and `_TARGET_LIST_KEYS`** instead of a hand-written
+   `("url", "base_url")`. **This is the actual fix.** A second hand-maintained key list is what
+   produced the gap, so there is not another one: a fifth target key is guarded by existing, and the
+   gate parametrizes over the same constants so it arrives as a test case, never as a blind spot.
+   `_BARE_HOST_TARGET_KEYS = ("target",)` is declared beside `_TARGET_KEYS`, not next to the guard,
+   because the whole of (B) is that a rule kept away from its declaration drifts away from it.
+3. **`js_urls` is filtered with `addressable_target` at the BUILD site** (planner.py:642), not only
+   refused at `fresh()`. A list key makes `_addressable` refuse the WHOLE step, and losing nine
+   addressable bundles because one was host-less would be a capability loss dressed up as a fix.
+   Filtering at the source means the step-level refusal is a backstop that should never fire.
+
+### MEASURED, after
+
+```
+$ pytest tests/test_planner_target_addressability.py tests/test_hostless_target_guard.py \
+         tests/test_whole_product_reach.py tests/test_liveness_hostless_negative_control.py -q
+.........................sssssss.......                                  [100%]
+EXIT=0        # was ..FFFF....
+```
+
+Q-019's own guard file and both reach guards are unaffected — the fix widens coverage without
+touching what they assert. (The `s` skips are network-gated; re-run on `apolaki_default` below.)
+
+### NOT FIXED, and outside this lane's write scope — for the Coordinator
+
+`agent._reject_hostless_step` (the executor ingress) inspects `url`/`base_url`/`target` but **not
+the `urls` list**, and it only fires on values containing `"://"` — so `{"target": ""}` and a bare
+`/static/app.js` pass it. `agent.py` is not mine to edit. The planner side is now closed, so the
+ingress is a backstop with a hole rather than an active leak, but it should be made to reuse
+`planner.addressable_target` (now public for exactly this reason).
+

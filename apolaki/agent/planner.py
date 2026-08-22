@@ -388,6 +388,11 @@ _SESSION_KILL_ENTITLED = frozenset({
 # `target` (run_nuclei/run_nmap_vuln) and the `urls` LIST that run_js_review/run_saml fetch.
 _TARGET_KEYS = ("url", "base_url", "target")
 _TARGET_LIST_KEYS = ("urls",)
+# Q-093(B). The subset of `_TARGET_KEYS` whose value may legitimately be a BARE HOST instead of a
+# URL. `run_nmap_vuln` is handed `juice-shop:3000` and `run_dork_gen` a bare domain; only
+# `run_nuclei` puts a URL in `target`. Declared HERE, beside the key list it qualifies, because the
+# whole of Q-093(B) is that a rule kept away from its declaration drifts away from it.
+_BARE_HOST_TARGET_KEYS = ("target",)
 
 
 def is_session_kill_url(u) -> bool:
@@ -426,25 +431,72 @@ def session_kill_target(step: dict) -> str:
     return ""
 
 
-def _addressable(step: dict) -> bool:
-    """False when a step carries a `url`/`base_url` that is not an absolute http(s) URL with a host.
+def addressable_target(v, bare_host_ok: bool = False) -> bool:
+    """Whether a single step-target value names something that can actually be requested.  Q-093(B).
 
-    Q-019's single chokepoint. Every URL a step targets is built here from a host plus a path, and a
-    host that turns out to be empty used to yield `https:///path` — scheme present, netloc empty —
-    which the scope engine refused ten times per mission while nothing named the planner as the
-    producer. The planner must not emit a target it cannot address; scope is the authorization gate,
-    not the spell-checker.
+    ONE definition, used by `_addressable` as the step-level backstop AND by the build sites that
+    assemble target LISTS, so a bundle list cannot be filtered by a rule that disagrees with the
+    guard that later inspects it.
+
+    `bare_host_ok` is the ONE real distinction between the declared target keys, and it is not
+    cosmetic: `run_nmap_vuln` is handed `juice-shop:3000` and `run_dork_gen` a bare domain. Both are
+    perfectly addressable and neither is a URL, so demanding a scheme everywhere would silently
+    delete those whole phases — a latent gap traded for a live capability loss, which is strictly
+    worse than the gap. It defaults to False so the STRICT reading is what a new call site gets by
+    not thinking about it.
+
+    An empty string is refused in both modes. `_b("")` returns `""` (Q-019) precisely to say "there
+    is no base for this host"; letting it flow on as a target is the same falsy-default failure the
+    empty string was introduced to stop.
+    """
+    if not isinstance(v, str) or not v.strip():
+        return False
+    p = urlparse(v)
+    if bare_host_ok and "://" not in v:
+        return True                              # a bare host/domain: nmap and the dork generator
+    return p.scheme in ("http", "https") and bool(p.netloc)
+
+
+def _addressable(step: dict) -> bool:
+    """False when a step carries a target it cannot address.
+
+    Q-019's chokepoint. Every URL a step targets is built from a host plus a path, and a host that
+    turns out to be empty used to yield `https:///path` — scheme present, netloc empty — which the
+    scope engine refused ten times per mission while nothing named the planner as the producer. The
+    planner must not emit a target it cannot address; scope is the authorization gate, not the
+    spell-checker.
+
+    Q-093(B) — THE KEYS ARE DERIVED, and that is the fix. This read `("url", "base_url")` while the
+    module twelve lines above declared FOUR target keys, and `session_kill_target` right next door
+    iterated all four correctly. MEASURED against the real `next_batch` over a surface carrying one
+    host-less `.js` URL, no stubs: `run_js_review` was still being planned with
+    `urls=['/static/app.js', 'https:///static/b.js']` — the Q-019 string, emitted through the one
+    key neither this guard nor `agent._reject_hostless_step` inspected. `{"target": _b(h)}` with an
+    empty `h` carried `""` for the same reason.
+
+    A hand-maintained second key list is what produced the gap, so there is not another one: adding
+    a key to `_TARGET_KEYS` now guards it here by existing, and
+    `tests/test_planner_target_addressability.py` parametrizes over the same constants so a new key
+    arrives as a test case rather than as a blind spot.
+
+    A LIST key refuses the whole step if ANY entry is unaddressable. That is deliberate and it
+    should never fire: the build sites filter with `addressable_target` first, so a mixed list
+    reaching here means something upstream is broken, and half-scanning a broken plan is a worse
+    answer than dropping it. `fresh()` drops silently by design (the planner is pure); the executor
+    ingress is what makes a refusal visible.
     """
     inp = step.get("input") or {}
-    for k in ("url", "base_url"):
+    for k in _TARGET_KEYS:
         if k not in inp:
             continue
-        v = inp.get(k)
-        if not isinstance(v, str) or not v:
+        if not addressable_target(inp.get(k), bare_host_ok=(k in _BARE_HOST_TARGET_KEYS)):
             return False
-        p = urlparse(v)
-        if p.scheme not in ("http", "https") or not p.netloc:
-            return False
+    for k in _TARGET_LIST_KEYS:
+        if k not in inp:
+            continue
+        for v in (inp.get(k) or []):
+            if not addressable_target(v):
+                return False
     return True
 
 
@@ -639,7 +691,14 @@ def next_batch(state: dict) -> list:
 
     # ── phase D: enrich (openapi / graphql / js) ──
     d = []
-    js_urls = _rank_urls([u for u in urls if u.split("?")[0].lower().endswith(".js")])
+    # Q-093(B). Filtered HERE, not just refused at `fresh()`. `js_urls` comes straight off raw
+    # `state["urls"]` and is the only target list the planner builds, so it never passed through
+    # `_abs` and was carrying host-less entries (`https:///static/b.js`) into `run_js_review`'s
+    # `urls`. Dropping the bad entries keeps the good bundles: the step-level guard has to refuse
+    # the WHOLE step, and losing nine addressable bundles to one broken one would be a capability
+    # loss dressed up as a fix.
+    js_urls = _rank_urls([u for u in urls
+                          if u.split("?")[0].lower().endswith(".js") and addressable_target(u)])
     openapi_seen, graphql_seen = set(), set()
     for u in urls:
         low = u.lower()

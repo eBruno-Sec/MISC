@@ -107,27 +107,25 @@ def _plan_all(roots, subs, urls, bases, mode="full"):
     return steps
 
 
-# Q-093 (B), OPEN. The defect is filed and MEASURED; the fix is not in this commit.
-# `strict=True`, following `tests/test_outcome_fidelity.py`'s `_KNOWN_OPEN`: these XPASS -> RED the
-# moment `_addressable` derives its keys, so the marker cannot outlive the defect. A landed fix MUST
-# delete `_OPEN_B`, `_UNGUARDED` and every use of them.
+# THE NEGATIVE CONTROL FOR THIS FILE ITSELF. `pytest tests/test_planner_target_addressability.py -q`
+# against HEAD 1d85fe3, the commit BEFORE `_addressable` derived its keys:
 #
-# MEASURED against HEAD 1d85fe3, `pytest tests/test_planner_target_addressability.py -q`:
-#     ..FFFF....     -- 4 failed, 6 passed
-# The 6 that ALREADY PASS are `url`, `base_url`, and all four negative controls. Their passing
-# before the fix is what proves this file distinguishes a guarded key from an unguarded one.
-_OPEN_B = pytest.mark.xfail(strict=True, reason="Q-093(B): _addressable guards 2 of 4 declared keys")
-
-# The declared target keys `_addressable` does NOT inspect today. Written as an exclusion list over
-# the module's own constant so it stays a statement about the gap, not a second key list to drift.
-_UNGUARDED = ("target", "urls")
+#     ..FFFF....                                                               [100%]
+#     FAILED ...::test_every_declared_scalar_target_key_refuses_a_hostless_url[target]
+#     FAILED ...::test_every_declared_list_target_key_refuses_a_hostless_url[urls]
+#     FAILED ...::test_an_empty_target_is_refused
+#     FAILED ...::test_the_real_planner_never_emits_a_hostless_js_bundle
+#
+# 4 failed, 6 passed. The 6 that ALREADY PASSED are `url`, `base_url` and all four negative
+# controls -- so the file distinguishes a guarded key from an unguarded one rather than simply
+# disliking every target. They were committed first as `xfail(strict=True)` (`8df4535`), marked
+# per-key from an explicit `_UNGUARDED = ("target", "urls")`, and the marker was deleted by the fix
+# that made them XPASS -- which, being strict, is how it was forced to be deleted.
 
 
 # ── the gap, stated over planner's OWN declaration ────────────────────────────
 
-@pytest.mark.parametrize("key", [
-    pytest.param(k, marks=([_OPEN_B] if k in _UNGUARDED else []))
-    for k in planner._TARGET_KEYS])
+@pytest.mark.parametrize("key", planner._TARGET_KEYS)
 def test_every_declared_scalar_target_key_refuses_a_hostless_url(key):
     """MUST FAIL before the fix, for `target`. `url`/`base_url` already pass -- that is the control.
 
@@ -140,9 +138,7 @@ def test_every_declared_scalar_target_key_refuses_a_hostless_url(key):
         % (key, HOSTLESS))
 
 
-@pytest.mark.parametrize("key", [
-    pytest.param(k, marks=([_OPEN_B] if k in _UNGUARDED else []))
-    for k in planner._TARGET_LIST_KEYS])
+@pytest.mark.parametrize("key", planner._TARGET_LIST_KEYS)
 def test_every_declared_list_target_key_refuses_a_hostless_url(key):
     """MUST FAIL before the fix. This is the key that is still emitting the Q-019 string live."""
     step = {"tool": "run_js_review", "input": {key: [BASE + "/ok.js", HOSTLESS]}, "key": "k"}
@@ -151,7 +147,6 @@ def test_every_declared_list_target_key_refuses_a_hostless_url(key):
         "containing %r" % (key, HOSTLESS))
 
 
-@_OPEN_B
 def test_an_empty_target_is_refused():
     """MUST FAIL before the fix.
 
@@ -161,7 +156,6 @@ def test_an_empty_target_is_refused():
     assert planner._addressable({"tool": "run_nuclei", "input": {"target": ""}, "key": "k"}) is False
 
 
-@_OPEN_B
 def test_the_real_planner_never_emits_a_hostless_js_bundle():
     """MUST FAIL before the fix -- the live reproduction, end to end through `next_batch`.
 
