@@ -108,3 +108,126 @@ MEASURED, all 22, full histogram of `output`:
   CORRECTLY QUIET can only be told apart by a live positive control.
 
 Per-tool sections follow in descending order of corpus runs.
+
+---
+
+## 3. `run_ssi` -- 940 runs -- **CORRECTLY QUIET**
+
+Wrapper `tools.py:5281-5339`. Pure Python (`self._cmd` calls: 0). Injects
+`mk<tok>mk<!--#config timefmt=...--><!--#echo var="DATE_GMT" -->mk<tok>mk` into each GET query
+param and each POST form text field; `ssi_tool.evaluate` confirms only when the text BETWEEN the
+two unique markers is an expanded date.
+
+**Oracle positive control (synthetic known-positive bytes).** MEASURED:
+
+```
+body = '<html>x' + marker + 'APO-deadbeef-2026-233' + marker + 'y</html>'
+si.evaluate(body, 'deadbeef')['confirmed']  -> True
+si.evaluate(<literal payload echoed back>)  -> False
+```
+
+The oracle fires on a real positive and stays silent on plain reflection. It is not structurally
+pinned at zero the way dalfox's JSONL parser is.
+
+**Live transport control, DVWA (authorized lab), the engine's exact payload on a REFLECTING
+surface.** MEASURED:
+
+```
+GET http://dvwa/vulnerabilities/xss_r/?name=<engine payload>     (authenticated, security=low)
+-> 200, 4451 bytes
+marker sandwich intact in response: True
+text BETWEEN the markers:
+    '<!--#config timefmt="APO-d2180631-%Y-%j" --><!--#echo var="DATE_GMT" -->'
+si.evaluate(...) -> {'confirmed': False, 'oracle': ''}
+```
+
+This is the whole engine proven end to end: the payload reached the server, the server echoed it,
+the response was parsed, the sandwich was found, and the oracle correctly ruled it REFLECTED rather
+than EXECUTED. DVWA's Apache does not run `.php` through `mod_include`, so the directive is not
+expanded -- which is the true state of the target.
+
+**Live run of the wrapper itself, Juice Shop.** MEASURED:
+
+```
+run_ssi {"url":"http://juice-shop:3000/rest/products/search?q=apple"}
+-> success=True output='0 SSI injection finding(s)' findings=0 error=None, swallowed=0
+raw response to the SSI payload: 200, 30 bytes, '{"status":"success","data":[]}'
+marker present in response: False
+```
+
+The JSON search endpoint does not reflect the parameter at all, so there is nothing for any SSI
+oracle to read. Correct.
+
+**VERDICT: CORRECTLY QUIET.** The engine transmits, parses and discriminates correctly; no target
+in the corpus runs an SSI-enabled server. 940 zeros are 940 true negatives. No patch needed.
+
+---
+
+## 4. `run_waf_bypass` -- 592 runs -- **CORRECTLY QUIET (by required precondition)**
+
+Wrapper `tools.py:9412-9452`. Pure Python. A THREE-state differential: baseline OK, bare signature
+BLOCKED by a WAF, padded signature NOT blocked and reflected. State 2 is a hard gate -- the code
+`continue`s out of the loop the moment `wb.is_blocked(...)` is False, so **a target with no WAF can
+never produce a finding, by design.**
+
+**Oracle positive control.** MEASURED:
+
+```
+wb.evaluate((200,'ok'), (403,'Request blocked by WAF'), (200,'echo <script>alert(1)</script>'), payload)
+   -> confirmed True
+wb.evaluate((200,'ok'), (200,'echo <payload>'),        (200,'echo <payload>'),        payload)
+   -> confirmed False        # no WAF -> nothing to bypass
+```
+
+**Live.** MEASURED: `run_waf_bypass` on `http://juice-shop:3000/rest/products/search?q=apple`
+-> `success=True output='0 WAF-bypass finding(s)' findings=0 swallowed=0`. Juice Shop returns 200
+to the bare `<script>alert(1)</script>` signature; nothing blocks, so state 2 never occurs.
+
+**Corpus corroboration:** 59 of the 592 runs report `no query params to test`, i.e. the wrapper was
+dispatched at paramless URLs one run in ten. The remaining 533 reached the loop and found no WAF.
+
+**VERDICT: CORRECTLY QUIET.** The engine is a WAF-bypass check pointed at a fleet of WAF-less local
+labs. The zero is the correct answer. No patch needed.
+
+---
+
+## 5. `run_sqli_structural` -- 592 runs -- **CORRECTLY QUIET on the surfaces tested**
+
+Wrapper `tools.py:9453-9486`. Pure Python. Sends a VALID subquery `(SELECT 1)` and an INVALID one
+`(SELECT 1 FROM apolnope_zqx77)` and confirms when the invalid one raises a DBMS error the baseline
+and the valid probe lack.
+
+**Oracle positive control.** MEASURED:
+
+```
+sq.structural_probes() -> {'ok': '(SELECT 1)', 'bad': '(SELECT 1 FROM apolnope_zqx77)'}
+sq.structural_confirmed('base rows', 'base rows', 'SQLITE_ERROR: near "x": syntax error')
+   -> (True, [{'dbms': 'SQLite', 'pattern': 'SQLITE_ERROR'}])
+sq.structural_confirmed('base rows', 'base rows', 'base rows')     -> (False, [])
+```
+
+**Live, with a NEGATIVE AND A POSITIVE on the same endpoint.** This is the important measurement:
+Juice Shop's `/rest/products/search?q=` IS SQL-injectable, so if the engine were blind it would be
+blind on a genuinely vulnerable parameter. MEASURED, raw:
+
+```
+q=apple                             -> 200,  921 bytes  {"status":"success","data":[{...}]}
+q=(SELECT 1)                        -> 200,   30 bytes  {"status":"success","data":[]}
+q=(SELECT 1 FROM apolnope_zqx77)    -> 200,   30 bytes  {"status":"success","data":[]}
+q='                                 -> 200,   30 bytes  {"status":"success","data":[]}
+q=apple')) UNION SELECT 1,2,3--     -> 500, 1078 bytes  Error: SQLITE_ERROR: SELECTs to the left
+                                                        and right of UNION do not have the same
+                                                        number of result columns
+```
+
+The parameter is injectable (the UNION probe reaches SQLite and errors), but it lands inside a
+`LIKE '%...%'` **value** context, not a query-**structure** context: an unknown table name inside a
+string literal is just a string, so the invalid subquery cannot raise. The engine's premise -- input
+placed into the query STRUCTURE -- is simply not true of this parameter, and reporting nothing is
+right. `run_sqli` (a separate engine) is the one that catches this surface, and the corpus confirms
+it does: `run_sqli` histogram `{0:1113, 1:83, 2:18}`.
+
+**VERDICT: CORRECTLY QUIET** on every surface reachable in the lab fleet. Caveat recorded honestly:
+I did not find an ORDER-BY-style structural parameter on an authorized target, so I have proven the
+oracle sound and the transport sound but have NOT observed an end-to-end true positive. That is a
+gap in coverage, not evidence of a defect -- see section "RESIDUAL UNPROVEN" at the end.
