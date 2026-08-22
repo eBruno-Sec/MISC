@@ -474,3 +474,29 @@ Mutant 4 leaves the `urls` tests green because the fix closes that key **twice**
 `_TARGET_LIST_KEYS` loop in the guard AND the `addressable_target` filter at the `js_urls` build
 site. Both halves are independently load-bearing, which is the property I wanted and did not assume.
 
+---
+
+## 11. SCOPE OF THE (B) FIX — the other emitter, checked rather than assumed
+
+`planner.fresh()` is not the only producer of executable steps. `session_kill_target`'s docstring
+names the bypass: "steps the graph produces (`_graph_action_steps`) never pass through `fresh()`".
+So a fix that only hardened `fresh()` would be an island. Checked:
+
+* `agent.py:3849` — every graph-directed step goes through `_reject_hostless_step` before
+  `_run_tool`, so the executor ingress does cover that producer.
+* `_graph_action_step` builds its target as `"%s://%s" % (p.scheme, p.netloc)`. An empty netloc
+  yields `https://`, which contains `"://"` and has no netloc, so the ingress catches it.
+* `_graph_action_step` emits `host`/`port`/`base_url` — **it never emits a `urls` list.**
+
+Therefore the `urls` key, the one both guards skipped, has exactly ONE producer: `planner`'s
+`run_js_review` / `run_saml` steps. The (B) fix closes it there twice (build-site filter + derived
+guard loop), so the ingress's `urls` gap is now a backstop hole with **no live producer feeding it**
+rather than an open path. It should still be closed — `planner.addressable_target` was made public
+for exactly that reuse — but it is not currently leaking.
+
+**HONEST LIMIT.** I have not proved the *negative* over the whole product — that no module anywhere
+can construct an empty-netloc URL. What is proved: the two producers that feed the executor were
+driven with host-less input and, after the fix, emit none; and after (A), any that ever survive stop
+being silent. Gate clause 3 is met for the step-building path, which is where all 1495 corpus
+dispatches came from.
+
