@@ -52,6 +52,91 @@ _ACTIVE_TOOL_DISPATCH = contextvars.ContextVar("apolaki_active_tool_dispatch", d
 # ledger, the same DEGRADED line and the same durable tool_error row as every other engine.
 _ACTIVE_REGISTRY = contextvars.ContextVar("apolaki_active_registry", default=None)
 
+# Q-093.  The transport outcome of the dispatch currently executing in this asyncio context.
+#
+# THE DEFECT.  `_http` is HONEST -- on a transport failure it returns
+# `{"error": str(e), "status": 0, "headers": {}, "body": "", "length": 0, "final_url": url}`.
+# **No caller reads `status` or `error`.**  All 21 pure-Python engines do `r.get("body", "") or ""`,
+# so an empty body from a connection that never opened is the SAME VALUE as an empty body from a
+# clean page.  I-2b on the return edge, exactly as in `CmdResult` (Q-092), `FindingWriteId` (Q-089)
+# and `FindingUpdateResult` (Q-090), and MEASURED at 3241 of 27222 corpus dispatches (11.9%) fired
+# at a target that could not answer -- every one filed as a completed scan.
+#
+# WHY THE SWALLOW LEDGER CANNOT REACH IT.  `_swallow` catches engines that let a request RAISE.
+# `_http` catches the transport error itself and hands back a dict, so **the failure arrives as
+# DATA, not as an exception.**  There is nothing for a ledger to catch.  Same invariant, other half.
+#
+# WHY A CONTEXTVAR AND NOT A COUNTER ON THE REGISTRY.  A `self._http_dead` read as a delta around
+# the dispatch is the `_swallowed_total` shape, and it mis-bills one engine for another's dead
+# requests the moment two dispatches overlap -- and they do overlap; that is why
+# `_ACTIVE_TOOL_DISPATCH` above is a ContextVar for exactly the same reason.  A task created inside
+# a dispatch COPIES the context, so it keeps mutating the same tally dict and a `gather` of probes
+# still lands on its own dispatch.  Unset (an engine called directly, outside `execute`) records
+# nothing: no tally, no verdict, never a guess.
+_ACTIVE_HTTP_TALLY = contextvars.ContextVar("apolaki_http_tally", default=None)
+
+
+def _http_record(url: str, resp: dict) -> None:
+    """Book one `_http` outcome against the dispatch in flight.  Q-093.
+
+    UNCONDITIONAL, and that is the point.  The first `_cmd` fix (Q-092) reported the exit status
+    only when the exit was non-zero AND stdout was empty; sqlmap exits 2 with an ASCII banner on
+    stdout, so the rule never fired and four guards caught it.  **Non-empty output is not the same
+    as a produced result.**  So this records EVERY outcome, live and dead alike, and leaves the
+    verdict to one shared predicate -- because a rule that decides what to record has already
+    thrown away the evidence needed to question it.
+
+    A transport failure is `status == 0`; httpx status codes start at 100, so there is no third
+    state to get wrong here.
+    """
+    tally = _ACTIVE_HTTP_TALLY.get()
+    if tally is None:
+        return                       # no dispatch in flight: record nothing, never invent one
+    if resp.get("status"):
+        tally["live"] += 1
+    else:
+        tally["dead"] += 1
+        tally["last"] = {"url": url, "error": resp.get("error")}
+
+
+def _http_failure(tally, produced=None) -> str:
+    """Why this dispatch reached NOTHING, or "" if it reached something.  Q-093.
+
+    ONE predicate, the sibling of `_cmd_failure`, so no engine can be "the one that forgot to
+    check".  Returns a reason string rather than a bool for the same reason `_cmd_failure` does:
+    the caller has to put it somewhere a human reads, which is what makes it a verdict instead of
+    a silent branch.
+
+    THE RULE IS `dead AND NOT live`, and the narrowness is deliberate:
+
+      dead=0                 nothing failed                       -> ran
+      live>0                 something completed, so something WAS scanned; a partially failed
+                             dispatch is DEGRADED, not dead, and the existing `DEGRADED:` line
+                             already reports it                   -> ran
+      dead=0, live=0         the engine sent nothing at all (no params to test, an early return,
+                             a non-HTTP engine).  "No evidence" is not "evidence of failure" --
+                             the opposite reading would redden every engine in the registry
+                                                                  -> ran
+      dead>0, live=0         it made requests and completed NONE of them.  It scanned nothing.
+                                                                  -> NOT RUN
+
+    `produced` is the caller's own answer to "did I get anything out of this run anyway?", the same
+    role `parsed` plays in `_cmd_failure`, and it is LOAD-BEARING rather than cosmetic: `agent.py`
+    guards auto-store with `if not result.error`, so stamping an error onto a dispatch that DID
+    produce findings would delete them from the mission.  A finding produced while every `_http`
+    request died came off another transport (the browser engine, `_cmd`, a private httpx client),
+    which means the dispatch is degraded, not dead.  Defaulting it to None means the safe
+    direction -- report the failure -- is the one you get by not thinking about it.
+    """
+    if not tally:
+        return ""
+    dead, live = tally.get("dead", 0), tally.get("live", 0)
+    if not dead or live or produced:
+        return ""
+    last = tally.get("last") or {}
+    return "NO REQUEST COMPLETED: %d request(s) attempted, 0 completed; last=%s -> %s" % (
+        dead, last.get("url") or "?", last.get("error") or "unknown transport failure")
+
 
 def _swallow(exc: BaseException, where: str, target: str = "") -> bool:
     """Module-level face of `ToolRegistry._swallow`, for helpers that have no `self`.
@@ -1655,6 +1740,11 @@ class ToolRegistry:
         # I-5: same span, same reset, so a module-level helper's failure is attributed to the
         # dispatch that actually caused it and never leaks into the next one.
         registry_token = _ACTIVE_REGISTRY.set(self)
+        # Q-093. A FRESH tally per dispatch, in the context rather than on the registry, so
+        # overlapping dispatches cannot bill each other's dead requests. Same reasoning as the two
+        # ContextVars above, and `tests/test_http_transport_outcome.py` pins it in both directions.
+        http_tally = {"dead": 0, "live": 0, "last": None}
+        tally_token = _ACTIVE_HTTP_TALLY.set(http_tally)
         # Q-043. The scope brackets the SAME span as the ledger rows, so the cooldown a dispatch
         # actually paid for is the cooldown its row reports. A process-wide counter read either
         # side of this would bill one engine for a concurrent engine's wait.
@@ -1664,6 +1754,22 @@ class ToolRegistry:
         finally:
             _ACTIVE_TOOL_DISPATCH.reset(active_token)
             _ACTIVE_REGISTRY.reset(registry_token)
+            _ACTIVE_HTTP_TALLY.reset(tally_token)
+        # Q-093. A dispatch that made requests and completed NONE of them scanned nothing, and
+        # reporting `success=True, "0 finding(s)", error=None` there is the false-clean this
+        # ticket exists to kill. Placed AFTER `_dispatch_engine` and BEFORE `_ledger_outcome`, so
+        # the durable ledger row records the failure too rather than a clean summary.
+        #
+        # An engine that already refused (SCOPE BLOCK, PERMISSION BLOCK) keeps its own error: it
+        # is a more specific and more actionable answer than "the requests failed", and
+        # overwriting it would trade a precise cause for a vague one.
+        if res is not None and not res.error:
+            _real = sum(1 for f in (res.findings or [])
+                        if not (isinstance(f, dict) and f.get("vulnerable") is False))
+            reason = _http_failure(http_tally, produced=_real)
+            if reason:
+                res.success = False
+                res.error = reason
         swallowed_count = getattr(self, "_swallowed_total", 0) - swallowed_before
         if swallowed_count and res is not None:
             latest = self._latest_swallowed or {}
@@ -3995,8 +4101,15 @@ class ToolRegistry:
                 except Exception:
                     pass
         except Exception as e:
-            return {"error": str(e), "status": 0, "headers": {}, "body": "", "length": 0, "final_url": url}
+            # Q-093. The ONE place a transport failure is known. `_http` always returned it
+            # honestly and no caller ever read it, so it is booked here against the dispatch in
+            # flight instead of being left to 21 engines to remember.
+            dead = {"error": str(e), "status": 0, "headers": {}, "body": "", "length": 0,
+                    "final_url": url}
+            _http_record(url, dead)
+            return dead
 
+        _http_record(url, resp)                       # Q-093: the live half, booked unconditionally
         if capture and self.mission_id:
             db.add_exchange(self.mission_id, {
                 "url": url, "method": method.upper(), "request_headers": req_headers,

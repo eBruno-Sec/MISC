@@ -127,16 +127,20 @@ ALL_DEAD = lambda _n: False
 ALL_LIVE = lambda _n: True
 EVERY_OTHER = lambda n: n % 2 == 0
 
-# Q-093, OPEN. The defect is filed and MEASURED; the fix is not in this commit. `strict=True` on
-# purpose, following `tests/test_outcome_fidelity.py`'s `_KNOWN_OPEN`: the moment the chokepoint
-# starts carrying the transport outcome, these XPASS and pytest turns them RED, so the marker
-# cannot outlive the defect it describes. A landed fix MUST delete this line.
+# THE NEGATIVE CONTROL FOR THIS FILE ITSELF, recorded so a later reader does not have to take it on
+# faith. `pytest tests/test_http_transport_outcome.py -q` against HEAD 2dd1f7a, the commit BEFORE
+# the chokepoint carried the outcome:
 #
-# MEASURED against HEAD 2dd1f7a, `pytest tests/test_http_transport_outcome.py -q`:
-#   FFF.....F   -- 4 failed, 5 passed
-# the 4 are exactly the ones marked below; the 5 that pass are the negative controls, and they
-# passing BEFORE the fix is what proves this file can tell a dead connection from a clean page.
-_OPEN = pytest.mark.xfail(strict=True, reason="Q-093: _http drops the transport outcome")
+#     FFF.....F                                                                [100%]
+#     AssertionError: the dead dispatch stopped being reported: '0 WAF-bypass finding(s)'
+#      + where True = ToolResult(tool='waf_bypass', ..., success=True,
+#                                output='0 WAF-bypass finding(s)', findings=[], error=None).success
+#
+# 4 failed, 5 passed. The 4 are the dead-transport assertions; the 5 that ALREADY PASSED are the
+# negative controls, and their passing before the fix is what proves this file can tell a dead
+# connection from a clean page rather than merely disliking empty results. They were committed
+# first as `xfail(strict=True)` (`1d85fe3`) and the marker was deleted by the fix that made them
+# XPASS -- which, being strict, is how it was forced to be deleted.
 
 
 # ── the defect ────────────────────────────────────────────────────────────────
@@ -150,7 +154,6 @@ SILENT_ENGINES = [
 ]
 
 
-@_OPEN
 @pytest.mark.parametrize("tool,_label", SILENT_ENGINES)
 def test_a_dispatch_whose_every_request_failed_is_not_a_clean_scan(tool, _label, monkeypatch):
     """MUST FAIL before the fix. Today: success=True, error=None, 'N finding(s)'."""
@@ -219,7 +222,6 @@ def test_a_dispatch_that_made_no_requests_at_all_is_untouched(monkeypatch):
         % (res.output, res.error))
 
 
-@_OPEN
 def test_a_dead_dispatch_does_not_poison_the_next_clean_one(monkeypatch):
     """MUST PASS before AND after -- the cross-attribution negative control.
 
