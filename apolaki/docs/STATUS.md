@@ -32,42 +32,49 @@ reproducible release blockers.
 | I-9 | caps preserve highest-value ordering | ⏳ CLAIMED closed, NOT yet verified | never measured by us; guard `test_cap_ordering_invariant` 8 tests |
 | I-11 | reachable / framework-invoked / retained-with-reason | ❌ **44 vs ceiling 37** | pin held; three lanes declined to force it |
 
-## SHIP GATE IS RED AT HEAD `9962963`: 8 failed, 3546 passed, 11 skipped, 12 xfailed
+## SHIP GATE GREEN: 3562 passed, 11 skipped, 12 xfailed, 0 failed
 
-Both groups are diagnosed, both belong to the live I-5 lane, and **neither is a mystery**. Recorded
-here rather than quietly re-run, because a release record that only shows green is worth nothing.
+Verified INDEPENDENTLY by the Coordinator on a clean `git archive HEAD` snapshot attached to
+`apolaki_default`, matching the lane's own figure exactly. Lane-open baseline was 3519 passed:
+**+43 passing, none lost, and all 8 failures HEAD was carrying are gone.**
 
-**Group 1 (4) - `test_external_tool_liveness.py`. FAILING BY DESIGN.** This is Q-092's GATE clause: the
-test that must fail before the fix. It goes green when `_cmd` returns the exit status on its return
-edge. The clearest one prints `assert (True, False) != (True, False)`. Three sibling controls PASS,
-which rules out a broken fixture, a wrong code path, and a fix that would just fail everything.
+Both groups were closed **by fixing production**. Neither guard file was edited, no baseline was
+raised, no exemption was added. That is the distinction that matters: the guards did not become
+satisfiable, the code became correct.
 
-**Group 2 (4) - `test_deadcode_gate.py`. A REAL ISLAND.**
+**`_cmd` now returns `CmdResult`, a 2-length tuple subclass** - every `out, err = await self._cmd(...)`
+unpack still works, `result == (out, err)` still holds, and the exit status rides on
+`result.exit_code`. Same family as `FindingWriteId` (Q-089) and `FindingUpdateResult` (Q-090): **the
+carrier is the thing callers already read.** A third tuple element was rejected because 6 of the 18
+sites ignore `err` today and would ignore a third slot as easily. Twelve scattered
+`err.startswith("__MISSING__")` checks collapsed into one shared `_cmd_failure()` predicate, defaulted
+so the safe direction is what you get by not thinking about it.
 
-```
-assert ['tools._swallow'] == []
-AssertionError: qualified dead-code count rose to 40 (baseline 37)
-```
+### The first fix was wrong, and a DIFFERENT lane's guard caught it
 
-Two symbols share the name. `ToolRegistry._swallow` (`tools.py:4095`) has **124 callers** via
-`self._swallow(...)`. The new module-level `tools._swallow` (`tools.py:56`), which uses an
-`_ACTIVE_REGISTRY` contextvar so module-level helpers can record without a registry instance, has
-**ZERO**. The wiring intended at `tools.py:3562` has not landed.
+The initial attempt carried the status only in an `__EXIT__` sentinel fired when the exit was non-zero
+**and** stdout was empty. The measured sqlmap case exits 2 with an **ASCII banner on stdout**, so the
+rule never fired. **Non-empty stdout is not the same as a produced result.**
 
-**A recorder added to FIX silent failures, itself added without a caller.** Registration is not
-invocation, caught by the gate that exists for exactly that. The gate is working; do not work around
-it, and do not raise the baseline from 37.
+This is the week's thesis landing in practice: a guard written by one lane caught a defect in a fix
+written by another, one turn before it would have shipped looking correct. It is the strongest
+available argument for the rule that **a guard does not count until someone who did not write it has
+made it fail** - and here, for its converse: a fix does not count until a guard someone else wrote has
+had a chance at it.
 
-**Attribution was MEASURED, not assumed.** The audit lane suspected its own new test file - a plausible
-culprit, since an AST-walking dead-code gate could flag new module-level helpers - and ran the negative
-control: two `git archive` snapshots identical but for that file's presence, **4 failed either way**.
-Its file is innocent. That is the discipline this document exists to record.
+### Ceilings: none raised, and one stopped being a budget
 
-**DECISION PENDING (Coordinator).** Four hard failures on `main` block every other lane's ship gate.
-This project's established convention for "the fix is not in yet" is `xfail(strict=True)`, retired in
-the commit that fixes it, exactly as `_KNOWN_OPEN` did for Q-089/Q-090. Holding as hard failures while
-the I-5 lane is actively fixing `_cmd`; **if that lane does not land the fix this cycle, convert Group
-1 to strict xfail** so a real regression elsewhere stays visible instead of being lost in a red suite.
+Verified against `66a7012`. `_swallowed optional` **388 -> 387** (lowered). Literal-return
+`load-bearing` **`<= 15` -> `== 0`** - tightened from a budget into an equality, so a single new
+load-bearing swallow is now red rather than absorbed. The other three were already touching their
+measured count, so every ceiling now sits on its real value with **zero slack anywhere**.
+`_SWALLOW_RECORDERS` is a FLOOR and was raised 80 -> 95 owners, which tightens.
+
+### Owed, stated rather than rounded up
+
+Four `_run_hash_crack` call sites consume the swallow's DEGRADED visibility but do not yet report
+`ran=False`. `_run_metadata` is correctly left alone because it has a genuine native fallback.
+**Q-093 (`_http`) remains open and is the larger half of this defect class.**
 
 ## RELEASE BLOCKER, CRITICAL: engines that never ran, reported as clean scans
 
