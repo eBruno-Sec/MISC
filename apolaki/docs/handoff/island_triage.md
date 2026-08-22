@@ -1793,7 +1793,14 @@ Grouped by the file that must be edited WITH any deletion:
 | `test_service_router.py` | 2 | `service_router.known_services`, `service_router.plan` |
 | `test_archive_intel.py` | 2 | `archive_intel.mark_validated`, `archive_intel.needs_validation` |
 | `test_intel_registry.py` | 2 | `intel_connectors.reset`, `intel_registry.reset` (each also has a second file) |
-| one file each | 16 | `action_envelope.mark`, `api_protocols.inventory`, `bench_all.bench`, `candidate_pipeline.plan_targets`, `cloud_iam.collect_live`, `ics_dnp3_s7.is_read_only`, `mission_export.summary`, `ot_context.declare_protocol_safety`, `report_integrity.cvss_version_of`, `saml_tool.finding`, `stealth.describe`, `technique_store.dedup_key`, `techniques.techniques_for_lab`, `tool_provenance.argv_hash`, `waf_bypass_tool.pad`, `report.control_ran` |
+| no shared file | 16 | `action_envelope.mark`, `api_protocols.inventory`, `bench_all.bench`, `candidate_pipeline.plan_targets`, `cloud_iam.collect_live`, `ics_dnp3_s7.is_read_only`\*, `mission_export.summary`, `ot_context.declare_protocol_safety`, `report_integrity.cvss_version_of`, `saml_tool.finding`, `stealth.describe`, `technique_store.dedup_key`, `techniques.techniques_for_lab`, `tool_provenance.argv_hash`, `waf_bypass_tool.pad`, `report.control_ran`\* |
+
+The grouping key is the **primary** test file, so the row counts sum to 37 but a row label is not a
+deletion cost. Entries marked `*` cost MORE than the row suggests, and the two rows above them hide the
+same thing: `report.control_ran` costs **three** files, `ics_dnp3_s7.is_read_only` two. Read the cost
+off `TESTS_ONLY` in `deadcode_gate.py`, which is checked against the tree, never off this table, which
+is not. That distinction is the whole reason the record was moved out of markdown in the first place,
+and it applies to this markdown too.
 
 **Seven cost more than one file** and the record is the only place that says so:
 `report.control_ran` costs **three** proof-integrity suites
@@ -1877,6 +1884,21 @@ write-as-you-go rule stated as strongly as it can be stated.
 reclaim the commit would rewrite shared history under them. The commit stands, this section is the
 pointer, and the correction is procedural.
 
+**WHAT WAS LOST, EXACTLY, and its status - RECOVERED, nothing missing.** Answering concretely, because
+a vague answer to "did we lose anything" is worse than no answer.
+
+| | |
+|---|---|
+| stolen into | `65bdb27` "Apolaki Q-092 CRITICAL: _cmd discards the exit code, and nuclei has never run" |
+| files taken | `agent/deadcode_gate.py`, `agent/exposure_tool.py`, `agent/tests/test_deadcode_gate.py`, `docs/handoff/island_triage.md` |
+| content status | **IN HEAD, INTACT.** `git diff HEAD` over the three code files is empty; `def paths` occurs **0** times in `exposure_tool.py` at HEAD; both new records present; `REMOVED_NOT_WIRED["exposure_tool.paths"]` at `deadcode_gate.py:732` |
+| what was actually lost | **only the commit message.** No code, no test, no record, no evidence |
+| recovered by | `8f4ff57`, which carries the rationale, plus this document |
+| how detected | `git commit -F` printed *"no changes added to commit"* while `git log --oneline -1` showed a commit this lane did not author, and `git show --stat HEAD` listed exactly this lane's four files beside a `QUEUE.md` this lane never touched |
+
+**Nothing needs restoring.** The loss was one commit message, and the only reason that was survivable is
+that the evidence had already been written into this file as the work happened rather than at the end.
+
 **The rule, which generalises past git.** `git add` and `git commit` are ONE operation, never two, and
 nothing may run between them. The index is process-global shared state that looks private, and the
 existing rule ("never `git add -A`", "stage named files only") guards the wrong half: it stops YOU
@@ -1887,3 +1909,171 @@ file, then stage and commit in a single invocation. A staging window is a race w
 (`@'...'@`) in the Bash tool, where it is a parse error. That is the mechanism that opened the window.
 Multi-line commit messages on this machine go through a file and `git commit -F`, not through shell
 quoting - the two shells' quoting rules differ, and getting it wrong costs more than a retry.
+
+### 15.9 THE DOCUMENTED THROWAWAY-CONTAINER COMMAND CANNOT PRODUCE A GREEN SUITE
+
+The house-rule command for running the suite in your own container is
+
+```
+docker run --rm -v "<ABS-WINDOWS-PATH>/agent:/app" -w /app apolaki-agent \
+    python -m pytest tests/ -p no:cacheprovider -rfE
+```
+
+**It has no `--network`.** Every lab hostname (`juice-shop`, `vampi`, ...) lives on the compose network
+`apolaki_default`, so any test that reaches one fails DNS resolution. MEASURED, at HEAD:
+
+```
+2 failed, 3526 passed, 19 skipped, 12 xfailed in 927.21s
+FAILED tests/test_truthful_metadata.py::test_the_engine_now_reports_the_leak_end_to_end
+FAILED tests/test_truthful_metadata.py::test_the_engine_reports_ONE_canonical_coordinate_whichever_reader_ran
+```
+
+**And the failure does not look like a network failure.** What pytest prints first is
+
+```
+assert 0 == 1
+  +  where 0 = len([])
+```
+
+with `fetch failed: [Errno -2] Name or service not known` buried in the `ToolResult` repr on a later
+line. That reads as a broken oracle, not as an unreachable host. A lane that had just changed an
+engine would have a plausible story for it, and it is the exact shape that gets a good change reverted.
+
+**NEGATIVE CONTROL, which is the only thing that settles attribution.** The same two tests, run in the
+same networkless container against a `git archive` of **66a7012** - the commit independently verified
+green at 3519 passed / 0 failed, containing NONE of this lane's work:
+
+```
+FAILED tests/test_truthful_metadata.py::test_the_engine_now_reports_the_leak_end_to_end
+FAILED tests/test_truthful_metadata.py::test_the_engine_reports_ONE_canonical_coordinate_whichever_reader_ran
+```
+
+**Identical.** The failures are the apparatus, not the tree, and not this lane's change - which touched
+only `exposure_tool.paths`, comments, and records, none of which any metadata engine can reach.
+
+**POSITIVE CONTROL, the other half.** The same file, at the CURRENT HEAD with this lane's commits, in a
+container attached to the network:
+
+```
+docker run --rm --network apolaki_default -v "<...>/agent:/app" -w /app apolaki-agent \
+    python -m pytest tests/test_truthful_metadata.py -q
+    ->  56 passed
+```
+
+So: fails on a known-good tree without the flag, passes on the changed tree with it. Attribution is
+settled in both directions rather than argued.
+
+**THE FIX, for whoever owns the house rules:** add `--network apolaki_default` to the documented
+command. Without it "SKIPPED is never a pass" has a sibling nobody wrote down - **a network-shaped
+FAILED is not a regression** - and the first rule cannot be enforced honestly while the documented
+command manufactures instances of the second.
+
+**THE SKIP COUNT IS THE HALF NOBODY WOULD HAVE NOTICED.** Same tree, same commit, the only difference
+being the flag:
+
+```
+no  --network apolaki_default :  2 failed, 3526 passed, 19 skipped, 12 xfailed   (927s)
+with --network apolaki_default:  0 failed, 3536 passed, 11 skipped, 12 xfailed   (807s)
+```
+
+**Ten tests silently became skips, and eight of them never announced themselves as a problem at all.**
+The two FAILEDs are loud and would eventually be chased. The skips are not: they take the suite from
+3536 executed assertions to 3526 and print a number nobody diffs. A lane running the documented
+command believes it verified the tree and has actually verified ten tests less than it thinks, which is
+precisely the shape of "SKIPPED is never a pass" arriving through the environment rather than through a
+marker. **The networkless run does not just fail more, it TESTS LESS, and only the failing half is
+visible.**
+
+**Which tests need the network.** The two named above are the ones that FAIL. The ten that skip do so
+through reachability guards, so they name no defect and appear only as a count. The reliable rule is
+therefore not a list of test names - it is: any suite run that is not attached to `apolaki_default` is
+not a verification of this repository, whatever number it prints.
+
+### 15.10 A MECHANICAL DETECTOR for the shared-index race, and the scan that clears the other lanes
+
+Section 15.8 records the race. The Coordinator's question is the right one - if it took one commit, it
+could have taken others silently - so here is a detector rather than a warning.
+
+**THE SIGNATURE.** A stolen commit is one whose file list spans **two lanes' write sets**. Lane write
+sets are declared, disjoint, and knowable, so this is decidable rather than heuristic. No honest commit
+should ever touch two of them.
+
+```sh
+# Every commit since the verified-green baseline, tagged by which lanes' files it contains.
+for c in $(git log --format=%h 66a7012..HEAD); do
+  files=$(git show --name-only --format="" $c)
+  lanes=""
+  echo "$files" | grep -q "deadcode_gate.py\|exposure_tool.py\|test_deadcode_gate.py\|island_triage.md" && lanes="$lanes I11"
+  echo "$files" | grep -q "test_silent_failure\|silent_failure_fix.md"                                  && lanes="$lanes SILENT"
+  echo "$files" | grep -q "test_external_tool_liveness\|tool_liveness_audit.md"                          && lanes="$lanes LIVENESS"
+  echo "$files" | grep -q "docs/QUEUE.md\|docs/STATUS.md"                                                && lanes="$lanes COORD"
+  [ "$(echo $lanes | wc -w)" -ge 2 ] && echo "MIXED $c lanes:$lanes  $(git log -1 --format=%s $c)"
+done
+```
+
+**MEASURED, over all 20 commits since `66a7012`:**
+
+```
+MIXED  65bdb27 lanes: I11 COORD   Apolaki Q-092 CRITICAL: _cmd discards the exit code, and nuc...
+commits scanned: 20   MIXED-LANE commits: 1
+```
+
+**Exactly one, and it is the one already known.** The other 19 are single-lane. No other lane lost work
+to this race - that is a measured clearance, not an assumption, and it is the answer to "can you rule
+out that something else went the same way".
+
+**THE PROSPECTIVE CHECK, which is cheaper than the retrospective one.** Detection after the fact only
+tells you who to apologise to. The check that prevents it costs one line: record the staged set, then
+assert the commit contains exactly that set.
+
+```sh
+want=$(git diff --cached --name-only | sort)
+git commit -F msg.txt
+got=$(git show --name-only --format="" HEAD | grep -v '^$' | sort)
+[ "$want" = "$got" ] || echo "RACE: committed set != staged set"
+```
+
+If they differ, either your files went into someone else's commit or theirs came into yours, and you
+know immediately rather than three sections later. Combined with the section 15.8 rule - `git add` and
+`git commit` are ONE invocation with nothing between them - the window closes and the assertion catches
+the case where it did not.
+
+**Worth stating plainly for the Coordinator's purposes:** the race is not caused by `git add -A`, which
+the house rules already forbid and which this lane did not use. It is caused by the index being
+**process-global** while looking private. Staging named files perfectly still loses the commit if
+anything runs between the stage and the commit. The existing rule guards against taking other people's
+files; it does not guard against other people taking yours.
+
+### 15.11 FINAL STATE of run 8, verified
+
+Full suite, `git archive` snapshot of HEAD, throwaway container, **attached to `apolaki_default`**:
+
+```
+3536 passed, 11 skipped, 12 xfailed, 0 failed in 807.66s
+EXIT=0
+```
+
+Against the `66a7012` baseline of 3519 passed / 11 skipped / 12 xfailed / 0 failed: **+17 passed** (other
+lanes' new tests), skips and xfails **unchanged**, failures still **zero**.
+
+Gate state at HEAD:
+
+```
+qualified count=39  baseline=37  ok=False  unaccounted=[]
+QUALIFIED_BASELINE constant = 37          (NOT raised)
+flagged == dispositioned : True           (37 tests-only + 2 retained == 39)
+REMOVED_NOT_WIRED entries: 5              exposure_tool.paths recorded: True
+census: {'optional': 387, 'control-plane': 77}    deadcode_gate.py handlers: 9
+```
+
+**The control-plane census is 77, not 78, and deadcode_gate.py contributes the same 9 handlers it
+contributed at `66a7012`.** The brief this lane resumed under still carried run 7's belief that its
+uncommitted code held a new silent swallow taking the count to 78, and that the swallow needed removing.
+It had already been removed before that lane died - see section 15.2 - so there was nothing to remove and
+nothing to accommodate. `assert counts["control-plane"] <= 77` is present verbatim in
+`tests/test_silent_failure_invariant.py` and this lane has never opened that file. No ceiling raised,
+no exemption broadened, no test weakened.
+
+**I-11 stands at 39 against a ceiling of 37, `ok=False`, and that is the honest number.** The two-entry
+gap is write-set-limited and the patch to close it is written out in section 15.5. The 37 tests-only are
+not deletions.
