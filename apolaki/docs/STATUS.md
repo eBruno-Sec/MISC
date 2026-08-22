@@ -32,7 +32,23 @@ reproducible release blockers.
 | I-9 | caps preserve highest-value ordering | ⏳ CLAIMED closed, NOT yet verified | never measured by us; guard `test_cap_ordering_invariant` 8 tests |
 | I-11 | reachable / framework-invoked / retained-with-reason | ❌ **44 vs ceiling 37** | pin held; three lanes declined to force it |
 
-## SHIP GATE GREEN: 3562 passed, 11 skipped, 12 xfailed, 0 failed
+## SHIP GATE GREEN: 3581 passed, 11 skipped, 12 xfailed, 0 failed - Q-093 CLOSED
+
+Independently verified by the Coordinator on a clean `git archive HEAD` snapshot on `apolaki_default`.
+Q-093 closed both root causes with 0 engines edited, each gate filed RED before its fix.
+
+**The near-miss worth remembering: the fix nearly shipped DATA LOSS.** `agent.py:874` guards auto-store
+with `if not result.error`, so stamping a transport error on a dispatch that DID produce findings would
+have **deleted them from the mission**. The `produced` parameter exists solely to prevent that. A fix
+at a chokepoint inherits every downstream consumer of the field it starts setting.
+
+**And Q-019 had appeared to close the empty-netloc bug.** All 1495 corpus dispatches genuinely predate
+it, yet the real `next_batch` still emitted `https:///static/b.js` the same day. `planner._addressable`
+read 2 of the module's 4 target keys, **and Q-019's guard collects the same 2** - its coverage exactly
+congruent with the code's blind spot. **A guard that restates the code's assumptions inherits the
+code's blind spots.** That is the fourth instance of this pattern this week and the sharpest.
+
+### Previously (Q-092 cycle): 3562 passed
 
 Verified INDEPENDENTLY by the Coordinator on a clean `git archive HEAD` snapshot attached to
 `apolaki_default`, matching the lane's own figure exactly. Lane-open baseline was 3519 passed:

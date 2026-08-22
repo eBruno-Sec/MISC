@@ -1398,7 +1398,58 @@ current HEAD with the lane's commits passes 56/56 networked.
 **GATE:** assert the skip count does not exceed the networked figure. The negative control is a run
 without the network, which must go red rather than quietly reporting a smaller suite as green.
 
-### Q-093 - `_http` drops the transport outcome the same way `_cmd` drops the exit code, and 3241 dispatches never reached a target - **READY** - **CRITICAL**
+### Q-093 - `_http` drops the transport outcome the same way `_cmd` drops the exit code, and 3241 dispatches never reached a target - **CLOSED** `1d85fe3` `c08db26` `8df4535` `86c8dfb` - **CRITICAL**
+
+**CLOSED. Both root causes fixed, each gate filed RED first, and 0 engines edited.** Verified
+INDEPENDENTLY by the Coordinator on a clean `git archive HEAD` snapshot attached to `apolaki_default`:
+**3581 passed / 11 skipped / 12 xfailed / 0 failed**, against a 3562 baseline, so `+19` is exactly the
+new tests and nothing was lost.
+
+**(A) The transport outcome, fixed at the chokepoint.** A `ContextVar` tally set per dispatch in
+`execute`, `_http_record` at BOTH of `_http`'s return points, and `_http_failure(tally, produced=None)`
+as the single shared predicate (sibling of `_cmd_failure`). Three deliberate rejections:
+
+- **`ContextVar`, not the ticket's own suggested `self._http_dead` delta.** My drafted patch was wrong:
+  a counter delta mis-bills one engine for another's dead requests when dispatches overlap. That is the
+  stated reason `_ACTIVE_TOOL_DISPATCH` is already a ContextVar.
+- **Recording is unconditional; only the predicate judges.** The Q-092 mistake, a rule that never fired
+  on sqlmap's banner, deliberately not repeated.
+- **`produced` is LOAD-BEARING, and omitting it would have shipped DATA LOSS as a fix.** `agent.py:874`
+  guards auto-store with `if not result.error`. Stamping an error on a dispatch that DID produce
+  findings would have **deleted them from the mission.**
+
+Live on the lab over real sockets: `run_waf_bypass` / `run_sqli_structural` / `run_css_injection` at
+`https://juice-shop:3000` now return `success=False` NAMING `WRONG_VERSION_NUMBER`, while their
+`http://` twins are unchanged. `run_path_sqli` (the case that cost the real VAmPI SQLi) now writes a
+**different durable row type per scheme**, `tool_error` vs `tool_result` - exactly where the audit
+showed the 1687 dispatches were hiding.
+
+**(B) The empty-netloc builder was STILL LIVE, and Q-019 appeared to have closed it.** All 1495 corpus
+dispatches genuinely predate Q-019 (last `2026-08-10T16:28Z`, fix landed `2026-08-11T05:05Z`), so the
+evidence said closed. **Driving the real `next_batch` still emitted
+`run_js_review urls=['/static/app.js', 'https:///static/b.js']` the same day.**
+
+`planner._addressable` inspected `("url", "base_url")` while the module declares FOUR target keys - and
+**Q-019's own guard file collects the same two keys, so its coverage is exactly congruent with the
+code's blind spot.** A guard that restates the code's assumptions inherits the code's blind spots.
+Fixed by deriving from `_TARGET_KEYS`/`_TARGET_LIST_KEYS` instead of restating them, plus filtering at
+the `js_urls` build site so one bad bundle cannot cost nine good ones.
+
+**Adversarial verification:** four mutants, all killed, each with a DIFFERENT signature - including one
+proving the gate requires the error to NAME the cause, and one proving the bare-host exemption
+(`run_nmap_vuln`, `run_dork_gen`) stays pinned.
+
+**HELD, with reasons rather than guesses:**
+- `_run_hash_crack` NOT attempted: hashcat and john are both absent from the image, so no fix is
+  verifiable in the real execution path, **and the naive fix is wrong anyway because hashcat exits 1
+  for "exhausted"** - ran fine, cracked nothing. Only marker-derived reasons are exit-code-independent.
+- `agent._reject_hostless_step` skips the `urls` list and fires only on values containing `"://"`.
+  Checked rather than assumed: graph-directed steps do use that ingress and never emit a `urls` list,
+  so after (B) it is a backstop hole with **no live producer**.
+
+ORIGINAL TICKET FOLLOWS.
+
+### Q-093 (as filed) - **CRITICAL**
 
 **This is Q-092 in the HTTP path.** Q-092 is about 14 wrappers that shell out. `_http` is the
 transport for **all 21 pure-Python engines**, and it has the identical defect with a wider blast
