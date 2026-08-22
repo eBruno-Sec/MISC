@@ -12,10 +12,18 @@ Lane opened 2026-08-21 from HEAD `66a7012` (verified green 3519 passed / 11 skip
 | 2 | 3 module-level helpers + the executor boundary that would have made one an island | `196dfda` |
 | 3 | Q-091 dalfox: a live instance of this exact defect class, 171 invocations of evidence | `f9a8815` |
 | 4 | no-island check on all 11 recorder owners | `7871871` |
-| 5 | Q-092 `_cmd`: exit status on the RETURN edge via `CmdResult`, 18 call sites, one shared predicate | pending |
+| 5 | Q-092 `_cmd`: exit status on the RETURN edge via `CmdResult`, 18 call sites, one shared predicate | `7a7b90b` |
+| 6 | `tools._swallow` wired through a RESOLVED import - it had 3 callers, none visible to static analysis | `9f8293d` |
 
-Slice 5 also turns GREEN the 4 guards in `tests/test_external_tool_liveness.py` that
-another lane wrote to fail by design until Q-092 landed. That file was not modified.
+Between them, slices 5 and 6 clear all 8 of the failures HEAD was carrying:
+
+* the 4 in `tests/test_external_tool_liveness.py`, which another lane wrote to fail by
+  design until Q-092 landed - now 7/7 green, file unmodified;
+* the 4 in `tests/test_deadcode_gate.py`, confirmed by name:
+
+      4 passed in 12.35s
+
+Neither file was edited, no baseline was raised, and no exemption was added.
 
 ## Census: before vs after, and the ceilings (the direct answer)
 
