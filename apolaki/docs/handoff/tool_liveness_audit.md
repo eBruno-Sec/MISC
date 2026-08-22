@@ -977,3 +977,222 @@ Fixing one and calling the class closed would leave the larger half open.
 
 <!-- ================== END Q-093 TICKET TEXT ================== -->
 
+---
+
+# 15. THE CONSEQUENCE, PROVEN: a REAL vulnerability an Apolaki engine detects, missed 55 times
+
+`run_path_sqli` is the case that turns Q-093 from an integrity argument into a lost finding.
+
+**MEASURED live.** The engine, dispatched through the real path against an authorized lab:
+
+```
+run_path_sqli {"url": "http://vampi:5000/users/v1/1"}
+  -> success=True  '1 path-param SQLi finding(s)'  n=1
+     title:      SQL injection (error-based) in 'path segment 3'
+     severity:   high      cwe: CWE-89      confidence: confirmed
+     evidence:   SQLite error triggered by "1'"
+```
+
+**Verified genuine by hand, with the balanced-quote negative control** (so this is an injection, not
+a generic 500):
+
+```
+/users/v1/1               -> 404,    48 B  {"status":"fail","message":"User not found"}
+/users/v1/1'              -> 500, 44654 B  sqlalchemy.exc.OperationalError:
+                                           (sqlite3.OperationalError) unrecognized token:
+/users/v1/1''             -> 404,    48 B  {"status":"fail","message":"User not found"}
+/users/v1/1' AND '1'='1   -> 404,    48 B  {"status":"fail","message":"User not found"}
+```
+
+One quote breaks the query, two quotes restore it. That is a textbook error-based SQLi and the
+finding is correct.
+
+**And the corpus fired this engine at `https://vampi:5000/...` for 55 of its 58 runs (94.8%)** --
+the same path, the same host, the scheme that cannot open a socket. `https://vampi:5000/users/v1/1`
+was dispatched 13 times on its own.
+
+**A high-severity SQL injection that Apolaki's own engine finds correctly, on a lab in the standing
+fleet, was reported as a clean scan 55 times.** Not a hypothetical loss of fidelity: a lost
+finding, with the engine, the target and the proof all still in place.
+
+---
+
+# 16. REMAINING VERDICTS
+
+Four more engines produced live TRUE POSITIVES during this pass, which raises the count of
+demonstrably-working engines in the audit to six.
+
+## 16.1 `run_form_cmdi` -- 250 runs (568 dispatches) -- **CORRECTLY QUIET, PROVEN CAPABLE**
+
+MEASURED, authenticated DVWA:
+
+```
+run_form_cmdi {"url": "http://dvwa/vulnerabilities/exec/"}
+  -> success=True  'command injection CONFIRMED in the form body
+                    (http://dvwa/vulnerabilities/exec/)'  n=1
+     -> "OS command injection (output) in 'ip'"
+```
+
+The engine works and confirms a real OS command injection. Its corpus zero is targeting:
+**318 of 568 dispatches (56.3%) went to `https:///` -- a URL with no host** -- and the remainder to
+Juice Shop, which has no server-rendered command-executing form. Corpus summary was 250/250
+`no body command injection in the page's forms`.
+
+## 16.2 `run_upload_test` -- 248 runs (566 dispatches) -- **CORRECTLY QUIET, PROVEN CAPABLE**
+
+MEASURED, authenticated DVWA:
+
+```
+run_upload_test {"url": "http://dvwa/vulnerabilities/upload/"}
+  -> success=True  'no restriction observed on upload endpoint'  n=1
+     -> "No file-extension restriction observed on upload endpoint"
+```
+
+Raw corroboration: `/vulnerabilities/upload/` is 4194 bytes and contains `type="file"`. Corpus:
+226/248 `No file-upload form found`, 22 `Could not fetch page for form discovery` -- and **318 of
+566 dispatches (56.5%) were the empty-host `https:///` form.** Juice Shop's upload is an SPA XHR,
+not a server-rendered form, so "no form found" is honest there.
+
+## 16.3 `run_exposure` -- 62 runs -- **CORRECTLY QUIET, PROVEN CAPABLE**
+
+MEASURED, DVWA: `run_exposure {"base_url": "http://dvwa"}` -> `'15 checks, 1 exposure(s)'`, n=1,
+finding **"Exposed phpinfo()"**. The 62 corpus runs all report `15 checks, 0 exposure(s)` against
+Juice Shop / ginandjuice / VAmPI, none of which serve phpinfo. True negatives.
+
+## 16.4 `run_deserialization` -- 335 runs -- **CORRECTLY QUIET, PROVEN CAPABLE**
+
+Corpus: 335/335 `No serialized objects found in query params or cookies` -- the precondition was
+never met, not once. MEASURED that the precondition is real and the engine fires when it IS met:
+
+```
+run_deserialization {"url": ".../search?q=rO0ABXNyABFqYXZhLmxhbmcuSW50ZWdlcg"}   (java stream magic)
+  -> success=True  '1 serialized input(s), 1 signal(s), 0 confirmed'  n=1
+run_deserialization {"url": "http://dvwa/vulnerabilities/exec/"}
+  -> 'No serialized objects found in query params, cookies or form fields'  n=0
+```
+
+The engine detects a serialized blob when one is present. No target in the fleet passes serialized
+objects in params or cookies, so 335 true negatives.
+
+## 16.5 `run_path_sqli` -- 58 runs -- **BROKEN BY TRANSPORT** (section 15)
+
+Engine correct and proven; **55/58 (94.8%) unreachable by scheme.** The only entry in this audit
+where a confirmed real vulnerability was demonstrably missed. Fixed by Q-093(B), not by Q-092.
+
+## 16.6 `run_nosqli` -- 342 runs -- **CORRECTLY QUIET**
+
+Corpus reached the oracle every time (`tested N param(s), 0 confirmed`, N = 1..4) -- oracle silence,
+not input starvation. Oracle proven in section 8. MEASURED live on Juice Shop and VAmPI
+(`/books/v1/1?id=1`): `tested 1 param(s), 0 confirmed`. **No MongoDB-backed application exists in
+the authorized fleet**, so the required positive cannot occur. True negatives.
+
+## 16.7 `run_ssrf` -- 23 runs -- **CORRECTLY QUIET, with a targeting caveat**
+
+MEASURED live: `run_ssrf` on `http://juice-shop:3000/rest/products/search?q=apple`
+-> `tested 1 param(s), 0 SSRF signal(s), 0 confirmed`. The parameter is a product search string; it
+does not fetch a URL, so there is nothing to make server-side.
+
+Caveat worth recording: **all 23 corpus dispatches went to ONE mangled URL**,
+`http://juice-shop:3000//api.ipinfodb.com/v3/ip-country/?callback&format&key` (a JS-harvested
+absolute URL pasted onto the lab origin), and **23/23 had every parameter valueless.** The engine
+has never been pointed at a genuine URL-fetching parameter, so its zero is uninformative rather
+than wrong.
+
+## 16.8 `run_oauth` -- 422 runs (645 dispatches) -- **CORRECTLY QUIET / UNTESTABLE for a positive**
+
+`oauth_tool.parse_authorize` is a pure string check made BEFORE any request, so the 44
+`Not an OAuth authorization URL` runs are correct refusals for URLs like
+`https://ginandjuice.shop/oauth/authorize` carrying no `client_id`. Oracle proven:
+
+```
+parse_authorize("...?client_id=abc&redirect_uri=http://x/cb&response_type=code&state=s1")
+   -> is_oauth True, state 's1'
+parse_authorize(".../rest/products/search?q=apple")   -> is_oauth False
+```
+
+MEASURED live with a well-formed authorize URL on Juice Shop -> `0 OAuth signal(s), 0 confirmed`:
+the endpoint does not exist, every redirect variant 404s, and `analyze_redirect_response` correctly
+declines. **UNTESTABLE for a true positive: there is no OAuth authorization server in the
+authorized fleet.** 37 dispatches also used the empty-host `https:///` form.
+
+## 16.9 `check_takeover` -- 142 runs -- **CORRECTLY QUIET / UNTESTABLE for a positive**
+
+**All 142 dispatches passed input `{}`** -- no subdomain list is ever handed in; the engine reads
+mission recon state. 73 report `No subdomains to check (run recon first)`, which is an
+ORCHESTRATION ORDERING fact: half its invocations happened before recon produced anything. The
+other 68 had subdomains and found no takeover candidate. MEASURED live: `check_takeover {}` ->
+`'No subdomains to check (run recon first)'`. A takeover needs a dangling CNAME to a claimable
+provider; **no lab host has one**, so a positive is not constructible on an authorized target.
+
+## 16.10 `run_session_token` -- 82 runs -- **CORRECTLY QUIET**
+
+MEASURED live on DVWA `/login.php` and VAmPI `/users/v1/login`: `0 weak-session-token finding(s)`.
+DVWA issues a PHP `PHPSESSID` and VAmPI a JWT -- neither is sequential nor decodes to user/role
+data, so the oracle correctly declines. Note **71/82 (86.6%) of corpus dispatches were unreachable
+by scheme**, so only 11 of the 82 zeros are informative.
+
+## 16.11 `run_username_enum` -- 15 runs -- **PRECONDITION NEVER MET**
+
+Corpus: 13 `no server-rendered login form here`, 2 `0 username-enumeration finding(s)`.
+MEASURED live a THIRD precondition message the corpus never produced:
+
+```
+run_username_enum {"url": "http://dvwa/login.php"}       -> 'no known account to differential against'
+run_username_enum {"url": "http://vampi:5000/users/v1/login"} -> 'no known account to differential against'
+```
+
+The engine needs a KNOWN-GOOD username to differentiate against, and nothing supplies one. Combined
+with **12/15 (80%) unreachable by scheme**, this engine has never once run its comparison. Not
+broken code -- an unmet precondition plus a transport defect. Its true capability is UNPROVEN.
+
+## 16.12 `run_cache_poison` -- 59 runs -- **CORRECTLY QUIET**
+
+MEASURED live on DVWA `/` -> `no unkeyed-header reflection observed`. Neither lab reflects an
+unkeyed request header into a cacheable response; there is no cache in front of either. True
+negatives.
+
+## 16.13 `run_cache_deception` -- 24 runs -- **CORRECTLY QUIET**
+
+Corpus: 22 `0 web-cache-deception finding(s)`, 2 `no auth-differentiated private tokens on this
+page`. MEASURED live with a real authenticated DVWA session -> `0 web-cache-deception finding(s)`:
+it found private tokens, built path-confusion variants and none routed to the private page. Correct
+-- there is no caching layer in front of the labs.
+
+## 16.14 `run_llm_probe` -- 46 runs -- **CORRECTLY QUIET, never reached an LLM**
+
+MEASURED live, and the targeting is the story:
+
+```
+run_llm_probe {"url": "http://dvwa/"}                      -> 'URL does not look like a chat/AI endpoint - skipped'
+run_llm_probe {"url": ".../rest/chatbot/respond"}          -> 'no prompt-injection / output-handling signal observed'
+run_llm_probe {"url": ".../chatbot/conversation"}          -> 'no prompt-injection / output-handling signal observed'
+
+raw GET probes of every chat path involved:
+  /chatbot/conversation   -> 200, 9903 B   the SPA index (soft 404 -- this path does not exist)
+  /rest/chat              -> 500, 2420 B   Error: Unexpect...
+  /rest/chatbot/respond   -> 500, 2442 B   Error: Unexpect...
+  /rest/chatbot/status    -> 500, 2440 B   Error: Unexpect...
+```
+
+The corpus only ever used `/chatbot/conversation` and `/rest/chat`. The first is a soft 404 serving
+the SPA index; the second is a 500. Juice Shop's real chatbot requires **POST with an authenticated
+token**, which the engine never performs. **The engine has never exchanged a message with an LLM**,
+so "no prompt-injection signal observed" is a statement about nothing. Correctly quiet in the sense
+that it invents no finding, but its 46 zeros carry no information about the target's LLM.
+
+## 16.15 `run_github_recon` -- 320 runs -- **UNTESTABLE (disabled by configuration)**
+
+**320/320 corpus runs report `Skipped - set BBH_GITHUB_TOKEN (your own read-only GitHub PAT) to
+enable`.** It has never made a request. This is a DECLARED no-op, not a silent failure -- the
+summary string says so plainly and honestly.
+
+**UNTESTABLE, and deliberately left so:** enabling it requires supplying a GitHub personal access
+token, and providing credentials is outside what this lane may do. It is also aimed at recon
+targets that were themselves malformed (`hostmaster.hostmaster.hostmaster.juice-shop`, 22 runs),
+which is a separate targeting defect worth noting for whoever owns subdomain recon.
+
+**Recommendation:** a tool that is 100% skipped across 320 invocations should not be scheduled at
+all, or the scheduler should surface "disabled" distinctly from "found nothing" -- it currently
+inflates the tool ledger with 320 rows that scanned nothing.
+
+
