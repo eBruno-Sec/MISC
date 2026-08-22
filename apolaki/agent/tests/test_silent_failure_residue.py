@@ -22,7 +22,10 @@ import types
 
 import pytest
 
+import bie
 import browser_engine
+import dns_recon
+import enip_audit_tool
 import scope
 import tools
 
@@ -290,6 +293,144 @@ def test_sqli_metadata_query_crash_is_not_reported_as_a_width_that_did_not_work(
     assert "sqli_metadata.query" in _wheres(reg)
 
 
+# ══════════════════════════════════════════════════════════════════════════════
+# SLICE 2 -- the three module-level helpers.
+#
+# They have no ToolRegistry `self`, so they reach the ledger through
+# `tools._ACTIVE_REGISTRY`, published for the span of `ToolRegistry.execute`.  These
+# tests drive the REAL dispatch, not the helper in isolation: a recorder that a real
+# dispatch never reaches is an island, and one of these three was exactly that until
+# the executor boundary below was measured.
+# ══════════════════════════════════════════════════════════════════════════════
+
+def test_contextvars_do_not_cross_run_in_executor_but_do_cross_to_thread():
+    """The MEASURED fact the enip fix depends on, pinned so it cannot be assumed away.
+
+    `loop.run_in_executor(None, fn, ...)` reads a ContextVar's DEFAULT in the worker
+    thread; `asyncio.to_thread` runs `ctx.run(fn, ...)` on the same default executor and
+    sees the caller's value.  `_run_service_pack`'s enip branch must therefore use
+    `to_thread`, or `enip.list_identity_tcp`'s recorder is registered and never reached.
+    """
+    probe = tools.contextvars.ContextVar("apolaki_residue_probe", default=None)
+
+    def _read():
+        return probe.get()
+
+    async def _main():
+        probe.set("published")
+        loop = asyncio.get_event_loop()
+        return (_read(), await loop.run_in_executor(None, _read), await asyncio.to_thread(_read))
+
+    direct, in_executor, in_to_thread = asyncio.run(_main())
+    assert direct == "published"
+    assert in_executor is None            # the trap
+    assert in_to_thread == "published"    # the mechanism the fix relies on
+
+
+def test_module_level_swallow_reports_whether_it_actually_recorded():
+    """Negative control.  Outside a dispatch there is no registry, and the helper says so
+    instead of pretending.  A recorder that always returns success cannot detect an island."""
+    reg = _registry()
+    assert tools._swallow(_Boom("orphan"), "orphan.helper", "") is False
+    token = tools._ACTIVE_REGISTRY.set(reg)
+    try:
+        assert tools._swallow(_Boom("adopted"), "orphan.helper", "") is True
+    finally:
+        tools._ACTIVE_REGISTRY.reset(token)
+    assert "orphan.helper" in _wheres(reg)
+
+
+# ── 13. dns_recon.doh -- full real dispatch, execute() to helper and back ─────
+
+def test_doh_transport_crash_is_not_reported_as_a_domain_with_no_records(monkeypatch):
+    """End-to-end through `ToolRegistry.execute("run_dns", ...)`.
+
+    Every `doh` call returns [], so `gather_dns` reports SPF MISSING / DMARC MISSING /
+    0 CAA / 0 vendors and `run_dns` returns ran=True.  That output is byte-identical to a
+    real domain with no records -- a DNS transport outage used to read as an email-auth
+    finding.  The fix must reach the ledger AND the dispatch's DEGRADED line.
+    """
+    import httpx
+
+    class _DeadClient:
+        def __init__(self, *_args, **_kwargs):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *_args):
+            return False
+
+        async def get(self, *_args, **_kwargs):
+            raise _Boom("DoH resolver unreachable")
+
+    reg = _registry()
+    monkeypatch.setattr(httpx, "AsyncClient", _DeadClient)
+    result = asyncio.run(reg.execute("run_dns", {"domain": "target.tld"}, "m-residue"))
+    assert "dns_recon.doh" in _wheres(reg)
+    assert "DoH resolver unreachable" in " ".join(_errors(reg, "dns_recon.doh"))
+    # the dispatch surfaces it -- the ledger row is not enough on its own
+    assert "DEGRADED" in result.output and "dns_recon.doh" in result.output
+
+
+# ── 14. enip.list_identity_tcp -- across the executor boundary ────────────────
+
+def test_enip_socket_crash_is_not_reported_as_no_ics_device(monkeypatch):
+    """End-to-end through `execute("run_service_pack", ...)`, which crosses a thread.
+
+    b"" means "nothing answered", so a socket layer that blew up on the SCANNING host
+    reported the OT asset as absent rather than as unmeasured.
+    """
+    def _boom_connect(*_args, **_kwargs):
+        raise _Boom("ENIP socket layer refused to open")
+
+    # UDP is tried first and is NOT the handler under test; a silent UDP miss is the real
+    # precondition for the TCP attempt.  `enip_audit_tool.socket` IS the stdlib module, so
+    # only the one function the TCP path calls is replaced -- patching `socket.socket`
+    # wholesale takes the event loop's own socketpair down with it.
+    monkeypatch.setattr(enip_audit_tool, "_list_identity_udp", lambda *_a, **_k: b"")
+    monkeypatch.setattr(enip_audit_tool.socket, "create_connection", _boom_connect)
+
+    reg = _registry()
+    result = asyncio.run(reg.execute(
+        "run_service_pack",
+        {"host": "target.tld", "port": 44818, "service": "enip"}, "m-residue"))
+    assert "enip.list_identity_tcp" in _wheres(reg), _wheres(reg)
+    assert "DEGRADED" in result.output
+
+
+# ── 15. bie.session_fingerprint -- across asyncio.to_thread ───────────────────
+
+def test_bie_session_fingerprint_crash_is_not_reported_as_two_identical_sessions(monkeypatch):
+    """Driven the way `_run_browser_persona_bola` drives it: a sync bie call inside
+    `asyncio.to_thread`, inside a real dispatch.  Playwright is not needed to prove the
+    recorder is reached -- only the same context boundary the shipped call crosses."""
+    import bie
+
+    class _BadCookie:
+        def get(self, _name):
+            raise _Boom("storage state is not readable")
+
+    class _Ctx:
+        def storage_state(self):
+            return {"cookies": [_BadCookie()], "origins": []}
+
+    reg = _registry()
+    captured = {}
+
+    async def _dispatch(name, _inp, _sid):
+        captured["fp"] = await asyncio.to_thread(bie.session_fingerprint, _Ctx())
+        return tools.ToolResult(name, "https://target.tld/", True, "persona swap complete", [])
+
+    monkeypatch.setattr(reg, "_dispatch_engine", _dispatch)
+    result = asyncio.run(reg.execute("browser_persona_bola",
+                                     {"base_url": "https://target.tld"}, "m-residue"))
+    assert captured["fp"] == {}           # control: the redacted-empty contract is unchanged
+    assert "bie.session_fingerprint" in _wheres(reg)
+    assert "DEGRADED" in result.output
+
+
 # ── the whole slice, as one assertion ─────────────────────────────────────────
 
 def test_every_repaired_owner_is_reachable_from_a_real_execution_path():
@@ -306,3 +447,7 @@ def test_every_repaired_owner_is_reachable_from_a_real_execution_path():
                   "encoded_cookie.send", "oauth.send", "race.read_state", "race.worker",
                   "sqli_metadata.query"):
         assert '"%s"' % where in src, where
+    import inspect as _inspect
+    for module, where in ((bie, "bie.session_fingerprint"), (dns_recon, "dns_recon.doh"),
+                          (enip_audit_tool, "enip.list_identity_tcp")):
+        assert '"%s"' % where in _inspect.getsource(module), where

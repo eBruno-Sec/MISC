@@ -153,3 +153,114 @@ Note on the census key: `(module, function)` uses the INNERMOST enclosing functi
 the two distinct nested `_send` closures (`_test_numeric_abuse` and
 `_run_encoded_cookie`) collapse into one baseline entry `("tools.py", "_send"): 2`.
 
+### Slice 2 - the 3 module-level helpers (committed)
+
+`bie.session_fingerprint`, `dns_recon.doh` and `enip_audit_tool._list_identity_tcp` have
+no ToolRegistry `self`, so `_swallow` was simply not reachable from them. Added
+`tools._ACTIVE_REGISTRY` (a ContextVar, set and reset on exactly the span
+`_ACTIVE_TOOL_DISPATCH` already covers in `execute`) plus a module-level
+`tools._swallow(exc, where, target) -> bool` that forwards to the registry running the
+current dispatch. Same ledger, same DEGRADED line, same durable `tool_error` row.
+
+Three constraints shaped this, all of them real:
+
+1. **No new production module.** `test_partition_is_non_vacuous...` asserts
+   `len(trees) == 178` as an EQUALITY, so a new `.py` under `agent/` turns it red. The
+   recorder therefore lives in `tools.py`, not in a new shared module.
+2. **No new broad `except`.** The obvious `try: import tools / except: pass` guard
+   around the import would itself be censused as an optional swallow and push
+   `counts["optional"]` past its 388 ceiling. The helpers use
+   `sys.modules.get("tools")` instead: it cannot raise, cannot trigger an import, and
+   does not give a leaf module a hard dependency on the orchestrator.
+3. **The recorder is named `_swallow`, deliberately.** `_swallow_recorder_census`
+   counts calls whose attribute is literally `_swallow`, so the module-level face is
+   covered by the same deletion ratchet as every `self._swallow`.
+
+**THE ISLAND THIS ALMOST SHIPPED (MEASURED).** ContextVars do not cross every thread
+boundary, and `enip_audit_tool.probe` is dispatched into one:
+
+    python 3.12.14
+    direct            = SET
+    run_in_executor   = None      <-- the trap
+    asyncio.to_thread = SET
+
+`_run_service_pack`'s enip branch used
+`asyncio.get_event_loop().run_in_executor(None, _en.probe, ...)`, which does NOT copy the
+context, so `_ACTIVE_REGISTRY.get()` returns its default in the worker thread and the new
+recorder would have been registered and never reached - a textbook island, and invisible
+to any test that called the helper directly. Changed that ONE call site to
+`asyncio.to_thread(_en.probe, host, int(port))`: same default executor, same arguments,
+same result, only the context now crosses. `bie` was already on `asyncio.to_thread`
+(tools.py:3138) and `dns_recon.doh` is pure async, so neither needed a change.
+
+**Mutant M-EXEC, to prove that change is load-bearing and not decorative.** Snapshot from
+`git archive HEAD` with the slice-2 patch applied, then the executor line - and ONLY that
+line - reverted. Proof the mutant landed, read back through the IMPORTED module rather
+than the file on disk:
+
+    imported module has run_in_executor(None, _en.probe): True
+    imported module has to_thread(_en.probe): False
+
+Result: `test_enip_socket_crash_is_not_reported_as_no_ics_device` FAILED with
+`AssertionError: []` - the swallow ledger is empty, which is exactly the false clean.
+M-EXEC is KILLED. Every recorder was left in place in the mutant, so the failure is
+attributable to the boundary and nothing else.
+
+**FAIL-BEFORE PROOF (MEASURED).** Fresh `git archive HEAD` snapshot (481 .py files),
+slice-2 production confirmed ABSENT (`_ACTIVE_REGISTRY` count 0, `dns_recon.doh` count 0)
+and slice-1 production confirmed PRESENT (`authz_matrix.fetch` count 1):
+
+    5 FAILED, EXIT=1
+      test_module_level_swallow_reports_whether_it_actually_recorded
+      test_doh_transport_crash_is_not_reported_as_a_domain_with_no_records
+      test_enip_socket_crash_is_not_reported_as_no_ics_device
+      test_bie_session_fingerprint_crash_is_not_reported_as_two_identical_sessions
+      test_every_repaired_owner_is_reachable_from_a_real_execution_path
+
+The 12 slice-1 tests pass there, correctly - HEAD already carries slice 1.
+`test_contextvars_do_not_cross_run_in_executor_but_do_cross_to_thread` also passes there:
+it measures Python's semantics, not this fix, and it is in the file so the enip call site
+cannot be "simplified" back without a test that explains why.
+
+Two of the three are driven END TO END through a real `ToolRegistry.execute(...)`
+dispatch - `run_dns` and `run_service_pack` - not by calling the helper directly. The
+`run_dns` case is the clearest statement of the whole defect: with every `doh` returning
+`[]`, `gather_dns` reports `SPF MISSING, DMARC MISSING, 0 CAA, 0 vendors` and `run_dns`
+returns ran=True. A resolver outage was being rendered as an email-authentication
+finding. It now carries `DEGRADED: ... latest=dns_recon.doh`.
+
+Census after slice 2:
+
+    LITERAL-RETURN 74 {'optional': 61, 'control-plane': 13}     load-bearing: 0
+    SWALLOWED     465 {'optional': 388, 'control-plane': 77}    load-bearing: 0  (unchanged)
+    RECORDERS total=176 owners=93                               LOSSES {}
+
+Ceiling LOWERED 3 -> 0 and converted from `<=` to `==`: with the residue cleared, a new
+`except: return []` on a load-bearing path is a regression, not a budget item.
+
+Also corrected two now-stale claims in the guard's own comments rather than leaving them
+to rot: the header comment said the strong invariant "is FALSE: 15 such handlers exist",
+and `_literal_return_swallow`'s docstring justified staying separate from `_swallowed`
+by those same 15. Both were true when written and are not now. The predicates stay
+separate for the REAL remaining reason: merging moves 61 optional + 13 control-plane rows
+into the main census and would need `counts["optional"] <= 388` raised to absorb them.
+A ceiling is not raised to make a merge fit.
+
+### Known limitation (stated, not hidden)
+
+`tools._swallow` is a no-op when no dispatch is active, and returns `False` to say so.
+Every shipped call site of the three helpers runs inside `ToolRegistry.execute`, which is
+why the end-to-end tests above can exist at all. If one is ever called from `planner.py`,
+`memory.py` or `retest.py` (today those import only `is_junk_host`, `retest_recipe` and
+`retest_verdict`), its failure would be silent again. The `-> bool` return is the hook a
+future test uses to detect that, and is asserted in both directions by
+`test_module_level_swallow_reports_whether_it_actually_recorded`.
+
+### Adjacent finding, NOT fixed here (out of scope, no owner assigned)
+
+`tools.py` has 24 remaining `run_in_executor(None, ...)` call sites (dnp3, s7comm, vnc,
+rsync, and others). None of them contains one of the 15 handlers, so none is a defect
+today. But every one of them is context-blind by the measurement above: any future
+module-level recorder placed behind them is a dead island by construction, and the
+failure mode is silent. Worth a sweep by whoever owns the beyond-web packs.
+

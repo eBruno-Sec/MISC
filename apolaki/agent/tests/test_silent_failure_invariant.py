@@ -344,16 +344,23 @@ def test_registration_fallback_transport_failure_is_explicit(monkeypatch):
 # `return None` instead of `return out` is killed, naming the line.  One token.
 # docs/handoff/guard_falsification.md, mutants M5-POS and M5-HUNT.
 #
-# This repair does NOT assert the strong claim "no load-bearing handler swallows
-# silently", because that claim is FALSE: 15 such handlers exist at HEAD under the
-# guard's own written definition.  Asserting it is how the unfalsifiable guards in
-# this repo got written.  It ratchets instead, in the DELETION direction only:
+# The repair did NOT assert the strong claim "no load-bearing handler swallows
+# silently", because when it was written that claim was FALSE: 15 such handlers existed
+# under the guard's own written definition.  Asserting it then is how the unfalsifiable
+# guards in this repo got written.  It ratchets instead, in the DELETION direction only:
 # adding a recorder is never blocked, removing one is red, and the message names
 # the owner.  Lower a baseline deliberately, in the same commit, with the reason.
+#
+# Those 15 have since been FIXED rather than merely capped, so the strong claim is now
+# true and is asserted as an equality at the bottom of this file.  It is asserted
+# because it was measured, not to make the guard sound stronger.
 #
 # AST NODE counts (not grep LINE counts) over the same 178 production modules.
 _SWALLOW_RECORDERS = {
     ("agent.py", "_authenticated_recrawl"): 4,
+    ("bie.py", "session_fingerprint"): 1,
+    ("dns_recon.py", "doh"): 1,
+    ("enip_audit_tool.py", "_list_identity_tcp"): 1,
     ("agent.py", "_do_header_trust"): 1,
     ("agent.py", "_do_persona_authz"): 11,
     ("agent.py", "_do_saml"): 1,
@@ -428,6 +435,9 @@ _SWALLOW_RECORDERS = {
     ("tools.py", "_sl_mint"): 1,
     ("tools.py", "_sl_pwchange_variant"): 2,
     ("tools.py", "_socket_service_probe"): 2,
+    # the module-level face of `_swallow` itself; deleting its one forwarding call would
+    # silence all three module-level helpers at once and no per-owner row would move.
+    ("tools.py", "_swallow"): 1,
     ("tools.py", "_submit"): 1,
     ("tools.py", "_timed"): 1,
     ("tools.py", "_traversal_differential"): 1,
@@ -480,9 +490,14 @@ def _literal_return_swallow(handler):
     """A handler that discards the exception into a literal value it RETURNS.
 
     Same discard as `_swallowed`'s Assign branch (`out = []`), in the shape that
-    branch cannot see (`return []`).  Kept separate from `_swallowed` on purpose:
-    folding it in would move 15 already-shipped handlers into `load-bearing` and
-    make `counts["load-bearing"] == 0` fail on a pristine tree.
+    branch cannot see (`return []`).
+
+    Kept separate from `_swallowed` still, but no longer for the original reason.  The
+    15 load-bearing handlers that made folding it in go red are FIXED, so folding would
+    now leave `load-bearing` at 0 either way.  What blocks it is the other 74 rows:
+    merging moves 61 optional + 13 control-plane handlers into the main census, which
+    needs `counts["optional"] <= 388` RAISED to absorb them.  A ceiling is not raised to
+    make a merge fit.
 
     Strictly DISJOINT from `_swallowed`: `return None` / `return False` satisfy both
     predicates, and counting them twice inflated this census from 89 to 134 on the
@@ -565,14 +580,20 @@ def test_literal_return_discards_are_censused_and_capped():
     adding a 90th must.  The load-bearing survivors are named on failure so the list
     can only be argued down one site at a time.
 
-    LOWERED 15 -> 3 in the same commit that fixed the first 12.  Those twelve now route
-    through `self._swallow` before returning the SAME empty value, so the handler is no
-    longer a bare literal-return discard and drops out of this census entirely.  Each
-    one has an oracle in `tests/test_silent_failure_residue.py` that forces the
-    protected call to raise and asserts the ledger names the owner; all twelve were
-    measured RED against `git archive HEAD` (66a7012) production and green after.
-    The remaining 3 are module-level helpers with no ToolRegistry `self`:
-    bie.session_fingerprint, dns_recon.doh, enip_audit_tool._list_identity_tcp.
+    LOWERED 15 -> 3 -> 0, each step in the commit that earned it.  Every one of the 15
+    now records before returning the SAME empty value, so the handler is no longer a bare
+    literal-return discard and drops out of this census.  Twelve are ToolRegistry methods
+    or their closures and use `self._swallow`; the other three are module-level helpers
+    with no `self` (bie.session_fingerprint, dns_recon.doh,
+    enip_audit_tool._list_identity_tcp) and reach the same ledger through
+    `tools._ACTIVE_REGISTRY`, published for the span of `ToolRegistry.execute`.
+
+    Each has an oracle in `tests/test_silent_failure_residue.py` that forces the protected
+    call to raise and asserts the ledger names the owner.  All were measured RED against a
+    `git archive HEAD` snapshot of production and green after.
+
+    Zero is now an EQUALITY, not a ceiling: with the residue cleared, one new
+    `except: return []` on a load-bearing path is a regression, not a budget item.
     """
     rows = _partition(predicate=_literal_return_swallow)
     counts = Counter(row["category"] for row in rows)
@@ -580,4 +601,4 @@ def test_literal_return_discards_are_censused_and_capped():
              for r in rows if r["category"] == "load-bearing"]
     assert counts["optional"] <= 61
     assert counts["control-plane"] <= 13
-    assert counts["load-bearing"] <= 3, named
+    assert counts["load-bearing"] == 0, named

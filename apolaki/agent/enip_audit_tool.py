@@ -19,6 +19,8 @@ from __future__ import annotations
 
 import socket
 import struct
+import sys as _sys                       # I-5: reach the orchestrator's swallow ledger without
+                                         # importing it (tools imports this module, never the reverse)
 
 _CMD_LIST_IDENTITY = 0x0063
 _ITEM_IDENTITY = 0x000C
@@ -81,7 +83,12 @@ def _list_identity_tcp(host: str, port: int, timeout: float) -> bytes:
             s.settimeout(timeout)
             s.sendall(build_list_identity())
             return s.recv(2048)
-    except Exception:
+    except Exception as _apolaki_exc:
+        # I-5: b"" is also "no ENIP device answered", so a socket layer that blew up on the
+        # scanning host reports the OT asset as absent rather than as unmeasured.
+        _tools = _sys.modules.get("tools")
+        if _tools is not None:
+            _tools._swallow(_apolaki_exc, "enip.list_identity_tcp", "%s:%s" % (host, port))
         return b""
 
 

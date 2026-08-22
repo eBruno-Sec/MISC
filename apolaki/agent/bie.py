@@ -29,6 +29,8 @@ from __future__ import annotations
 
 import browser_engine
 import re
+import sys as _sys                       # I-5: reach the orchestrator's swallow ledger without
+                                         # importing it (tools imports bie, never the reverse)
 
 # Response bodies are compared by the oracle and embedded in evidence -- bound both.
 _MAX_BODY = 6000
@@ -1398,7 +1400,13 @@ def session_fingerprint(context) -> dict:
                             "storage_keys": sorted(str(i.get("name")) for i in (o.get("localStorage") or []))})
         return {"cookie_names": cookies, "origins": origins,
                 "note": "values redacted — session secrets never leave the engine"}
-    except Exception:
+    except Exception as _apolaki_exc:
+        # I-5: {} is also what a persona with no cookies and no storage returns, so the
+        # persona-swap proof would read a crashed fingerprint as "the two contexts were
+        # identical" -- the exact claim this function exists to be able to refuse.
+        _tools = _sys.modules.get("tools")
+        if _tools is not None:
+            _tools._swallow(_apolaki_exc, "bie.session_fingerprint", "")
         return {}
 
 

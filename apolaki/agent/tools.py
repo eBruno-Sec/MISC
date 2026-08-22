@@ -44,6 +44,37 @@ NEGATIVE_RESULT_TOKEN = "NOT PRESENT:"
 # to their explicit `where` owner instead.
 _ACTIVE_TOOL_DISPATCH = contextvars.ContextVar("apolaki_active_tool_dispatch", default=None)
 
+# I-5.  The ToolRegistry running the current dispatch.  Module-level engine helpers -- the
+# three the literal-return census named (`bie.session_fingerprint`, `dns_recon.doh`,
+# `enip_audit_tool._list_identity_tcp`) -- have no `self`, so their failures could not reach
+# the swallowed-error ledger AT ALL: they returned {} / [] / b"" and the caller read that as a
+# clean negative.  Publishing the registry for the span of the dispatch gives them the same
+# ledger, the same DEGRADED line and the same durable tool_error row as every other engine.
+_ACTIVE_REGISTRY = contextvars.ContextVar("apolaki_active_registry", default=None)
+
+
+def _swallow(exc: BaseException, where: str, target: str = "") -> bool:
+    """Module-level face of `ToolRegistry._swallow`, for helpers that have no `self`.
+
+    Returns whether the failure was RECORDED, so a test can prove the helper sits on a real
+    dispatch path instead of assuming it -- a recorder nothing reaches is a declaration.
+
+    Callers reach this through `sys.modules.get("tools")`, never a fresh `import`: a helper
+    must not acquire a hard dependency on the orchestrator, and an import inside an exception
+    handler would need its own broad `except` -- which is the very defect this repairs.
+
+    Deliberately cannot raise.  It is called from inside an exception handler whose contract is
+    to return an empty value; turning a swallowed failure into a propagating one would be a
+    behaviour change, and this lane changes visibility only.  A registry built without
+    `__init__` (a few contract tests do that around the dispatch boundary) has no ledger to
+    write to, and is reported as not-recorded rather than crashed.
+    """
+    registry = _ACTIVE_REGISTRY.get()
+    if registry is None or not hasattr(registry, "swallowed"):
+        return False
+    registry._swallow(exc, where, target)
+    return True
+
 
 def _target_client(*args, _rate_policy=True, **kwargs):
     """Create a target HTTP client with the shared per-origin safety policy."""
@@ -1473,6 +1504,9 @@ class ToolRegistry:
         # still creates the counter through _swallow.
         swallowed_before = getattr(self, "_swallowed_total", 0)
         active_token = _ACTIVE_TOOL_DISPATCH.set((session_id, tool_name))
+        # I-5: same span, same reset, so a module-level helper's failure is attributed to the
+        # dispatch that actually caused it and never leaks into the next one.
+        registry_token = _ACTIVE_REGISTRY.set(self)
         # Q-043. The scope brackets the SAME span as the ledger rows, so the cooldown a dispatch
         # actually paid for is the cooldown its row reports. A process-wide counter read either
         # side of this would bill one engine for a concurrent engine's wait.
@@ -1481,6 +1515,7 @@ class ToolRegistry:
                 res = await self._dispatch_engine(tool_name, tool_input, session_id)
         finally:
             _ACTIVE_TOOL_DISPATCH.reset(active_token)
+            _ACTIVE_REGISTRY.reset(registry_token)
         swallowed_count = getattr(self, "_swallowed_total", 0) - swallowed_before
         if swallowed_count and res is not None:
             latest = self._latest_swallowed or {}
@@ -3351,7 +3386,13 @@ class ToolRegistry:
                 findings.append(_ics.finding(service, host, int(port), res))
         elif service == "enip":
             import enip_audit_tool as _en                        # ICS/OT: READ-ONLY ListIdentity, never a CIP write
-            res = await asyncio.get_event_loop().run_in_executor(None, _en.probe, host, int(port))
+            # I-5, MEASURED on python 3.12.14: `loop.run_in_executor(None, fn, ...)` does NOT copy
+            # the context into the worker thread (a ContextVar reads its DEFAULT there), while
+            # `asyncio.to_thread` does -- it runs `ctx.run(fn, ...)` on the same default executor.
+            # `_list_identity_tcp` records its swallow through `_ACTIVE_REGISTRY`, so left on
+            # run_in_executor that recorder would be a dead island: registered, never reached.
+            # Same executor, same arguments, same result; only the context crosses now.
+            res = await asyncio.to_thread(_en.probe, host, int(port))
             if res.get("device_info"):
                 findings.append(_en.finding(host, int(port), res["device_info"]))
         elif service == "vnc":
