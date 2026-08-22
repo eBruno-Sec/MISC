@@ -516,3 +516,154 @@ Second, independent patch: the URL builder that emitted 679 `https:///` URLs and
 URLs for plaintext hosts must not emit them. That is a separate lane's defect (target
 construction), and it is worth its own ticket -- fixing `_http`'s honesty makes it VISIBLE, it does
 not make it stop happening.
+
+### NOTE ON THE CENSUS INSTRUMENT, verified before the numbers above were trusted
+
+Two things about `count` that would have made me misread it:
+
+1. `count` is NOT `len(result.findings)`. `agent.py:850` computes
+   `_real = sum(1 for f in result.findings if not (isinstance(f, dict) and f.get("vulnerable") is False))`
+   -- sqlmap's no-confirmation data-carrier `{"vulnerable": False, "log_tail": ...}` is excluded.
+   So `run_sqlmap` legitimately logs `count: 0` while returning a 1-element list. The census is
+   still the right instrument, but it measures REAL findings, not list length.
+2. A dispatch whose `ToolResult.error` is set is logged as `tool_error`/`scope_block`, **not** as
+   `tool_result` (`agent.py:840`). Only 4 `tool_error` rows exist for all 22 tools. **This
+   strengthens the finding rather than weakening it:** the 1687 unreachable dispatches are not
+   hiding in an error table, they are sitting in `tool_result` wearing a clean-scan summary.
+
+---
+
+## 11. `run_sqlmap` -- 58 runs -- **BROKEN, twice over**, and the only one of the 22 on the `_cmd` chokepoint
+
+Wrapper (currently `tools.py:~10815`). **The only one of my 22 that calls `self._cmd`.** It checks
+`err.startswith("__MISSING__")` and nothing else, then decides purely on
+`vuln = "is vulnerable" in out or "sqlmap identified" in out`.
+
+### 11.1 The Q-092 defect is LIVE here -- MEASURED negative control
+
+```
+$ sqlmap -u "http://juice-shop:3000/x" --batch --no-such-flag
+EXIT=2
+stdout 217 bytes (banner only)
+stderr  79 bytes: "Usage: python3 sqlmap [options]\n\nsqlmap: error: no such option: --no-such-flag"
+grep "is vulnerable|sqlmap identified" -> 0
+```
+
+sqlmap exits **2 without scanning anything**. `err` is the usage text, which does NOT start with
+`__MISSING__`, so the guard passes it. `vuln` is False. The wrapper returns
+`ToolResult("sqlmap", url, True, "No SQLi confirmed [standard]", [...])` -- **`success=True`, a
+clean scan, from a tool that never ran.** This is nuclei's failure exactly, in a different binary.
+(Where nuclei wrote its flag error to STDOUT, sqlmap writes to STDERR; neither is checked, because
+neither can be: `_cmd` never returns the exit code.)
+
+### 11.2 The tool itself is HEALTHY -- MEASURED positive control
+
+The wrapper's exact `deep` command, run by hand against an authorized lab:
+
+```
+$ sqlmap -u "http://juice-shop:3000/rest/products/search?q=apple" --batch --level 3 --risk 2 \
+         --flush-session --random-agent --technique BEUSTQ
+EXIT=0    stdout 79855->4364 bytes    stderr 0 bytes
+grep "is vulnerable" -> 1     grep "sqlmap identified" -> 1
+
+Parameter: q (GET)
+    Type: boolean-based blind   AND boolean-based blind - WHERE or HAVING clause
+        Payload: q=apple%' AND 7729=7729 AND 'sZgQ%'='sZgQ
+    Type: time-based blind      SQLite > 2.0 AND time-based blind (heavy query)
+back-end DBMS: SQLite
+```
+
+**sqlmap finds real SQL injection on this lab and the wrapper's marker oracle matches it.** Unlike
+dalfox, the parser is fine. So the 58 zeros have a different cause.
+
+### 11.3 The actual cause of the 58 zeros: EVERY dispatch used a VALUELESS parameter
+
+MEASURED, all 58 `tool_call` rows for `run_sqlmap`: **58/58 have a query string in which every
+parameter is valueless** -- `?q`, `?key&name`, `?current`, `?email`, `?callback&format&key`,
+`?EIO&sid&t&transport`. These come from param-mining, which yields NAMES, not observed values.
+
+The A/B on the same endpoint, same binary, same flags -- the corpus's own URL versus the same URL
+with a value:
+
+```
+$ sqlmap -u "http://juice-shop:3000/rest/products/search?q"  --batch --level 5 --risk 3 \
+         --flush-session --random-agent --technique BEUSTQ --threads 4 \
+         --current-user --current-db --is-dba --dbs          # the corpus's exact `insane` command
+EXIT=0   stdout 79855 bytes   stderr 0 bytes
+grep "is vulnerable" -> 0    grep "sqlmap identified" -> 0
+tail: "[ERROR] all tested parameters do not appear to be injectable."
+
+$ same command with ?q=apple                       ->  CONFIRMED (11.2 above)
+```
+
+**The same tool, the same endpoint, the same flags. The only difference is that the parameter had a
+value.** The endpoint IS injectable; sqlmap proves it in 11.2 and misses it in 11.3.
+
+Corroborating raw responses (why the empty value is fatal): `?q` and `?q=` both return **16578
+bytes** (the whole product list -- an unfiltered query), while `?q=apple` returns **921 bytes**.
+With an empty value the baseline is the unfiltered response, so sqlmap's dynamicity check finds the
+parameter does not change the page and it stops before injecting.
+
+This is the "probe with observed values" discipline in its exact failure form.
+
+**VERDICT: BROKEN.** Two independent defects, both real:
+1. **Latent-but-real:** a non-zero sqlmap exit is reported as a clean scan (11.1). Q-092's fix at
+   `_cmd` closes this.
+2. **Live and causing all 58 zeros:** the caller feeds valueless parameters, so sqlmap never
+   reaches the injection stage (11.3). `_cmd`'s fix will NOT close this one -- exit code is 0 and
+   the tool ran correctly. It needs the caller to supply an observed value.
+
+### 11.4 PROPOSED PATCH for 11.3 (diff only)
+
+```diff
+--- a/agent/tools.py
++++ b/agent/tools.py
+@@ async def _run_sqlmap(self, inp: dict) -> ToolResult:
+     url = inp["url"]
++    # A parameter mined by NAME has no value, and sqlmap's dynamicity check stops before the
++    # injection stage when the page does not change -- MEASURED: `?q` misses a SQLi that `?q=apple`
++    # confirms on the same endpoint. Give every valueless parameter a benign observed-shaped seed
++    # so the baseline is a FILTERED response rather than the unfiltered one.
++    url = _seed_valueless_params(url)          # ?q -> ?q=<benign seed>
+```
+
+with the negative control being that a URL whose parameters already carry values is returned
+byte-identical.
+
+---
+
+## 12. HONEST NEGATIVE RESULT: valueless parameters do NOT break the value-overwriting engines
+
+The obvious next hypothesis was that the valueless-parameter defect explains the other zero
+histograms too. **It does not, and I measured it rather than assuming it.**
+
+Corpus scale of the phenomenon first (all `tool_call` rows with a query string):
+
+| tool | all params valueless | some | all valued |
+|---|---|---|---|
+| `run_sqlmap` | **58 (100%)** | 0 | 0 |
+| `run_ssrf` | **23 (100%)** | 0 | 0 |
+| `run_nosqli` | 334 (97.7%) | 0 | 8 |
+| `run_deserialization` | 327 (97.6%) | 0 | 8 |
+| `run_ssi` / `run_waf_bypass` / `run_sqli_structural` / `run_css_injection` | 392 (73.5%) | 14 | 127 |
+
+**TOTAL: 2310 of 2890 param-bearing dispatches (79.9%) carried no parameter value at all.**
+
+But the A/B disproves the hypothesis for the reflection engines. `_setq(name, payload)` REPLACES
+the parameter value, so a missing original value costs them only their baseline, not their probe:
+
+```
+url = http://juice-shop:3000/rest/products/search
+?q         (valueless, as the corpus called it)      ?q=apple  (valued)
+  run_sqli_structural  '0 structural SQLi finding(s)'   ->  '0 structural SQLi finding(s)'
+  run_nosqli           'tested 1 param(s), 0 confirmed' ->  'tested 1 param(s), 0 confirmed'
+  run_ssi              '0 SSI injection finding(s)'     ->  '0 SSI injection finding(s)'
+  run_css_injection    '0 CSS injection finding(s)'     ->  '0 CSS injection finding(s)'
+```
+
+Identical on both sides, even though the baseline bodies differ by 15657 bytes (16578 vs 921).
+
+**The valueless-parameter defect is specific to engines that USE the observed value as their
+injection base.** Proven for `run_sqlmap`. `run_ssrf` is 100% valueless too and is the other
+candidate -- audited in its own section below. Blast radius is therefore much smaller than the
+79.9% headline, and saying so is the point of measuring it.
