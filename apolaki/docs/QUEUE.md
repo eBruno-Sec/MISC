@@ -1299,6 +1299,70 @@ call sites adopting `technique_status()`, which Q-012 already established and ne
 invented-id negative control passes; `/packs` and `/techniques` agree; the four markers XPASS and are
 retired in the commit that closes them.
 
+### Q-095 · Param mining yields NAMES, not VALUES, and 81.2% of dispatches probe a valueless parameter · **READY** · **HIGH**
+
+**A baseline-dependent engine handed `?q` instead of `?q=apple` reports CLEAN on a genuinely
+vulnerable endpoint.** Proven on sqlmap by the Q-092 audit, then measured corpus-wide by the
+Coordinator and found to be general.
+
+**THE PROOF, same tool, same endpoint, same flags, one difference:**
+
+```
+sqlmap -u "http://juice-shop:3000/rest/products/search?q"        --batch --level 5 --risk 3 ...
+  -> "all tested parameters do not appear to be injectable"      is-vulnerable: 0
+
+sqlmap -u "http://juice-shop:3000/rest/products/search?q=apple"  --batch --level 3 --risk 2 ...
+  -> Parameter: q (GET)  boolean-based blind + time-based blind, back-end DBMS: SQLite
+                                                                 is-vulnerable: 1
+```
+
+**Why the empty value is fatal, measured in raw bytes:** `?q` and `?q=` both return **16578 bytes**
+(the whole product list, an UNFILTERED query) while `?q=apple` returns **921**. With an empty value the
+baseline IS the unfiltered response, so sqlmap's dynamicity check concludes the parameter does not
+change the page and **stops before injecting anything.** The parser is fine. The tool is fine. The
+input was never capable of producing a result.
+
+**Root cause:** the URLs come from param-mining, which yields parameter NAMES and never carries an
+observed VALUE. Corpus examples, verbatim: `?q`, `?key&name`, `?current`, `?email`,
+`?callback&format&key`, `?EIO&sid&t&transport`.
+
+**SCALE, measured by the Coordinator over all `tool_call` rows carrying a query string:**
+
+```
+CORPUS TOTAL: 2283 valued, 9873 VALUELESS of 12156 query-bearing dispatches (81.2%)
+5 tools whose EVERY query-bearing dispatch was valueless:
+    run_sqlmap 0/58 valued   run_param_mine 0/56   run_ssrf 0/23   (+2)
+worst by volume: run_xss 1059 valueless (77%), run_sqli 863 (75%),
+    run_injection_probes 863 (75%), run_anomaly_scan 731 (94%), run_dom_audit 474 (94%)
+```
+
+**DO NOT OVERCLAIM THIS, and do not "fix" all 9873.** Valuelessness is **not** universally harmful,
+and that was MEASURED, not assumed: the Q-092 audit A/B'd the **value-overwriting** engines, which
+substitute their payload for whatever the value is, and found them **identical on both sides**. For
+those, `?q` is harmless.
+
+**The discriminator is whether the engine needs a working BASELINE.** An engine that compares a probed
+response against an unprobed one is destroyed by an empty value, because the empty-value baseline is a
+different page. An engine that overwrites the value does not care. Classify every engine on that axis
+before changing anything; the fix is worthless if it is applied where it was never needed, and a
+generalized change here would touch the highest-traffic engines in the tool.
+
+**FIX: thread the OBSERVED value.** Crawl and traffic capture already see real parameter values;
+param-mining discards them. **Never synthesize one.** `?q=apple` is the right value here only because
+it was OBSERVED against this app; inventing a plausible-looking value is the failure mode that has
+already bitten three engines in a single day, because an invented value can make baseline and probe
+fail identically and the engine then reports clean on a vulnerable field.
+
+**GATE:** a baseline-dependent engine, handed a valueless param for an endpoint it confirms with a
+value, must be RED today and green after. The non-vacuity control matters as much: a value-overwriting
+engine must be unaffected in both directions, or the fix has been applied where it was not needed and
+the test cannot tell the two classes apart.
+
+**RELATED:** this is the same defect family as Q-093 (a dispatch that could never have produced a
+result, reported as a clean scan). Q-093 is the transport never opening; **Q-095 is the transport
+opening and carrying input incapable of proving anything.** Both end in "0 findings" that reads as a
+clean bill of health.
+
 ### Q-094 · The documented test command omits `--network`, and 10 tests answer by SKIPPING · **READY** · **HIGH**
 
 MEASURED by the I-11 lane, same tree, same commit, only the docker flag differs:
