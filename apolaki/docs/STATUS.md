@@ -32,6 +32,44 @@ reproducible release blockers.
 | I-9 | caps preserve highest-value ordering | ⏳ CLAIMED closed, NOT yet verified | never measured by us; guard `test_cap_ordering_invariant` 8 tests |
 | I-11 | reachable / framework-invoked / retained-with-reason | ❌ **44 vs ceiling 37** | pin held; three lanes declined to force it |
 
+## RELEASE BLOCKER, CRITICAL: engines that never ran, reported as clean scans
+
+Chasing one stale queue question (Q-053 GAP-2, "why zero dalfox findings in 1783") opened the largest
+defect class this project has found. **Confirmed, live, on authorized targets:**
+
+| tool | corpus | what is actually wrong |
+|---|---|---|
+| `run_nuclei` | **0 / 155 runs** | nuclei v3 renamed `-json` to `-jsonl`. `nuclei -json` exits **2 before scanning** and writes the error to STDOUT, so `err` is empty and the `__MISSING__` check passes. **It has never run in this build.** It is the primary breadth scanner. |
+| `run_dalfox` | **0 / 171 runs** | emits a JSON ARRAY; the parser reads JSONL. Every line of a multi-line array is invalid standalone, so the yield is pinned at 0 for ANY output. |
+| `run_sqlmap` | **0 / 58 runs** | exits 2, reported clean; and all 58 corpus runs used valueless params that miss a SQLi the same command confirms with a value. |
+
+**Every external-binary wrapper in `_CONFIRMED_BY_TOOL` is in the zero list** (nuclei, dalfox,
+check_takeover, sqlmap). The tools Apolaki trusts MOST as confirmatory have collectively never
+confirmed anything.
+
+**One root cause, two chokepoints, both the SAME defect as Q-089/Q-090: the outcome is measured
+correctly and dropped at the return edge.**
+- `_cmd` captures `proc.returncode` into `_exit`, uses it only for the provenance record in its
+  `finally` block, and returns `(out, err)` without it. **No caller CAN check exit status.**
+- `_http` returns `status` and `error` honestly; **the callers do not read them.** This one is bigger:
+  it reaches all 21 pure-Python engines rather than the 14 that shell out. **3241 of 27222 corpus
+  dispatches (11.9%) could not have reached their target** - 1746 `https` fired at plaintext-only hosts
+  and 1495 with an empty host (`https:///`, a URL builder that lost its netloc). Every one was reported
+  as a completed scan.
+
+**The sharpest single case is `run_client_checks`:** it demonstrably WORKS and produced a live true
+positive on DVWA, yet 275 of its 348 runs were fired at URLs that never opened a socket. **Its zero
+histogram is not one phenomenon, it is two.** That is why a zero histogram is a SIGNATURE and never a
+verdict: `run_ssi`, `run_waf_bypass` and `run_sqli_structural` were reproduced live and are CORRECTLY
+QUIET.
+
+**I filed the original ticket with the wrong attribution** - I blamed `_cmd` for all 24, and 21 of the
+remaining 22 never shell out at all. The census signature was right; the cause was not. Corrected in
+`0f343aa`.
+
+**Nothing anywhere in the pipeline could tell a failed tool from a quiet one.** The log, the report and
+the ledger are byte-identical either way, which is how this survived 155 and 171 invocations unnoticed.
+
 ## ALL THREE CODEX GUARDS WERE UNFALSIFIABLE. Measured, not suspected.
 
 Codex shipped three guards closing I-4, I-5 and I-9, then became unavailable. Each was mutation-tested
