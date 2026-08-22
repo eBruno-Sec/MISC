@@ -32,6 +32,43 @@ reproducible release blockers.
 | I-9 | caps preserve highest-value ordering | ⏳ CLAIMED closed, NOT yet verified | never measured by us; guard `test_cap_ordering_invariant` 8 tests |
 | I-11 | reachable / framework-invoked / retained-with-reason | ❌ **44 vs ceiling 37** | pin held; three lanes declined to force it |
 
+## SHIP GATE IS RED AT HEAD `9962963`: 8 failed, 3546 passed, 11 skipped, 12 xfailed
+
+Both groups are diagnosed, both belong to the live I-5 lane, and **neither is a mystery**. Recorded
+here rather than quietly re-run, because a release record that only shows green is worth nothing.
+
+**Group 1 (4) - `test_external_tool_liveness.py`. FAILING BY DESIGN.** This is Q-092's GATE clause: the
+test that must fail before the fix. It goes green when `_cmd` returns the exit status on its return
+edge. The clearest one prints `assert (True, False) != (True, False)`. Three sibling controls PASS,
+which rules out a broken fixture, a wrong code path, and a fix that would just fail everything.
+
+**Group 2 (4) - `test_deadcode_gate.py`. A REAL ISLAND.**
+
+```
+assert ['tools._swallow'] == []
+AssertionError: qualified dead-code count rose to 40 (baseline 37)
+```
+
+Two symbols share the name. `ToolRegistry._swallow` (`tools.py:4095`) has **124 callers** via
+`self._swallow(...)`. The new module-level `tools._swallow` (`tools.py:56`), which uses an
+`_ACTIVE_REGISTRY` contextvar so module-level helpers can record without a registry instance, has
+**ZERO**. The wiring intended at `tools.py:3562` has not landed.
+
+**A recorder added to FIX silent failures, itself added without a caller.** Registration is not
+invocation, caught by the gate that exists for exactly that. The gate is working; do not work around
+it, and do not raise the baseline from 37.
+
+**Attribution was MEASURED, not assumed.** The audit lane suspected its own new test file - a plausible
+culprit, since an AST-walking dead-code gate could flag new module-level helpers - and ran the negative
+control: two `git archive` snapshots identical but for that file's presence, **4 failed either way**.
+Its file is innocent. That is the discipline this document exists to record.
+
+**DECISION PENDING (Coordinator).** Four hard failures on `main` block every other lane's ship gate.
+This project's established convention for "the fix is not in yet" is `xfail(strict=True)`, retired in
+the commit that fixes it, exactly as `_KNOWN_OPEN` did for Q-089/Q-090. Holding as hard failures while
+the I-5 lane is actively fixing `_cmd`; **if that lane does not land the fix this cycle, convert Group
+1 to strict xfail** so a real regression elsewhere stays visible instead of being lost in a red suite.
+
 ## RELEASE BLOCKER, CRITICAL: engines that never ran, reported as clean scans
 
 Chasing one stale queue question (Q-053 GAP-2, "why zero dalfox findings in 1783") opened the largest
