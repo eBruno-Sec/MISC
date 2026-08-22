@@ -1297,4 +1297,66 @@ Ordered by value, each traceable to a measurement above:
 7. **`run_github_recon` should not be scheduled while disabled** -- 320 ledger rows that scanned
    nothing.
 
+---
+
+# 19. SUITE STATE AT HEAD -- attribution of every red test, measured not assumed
+
+The Coordinator asked to be told which of my files is implicated if the suite came back red. It is
+red, **8 tests across two files, and only 4 of them are mine.**
+
+## 19.1 Mine: 4 failures, by design, in `tests/test_external_tool_liveness.py`
+
+```
+FAILED test_cmd_hands_back_the_exit_status
+FAILED test_cmd_reports_a_zero_exit_as_zero
+FAILED test_wrapper_reports_not_ran_when_the_tool_exits_nonzero
+FAILED test_a_failed_run_is_distinguishable_from_a_clean_run
+```
+
+This is Q-092's GATE clause working as specified. They go green when `_cmd` returns the exit status.
+The other 3 tests in the file pass. See section 13.
+
+## 19.2 NOT mine: 4 failures in `tests/test_deadcode_gate.py`, all naming `tools._swallow`
+
+`test_deadcode_gate.py` is a file this lane is forbidden to edit. **I did not assume the failures
+were someone else's -- I ran the negative control.**
+
+Two `git archive HEAD` snapshots (never `cp -r` of the working tree), identical except that one has
+my test file deleted:
+
+```
+SNAP A  = git archive HEAD, WITH tests/test_external_tool_liveness.py   (314 test files)
+SNAP B  = git archive HEAD, WITHOUT it                                  (313 test files)
+
+pytest tests/test_deadcode_gate.py on SNAP A -> 4 failed, exit 1
+pytest tests/test_deadcode_gate.py on SNAP B -> 4 failed, exit 1     <-- IDENTICAL
+```
+
+**The same four fail with my file and without it, so my file did not cause them.** The failures
+also never mention it; every one of the four names the same symbol:
+
+```
+test_no_flagged_entry_is_unaccounted_for
+    AssertionError: qualified dead-code count rose to 40 (baseline 37).
+    assert ['tools._swallow'] == []
+test_the_accounting_gate_catches_the_island_the_pinned_ratchet_swallows
+    AssertionError: the real tree must be accounted for before the island is added
+test_a_justification_written_for_one_module_does_not_excuse_another
+    assert ['security.build_error_xml', 'tools._swallow'] == ['security.build_error_xml']
+test_every_flagged_function_has_a_named_disposition
+    AssertionError: ... ['tools._swallow']
+```
+
+`tools._swallow` is the module-level swallow recorder added to `tools.py` by the **I-5 lane** (the
+`_ACTIVE_REGISTRY` change I read the diff of in section 1 and confirmed orthogonal to all 22
+wrappers). It is now at HEAD, and the deadcode gate flags it as an unaccounted island: registered,
+with no record of its disposition.
+
+**Owner: the I-5 lane, not this one.** The fix is theirs -- an entry in `TESTS_ONLY` or
+`RETAINED_PINNED_BY_TEST_CONTRACT`, or proof of a real caller. Worth noting that the gate is
+behaving exactly as designed here: a recorder added to fix silent failures was itself added without
+an accounted caller, and the guard caught it.
+
+**Net: HEAD is red 8 for these two files -- 4 mine and intended, 4 the I-5 lane's and unrelated.**
+
 
