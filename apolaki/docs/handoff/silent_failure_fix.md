@@ -3,6 +3,35 @@
 Lane opened 2026-08-21 from HEAD `66a7012` (verified green 3519 passed / 11 skipped /
 12 xfailed / 0 failed).
 
+## STATUS: all 15 fixed, plus the live instance routed in mid-lane
+
+| slice | what | commit |
+|-------|------|--------|
+| 0 | the 15 derived by AST and written down before any edit | `859e803` |
+| 1 | 12 ToolRegistry sites route through `self._swallow` | `5f50857` |
+| 2 | 3 module-level helpers + the executor boundary that would have made one an island | `196dfda` |
+| 3 | Q-091 dalfox: a live instance of this exact defect class, 171 invocations of evidence | `f9a8815` |
+| 4 | no-island check on all 11 recorder owners | `7871871` |
+
+Census movement, MEASURED at each step with the guard's own predicates:
+
+    literal-return load-bearing:  15 -> 3 -> 0
+    _swallowed optional:         388 -> 388 -> 387
+    swallow recorders:           160 -> 172 -> 176 -> 177   (losses: {} throughout)
+
+Ceilings were LOWERED three times and raised zero times. `_SWALLOW_RECORDERS` is a
+FLOOR, and raising it (14 new owners) is tightening, not loosening.
+
+23 new tests in `agent/tests/test_silent_failure_residue.py`, counted by running the
+file, not by counting `def`s:
+
+* **19 are kills** - measured RED against a `git archive HEAD` snapshot before the
+  matching fix, green after. 12 at slice 1, 4 at slice 2, 3 at slice 3.
+* **4 are CONTROLS** that pass on BOTH sides on purpose, and are labelled as such in
+  the file: the ContextVar propagation measurement, dalfox's `[{}]` staying a real
+  zero, dalfox JSONL still parsing, and the line-by-line mechanism proof. A control
+  that only passes after the fix is not a control.
+
 ## The defect this lane fixes
 
 `_swallowed()` in `agent/tests/test_silent_failure_invariant.py` applies `_constant()`
