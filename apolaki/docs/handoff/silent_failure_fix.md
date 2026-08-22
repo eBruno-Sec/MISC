@@ -524,6 +524,79 @@ None is inert. Two of the module-level three are additionally proven by END-TO-E
 through a real `ToolRegistry.execute(...)` dispatch (`run_dns`, `run_service_pack`) rather
 than by a call-graph argument.
 
+### Slice 6 - `tools._swallow` flagged as dead code, and the part of the report that was wrong
+
+The Coordinator reported `tools._swallow` as an island with **0 callers**, checked with a
+grep that excludes `self._swallow(` and `def _swallow(`. Resolution options offered were
+WIRE IT, REMOVE IT, or an accounting entry.
+
+**The premise was partly wrong, and I measured it before acting.** The same over-broad
+grep, run across ALL production modules instead of `tools.py` alone, finds three callers:
+
+    ./bie.py:1409             _tools._swallow(_apolaki_exc, "bie.session_fingerprint", "")
+    ./dns_recon.py:138        _tools._swallow(_apolaki_exc, "dns_recon.doh", ...)
+    ./enip_audit_tool.py:91   _tools._swallow(_apolaki_exc, "enip.list_identity_tcp", ...)
+
+They landed in slice 2 (`196dfda`) and each is proven live by an end-to-end test through a
+real `ToolRegistry.execute(...)` dispatch. So it was never dead code in the "no caller"
+sense, and REMOVE IT would have deleted a mechanism with three live users and broken those
+tests.
+
+**But the gate was still right to flag it, for a reason worth keeping.** Reading
+`deadcode_gate._module_bindings` (read-only; I hold no write on that file) shows
+`scan_qualified` resolves a caller ONLY through a resolved import - `import m as x` then
+`x.f`, or an assignment whose right-hand side is already a known module binding. My call
+sites did:
+
+    _tools = _sys.modules.get("tools")     # resolves to nothing, by design of the gate
+    if _tools is not None:
+        _tools._swallow(...)
+
+I chose `sys.modules.get` in slice 2 to avoid an import inside an exception handler. The
+cost, which I did not anticipate, is that a dynamically fetched module is invisible to
+static analysis, so a genuinely live recorder read as an island. **The gate was measuring
+what it says it measures; my wiring was the thing that could not be verified.**
+
+Fix (option 1, WIRE IT - properly this time): the three handlers now use
+`import tools as _tools`, a resolved import the gate can follow. Function-level, inside
+the handler, so no module-level dependency and no import cycle is created - `tools`
+imports `dns_recon` at module scope, and a module-level import back would have been a
+cycle. It is safe as a statement in an except handler because every path that can reach
+it is already running inside a `ToolRegistry` dispatch, so `tools` is in `sys.modules` and
+the statement is a dict lookup. The now-unused `import sys as _sys` was removed from all
+three modules so it would not become the next dead entry.
+
+MEASURED after the change, by running the gate itself rather than trusting the tests:
+
+    qualified unused count: 39
+    tools._swallow flagged: False
+    unaccounted entries: []
+
+No baseline was raised, no exemption added, and `deadcode_gate.py` was not edited. The
+count sitting at 39 against a baseline of 37 is not mine: every flagged entry is inside
+the gate's own recorded set, and none of the five module-level names this lane added
+(`_swallow`, `_cmd_failure`, `CmdResult`, `_dalfox_rows`, `_dalfox_finding`) appears in
+the flagged list.
+
+**Lesson worth carrying:** this lane's whole subject is recorders that exist but are not
+reached. I added one and wired it in a form no static check could confirm - the island
+pattern inside the fix for islands. "I have a test that proves it fires" and "a reader can
+verify it is reached" are different properties, and the second is the one a gate enforces.
+
+### The 6 `_cmd` sites that still do NOT check for failure, and why (Q-092)
+
+12 of the 18 sites now share `_cmd_failure`. The other 6 discard the error channel
+entirely (`out, _ = await self._cmd(...)`). Each was looked at rather than left unexamined:
+
+| site | disposition |
+|------|-------------|
+| `_run_metadata:1911` (exiftool) | **Correctly left alone.** A failed exiftool falls through to `upload_tool.extract_metadata`, a real native reader. The check genuinely still runs, so `ran=True` is the honest answer. Covered for visibility by the `_swallow` in `_cmd`. |
+| `_run_hash_crack` x4 (hashcat / john) | **Known remaining gap.** A crashed cracker reports "not cracked", which is a false negative of the same shape. Not fixed here because it is an offline convenience feature, not target testing, and widening this commit further was not asked for. Visible via the `_swallow` DEGRADED line but NOT yet `ran=False`. |
+| `_run_httpx:4296` | **Fixed.** It used `missing = err.startswith("__MISSING__")`; now `missing = bool(_cmd_failure(_cmd_r))`. |
+
+So the honest count is 13 of 18 sites consuming the failure signal, 1 correct by design,
+and 4 (`_run_hash_crack`) still owed. Stated rather than rounded up.
+
 ### Not fixed here, deliberately
 
 `_run_dalfox` findings still carry no `family` key, so they map to no ASVS objective

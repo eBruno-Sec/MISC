@@ -10,8 +10,6 @@ HERMES.
 from __future__ import annotations
 
 import re
-import sys as _sys                       # I-5: reach the orchestrator's swallow ledger without
-                                         # importing it (tools imports dns_recon, never the reverse)
 
 DOH_URL = "https://dns.google/resolve"
 _RTYPE = {"A": 1, "NS": 2, "CNAME": 5, "MX": 15, "TXT": 16, "AAAA": 28, "CAA": 257}
@@ -133,9 +131,14 @@ async def doh(name: str, rtype: str, timeout: int = 12) -> list:
         # I-5: [] is also "this name has no records of that type", which is precisely the
         # answer a subdomain-takeover or SPF/DMARC check reads as a healthy zone.  A DoH
         # transport failure must not be able to certify a domain as clean.
-        _tools = _sys.modules.get("tools")
-        if _tools is not None:
-            _tools._swallow(_apolaki_exc, "dns_recon.doh", "%s/%s" % (name, rtype))
+        # `import` rather than `sys.modules.get`: `deadcode_gate.scan_qualified`
+        # resolves a caller only through a RESOLVED import, and a module fetched
+        # dynamically resolves to nothing -- which is how this recorder read as dead
+        # while three live call sites pointed straight at it.  Safe as a statement in
+        # an except handler: every path that reaches here runs inside a ToolRegistry
+        # dispatch, so `tools` is already in sys.modules and this is a dict lookup.
+        import tools as _tools
+        _tools._swallow(_apolaki_exc, "dns_recon.doh", "%s/%s" % (name, rtype))
         return []
     return [a.get("data", "") for a in (data.get("Answer") or []) if a.get("type") == t]
 

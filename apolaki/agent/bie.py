@@ -29,8 +29,6 @@ from __future__ import annotations
 
 import browser_engine
 import re
-import sys as _sys                       # I-5: reach the orchestrator's swallow ledger without
-                                         # importing it (tools imports bie, never the reverse)
 
 # Response bodies are compared by the oracle and embedded in evidence -- bound both.
 _MAX_BODY = 6000
@@ -1404,9 +1402,14 @@ def session_fingerprint(context) -> dict:
         # I-5: {} is also what a persona with no cookies and no storage returns, so the
         # persona-swap proof would read a crashed fingerprint as "the two contexts were
         # identical" -- the exact claim this function exists to be able to refuse.
-        _tools = _sys.modules.get("tools")
-        if _tools is not None:
-            _tools._swallow(_apolaki_exc, "bie.session_fingerprint", "")
+        # `import` rather than `sys.modules.get`: `deadcode_gate.scan_qualified`
+        # resolves a caller only through a RESOLVED import, and a module fetched
+        # dynamically resolves to nothing -- which is how this recorder read as dead
+        # while three live call sites pointed straight at it.  Safe as a statement in
+        # an except handler: every path that reaches here runs inside a ToolRegistry
+        # dispatch, so `tools` is already in sys.modules and this is a dict lookup.
+        import tools as _tools
+        _tools._swallow(_apolaki_exc, "bie.session_fingerprint", "")
         return {}
 
 

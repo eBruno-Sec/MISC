@@ -19,8 +19,6 @@ from __future__ import annotations
 
 import socket
 import struct
-import sys as _sys                       # I-5: reach the orchestrator's swallow ledger without
-                                         # importing it (tools imports this module, never the reverse)
 
 _CMD_LIST_IDENTITY = 0x0063
 _ITEM_IDENTITY = 0x000C
@@ -86,9 +84,14 @@ def _list_identity_tcp(host: str, port: int, timeout: float) -> bytes:
     except Exception as _apolaki_exc:
         # I-5: b"" is also "no ENIP device answered", so a socket layer that blew up on the
         # scanning host reports the OT asset as absent rather than as unmeasured.
-        _tools = _sys.modules.get("tools")
-        if _tools is not None:
-            _tools._swallow(_apolaki_exc, "enip.list_identity_tcp", "%s:%s" % (host, port))
+        # `import` rather than `sys.modules.get`: `deadcode_gate.scan_qualified`
+        # resolves a caller only through a RESOLVED import, and a module fetched
+        # dynamically resolves to nothing -- which is how this recorder read as dead
+        # while three live call sites pointed straight at it.  Safe as a statement in
+        # an except handler: every path that reaches here runs inside a ToolRegistry
+        # dispatch, so `tools` is already in sys.modules and this is a dict lookup.
+        import tools as _tools
+        _tools._swallow(_apolaki_exc, "enip.list_identity_tcp", "%s:%s" % (host, port))
         return b""
 
 
