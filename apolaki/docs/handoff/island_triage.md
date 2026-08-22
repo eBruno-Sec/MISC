@@ -2077,3 +2077,34 @@ no exemption broadened, no test weakened.
 **I-11 stands at 39 against a ceiling of 37, `ok=False`, and that is the honest number.** The two-entry
 gap is write-set-limited and the patch to close it is written out in section 15.5. The 37 tests-only are
 not deletions.
+
+### 15.12 "Blocked" PROVED rather than asserted - 39 is this lane's floor, mechanically
+
+Six lanes have now reported the ratchet as stuck, each in prose. Prose is what this gate exists to
+distrust, so run 8 closes with the claim made decidable instead. Query, run against the live records:
+
+```
+TESTS_ONLY entries whose module AND every test file are in the write set : []
+TESTS_ONLY entries defined in a write-set production module              : []
+TESTS_ONLY entries tested ONLY by test_deadcode_gate.py                  : []
+distinct test files needed to close all 37: 30; in write set: NONE
+RETAINED pins: bench_all.scan_via_mission -> tests/test_rate_policy.py
+               hashid_tool.summarize      -> tests/test_cap_ordering_invariant.py
+```
+
+**Zero of the 39 flagged entries can be closed by a lane holding
+`deadcode_gate.py` / `exposure_tool.py` / `tests/test_deadcode_gate.py` / this document.** Not one of
+the 37 is defined in either production file this lane owns, not one is tested solely by the one test
+file it owns, and the 37 span **30 distinct test files of which none is in the write set**. Add the two
+pin files and closing I-11 completely requires **32 files, all owned elsewhere**.
+
+**This is the useful form of the finding.** "I could not move the number" invites the next lane to try
+again and burn a session rediscovering the same wall - which is what six lanes did. "The number cannot
+move from this write set, and here is the query that shows it, and here are the 32 files that would
+have to move" is schedulable. **The ratchet is not blocked by missing evidence or by difficulty; it is
+blocked by file ownership**, and that is a Coordinator decision rather than an engineering one.
+
+**And the one thing that must NOT be concluded from it.** The obvious escape - the count cannot move,
+so move the ceiling - is the single move every lane has refused, and it stays refused. `ok=False` at
+39/37 with a strict xfail is the invariant reporting the truth. A green suite bought by raising 37
+would report the same truth as a lie.
