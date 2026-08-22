@@ -674,3 +674,22 @@ None of `deadcode_gate.py`, `exposure_tool.py`, `tests/test_deadcode_gate.py`,
 `tests/test_external_tool_liveness.py`, `docs/QUEUE.md` or `docs/STATUS.md` was modified.
 The 8 tests those two guard files own went green by fixing production, not by editing
 them.
+
+### Instrument note: a counter that nearly reported 7 failures that do not exist
+
+A convenience waiter loop counted status markers with `tr -cd 'FE'` over the WHOLE gate
+output and printed `fail markers in progress: 7`, contradicting the 0 measured from the
+progress lines. Resolved by locating each character rather than trusting either number:
+
+    grep -nE '^[.sxXFE]+ *\[ *[0-9]+%\]' shipgate3.txt | grep -E '[FE]'
+    -> NONE - no progress line contains an F or E
+
+All 7 are letters inside deprecation-warning prose: "FastAPI", "Lifespan Events",
+"AbstractItemEncoder", "TYPE_MAP". The correct extraction restricts to progress lines
+(`^[.sxXFE]+ *\[ *N%\]`) before counting, and it agrees with `grep -c '^FAILED'` = 0,
+`grep -c '^ERROR'` = 0 and `SHIPGATE_EXIT=0`.
+
+Same family as `grep -c` counting LINES where `ast` counts NODES: a counter pointed at
+the wrong substrate produces a confident wrong number in whichever direction it happens
+to land. Here it would have been a false RED; the same loop could as easily have hidden a
+real one.
