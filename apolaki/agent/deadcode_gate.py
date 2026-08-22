@@ -625,9 +625,12 @@ QUALIFIED_Q077_REVEALED = frozenset({
 # nothing here is excused, and every member still counts toward the ratchet. It is the set an ACCOUNTING
 # CHECK subtracts, and that check exists because of a hole a reader will not otherwise see.
 #
-# **THE PIN IS A HOLE, MEASURED.** `test_the_ratchet_holds` is `xfail(strict=True)` while the count sits
-# at 51 against a ceiling of 37, so a count RISE cannot fail the suite -- the test fails either way and
-# the failure is the expected one. Mutation, on a copy of the real tree at HEAD:
+# **THE PIN IS A HOLE, MEASURED.** `test_the_ratchet_holds` is `xfail(strict=True)` for as long as the
+# count sits ABOVE the ceiling of 37 -- it was 51 when this was measured -- so a count RISE cannot fail
+# the suite: the test fails either way and the failure is the expected one. Stated as a CONDITION and
+# not as a number on purpose. The sentence "the count sits at 51" was left here in the present tense
+# through three lanes that took it to 40 and then 39, which is a live claim rotting inside the one file
+# whose whole job is to distrust prose. Mutation, on a copy of the real tree at the then-HEAD:
 #
 #   append `def summarize(rows)` to security.py -- an island whose name COLLIDES with
 #   hashid_tool.summarize and race_tool.summarize --> scan_qualified count 51 -> 52, ok False before
@@ -637,7 +640,8 @@ QUALIFIED_Q077_REVEALED = frozenset({
 # what it cannot see (`test_the_bare_name_scan_is_fooled_by_a_name_collision` proves that on a synthetic
 # tree; 90 function names in this codebase are defined in more than one module). So between the pin and
 # the collision there was NO gate on new dead code at all, for as long as the pin lasts -- and the pin
-# lasts until 14 islands in files other lanes own are closed.
+# lasts until the count reaches the ceiling. Every entry still above it is in a file some OTHER lane
+# owns, which is why the pin has outlived six lanes: it is not held open by missing evidence.
 #
 # The accounting check closes it WITHOUT touching a threshold: every flagged entry must be one someone
 # has already measured and written down. A brand-new island is in neither set, so it fails immediately,

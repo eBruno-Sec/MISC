@@ -1662,8 +1662,8 @@ Both diagnoses were written at the moment of being killed, after the apparatus h
 compromised, and both were wrong in a way that would have cost the next lane real time - one sends you
 hunting an encoding problem that does not exist, the other sends you editing a handler that is not
 there. **A dying lane's last paragraph is the least verified thing in its handoff and should be
-re-measured before it is acted on, not after.** Everything run 7 wrote from a clean frozen tree (§14.2
-through §14.7) re-measured correct; only the two claims made after the tear were false.
+re-measured before it is acted on, not after.** Everything run 7 wrote from a clean frozen tree
+(sections 14.2 through 14.7) re-measured correct; only the two claims made after the tear were false.
 
 ### 15.4 Apparatus for this run
 
@@ -1711,7 +1711,7 @@ tests/test_rate_policy.py:271  test_every_rate_policy_exemption_is_named_and_mat
 
 Delete the function and the count for `("bench_all.py", "scan_via_mission", "httpx.AsyncClient")` goes
 to **0**, which is `!= 1`, which is red. Note also that the one production mention,
-`main.py:1324`, is inside a **docstring** - prose describing a sweep, not a call. That is §14's
+`main.py:1324`, is inside a **docstring** - prose describing a sweep, not a call. That is section 14's
 declaration-versus-fact one more time and it is why a text search alone would have mis-scored this.
 
 **`hashid_tool.summarize` - RETAINED, pin re-derived and it is real.**
@@ -1730,6 +1730,52 @@ write-set-limited, and closing it costs one edit each in `tests/test_rate_policy
 `tests/test_cap_ordering_invariant.py` - files this lane may not touch. **The patch, for whoever
 owns them:** delete the function, then delete its contract row in the same commit. Neither table
 tolerates an orphan key, which is exactly why they are safe pins.
+
+**THE PATCH, WRITTEN OUT**, because the house rule for a change outside a lane's write set is to write
+it here rather than reach for the file. Each is two deletions that MUST be one commit; either half
+alone is red.
+
+*A. `hashid_tool.summarize` - the clean one, do this first.*
+
+```
+agent/hashid_tool.py:81-87        delete `def summarize(value: str) -> str:` and its 6-line body
+                                  (docstring, `cands = identify(value)`, the empty guard, `top = ...`,
+                                  `return top`)
+agent/tests/test_cap_ordering_invariant.py:202-203
+                                  delete the row ("hashid_tool.py", "summarize", "cands", "3") and its
+                                  reason string
+agent/deadcode_gate.py            move "hashid_tool.summarize" from RETAINED_PINNED_BY_TEST_CONTRACT
+                                  into REMOVED_NOT_WIRED with the proof; count 39 -> 38
+```
+
+No other caller exists, so nothing else moves. Do NOT skip the third step:
+`test_every_flagged_function_has_a_named_disposition` fails on a disposition naming a function that is
+no longer flagged, which is the record working.
+
+*B. `bench_all.scan_via_mission` - do NOT do this one blind.*
+
+```
+agent/bench_all.py:91-…           delete `async def scan_via_mission(...)`
+agent/tests/test_rate_policy.py:133-134
+                                  delete the exemption row and its reason
+agent/main.py:1324                the docstring claims the sweep "is driven by
+                                  bench_all.bench(reachable, scan_via_mission)". Deleting the function
+                                  makes a FALSE docstring into a false docstring about a function that
+                                  does not exist. Fix or delete the sentence in the same commit.
+agent/deadcode_gate.py            same disposition move; count 38 -> 37, ratchet ok True
+```
+
+**And at 37 the xfail XPASSES.** `test_the_ratchet_holds` is `xfail(strict=True)`, so a strict xpass is
+a FAILURE: the marker must be retired in the same commit that reaches 37, deliberately, not discovered
+from a red suite. Note also `test_the_baseline_is_not_slack` asserts `baseline - count <= 3`, so 34
+would force the ceiling DOWN. There are three of headroom left, not five.
+
+**The better option for B, and the one this document has recommended since section 13.** `bench_all.bench`
+(`bench_all.py:49`) is in `TESTS_ONLY` and is `scan_via_mission`'s only intended partner. Wiring the
+pair through the `/bench/run` endpoint that `main.py:1313` already advertises closes TWO entries and a
+false claim at once, and it is the only resolution here that adds capability instead of subtracting
+code. It also un-launders `bench_all.aggregate` out of `TRANSITIVE_ONLY`, which must be updated in the
+same change.
 
 ### 15.6 The 37 tests-only - NOT deletions, and what they actually are
 
@@ -1799,3 +1845,45 @@ It did not XPASS, so the pin is intact and was not silently satisfied.
 `ALLOWED_UNUSED` were not touched. `allowed` 18 -> 20 is run 7's two harness entry points
 (`tests_only_from_tree`, `tests_only_drift`) given named callers, not two entries excused - neither is
 in `RECORDED_QUALIFIED`.
+
+### 15.8 A NEW apparatus defect, first of its kind here: the shared git INDEX
+
+Run 7 lost a measurement to a shared working tree (section 14.10). Run 8 lost a **commit** to a shared
+**index**, which nothing in the house rules covers and which is worth more than the commit was.
+
+**What happened.** The four files were staged with `git add <named files>` - correctly, never
+`git add -A` - and the staged set was verified:
+
+```
+apolaki/agent/deadcode_gate.py            | 232 +
+apolaki/agent/exposure_tool.py            |   4 -
+apolaki/agent/tests/test_deadcode_gate.py | 183 +
+apolaki/docs/handoff/island_triage.md     | 517 +
+```
+
+The first `git commit` attempt then failed on a shell-syntax error (a PowerShell here-string passed to
+bash), leaving the files **staged but uncommitted** for the time it took to rewrite the message. In
+that window another lane ran its own `git commit`, and `git commit` commits **the index**, not that
+lane's files. All four landed inside `65bdb27 "Apolaki Q-092 CRITICAL: _cmd discards the exit code"`,
+alongside a `docs/QUEUE.md` change that had nothing to do with them.
+
+**The content is intact and verified** - `git diff HEAD` over the four files is empty, `def paths` is
+gone from `exposure_tool.py` at HEAD, and the new records are present. What was lost is the
+**rationale**: the evidence for a deletion and two disproofs now sit under a commit message about a
+different defect. Recoverable only because this document exists, which is the argument for the
+write-as-you-go rule stated as strongly as it can be stated.
+
+**Not repaired by rewriting history.** Five lanes are committing to this branch; a rebase or amend to
+reclaim the commit would rewrite shared history under them. The commit stands, this section is the
+pointer, and the correction is procedural.
+
+**The rule, which generalises past git.** `git add` and `git commit` are ONE operation, never two, and
+nothing may run between them. The index is process-global shared state that looks private, and the
+existing rule ("never `git add -A`", "stage named files only") guards the wrong half: it stops YOU
+from taking THEIR files, and says nothing about them taking YOURS. Prepare the message FIRST, to a
+file, then stage and commit in a single invocation. A staging window is a race window.
+
+**And the smaller lesson underneath it.** The failed first attempt used PowerShell here-string syntax
+(`@'...'@`) in the Bash tool, where it is a parse error. That is the mechanism that opened the window.
+Multi-line commit messages on this machine go through a file and `git commit -F`, not through shell
+quoting - the two shells' quoting rules differ, and getting it wrong costs more than a retry.
