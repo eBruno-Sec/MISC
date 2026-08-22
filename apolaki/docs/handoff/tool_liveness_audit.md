@@ -231,3 +231,142 @@ it does: `run_sqli` histogram `{0:1113, 1:83, 2:18}`.
 I did not find an ORDER-BY-style structural parameter on an authorized target, so I have proven the
 oracle sound and the transport sound but have NOT observed an end-to-end true positive. That is a
 gap in coverage, not evidence of a defect -- see section "RESIDUAL UNPROVEN" at the end.
+
+---
+
+## 6. `run_css_injection` -- 592 runs -- **CORRECTLY QUIET**
+
+Wrapper (currently `tools.py:10455`, see NOTE ON LINE NUMBERS below). Pure Python. Reflects
+`apolcss<tok>;--apolaki-<tok>:v<tok>;} :root{--apolaki-<tok>:v<tok>}` into each GET param and
+confirms only when it lands inside a `<style>` block or a `style="..."` attribute; a confirmation
+is then re-checked through a real Chromium CSSOM read.
+
+**Oracle positive control.** MEASURED, three cases:
+
+```
+css.evaluate('<style>.x{color:red} <payload> </style>', tok)
+   -> {'confirmed': True, 'where': 'style block',     'oracle': '...CSS structure unescaped'}
+css.evaluate('<div style="color:red;<payload>">x</div>', tok)
+   -> {'confirmed': True, 'where': 'style attribute', ...}
+css.evaluate('<body><payload></body>', tok)
+   -> {'confirmed': False, 'where': ''}
+```
+
+**Live transport control, DVWA reflected surface.** MEASURED:
+
+```
+GET http://dvwa/vulnerabilities/xss_r/?name=<css payload>   -> 200, 4427 bytes
+payload echoed in the response: True
+reflection context: '...</form>\r\n\t\t<pre>Hello apolcsse92ba7;--apolaki-e92ba7:...'
+css.evaluate(...) -> confirmed False
+```
+
+The payload round-trips intact and the oracle reads it, then correctly rules it out: the reflection
+is inside a `<pre>` text node, not a CSS context. That is the right answer -- CSS injection requires
+a CSS context, and DVWA reflects into HTML text.
+
+**VERDICT: CORRECTLY QUIET.** Transport proven, oracle proven, and it declines a reflection that is
+real but in the wrong context -- exactly the discrimination it exists to make. No patch needed.
+
+---
+
+## 7. `run_client_checks` -- 348 runs -- **CORRECTLY QUIET, and PROVEN CAPABLE end-to-end**
+
+Wrapper (currently `tools.py:9253`). Pure Python, PASSIVE. Two content checks: reverse tabnabbing
+(a cross-origin `target=_blank` link with no `rel=noopener`) and a permissive
+`crossdomain.xml` / `clientaccesspolicy.xml`.
+
+**This is the one that produced a live TRUE POSITIVE, and it doubles as the positive control for
+the entire audit harness.** MEASURED, the wrapper dispatched through the real
+`ToolRegistry.execute` path against an authenticated DVWA:
+
+```
+run_client_checks {"url": "http://dvwa/index.php"}   (Cookie: PHPSESSID=...; security=low)
+-> success=True  output='1 client/config finding(s)'  findings=1  error=None  swallowed=0
+   FINDING: "Reverse tabnabbing - target=_blank link without rel=noopener"
+            oracle: a target=_blank link to a different origin lacks rel=noopener/noreferrer
+```
+
+Raw corroboration of the same page: DVWA `/index.php` is 6721 bytes and contains **7**
+`target="_blank"` cross-origin links; `cc.reverse_tabnabbing` returns all 7
+(`virtualbox.org`, `vmware.com`, `apachefriends.org`, `itsecgames.com`, `sourceforge.net`,
+`irongeek.com`, `owasp.org`). Negative control: the same helper on a link carrying
+`rel="noopener"` returns `[]`.
+
+Why the corpus is zero anyway. MEASURED: `http://juice-shop:3000/` is 9903 bytes and contains
+**0** occurrences of `_blank`; the earlier live wrapper run there returned `0 client/config
+finding(s)`. The corpus is dominated by Juice Shop and API targets that have no such links.
+
+**Because this dispatch produced a NON-ZERO count through the ordinary path, the harness used for
+every other verdict in this document is proven able to see a positive.** A zero reported below is a
+measurement, not a broken rig.
+
+Secondary observation (an FP risk, NOT a cause of the zero, filed for the owning lane):
+`http://juice-shop:3000/crossdomain.xml` returns **200 with the SPA index HTML** (9903 bytes,
+starting `<!--\n  ~ Copyright (c) 2014-2026 Bjoern Kimminich...`), because Juice Shop's catch-all
+route serves `index.html` for unknown paths. The wrapper's guard is `if "<" in body and
+cc.crossdomain_wildcard(body, fn)`. `crossdomain_wildcard` returns False on this body so nothing
+fires today, but the `"<" in body` precondition is satisfied by ANY HTML page, so the only thing
+standing between a soft-404 and a fabricated cross-domain-policy finding is the wildcard matcher.
+A content-type / root-element check would be the durable guard.
+
+**VERDICT: CORRECTLY QUIET on the corpus targets, PROVEN CAPABLE on DVWA.** No patch needed for the
+zero. One hardening suggestion recorded above.
+
+---
+
+## 8. `run_form_nosqli` -- 482 runs -- **CORRECTLY QUIET (no Mongo-backed target in the fleet)**
+
+Wrapper (currently `tools.py:8674`). Pure Python. Baselines a login POST with a benign credential,
+then replaces both credential fields with MongoDB operator objects and confirms only on a real
+bypass (token issued / 200).
+
+**Oracle positive control.** MEASURED:
+
+```
+ns.AUTH_BYPASS_OPERATORS = [{'$ne': None}, {'$ne': ''}, {'$gt': ''}, {'$regex': '.*'}, {'$exists': True}]
+ns.auth_bypass_confirmed(401, '{"error":"invalid"}',
+                         200, '{"authentication":{"token":"eyJhbGciOiJIUzI1NiJ9.abc.def"}}')
+   -> {'signal': 'session/JWT token issued for an operator-injected credential', 'how': 'token'}
+ns.auth_bypass_confirmed(401, '...invalid...', 401, '...invalid...')   -> {}
+```
+
+**Live, Juice Shop `/rest/user/login`, every operator the engine sends.** MEASURED, raw:
+
+```
+baseline {"email":"bbh_x@test.invalid","password":"nope123"} -> 401,  26 bytes  'Invalid email or password.'
+{"email":{"$ne":null},   "password":{"$ne":null}}           -> 500, 2706 bytes  TypeError [ERR_INVALID_ARG_TYPE]
+{"email":{"$ne":""},     "password":{"$ne":""}}             -> 500, 2706 bytes  TypeError [ERR_INVALID_ARG_TYPE]
+{"email":{"$gt":""},     "password":{"$gt":""}}             -> 500, 2706 bytes  TypeError [ERR_INVALID_ARG_TYPE]
+{"email":{"$regex":".*"},"password":{"$regex":".*"}}        -> 500, 2706 bytes  TypeError [ERR_INVALID_ARG_TYPE]
+{"email":{"$exists":true},"password":{"$exists":true}}      -> 500, 2706 bytes  TypeError [ERR_INVALID_ARG_TYPE]
+auth_bypass_confirmed(...) on each -> False
+```
+
+The engine reaches the target, the target's behaviour changes markedly (401 -> 500), and the oracle
+still declines -- correctly. Juice Shop is Sequelize/SQLite, not MongoDB; no session was issued, so
+there was no auth bypass to report. A NoSQL auth-bypass engine reporting "confirmed" on a 500 would
+be a false positive.
+
+**VERDICT: CORRECTLY QUIET.** Transport and oracle both proven; no MongoDB-backed application exists
+in the authorized fleet, so the required positive can never occur there. 482 true negatives.
+
+Filed for a different lane (out of Q-092 scope, and a REAL missed finding): those five requests turn
+a login endpoint into an unhandled `TypeError` with a 2706-byte stack-trace error page. That is an
+unhandled-exception / verbose-error finding (CWE-248 / CWE-209) that no engine in this list claims,
+and `run_form_nosqli` is sitting on the evidence.
+
+---
+
+## 9. `run_nosqli` -- 342 runs -- see section 8's oracle; live below
+
+Wrapper (currently `tools.py:8597`). Pure Python. Query-string operator injection
+(`id[$ne]=`, `id[$regex]=`) with an error-signature stage and a boolean-differential stage against
+both a non-matching-value control and a missing-param control.
+
+The corpus output histogram is the informative part and it is NOT a precondition message:
+`tested 1 param(s), 0 confirmed` (202), `tested 2` (94), `tested 3` (23), `tested 4` (23). **Every
+one of the 342 runs reached the oracle with at least one parameter.** So this is oracle silence,
+not input starvation.
+
+**VERDICT: pending live differential -- see section 9b below.**
