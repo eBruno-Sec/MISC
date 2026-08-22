@@ -14,6 +14,47 @@ Authorized targets only: `juice-shop:3000`, `dvwa:80` on the `apolaki_default` d
 
 ---
 
+## SUMMARY -- all 22, classified, with the evidence that decided each
+
+| tool | runs | verdict | what decided it |
+|---|---|---|---|
+| `run_ssi` | 940 | CORRECTLY QUIET | payload round-trips on DVWA, oracle rules it reflected-not-executed; no SSI server in the fleet |
+| `run_waf_bypass` | 592 | CORRECTLY QUIET | requires a WAF to block the bare signature; no lab has one |
+| `run_sqli_structural` | 592 | CORRECTLY QUIET | param is a `LIKE` value context, not a query-structure context |
+| `run_css_injection` | 592 | CORRECTLY QUIET | payload reflects into a `<pre>`, not a CSS context; oracle correctly declines |
+| `run_form_nosqli` | 482 | CORRECTLY QUIET | all 5 operators sent live; Juice Shop is SQLite, no Mongo in the fleet |
+| `run_oauth` | 422 | CORRECTLY QUIET / positive UNTESTABLE | no OAuth authorization server on any authorized target |
+| **`run_client_checks`** | 348 | **73 QUIET + 275 NEVER RAN** | **live TRUE POSITIVE on DVWA; 275/348 fired at `https://` plaintext hosts** |
+| `run_nosqli` | 342 | CORRECTLY QUIET | reached its oracle every run; no Mongo-backed target exists |
+| `run_deserialization` | 335 | CORRECTLY QUIET | fires on a serialized blob when given one; no target passes serialized objects |
+| `run_github_recon` | 320 | **UNTESTABLE (disabled)** | 320/320 `Skipped - set BBH_GITHUB_TOKEN`; never made a request |
+| `run_form_cmdi` | 250 | CORRECTLY QUIET, PROVEN CAPABLE | live CONFIRMED cmdi on DVWA; 318/568 dispatches had NO HOST |
+| `run_upload_test` | 248 | CORRECTLY QUIET, PROVEN CAPABLE | live finding on DVWA upload; 318/566 dispatches had NO HOST |
+| `check_takeover` | 142 | CORRECTLY QUIET / positive UNTESTABLE | all 142 called with `{}`; no dangling CNAME exists in the fleet |
+| `run_session_token` | 82 | CORRECTLY QUIET | DVWA/VAmPI tokens are random; 71/82 unreachable by scheme |
+| `run_exposure` | 62 | CORRECTLY QUIET, PROVEN CAPABLE | live "Exposed phpinfo()" on DVWA |
+| `run_cache_poison` | 59 | CORRECTLY QUIET | no unkeyed-header reflection, no cache in front of the labs |
+| **`run_sqlmap`** | 58 | **BROKEN (x2)** | **exit 2 reported clean; 58/58 used valueless params and missed a SQLi the same command confirms with a value** |
+| **`run_path_sqli`** | 58 | **BROKEN BY TRANSPORT** | **finds a REAL CWE-89 on VAmPI; 55/58 fired at `https://` on a plaintext host** |
+| `run_llm_probe` | 46 | CORRECTLY QUIET (uninformative) | never exchanged a message with an LLM; both corpus paths are a soft-404 and a 500 |
+| `run_cache_deception` | 24 | CORRECTLY QUIET | ran the full variant sweep with a real session; no caching layer exists |
+| `run_ssrf` | 23 | CORRECTLY QUIET (uninformative) | 23/23 to one mangled URL, all params valueless; never saw a URL-fetching param |
+| `run_username_enum` | 15 | PRECONDITION NEVER MET | needs a known-good account; none supplied. 12/15 unreachable. Capability UNPROVEN |
+
+**Tally: 2 BROKEN, 1 split (73 quiet / 275 never ran), 1 UNTESTABLE-by-config, 1 precondition-never-met, 17 CORRECTLY QUIET.**
+
+**Zero BLIND.** Not one of the 22 has dalfox's defect -- a parser that can never yield a finding no
+matter what the tool emits. Every oracle I tested fired on a synthetic positive and stayed silent
+on a negative. **The dalfox/nuclei shape did not generalise, and that is a real result: it shrinks
+the suspected blast radius of Q-091/Q-092's parser class from 24 tools to the 2 already known.**
+
+**What DID generalise is a different defect**: 6 of the 22 are demonstrably working engines
+(`run_client_checks`, `run_form_cmdi`, `run_upload_test`, `run_exposure`, `run_deserialization`,
+`run_path_sqli` all produced live findings) whose zeros are dominated by dispatches that never
+reached a target. That is section 10 / proposed ticket Q-093.
+
+---
+
 ## 0. INSTRUMENT -- census reproduced before it was trusted
 
 MEASURED. Re-derived independently from the corpus, not copied from the ticket:
@@ -1194,5 +1235,66 @@ which is a separate targeting defect worth noting for whoever owns subdomain rec
 **Recommendation:** a tool that is 100% skipped across 320 invocations should not be scheduled at
 all, or the scheduler should surface "disabled" distinctly from "found nothing" -- it currently
 inflates the tool ledger with 320 rows that scanned nothing.
+
+---
+
+# 17. RESIDUAL UNPROVEN -- what this audit did NOT establish
+
+Recorded so nobody reads a verdict as stronger than its evidence.
+
+1. **`run_sqli_structural` has no observed end-to-end true positive.** Oracle proven on synthetic
+   bytes, transport proven live, but I found no ORDER-BY-style structural parameter on any
+   authorized target. CORRECTLY QUIET is the right verdict for the surfaces tested; "this engine
+   can catch a real structural SQLi" remains UNVERIFIED.
+2. **`run_waf_bypass`, `check_takeover`, `run_oauth`, `run_cache_poison`, `run_cache_deception`
+   have no constructible positive on an authorized target** -- they need, respectively, a WAF, a
+   dangling CNAME, an OAuth authorization server, an unkeyed-header cache and a caching layer.
+   None exists in the fleet. Their oracles are proven; their live capability is UNVERIFIED.
+3. **`run_username_enum` capability is UNPROVEN.** It has never run its differential in the corpus
+   or in this audit, because nothing supplies the known-good account it requires.
+4. **`run_github_recon` is untested by choice.** Enabling it needs a GitHub PAT and supplying
+   credentials is outside this lane's remit.
+5. **`run_llm_probe` has never spoken to an LLM.** Its zeros are uninformative, not wrong. Proving
+   it works needs a POST + authenticated exchange with Juice Shop's real chatbot, which I did not
+   perform.
+6. **`js-bench:3000` does not resolve today** (30 `run_sqlmap` dispatches, plus `run_form_cmdi` /
+   `run_upload_test` traffic). It was presumably a live compose alias when those missions ran, so
+   I classified those dispatches as "reachable scheme" and did NOT count them as unreachable. If
+   the alias was already dead then, the unreachable totals in section 10.4 are UNDERSTATED. I
+   cannot settle this retroactively and did not guess.
+7. **The corpus is historical.** Every verdict about WHY a tool was zero in the corpus rests on
+   `tool_call` inputs plus live reproduction of the same engine against the same host today. The
+   labs are the same containers (8 days' uptime), but I did not re-run the original missions.
+8. **`tools.py` changed under me mid-audit** (another lane added 42 lines of swallow-ledger
+   plumbing at `_ACTIVE_REGISTRY`, verified orthogonal to all 22 wrappers by reading the diff).
+   Line numbers cited in this document may drift; wrapper names will not.
+
+---
+
+# 18. WHAT THE OWNING LANES SHOULD TAKE FROM THIS
+
+Ordered by value, each traceable to a measurement above:
+
+1. **File Q-093** (section 14, verbatim). Two independent root causes: `_http` dropping the
+   transport outcome, and a URL builder emitting `https:///` and wrong-scheme URLs. Bigger blast
+   radius than Q-092 and it reaches all 21 pure-Python engines.
+2. **Fix `_cmd` per Q-092.** `agent/tests/test_external_tool_liveness.py` is the gate and 4 of its
+   7 tests fail today by design; the 3 controls that pass keep it honest.
+3. **`run_sqlmap` needs a SECOND fix Q-092 does not provide** (section 11.4): seed valueless
+   parameters with a benign observed-shaped value. Exit code 0 and the tool ran correctly, so no
+   exit-code fix will reach it.
+4. **Re-run the corpus after Q-093 lands.** Six engines are proven capable and were largely
+   pointed at unreachable URLs; `run_path_sqli` alone has a confirmed high-severity CWE-89 waiting
+   on VAmPI. The zero histogram should be re-measured after the fix, and any tool still at zero is
+   then a genuine lead rather than a signature.
+5. **`run_form_nosqli` is sitting on an unreported finding** (section 8): five operator payloads
+   turn Juice Shop's login into an unhandled `TypeError` with a 2706-byte stack trace
+   (CWE-248 / CWE-209). No engine in this list claims it.
+6. **`run_client_checks` crossdomain check has an FP risk** (section 7): its `"<" in body`
+   precondition is satisfied by any HTML soft-404, and Juice Shop serves the SPA index at
+   `/crossdomain.xml` with HTTP 200. Only the wildcard matcher currently prevents a fabricated
+   finding; a content-type / root-element check would be the durable guard.
+7. **`run_github_recon` should not be scheduled while disabled** -- 320 ledger rows that scanned
+   nothing.
 
 
