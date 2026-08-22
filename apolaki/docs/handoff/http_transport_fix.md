@@ -327,3 +327,132 @@ the `urls` list**, and it only fires on values containing `"://"` — so `{"targ
 ingress is a backstop with a hole rather than an active leak, but it should be made to reuse
 `planner.addressable_target` (now public for exactly this reason).
 
+---
+
+## 6. Brief item 4 — `_run_hash_crack`: the defect is REAL, and the fix is HELD with a reason
+
+`tools.py:2083 _run_hash_crack` has four `_cmd` call sites and **discards the outcome at all four**:
+
+```python
+await self._cmd(cmd, timeout=120)                     # the CRACK run -- result thrown away entirely
+out, _ = await self._cmd(cmd + ["--show"], timeout=30) # the SHOW  run -- err and exit_code discarded
+```
+
+If the crack run fails, `--show` returns nothing and the tool reports
+`success=True, "Not cracked with passwords-common (offline dictionary)"`. **"Not cracked" when the
+cracker never ran** — the identical false-clean, in the `_cmd` path Q-092 already gave a carrier for.
+
+**WHY I DID NOT SHIP THE OBVIOUS FIX.** MEASURED in the agent image:
+
+```
+$ docker run --rm apolaki-agent sh -c '...'
+hashcat=MISSING john=MISSING
+```
+
+Neither binary exists in this build, so `_run_hash_crack` always takes its
+`"Skipped — neither hashcat nor john installed"` branch and **no fix here can be verified in the
+real execution path**. Worse, the naive fix is WRONG:
+
+> **hashcat exits 1 for "exhausted" — ran perfectly, cracked nothing.** A plain
+> `_cmd_failure(result)` on the crack run would report NOT RUN on every honest failure-to-crack.
+
+That is exactly the shape of the first `_cmd` fix that four guards caught: a rule that looks right
+and fires on the wrong population. Shipping it unverifiable, against a binary that is not installed,
+on exit-code semantics I cannot test, would be a ceiling set by guesswork.
+
+**RECOMMENDED (for whoever has hashcat in the image):** only the marker-derived reasons from
+`_cmd_failure` (`__MISSING__` / `__BUDGET__` / `__EXIT__`) are exit-code-independent and safe to
+report as NOT RUN here. `__BUDGET__` is reachable today (`shutil.which` already gates the missing
+binary), and it is a genuine false-clean. The exit-code half needs hashcat present and its
+0/1/2/-1 semantics pinned in a test before it can be trusted.
+
+**UNVERIFIED, stated as such:** that `__BUDGET__` currently produces a "Not cracked" false-clean is
+inferred from reading the control flow, not reproduced — the binaries are absent, so the branch is
+unreachable in this build.
+
+---
+
+## 7. The consequence the ticket said made this urgent, MEASURED as fixed
+
+The audit's sharpest complaint was that the unreachable dispatches **were not hiding in an error
+table** — `agent.py:840` logs a `ToolResult` carrying an `error` as `tool_error`, everything else as
+`tool_result`, and "the 1687 unreachable dispatches sit in `tool_result` wearing a clean-scan
+summary."
+
+`run_path_sqli` is the case that cost a real vulnerability: it detects a genuine error-based SQLi on
+VAmPI, and the corpus fired it at `https://vampi:5000/...` for **55 of its 58 runs**. Same tool, same
+page, the two schemes, through the real `execute` on the snapshot of HEAD:
+
+```
+https://vampi:5000/books/v1/1   success=False  error='NO REQUEST COMPLETED: 3 request(s) attempted, 0 completed; ...'
+http://vampi:5000/books/v1/1    success=True   error=''
+```
+
+and the DURABLE row each one leaves — read straight back out of the sqlite log:
+
+```
+etype=tool_error    tool=run_path_sqli  error='NO REQUEST COMPLETED: 3 request(s) attempted, 0 completed;'
+etype=tool_result   tool=run_path_sqli  output='0 path-param SQLi finding(s)'
+```
+
+**The row type itself now differs.** That is the fix landing where the ticket said the damage was:
+the failure is in the error table, not wearing a clean summary. The placement is load-bearing — the
+verdict is applied after `_dispatch_engine` and BEFORE `_ledger_outcome`, because `_ledger_outcome`
+is what chooses `tool_error` vs `tool_result`.
+
+Root cause (B)'s own shape is visible through the same chokepoint now:
+
+```
+_http("https:///.well-known/ai-plugin.json") -> status=0
+    err="Request URL is missing an 'http://' or 'https://' protocol."
+```
+
+(A) does not stop that URL being built — (B) does — but any that survive are no longer silent.
+
+## 8. SHIP GATE
+
+Baseline to preserve: **3562 passed / 11 skipped / 12 xfailed / 0 failed.**
+
+Full suite with (A) only, working tree, `--network apolaki_default`:
+
+```
+FULLSUITE_EXIT=0
+passed=3571  skipped=11  xfailed=12  xpassed=0  FAILED=0  ERROR=0   (total 3594)
+```
+
+**3571 - 3562 = +9, exactly the 9 tests of `test_http_transport_outcome.py`. Skips and xfails
+unchanged. Nothing lost.** Counted off the progress characters, not off the summary line, which does
+not survive redirect here; `FAILED` counted with `grep -c '^FAILED'`, never `grep -c F` (the
+deprecation prose contains "FastAPI" and "Lifespan Events").
+
+---
+
+## 9. NO ISLANDS — is `_http` the only chokepoint, or one of several?
+
+If engines mostly used a DIFFERENT transport, instrumenting `_http` would be an island. Census in
+`tools.py`:
+
+```
+self._http(       110 call sites
+self._http_send(   34 call sites
+```
+
+Both exist, and they are **not** the same defect. MEASURED, same dead URL, on the HEAD snapshot:
+
+```
+_http      -> RETURNS a dict, status=0   (the failure arrives as DATA; no exception to catch)
+_http_send -> RAISES ConnectError        (the failure arrives as an EXCEPTION; the ledger can see it)
+```
+
+`_http_send` has no `try/except` around `c.request` — a transport failure propagates, so a caller
+that wraps it reaches `_swallow` and gets the existing `DEGRADED:` line. **`_http` is the one that
+converts a failure into a falsy value, and it is the one this ticket is about.** That is also why the
+audit measured 2 of 5 wrappers being saved by the ledger and 3 not: the split follows the transport,
+not the engine.
+
+So the chokepoint choice is the right one and it is not an island: `ToolRegistry.execute` dispatches
+via `getattr(self, "_" + tool_name)` and is the single door for both emitters (`CLAUDE_TOOLS` and
+internal `_exec_internal`), the tally is set there, and `_http` books into it from all 110 sites
+without any engine being edited. Proven by execution, not by registration: the live A/B in s3 and s7
+went through the real `execute`, and the durable `tool_error` row is the observable effect.
+
