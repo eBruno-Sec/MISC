@@ -8,8 +8,17 @@ Two root causes, tracked separately throughout. **Do not read a fix for (A) as a
 
 | | root cause | corpus dispatches | status |
 |---|---|---|---|
-| **A** | `_http` returns `{status:0, error, body:""}`; no caller reads `status`/`error`, so a dead connection == a clean page | 3241 unreachable of 27222 (11.9%) | IN PROGRESS |
-| **B** | a URL builder emits `https:///` — scheme, no netloc | 1495 | NOT STARTED |
+| **A** | `_http` returns `{status:0, error, body:""}`; no caller reads `status`/`error`, so a dead connection == a clean page | 3241 unreachable of 27222 (11.9%) | **FIXED** `c08db26` (gate `1d85fe3`) |
+| **B** | a URL builder emits `https:///` — scheme, no netloc | 1495 | **FIXED** `86c8dfb` (gate `8df4535`) |
+
+**Ship gate GREEN: 3581 passed / 11 skipped / 12 xfailed / 0 failed** on a `git archive HEAD`
+snapshot. Baseline 3562 + exactly the 19 new tests; nothing lost. Full evidence in s12.
+
+**(B) was NOT the historical artifact it reads as.** Q-019 looks like it already fixed the
+empty-netloc builder, and every one of the 1495 corpus dispatches does predate it — but driving the
+real `planner.next_batch` showed it still emitting `https:///static/b.js` today, through a target key
+that Q-019's guard, its test file, AND the executor ingress all skip. Read s4 before concluding
+anything about (B) from the code alone.
 
 ---
 
