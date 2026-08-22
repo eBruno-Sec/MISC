@@ -320,6 +320,31 @@ Census after slice 3:
 fewer censused swallow. Ratcheted rather than left slack, so that seat cannot be quietly
 refilled. `_SWALLOW_RECORDERS` floor gains `("tools.py", "_run_dalfox"): 1`.
 
+### No-island check on every recorder added by this lane (MEASURED)
+
+A recorder in an engine nothing dispatches is a declaration, not a fact. `_dispatch_engine`
+resolves `getattr(self, "_" + tool_name)`, so a method being absent from `CLAUDE_TOOLS`
+proves nothing on its own - the tool-name STRING has several emitters. Each owner was
+traced to a real one:
+
+| owner | reached by |
+|-------|-----------|
+| `_run_authz_matrix` | `agent.py:2502` `_exec_internal("run_authz_matrix", ...)`; `tools.py:441` permission map |
+| `_run_header_trust` | `agent.py:2813` `_exec_internal("run_header_trust", ...)`; `tools.py:435` |
+| `_run_encoded_cookie` | `agent.py:4065` `_run_tool("run_encoded_cookie", ...)`; `tools.py:336` |
+| `_test_numeric_abuse` | `packs.py:51` pack step; `agent.py:103` |
+| `_run_oauth` | `planner.py:987` `_step("run_oauth", ...)` |
+| `_run_race` | `agent.py:98`; `engine_descriptor.py:355` |
+| `_run_dalfox` | `planner.py:914` `_step("run_dalfox", ...)` |
+| `_socket_service_probe` | `tools.py:_run_service_pack` |
+| `_discover_params` | `tools.py:_run_xss`, `_run_dom_audit`, `_run_dom_trace`; `agent.py:_inject_sweep_surface` |
+| `_form_xss_browser_confirm` | `tools.py:_form_xss_emit` |
+| `_sqli_db_metadata` | `tools.py:_run_sqli` |
+
+None is inert. Two of the module-level three are additionally proven by END-TO-END tests
+through a real `ToolRegistry.execute(...)` dispatch (`run_dns`, `run_service_pack`) rather
+than by a call-graph argument.
+
 ### Not fixed here, deliberately
 
 `_run_dalfox` findings still carry no `family` key, so they map to no ASVS objective
