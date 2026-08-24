@@ -134,3 +134,95 @@ run_sqlmap          58 (100%)     ->  class A  BROKEN  (proven in the ticket)
 ```
 
 That is the deliverable: **the blast radius is the class-A rows, not the 81.2%.**
+
+---
+
+## 2. MEASURED: where the value is thrown away
+
+`observed_param_values` **already recovers the real value correctly**. `merge_observed_params`
+**then discards it.** MEASURED, container `apolaki-agent`, `planner` + `surface` at `ca475ae`:
+
+```
+urls = ["http://juice-shop:3000/rest/products/search?q",
+        "http://juice-shop:3000/rest/products/search?q=apple"]
+
+observed_param_values ->  {('juice-shop:3000', '/rest/products/search'): {'q': 'apple'}}
+inventory example     ->  http://juice-shop:3000/rest/products/search?q      params: ['q']
+merge_observed_params ->  http://juice-shop:3000/rest/products/search?q
+
+VERDICT: the observed value 'apple' is DISCARDED
+
+reversed crawl order  ->  http://juice-shop:3000/rest/products/search?q=apple
+```
+
+**The last line is the sharpest form of the defect: whether the whole mission probes a working URL
+or a dead one is decided by which URL the crawl happened to see first.**
+
+Mechanism, `planner.py:293 merge_observed_params`:
+
+```python
+pairs = parse_qsl(p.query, keep_blank_values=True)   # [('q', '')]
+have  = {k for k, _ in pairs}                        # {'q'}
+extra = [(k, values[k]) for k in sorted(values) if k not in have]   # []  <- 'apple' dropped
+```
+
+A parameter present with a **blank** value counts as "already have it". `observed_param_values`
+itself already runs the opposite rule internally — *"first observation wins, but a real value beats
+a blank one"* (`planner.py:286`) — so the fix is to make the two helpers agree, not to invent a
+new policy. **Nothing is synthesized: `values[k]` comes only from `observed_param_values(urls)`,
+which reads real crawled URLs and nothing else. A parameter never observed with a value stays
+blank.**
+
+### The second source, NOT fixed here — warm-start memory
+
+`memory.py:164` stores endpoints as `host/path?` + `"&".join(params)` — **names joined by `&`,
+no `=` at all**, which is the ticket's verbatim corpus shape (`?key&name`,
+`?callback&format&key`, `?EIO&sid&t&transport`). The comment says so outright: *"Keep the param
+NAMES on the stored endpoint (not values)"*. A warm start therefore re-seeds the surface
+valueless **by construction**, and no in-mission merge can recover a value that was never stored.
+Left alone in this lane: it changes a persisted format, and the in-mission fix above is
+independently correct and testable. **Filed here so it is not lost.**
+
+## 3. Two hypotheses of mine, MEASURED and DISPROVED
+
+Recorded because a disproved hypothesis shrinks the real blast radius, and because both would
+have produced a gate that lies.
+
+**DISPROVED #1 — "`_run_sqli` reports clean on juice-shop's search when handed `?q`".** It does
+not. MEASURED end-to-end against the live lab, `ToolRegistry._run_sqli`, both URLs:
+
+```
+.../rest/products/search?q         0.5s  findings=2 confirmed=2   error-based + union-extraction
+.../rest/products/search?q=apple   0.4s  findings=2 confirmed=2   error-based + union-extraction
+```
+
+Why: `sqli.ERROR_PROBES` is `["'", '"', "')", '"))', '`']`, and `?q=')` raises `SQLITE_ERROR`
+**even with a blank value**. My earlier single-payload measurement (`?q='` -> 200/30 bytes, no
+signature) tested one probe and I generalised from it. A mechanism reproduced is not a cause
+proven.
+
+**DISPROVED #2 — "the boolean oracle discriminates on this endpoint".** It does not, in either
+direction. MEASURED, all four contexts, both `orig` values:
+
+```
+orig=''       string-quote true=30 false=30 base=16572 -> analyze_boolean=False
+              string-comment true=942 false=942        -> False   (numeric, paren-quote: False)
+orig='apple'  string-quote true=30 false=30 base=  921 -> analyze_boolean=False
+              string-comment true=942 false=942        -> False   (numeric, paren-quote: False)
+```
+
+Juice-shop concatenates as `%'||q||'%`, so a boolean payload breaks the statement outright and
+both arms return the same 30-byte error object. **`/rest/products/search` is not a valid fixture
+for a boolean-oracle gate at all**, with or without a value.
+
+**What survives both disproofs:** the ticket's own sqlmap proof, which is about sqlmap's
+*dynamicity check* bailing before it injects — a mechanism internal to sqlmap that neither of the
+above touches. And this correction to my own classification:
+
+> **CORRECTION to the A-err row in section 1.** I wrote that the error oracle "SURVIVES" a blank
+> value. That is true of the *baseline* half (a wrong baseline is still an error-free baseline),
+> but **not** of the **A2 value-derived payload** half: `?q='` returns 200/30 bytes while
+> `?q=apple'` returns 500 with `SQLITE_ERROR`. Whether A-err survives is decided per endpoint by
+> whether *some* probe in `ERROR_PROBES` happens to break the statement with an empty prefix.
+> On juice-shop `')` does, so it survives **there**. That is a coincidence of this endpoint, not
+> a property of the oracle. **A-err is UNRELIABLE under a blank value, not immune.**
