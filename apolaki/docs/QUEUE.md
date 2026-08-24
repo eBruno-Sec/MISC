@@ -1478,6 +1478,40 @@ run observed.
 containing a claim of file or source exposure. Non-vacuity control: a genuine exposure finding must
 still emit exactly that line.
 
+### Q-099 · `findings_gate` FAILS OPEN in exactly the two states where scope is broken · **READY** · **HIGH**
+
+Surfaced as a residual by the Q-096/097/098 lane and confirmed by the Coordinator. The function returns
+`True` to BLOCK an out-of-scope finding, so every `return False` ADMITS it. There are two:
+
+```python
+if not _host_of(target):
+    return False          # findings_gate.py:93  "no host to judge -> admit (fail-open)"
+...
+except Exception:
+    return False          # findings_gate.py:104 "scope engine unavailable -> do not block"
+```
+
+**Both fail open precisely when scope is least trustworthy.** A target with no parseable host is exactly
+the Q-096 regex case. And since Q-096 made `load_manual` RAISE on an all-pattern scope, the second arm
+now catches that raise and admits every finding from a mission whose scope could not be built at all.
+
+**This is the wrong direction for this particular gate.** An engine failing closed loses a finding; a
+SCOPE gate failing open puts an out-of-scope finding in a report submitted to a bug bounty program.
+That is a program-rules violation and a reputational hit, not a missed bug. The comments show both were
+deliberate, so the fix is a decision to reverse, not a bug to patch quietly.
+
+**FIX:** unbuildable scope or unparseable target means REFUSE the finding and surface a mission-level
+error, following `main.py:3081` ("Unknown is not permission"). Do not silently admit.
+
+**GATE:** a mission whose scope cannot be built must emit ZERO findings, not all of them. Negative
+control: a well-formed scope must still admit every in-scope finding and block a genuinely out-of-scope
+one, or the fix has simply broken the gate in the other direction.
+
+**RELATED, needs the same decision:** `main.py:197 _scope_for()` now RAISES when reopening a stored
+all-pattern mission (such as the Shopify run that produced Q-096). That is the correct direction, but it
+means a historical mission may fail to open in the UI. Decide whether it should surface as a clean
+"this mission's scope was invalid" state rather than an exception.
+
 ### Q-095 · Param mining yields NAMES, not VALUES, and 81.2% of dispatches probe a valueless parameter · **READY** · **HIGH**
 
 **A baseline-dependent engine handed `?q` instead of `?q=apple` reports CLEAN on a genuinely
@@ -1800,7 +1834,15 @@ Two distinct malformations, both MEASURED in `logs.etype='tool_call'`:
 transport. Q-092's `_cmd` fix does NOT touch this: `_http`'s failures never reach a subprocess.
 Fixing one and calling the class closed would leave the larger half open.
 
-### Q-092 · `_cmd` discards the exit code, so a failed external tool is byte-identical to a clean scan · **READY** · **CRITICAL**
+### Q-092 · `_cmd` discards the exit code, so a failed external tool is byte-identical to a clean scan · **CLOSED** `5f50857` `196dfda` · **CRITICAL**
+
+**CLOSED.** Verified in code by the Coordinator at HEAD: `CmdResult` is a 2-length tuple subclass
+carrying `exit_code` on the return edge, and the single shared `_cmd_failure()` predicate is used at
+**13** sites. Every wrapper now distinguishes "the tool failed" from "the tool ran and found nothing".
+
+ORIGINAL TICKET FOLLOWS.
+
+### Q-092 (as filed)
 
 **Q-091 (dalfox) is not a one-off. It is one of at least 24.** This is the shared root cause, and it is
 one line.
@@ -1908,7 +1950,18 @@ what makes the remaining engines' real behaviour VISIBLE; it does not by itself 
 negative control is the one that matters: it must FAIL against today's `_cmd`, which cannot express the
 distinction at all.
 
-### Q-091 · dalfox has NEVER produced a finding: a JSONL parser reading JSON-array output · **READY** · **HIGH**
+### Q-091 · dalfox has NEVER produced a finding: a JSONL parser reading JSON-array output · **CLOSED** `f9a8815` · **HIGH**
+
+**CLOSED.** `_dalfox_rows(out)` returns `(rows, parse_error)`. A parse failure is RETURNED, never
+swallowed, and `_run_dalfox` answers `"dalfox output could not be parsed (N bytes) - this is NOT a
+clean result"` instead of `0 XSS signals`. The empty-dict filter is present: `{}` is dalfox's
+"nothing found" placeholder, so admitting it would have converted 171 silent zeros into 171 empty-dict
+FALSE POSITIVES. JSONL is still accepted, because a parser that understands only the one shape we
+happened to measure is this same defect rebuilt.
+
+ORIGINAL TICKET FOLLOWS.
+
+### Q-091 (as filed)
 
 **This closes Q-053 GAP-2, which was unfalsifiable as posed.** "Why are there zero dalfox findings in
 1783?" cannot be answered from the corpus. The answerable form is Q-050-shaped: does the producer
