@@ -1299,6 +1299,128 @@ call sites adopting `technique_status()`, which Q-012 already established and ne
 invented-id negative control passes; `/packs` and `/techniques` agree; the four markers XPASS and are
 retired in the commit that closes them.
 
+### Q-096 · The SCOPE REGEX is used as a target hostname, so a whole engagement can run without ever contacting the target · **READY** · **CRITICAL**
+
+**FOUND IN THE FIELD, not in a lab.** Operator ran a full deterministic assessment against the Shopify
+HackerOne program on 2026-08-24. **Apolaki never contacted Shopify once.** Report:
+`C:\Users\voice\Desktop\HackerOne\Shopify\target_full-det_20260824@0739PST.md`.
+
+Scope is stored as anchored regex patterns (`^.*\.shopify\.com$`). Something downstream feeds those
+PATTERNS to engines as if they were hostnames. The generated reproduction command is, verbatim:
+
+```bash
+curl -i -sS -k --path-as-is 'https://^.*\.shopifycs\.com$'
+```
+
+**A regex is a FILTER, not an address.** It can never resolve. Corroborating ledger rows from the same
+mission, all consistent with zero contact:
+
+```
+http_probe        failed   15 calls  [Errno -2] Name or service not known (same error x15)
+fetch_openapi     failed   30 calls  [Errno -2] Name or service not known (same error x30)
+run_httpx         executed  1 call   0 live hosts
+run_katana        executed 15 calls  0 crawled URLs   [insane: depth 5]
+run_subfinder     executed 15 calls  0 subdomains found
+run_crtsh         executed 15 calls  0 CT log entries
+Surface Urls: 0
+run_transport_posture -> {"ran": true, ..., "tls": {"reachable": false, ...}}
+```
+
+**The failure is self-amplifying.** Recon (`subfinder`, `crtsh`) is ALSO seeded with the regex, so it
+discovers nothing, so no real host ever enters the mission, so every later engine falls back to the
+only "target" string it was given: the pattern. One bad seed silently voids the entire engagement.
+
+**Note the two junk-but-nonzero rows**, which are their own small defect: `run_asn` reported
+`15 findings / 0 IP(s)` and `run_dns` reported `15 findings / SPF MISSING, DMARC MISSING, 0 CAA` for a
+hostname that does not exist. "SPF missing" on an unresolvable name is not a result.
+
+**FIX:** scope patterns must never be usable as a target. The target list comes from RESOLVED hosts
+discovered by recon or supplied explicitly by the operator, and scope is applied as a PREDICATE over
+those. A candidate target that is not a syntactically valid host must be refused at the ingress that
+builds the target list, not at the engine.
+
+**GATE:** feed a mission a regex-shaped scope with no explicit hosts and assert it dispatches ZERO
+active engines and reports a hard configuration error. The negative control matters as much: a mission
+given real resolvable hosts must be unaffected. Today the first case produces an 18-finding report.
+
+---
+
+### Q-097 · `_run_transport_posture` reports every security header MISSING when the connection never opened · **READY** · **CRITICAL**
+
+**This is Q-092/Q-093's defect family in a THIRD place, and it is the one that manufactures false
+positives rather than hiding true ones.** All 18 findings in the Shopify report are fabricated by it.
+
+`tools.py:3348` (in `_run_transport_posture`, defined at `tools.py:3326`):
+
+```python
+headers, set_cookies = {}, []
+try:
+    r, _ = await self._http_send("GET", origin + "/", {}, None, True)
+    headers = dict(r.headers or {})
+    ...
+except Exception as _apolaki_swallowed_2960:
+    self._swallow(_apolaki_swallowed_2960, 'tools:_run_transport_posture:2960', "")
+    pass
+```
+
+The connection fails, the exception is swallowed, **`headers` stays `{}`**, and the header analysis then
+runs against an empty dict and declares every protective header absent. **An empty dict from a dead
+socket is indistinguishable from a response that carried no headers.** Falsy default on the failure
+path, exactly like `r.get("body","") or ""` in Q-093.
+
+**ARITHMETIC PROOF that this produced all 18:** the emitter checks 6 headers (HSTS, CSP,
+X-Frame-Options, X-Content-Type-Options, Referrer-Policy, Permissions-Policy) and the mission carried 3
+pseudo-hosts. **6 x 3 = 18**, and `run_transport_posture` is the ONLY engine in the ledger with a
+nonzero finding count: `executed | 3 | 18`. Shopify does send HSTS, CSP and XFO in reality.
+
+**The signal to gate on is ALREADY MEASURED and ALREADY IGNORED.** `transport_posture.py:502` seeds
+`out["reachable"] = False` and `:513` sets it True only on a successful handshake. The mission's own
+stored result reads `"tls": {"reachable": false}` while emitting 18 header findings. **The outcome was
+measured correctly and not consulted** - the same sentence as `_cmd`, `_http`, Q-089 and Q-090.
+
+**Q-093's fix does NOT reach this.** That fix instrumented `_http`; this path goes through
+`_http_send` wrapped in its own `try/except`. The I-5 work does make the swallow VISIBLE in the ledger,
+but nothing gates finding emission on it. **Visibility is not enforcement.**
+
+**FIX:** no header finding may be emitted from a request that did not complete. When the GET fails,
+return `ran=False` naming the transport error, exactly as Q-093 did for `_http`. Absence of a response
+is not absence of a header.
+
+**GATE:** point the engine at an unresolvable host and assert ZERO findings plus `ran=False`. Negative
+control, and this is the half that makes it a real test: a live lab host that genuinely lacks a header
+must STILL produce that finding. A gate that only checks the dead case can be satisfied by an engine
+that never reports anything.
+
+**MINOR, while in here:** the swallow label reads `'tools:_run_transport_posture:2960'` but the call
+site is line **3359**. The label's line number is stale and will misdirect anyone grepping it.
+
+---
+
+### Q-098 · Evidence-graded impact text is bound to CWE, so a missing header claims a CONFIRMED file exposure · **READY** · **MEDIUM**
+
+Findings 11, 14 and 17 of the Shopify report are titled **"No Referrer-Policy"** and carry this body:
+
+> _What it is:_ Sensitive files or source are reachable directly over the web.
+> _Demonstrated:_ Confirmed on this target: a sensitive file/resource served directly over the web (a
+> control path 404s)
+> _Confidence:_ confirmed
+
+**None of that happened.** No file was served, no control path was probed, nothing was confirmed. The
+narrative is attached to **CWE-200**, which the Referrer-Policy check also uses, so an information-
+exposure story is glued onto a missing-header finding and stamped `confirmed`.
+
+This is the most reputationally dangerous item of the three: Q-096 and Q-097 produce findings that a
+careful reader can dismiss, but this one **asserts a demonstrated exposure that was never demonstrated**.
+Submitted to a program, it is a false claim of evidence.
+
+**FIX:** bind the evidence-graded impact block to the FINDING FAMILY that produced it, never to the CWE
+alone. A CWE is a taxonomy label shared by unrelated checks; it cannot carry a claim about what this
+run observed.
+
+**GATE:** assert that no finding whose family is `security_misconfig` can emit a `Demonstrated:` line
+containing a claim of file or source exposure. Non-vacuity control: a genuine exposure finding must
+still emit exactly that line.
+
 ### Q-095 · Param mining yields NAMES, not VALUES, and 81.2% of dispatches probe a valueless parameter · **READY** · **HIGH**
 
 **A baseline-dependent engine handed `?q` instead of `?q=apple` reports CLEAN on a genuinely
