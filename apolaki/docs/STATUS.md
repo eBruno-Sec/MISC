@@ -32,7 +32,32 @@ reproducible release blockers.
 | I-9 | caps preserve highest-value ordering | ⏳ CLAIMED closed, NOT yet verified | never measured by us; guard `test_cap_ordering_invariant` 8 tests |
 | I-11 | reachable / framework-invoked / retained-with-reason | ❌ **44 vs ceiling 37** | pin held; three lanes declined to force it |
 
-## SHIP GATE GREEN: 3581 passed, 11 skipped, 12 xfailed, 0 failed - Q-093 CLOSED
+## SHIP GATE GREEN: 3604 passed, 11 skipped, 12 xfailed, 0 failed - Q-096/Q-097/Q-098 CLOSED
+
+Independently verified by the Coordinator on a clean `git archive HEAD` snapshot on `apolaki_default`.
+Baseline 3581 + exactly the 23 tests these tickets added; no skip, xfail or ceiling moved.
+
+**These three came from a REAL engagement, not a lab.** A full deterministic assessment ran against the
+Shopify HackerOne program and produced 18 findings without ever opening a socket to Shopify.
+
+**The scope predicate was INVERTED.** Measured either side of the fix: the regex validated against
+itself as `True` while a genuine `www.shopify.com` returned `False`. A real in-scope host was BLOCKED.
+No path existed for that engagement to reach the target even had recon worked.
+
+**The engine said so in its own output and was ignored.** On the dead path `res.output` read
+`DEGRADED: 3 load-bearing check(s) failed to execute`, and the 18 findings were emitted anyway. The I-5
+work had made the swallow visible; nothing gated emission on it. **Visibility is not enforcement** - the
+sharpest statement yet of why a recorded failure is not a handled one.
+
+**Both other tickets were larger than filed.** Q-098 was 24 family+CWE pairs, not one, the worst being
+`base64_param` + CWE-89 inheriting a *"confirmed injectable parameter"* claim. Q-096's real scope was
+the inversion above.
+
+**A guard caught the fix.** `test_silent_failure_invariant` went red at `388 <= 387` when the lane added
+a `try/except`; the ceiling was not raised, the design changed. The lane then self-reviewed its own diff
+and found THREE more instances of the defect it was fixing.
+
+### Previously (Q-093 cycle): 3581 passed
 
 Independently verified by the Coordinator on a clean `git archive HEAD` snapshot on `apolaki_default`.
 Q-093 closed both root causes with 0 engines edited, each gate filed RED before its fix.

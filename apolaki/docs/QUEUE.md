@@ -1299,7 +1299,32 @@ call sites adopting `technique_status()`, which Q-012 already established and ne
 invented-id negative control passes; `/packs` and `/techniques` agree; the four markers XPASS and are
 retired in the commit that closes them.
 
-### Q-096 · The SCOPE REGEX is used as a target hostname, so a whole engagement can run without ever contacting the target · **READY** · **CRITICAL**
+### Q-096 · The SCOPE REGEX is used as a target hostname, so a whole engagement can run without ever contacting the target · **CLOSED** `a28e7bd` `dde4023` · **CRITICAL**
+
+**CLOSED, and the defect was WORSE than this ticket stated.** Verified by the Coordinator on
+snapshots either side of the fix:
+
+```
+BEFORE 08158c2   validate('https://^.*\.shopify\.com$')  -> True    (the regex matches itself)
+                 validate('https://www.shopify.com')      -> False   (a REAL Shopify host, BLOCKED)
+                 base_urls()  -> ['https://^.*\.shopify\.com$']
+AFTER  HEAD      load_manual RAISES ScopeConfigurationError
+```
+
+**The predicate was INVERTED, not merely leaky.** This ticket said the regex was used as a target; the
+other half is that a genuine in-scope host was REFUSED. There was no path by which that engagement
+could have reached Shopify even had recon worked.
+
+Patterns are now typed `pattern` and held in `in_scope_patterns`, absent from `in_scope`. That one move
+fixes all three `agent.py` drivers that read `in_scope` as a target list (including `:3758`, the recon
+roots) **without editing `agent.py`**, and it is why the junk `run_asn` / `run_dns` rows stop too.
+Patterns still match, now as anchored `re.fullmatch`. `base_urls()` / `base_map()` moved from a negative
+filter to a positive one. An all-pattern scope raises at `load_manual`, following the discipline already
+written at `main.py:3081`: "Unknown is not permission".
+
+ORIGINAL TICKET FOLLOWS.
+
+### Q-096 (as filed)
 
 **FOUND IN THE FIELD, not in a lab.** Operator ran a full deterministic assessment against the Shopify
 HackerOne program on 2026-08-24. **Apolaki never contacted Shopify once.** Report:
@@ -1345,7 +1370,23 @@ given real resolvable hosts must be unaffected. Today the first case produces an
 
 ---
 
-### Q-097 · `_run_transport_posture` reports every security header MISSING when the connection never opened · **READY** · **CRITICAL**
+### Q-097 · `_run_transport_posture` reports every security header MISSING when the connection never opened · **CLOSED** `d199364` `b6e524d` · **CRITICAL**
+
+**CLOSED.** `transport_posture.findings_for` gained `http_observed` (default `True`, so a real response
+with no headers still reports all six), and `_run_transport_posture` now records `http_ok` / `http_err`
+in the `except` that previously only swallowed. Neither channel observed means `ran=False`, zero
+findings, and an error naming the transport cause. TLS reachable but the GET failed is handled as its
+own case: TLS/cert findings stand, cookie/header/method findings are withheld, and the summary says
+which half is missing. All three stale swallow labels fixed (this ticket named one).
+
+**The gate surfaced evidence this ticket did not have.** On the dead path `res.output` literally read
+`DEGRADED: 3 load-bearing check(s) failed to execute; latest=... {"ran": true...}`. **The dispatch knew
+all three calls had died, said so in its own output, and emitted the findings anyway.** Visibility
+without enforcement, stated in the engine's own words.
+
+ORIGINAL TICKET FOLLOWS.
+
+### Q-097 (as filed)
 
 **This is Q-092/Q-093's defect family in a THIRD place, and it is the one that manufactures false
 positives rather than hiding true ones.** All 18 findings in the Shopify report are fabricated by it.
@@ -1396,7 +1437,23 @@ site is line **3359**. The label's line number is stale and will misdirect anyon
 
 ---
 
-### Q-098 · Evidence-graded impact text is bound to CWE, so a missing header claims a CONFIRMED file exposure · **READY** · **MEDIUM**
+### Q-098 · Evidence-graded impact text is bound to CWE, so a missing header claims a CONFIRMED file exposure · **CLOSED** `0d207ad` `be19e0f` · **MEDIUM**
+
+**CLOSED, and it was 24 instances rather than the one this ticket named.** The impact block now binds
+to `_graded_family`: a declared family is authoritative (optionally through a small curated
+`_FAMILY_ALIAS`), and the CWE map is consulted only when no family is declared.
+
+**MEASURED: 24 family+CWE pairs took the old path.** The worst was `base64_param` + CWE-89 inheriting
+*"Confirmed on this target: an injectable parameter confirmed by a control-vs-payload differential"*.
+Not fixed by deletion: `security_misconfig` got its own entry whose unverified slot says the thing the
+defect denied.
+
+Diagnostic that makes this checkable: Referrer-Policy is the ONLY one of the six header rules mapped to
+CWE-200, which is exactly why the field report carried three of these and not eighteen.
+
+ORIGINAL TICKET FOLLOWS.
+
+### Q-098 (as filed)
 
 Findings 11, 14 and 17 of the Shopify report are titled **"No Referrer-Policy"** and carry this body:
 
