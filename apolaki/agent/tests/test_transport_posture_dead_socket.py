@@ -124,6 +124,19 @@ def _dispatch(reg, inp: dict):
         reg.execute("run_transport_posture", inp, "s-q097"))
 
 
+def _summary(res) -> dict:
+    """The engine's JSON summary out of `res.output`.
+
+    `execute()` prefixes a real, load-bearing string when calls were swallowed --
+    `DEGRADED: 3 load-bearing check(s) failed to execute; latest=tools:_run_transport_posture:3380`
+    -- so the output is not pure JSON on the dead path. That prefix is the I-5 visibility work and is
+    exactly the evidence that the failure WAS known while the findings were emitted anyway.
+    """
+    out = res.output or ""
+    i = out.find("{")
+    return json.loads(out[i:]) if i >= 0 else {}
+
+
 def _header_ids(res) -> set:
     """The header-family finding ids on a ToolResult. `finding()` stores the rule id at tags[2]."""
     out = set()
@@ -153,7 +166,7 @@ def test_a_dead_socket_emits_no_header_findings_and_reports_ran_false(monkeypatc
     assert not res.findings, (
         "a socket that never opened produced findings: %r" % ([f.get("title") for f in res.findings],))
 
-    summary = json.loads(res.output or "{}")
+    summary = _summary(res)
     assert summary.get("ran") is False, (
         "the engine reported a completed run over a dead socket: %r" % (summary,))
     assert DEAD_ERR in json.dumps(summary) or DEAD_ERR in (res.error or ""), (
@@ -193,7 +206,7 @@ def test_a_live_page_that_genuinely_lacks_a_header_still_reports_it(monkeypatch)
         "a page that really sends no CSP stopped being reported -- the fix silenced the engine "
         "instead of gating it: %r" % (sorted(got),))
     assert "header_missing_referrer_policy" in got, sorted(got)
-    assert json.loads(res.output or "{}").get("ran") is True
+    assert _summary(res).get("ran") is True
 
 
 def test_a_live_page_that_sends_the_headers_is_not_accused_of_missing_them(monkeypatch):
@@ -233,7 +246,7 @@ def test_live_lab_reports_the_headers_it_lacks_and_withholds_the_ones_it_sends()
     Content-Security-Policy nor Referrer-Policy. One response therefore proves both directions."""
     _fresh("q097-live")
     res = _dispatch(_registry("q097-live"), {"url": ORIGIN + "/"})
-    summary = json.loads(res.output or "{}")
+    summary = _summary(res)
     assert summary.get("ran") is True, summary
     got = _header_ids(res)
     assert "header_missing_csp" in got and "header_missing_referrer_policy" in got, sorted(got)

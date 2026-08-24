@@ -432,8 +432,16 @@ def _impact_for(iid: str, target: str) -> str:
 def findings_for(target: str, *, protocols=None, cipher: str = "", cert: dict = None, hostname: str = "",
                  key_bits: int = 0, set_cookies=None, headers: dict = None, is_https: bool = False,
                  allow_header: str = "", trace_status: int = 0, trace_body: str = "",
-                 trace_marker: str = "", now=None) -> list:
-    """Every posture finding for one target, from already-collected observations. Pure."""
+                 trace_marker: str = "", http_observed: bool = True, now=None) -> list:
+    """Every posture finding for one target, from already-collected observations. Pure.
+
+    Q-097: `http_observed` is the caller stating whether an HTTP response was ACTUALLY RECEIVED.
+    `headers={}` means "a response arrived and carried no protective headers" and must still be
+    reported; `http_observed=False` means no response arrived at all, and an absence cannot be
+    observed in something that never existed. Those two were the same value here, which is how a
+    field mission emitted 18 missing-header findings against a host it never reached. Defaults True
+    so every existing caller keeps its meaning; only a caller that KNOWS its request died says False.
+    """
     out = []
     pg = analyze_protocols(protocols or {})
     if pg["discriminating"]:
@@ -452,12 +460,16 @@ def findings_for(target: str, *, protocols=None, cipher: str = "", cert: dict = 
                            target, kind="tls", evidence="negotiated cipher: %s" % cipher))
     for iss in analyze_certificate(cert or {}, hostname, now=now, key_bits=key_bits):
         out.append(finding(iss, target, kind="cert"))
-    for iss in analyze_cookies(set_cookies or [], is_https=is_https):
-        out.append(finding(iss, target, kind="cookie"))
-    for iss in analyze_cookie_scope(set_cookies or [], host=hostname):
-        out.append(finding(iss, target, kind="cookie"))
-    for iss in analyze_security_headers(headers or {}, is_https=is_https):
-        out.append(finding(iss, target, kind="header"))
+    # Everything below this line is read off ONE HTTP response. With no response there is no
+    # observation to grade, and `analyze_security_headers({})` would otherwise report all six
+    # protective headers absent from a socket that never opened.
+    if http_observed:
+        for iss in analyze_cookies(set_cookies or [], is_https=is_https):
+            out.append(finding(iss, target, kind="cookie"))
+        for iss in analyze_cookie_scope(set_cookies or [], host=hostname):
+            out.append(finding(iss, target, kind="cookie"))
+        for iss in analyze_security_headers(headers or {}, is_https=is_https):
+            out.append(finding(iss, target, kind="header"))
     for iss in analyze_methods(allow_header, trace_status=trace_status, trace_body=trace_body,
                                trace_marker=trace_marker):
         out.append(finding(iss, target, kind="methods"))

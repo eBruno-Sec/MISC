@@ -107,7 +107,66 @@ The three controls that pass at HEAD:
 
 ### The fix
 
-STATUS: in progress.
+Two files, one idea: **an absence can only be observed in something that arrived.**
+
+1. `agent/transport_posture.py:findings_for` gains `http_observed: bool = True`. When it is False the
+   cookie, protective-header and method analyses are not run at all. The default preserves every
+   existing caller — `headers={}` still means "a response arrived carrying no protective headers" and
+   still reports all six. The two states were previously the same VALUE; now they are different
+   ARGUMENTS.
+2. `agent/tools.py:_run_transport_posture` records `http_ok` / `http_err` in the `except` that
+   previously only swallowed, and passes `http_observed=http_ok` down.
+   - **Neither channel observed** (HTTP GET failed AND the TLS handshake was not reachable):
+     `ran=False`, zero findings, `success=False`, and `error` naming the transport cause. This is the
+     Shopify case.
+   - **TLS reachable but the GET failed**: the TLS/certificate findings are real evidence and stay;
+     the cookie/header/method half is WITHHELD and the summary says so. Silence about the whole origin
+     would have thrown away a genuine observation.
+
+`tls_reachable` is now read from the probe into the branch, so the flag that was already measured at
+`transport_posture.py:502/513` and printed into `"tls": {"reachable": false}` finally decides
+something.
+
+**Stale swallow labels fixed** — the ticket names one, there were three, all in this function:
+`:2960 -> :3367`, `:2967 -> :3374`, `:2972 -> :3380` (the true `self._swallow` call-site lines).
+
+**Something the RED gate turned up that the ticket did not have.** The engine's own `res.output` on the
+dead path begins:
+
+```
+DEGRADED: 3 load-bearing check(s) failed to execute; latest=tools:_run_transport_posture:2972 {"ran": ...
+```
+
+The dispatch KNEW all three of its calls had died, said so in its own output string, and emitted five
+missing-header findings underneath that sentence with `success=True`. That is the ticket's "visibility
+is not enforcement" in a single artifact, and it is now recorded in the test's `_summary()` helper so
+the next reader does not have to rediscover it.
+
+### MEASURED after the fix
+
+```
+$ docker run --rm --network apolaki_default -v ".../agent:/app" -w /app apolaki-agent \
+    python -m pytest tests/test_transport_posture_dead_socket.py tests/test_transport_posture.py \
+      tests/test_asvs_transport_config_objective.py tests/test_silent_failure_invariant.py \
+      tests/test_deadcode_gate.py tests/test_oracle_properties.py \
+      tests/test_ledger_negative_result.py tests/test_arsenal_errored_class.py \
+      tests/test_scope_origin_carry.py tests/test_sqli_stability.py -p no:cacheprovider -q
+EXIT=0     (176 tests, 1 xfail, 0 failed)
+```
+
+The gate file went `FF...` -> `.....`, and the three guards named in the house rules
+(`test_deadcode_gate`, `test_silent_failure_invariant`, plus `test_external_tool_liveness` in the full
+run) were not edited.
+
+**A note on the first baseline run, so the record is honest.** The lane's opening full-suite baseline
+was started against the LIVE working tree and then I edited `tools.py` while it was still running. It
+finished `1 failed` on `test_sqli_stability.py::test_every_shipping_boolean_call_supplies_the_reference_sample`
+— a source-reading guard that read a half-edited `tools.py`. Re-run against the settled tree: PASSES
+(included in the command above). **That failure was my own torn read, not a regression**, and the
+lesson is the same one `git archive emits CRLF` taught: a mid-flight snapshot of a shared tree is not
+a measurement. Subsequent full-suite runs are started only when the tree is settled.
+
+---
 
 ---
 

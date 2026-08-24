@@ -3347,46 +3347,75 @@ class ToolRegistry:
             probe = await asyncio.get_event_loop().run_in_executor(None, _tp.probe_tls, host, int(port))
         # GET for cookies + protective headers
         headers, set_cookies = {}, []
+        # Q-097: whether a response ACTUALLY ARRIVED is a separate fact from what it contained. It was
+        # not recorded, so `headers == {}` from a dead socket was byte-identical to a page that sent no
+        # protective headers, and the emitter reported all six absent. `_http_send` RAISES on transport
+        # failure (unlike `_http`, which returns the honest `{"status": 0}` dict Q-093 books), and the
+        # raise is caught right here -- which is why Q-093's chokepoint never saw this path.
+        http_ok, http_err = False, ""
         try:
             r, _ = await self._http_send("GET", origin + "/", {}, None, True)
+            http_ok = True
             headers = dict(r.headers or {})
             try:                       # multi-valued Set-Cookie must not collapse to one
                 set_cookies = list(r.headers.get_list("set-cookie"))
             except Exception:
                 sc = r.headers.get("set-cookie")
                 set_cookies = [sc] if sc else []
-        except Exception as _apolaki_swallowed_2960:
-            self._swallow(_apolaki_swallowed_2960, 'tools:_run_transport_posture:2960', "")
-            pass
+        except Exception as _apolaki_swallowed_3367:
+            http_err = str(_apolaki_swallowed_3367) or _apolaki_swallowed_3367.__class__.__name__
+            self._swallow(_apolaki_swallowed_3367, 'tools:_run_transport_posture:3367', "")
         allow, trace_status, trace_body = "", 0, ""
         marker = _tp.trace_marker()
         try:
             ro, _ = await self._http_send("OPTIONS", origin + "/", {}, None, True)
             allow = (ro.headers or {}).get("allow", "") or (ro.headers or {}).get("Allow", "")
-        except Exception as _apolaki_swallowed_2967:
-            self._swallow(_apolaki_swallowed_2967, 'tools:_run_transport_posture:2967', "")
+        except Exception as _apolaki_swallowed_3374:
+            self._swallow(_apolaki_swallowed_3374, 'tools:_run_transport_posture:3374', "")
             pass
         try:                            # TRACE is a safe, non-state-changing echo
             rt, _ = await self._http_send("TRACE", origin + "/", {"X-Apolaki-Probe": marker}, None, True)
             trace_status, trace_body = rt.status_code, (rt.text or "")
-        except Exception as _apolaki_swallowed_2972:
-            self._swallow(_apolaki_swallowed_2972, 'tools:_run_transport_posture:2972', "")
+        except Exception as _apolaki_swallowed_3380:
+            self._swallow(_apolaki_swallowed_3380, 'tools:_run_transport_posture:3380', "")
             pass
+
+        # Q-097: the two observation channels are independent -- the TLS handshake and the HTTP
+        # response. When NEITHER completed, nothing about this origin was observed, and the honest
+        # answer is `ran=False` naming the transport error rather than a report full of absences.
+        tls_reachable = bool(probe.get("reachable", False))
+        if not http_ok and not tls_reachable:
+            why = "no response from %s (%s)" % (origin, http_err or "transport failure")
+            dead = {"ran": False, "origin": origin, "https": is_https, "note": why,
+                    "tls": {"reachable": False, "negotiated": "", "cipher": "", "protocols": {},
+                            "note": probe.get("note", "")},
+                    "http_observed": False, "cookies_seen": 0, "allow": "",
+                    "findings": 0, "leads": 0, "lead_findings": []}
+            return ToolResult("transport_posture", origin, False, json.dumps(dead), [], why)
 
         findings = _tp.findings_for(origin, protocols=probe.get("protocols"),
                                     cipher=probe.get("cipher", ""), cert=probe.get("cert"),
                                     hostname=host, key_bits=probe.get("key_bits", 0),
                                     set_cookies=set_cookies, headers=headers, is_https=is_https,
                                     allow_header=allow, trace_status=trace_status,
-                                    trace_body=trace_body, trace_marker=marker)
+                                    trace_body=trace_body, trace_marker=marker,
+                                    http_observed=http_ok)
         confirmed = [f for f in findings if f.get("confidence") != "lead"]
         leads = [f for f in findings if f.get("confidence") == "lead"]
         summary = {"ran": True, "origin": origin, "https": is_https,
-                   "tls": {"reachable": probe.get("reachable", False),
+                   "tls": {"reachable": tls_reachable,
                            "negotiated": probe.get("protocol", ""), "cipher": probe.get("cipher", ""),
                            "protocols": probe.get("protocols", {}), "note": probe.get("note", "")},
+                   "http_observed": http_ok,
                    "cookies_seen": len(set_cookies), "allow": allow,
                    "findings": len(confirmed), "leads": len(leads), "lead_findings": leads}
+        if not http_ok:
+            # TLS answered but the page did not: the TLS/certificate half is real evidence and stays,
+            # the cookie/header/method half was never observed and is withheld, and the operator is
+            # told which half is missing instead of being handed silence.
+            summary["note"] = ("HTTP response not observed (%s) -- cookie, protective-header and "
+                               "method findings are WITHHELD for this origin; the TLS findings stand"
+                               % (http_err or "transport failure"))
         return ToolResult("transport_posture", origin, True, json.dumps(summary), confirmed)
 
     async def _confirm_browser_persona_bola(self, inp: dict) -> ToolResult:
