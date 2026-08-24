@@ -315,4 +315,104 @@ for a pattern so that module's behaviour is byte-identical to before.
 
 ## 3. Q-098 — evidence-graded impact text bound to CWE, not to the finding family
 
-STATUS: not started.
+### The mechanism, exact
+
+`transport_posture._FINDING_META` gives `header_missing_referrer_policy` the CWE **CWE-200**
+(`transport_posture.py:346`) while the finding carries `family: "security_misconfig"`
+(`transport_posture.py:404`). Both impact functions in `report.py` then did the same thing:
+
+```python
+fam = finding["family"]                    # "security_misconfig"
+if fam not in _IMPACT_GRADE:               # true -- misconfig had no entry
+    fam = _CWE_FAMILY[finding["cwe"]]      # "cwe-200" -> "exposure"
+```
+
+**This is why the field report shows exactly three, one per origin, and not eighteen**: Referrer-
+Policy is the only one of the six header rules mapped to CWE-200. The other five are
+CWE-693/1021/319, which `_CWE_FAMILY` does not list, so they fell through to nothing. A detail that
+makes the diagnosis checkable rather than plausible.
+
+`report._family_of` (`report.py:812`) already had the right rule — family first, CWE only when there
+is no family. The two impact functions did not.
+
+### It is not one finding, it is at least a dozen — MEASURED
+
+Census over every `"family"`/`"cwe"` pair in the tree, run before writing the fix:
+
+```
+family+CWE pairs that TODAY borrow another family's graded text: 24
+   anomaly              CWE-200  -> exposure          fingerprint      CWE-200  -> exposure
+   attack_surface       CWE-200  -> exposure          graphql          CWE-200  -> exposure
+   base64_param         CWE-89   -> sqli              info_disclosure  CWE-200  -> exposure
+   bola                 CWE-204  -> username_enumeration                param_mine  CWE-200 -> exposure
+   jwt                  CWE-326  -> weak_ssh_crypto   oauth            CWE-352  -> csrf
+   llm_output_handling  CWE-79   -> xss               session_fixation CWE-384  -> weak_session_token
+   ...
+```
+
+`base64_param` + CWE-89 is the one that should worry a reader most: a base64-shaped parameter
+OBSERVATION inherits sqli's `Confirmed on this target: an injectable parameter confirmed by a
+control-vs-payload differential`. That is the Referrer-Policy defect with a worse claim.
+
+(About half the 24 are harmless — `crlf -> crlf`, `default_credentials -> default_credentials` and
+friends map a family onto itself or onto a family with no graded entry, so they produce nothing
+either way.)
+
+### The fix
+
+`_graded_family(finding)`: a **declared family is authoritative**, optionally through an explicit
+`_FAMILY_ALIAS`. The CWE map is consulted only for a finding that declares **no family at all** —
+which is its legitimate use and the case it was written for. Both `business_impact` and
+`graded_business_impact` now route through it.
+
+`_FAMILY_ALIAS` is deliberately tiny and each entry is a claim I can defend against the aliased
+family's own oracle:
+
+```python
+"reflected_xss": "xss", "stored_xss": "xss", "dom_xss": "xss",
+"bola": "idor",   # object-level authz: the oracle IS idor's (owner denied on the control)
+```
+
+Everything else that was borrowing loses the borrowed text. **No text is better than borrowed text**
+— that is the ticket's thesis, so the fix has to be willing to pay it.
+
+**The fix is not deletion.** Stripping the block would have left every misconfig finding with no
+impact text, trading a false claim for no information. `security_misconfig` gets its own entry saying
+what the check establishes and, in the third slot, what it explicitly does not:
+
+```
+demonstrated: the control's absence read directly out of the server's own response — the response
+              was received and the header/attribute is not in it
+plausible:    an otherwise-contained bug in this application reaching further, because the layer
+              that would have limited it is not present
+unverified:   any concrete compromise — a missing control is not itself an exploit and must not be
+              reported as one
+```
+
+The second half of the `demonstrated` sentence is only true because Q-097 landed first. The three
+tickets are one defect seen from three angles.
+
+### MEASURED
+
+```
+tests/test_impact_binds_to_family.py   FFF...  ->  ......
+```
+RED at HEAD reproduced the field text verbatim:
+
+```
+AssertionError: a missing-header finding claims a demonstrated file exposure:
+  'Confirmed on this target: a sensitive file/resource served directly over the web
+   (a control path 404s)'
+```
+
+With `test_asvs_transport_config_objective`, `test_asvs_model` and `test_transport_posture`: EXIT=0.
+The three tests that passed at HEAD and still pass are the controls that keep the fix honest — a
+genuine `family: "exposure"` finding still emits that exact line in a rendered markdown report, a
+finding with no family still resolves through its CWE, and a family that already resolved is
+untouched.
+
+### Not fixed, reported
+
+`transport_posture`-family findings (TLS/certificate) still get no impact block at all: their CWEs
+(295/297/326/327) map to `weak_ssh_crypto`, which is in neither table. That is missing text rather
+than false text, so it is out of this ticket's scope and left for a separate one.

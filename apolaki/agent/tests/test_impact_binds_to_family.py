@@ -114,7 +114,10 @@ def test_a_security_misconfig_finding_still_gets_an_honest_impact_block():
     assert "header" in dem or "control" in dem, dem
     assert "response" in dem, "the claim must be tied to the response it was read from: %r" % (dem,)
     bi = report.business_impact(f)
-    assert bi and "defence" in bi[1].lower() or "defense" in (bi[1].lower() if bi else ""), bi
+    assert bi, "the plain-English block went missing too"
+    assert "defence" in bi[1].lower() or "defense" in bi[1].lower(), (
+        "the consequence must say what a missing control actually costs -- containment, not a "
+        "breach: %r" % (bi[1],))
 
 
 # ── non-vacuity + the CWE fallback's legitimate use: PASS before AND after ────

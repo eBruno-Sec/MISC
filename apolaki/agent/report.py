@@ -742,6 +742,13 @@ _BIZ = {
                             "On its own it corrupts client-side logic; chained with a suitable sink it becomes DOM "
                             "XSS — attacker script running in your customers' browsers (session theft, account "
                             "takeover)."),
+    "security_misconfig": ("A protective control this response was expected to carry is not configured — a "
+                           "security header, a session-cookie attribute, or a restriction on which HTTP "
+                           "methods the server advertises.",
+                           "On its own it exposes nothing: it is a missing layer of defence, not a breach. It "
+                           "matters because it removes the containment that would have limited some OTHER bug — "
+                           "an injected script with no Content-Security-Policy to stop it, a clickjacking frame "
+                           "with no X-Frame-Options, a session cookie a script can read."),
     "csti": ("The page's client-side template engine (AngularJS) evaluates attacker text from a link as code in "
              "the visitor's browser — it runs JavaScript, it does NOT run code on your server.",
              "From a crafted link on your real domain, an attacker's script runs in a victim's browser: stealing "
@@ -1219,13 +1226,12 @@ def group_findings(findings: list) -> list:
 
 def business_impact(finding: dict):
     """(plain-English meaning, business consequence) for a finding, or None when we
-    have no mapping (better to omit than to invent). Family first, then CWE."""
-    fam = str(finding.get("family") or "").strip().lower()
-    if fam in _BIZ:
-        return _BIZ[fam]
-    cwe = str(finding.get("cwe") or "").strip().lower()
-    fam2 = _CWE_FAMILY.get(cwe)
-    return _BIZ.get(fam2) if fam2 else None
+    have no mapping (better to omit than to invent).
+
+    Q-098: bound to the FINDING FAMILY (see `_graded_family`), never to the CWE alone. This used to
+    fall through to the CWE whenever the declared family had no entry, which is how a missing
+    Referrer-Policy was described as "Sensitive files or source are reachable directly over the web"."""
+    return _BIZ.get(_graded_family(finding))
 
 
 # Evidence-aware impact grade (Pentera "exploitability over theoretical severity" + the mission's
@@ -1288,7 +1294,48 @@ _IMPACT_GRADE = {
     "cors": ("a cross-origin read allowed by an over-permissive CORS policy",
              "another site reading your logged-in users' private data",
              "broad data leakage across authenticated users"),
+    # Q-098. The family that shipped 'Confirmed on this target: a sensitive file/resource served
+    # directly over the web (a control path 404s)' under the title "No Referrer-Policy". What this
+    # check actually establishes is narrower and it is stated narrowly: the control is not in a
+    # response we RECEIVED (Q-097 is what makes the second half of that sentence true).
+    "security_misconfig": ("the control's absence read directly out of the server's own response — the "
+                           "response was received and the header/attribute is not in it",
+                           "an otherwise-contained bug in this application reaching further, because the "
+                           "layer that would have limited it is not present",
+                           "any concrete compromise — a missing control is not itself an exploit and must "
+                           "not be reported as one"),
 }
+
+# Families that ARE another family's class, stated explicitly and reviewably.
+#
+# Q-098: this is the ONLY redirection permitted for a finding that DECLARES a family, and it is a
+# curated claim about the CHECK rather than a taxonomy lookup. A CWE cannot do this job: CWE-200
+# alone is carried by a missing Referrer-Policy, a served .env, a GraphQL introspection dump and a
+# parameter-mining observation, so it can never say what THIS run demonstrated. Entries are added
+# only where the graded sentence is TRUE of the aliased family's own oracle — no text is better than
+# borrowed text, which is the whole point of the ticket.
+_FAMILY_ALIAS = {
+    "reflected_xss": "xss", "stored_xss": "xss", "dom_xss": "xss",
+    "bola": "idor",          # object-level authorization: the oracle IS idor's (owner denied on the control)
+}
+
+
+def _graded_family(finding: dict) -> str:
+    """The family whose evidence text is allowed to speak for this finding.
+
+    A DECLARED family is authoritative, optionally via an explicit alias. The CWE map is consulted
+    ONLY for a finding that declares no family at all — its legitimate use, and the case it was
+    written for. Before Q-098 a declared-but-ungraded family fell THROUGH to the CWE, so
+    `security_misconfig` + CWE-200 became `exposure` and a missing header claimed a confirmed file
+    exposure. MEASURED across the tree at the time of the fix: 24 family+CWE pairs took that path,
+    including `base64_param` + CWE-89 claiming a confirmed SQL injection.
+
+    `_family_of` above already had this right; the two impact functions did not.
+    """
+    fam = str(finding.get("family") or "").strip().lower()
+    if fam:
+        return _FAMILY_ALIAS.get(fam, fam)
+    return _CWE_FAMILY.get(str(finding.get("cwe") or "").strip().lower(), "")
 _DEFAULT_GRADE = ("the confirming oracle condition for this vulnerability class",
                   "the direct consequence of the confirmed weakness",
                   "escalation beyond what was demonstrated — not claimed without further evidence")
@@ -1298,11 +1345,13 @@ def graded_business_impact(finding: dict):
     """Evidence-aware DEMONSTRATED / PLAUSIBLE / UNVERIFIED impact for a finding, or None for an
     unknown family. Truth-first: 'demonstrated' is gated on an oracle-confirmed finding; anything
     beyond it is explicitly labelled plausible or unverified so a report never overclaims (the
-    mission's business-impact discipline). Deterministic; reuses business_impact()'s family resolution."""
-    fam = str(finding.get("family") or "").strip().lower()
-    if fam not in _IMPACT_GRADE:
-        fam = _CWE_FAMILY.get(str(finding.get("cwe") or "").strip().lower(), fam)
-    grade = _IMPACT_GRADE.get(fam)
+    mission's business-impact discipline). Deterministic; reuses business_impact()'s family resolution.
+
+    Q-098: the family resolution is `_graded_family`, which is bound to what the CHECK observed. The
+    line this function emits is stamped `Confirmed on this target:` for any confirmed finding, so a
+    borrowed family here is not a wording problem — it is a false evidentiary claim in a report that
+    gets submitted to a program."""
+    grade = _IMPACT_GRADE.get(_graded_family(finding))
     if not grade:
         return None
     dem, plaus, unv = grade
