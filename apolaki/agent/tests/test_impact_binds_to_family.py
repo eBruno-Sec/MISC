@@ -122,6 +122,28 @@ def test_a_security_misconfig_finding_still_gets_an_honest_impact_block():
 
 # ── non-vacuity + the CWE fallback's legitimate use: PASS before AND after ────
 
+def test_the_misconfig_text_is_true_of_a_PRESENCE_finding_too():
+    """`security_misconfig` covers three kinds — header, cookie and methods — and the methods ones
+    are PRESENCE findings (TRACE echoed the exact marker sent; a dangerous method is advertised).
+    Wording the new entry as "the control's absence" would have described those as absences, which is
+    the same mistake this ticket is about, one size smaller."""
+    fs = tp.findings_for(TARGET, headers={"content-security-policy": "default-src 'self'; "
+                                          "frame-ancestors 'none'", "x-frame-options": "DENY",
+                                          "x-content-type-options": "nosniff",
+                                          "referrer-policy": "no-referrer",
+                                          "permissions-policy": "geolocation=()",
+                                          "strict-transport-security": "max-age=63072000"},
+                         is_https=True, hostname="www.shopify.com",
+                         trace_status=200, trace_body="Apolaki-Trace-xyz",
+                         trace_marker="Apolaki-Trace-xyz")
+    trace = [f for f in fs if f["tags"][2] == "methods_trace_enabled"]
+    assert len(trace) == 1, [f["tags"][2] for f in fs]
+    g = report.graded_business_impact(trace[0])
+    assert g, "the methods kind lost its impact block"
+    assert "absent from it, or a permissive setting is present in it" in g["demonstrated"], (
+        "an active TRACE echo is described as an absence: %r" % (g["demonstrated"],))
+
+
 def test_a_genuine_exposure_finding_still_emits_exactly_that_line():
     """MUST PASS before AND after. Without this, a fix that deletes the sentence everywhere passes."""
     f = _exposure_finding()

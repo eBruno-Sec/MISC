@@ -3355,8 +3355,12 @@ class ToolRegistry:
         http_ok, http_err = False, ""
         try:
             r, _ = await self._http_send("GET", origin + "/", {}, None, True)
-            http_ok = True
             headers = dict(r.headers or {})
+            # AFTER the header view is actually built, not before: `http_ok` means "we hold a real
+            # header view of a real response". Setting it on the bare return would re-open the same
+            # hole one step further in — a response whose headers could not be read would again be
+            # indistinguishable from one that carried none.
+            http_ok = True
             try:                       # multi-valued Set-Cookie must not collapse to one
                 set_cookies = list(r.headers.get_list("set-cookie"))
             except Exception:

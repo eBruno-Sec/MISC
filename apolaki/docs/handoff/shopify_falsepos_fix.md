@@ -23,7 +23,24 @@ MSYS_NO_PATHCONV=1 docker run --rm --network apolaki_default \
   python -m pytest tests/ -p no:cacheprovider -rfE -q
 ```
 
-Result: PENDING (running).
+Result at HEAD `08158c2`: **3581 passed / 11 skipped / 12 xfailed / 0 failed**, matching the
+Coordinator's figure. (Caveat recorded in §1: my first attempt at this run was contaminated by my own
+mid-flight edit; this is the settled re-measurement.)
+
+Result with all three fixes landed: **3602 passed / 11 skipped / 12 xfailed / 0 failed** — 3581 + the
+21 tests added by this lane (5 + 10 + 6), and **zero regressions**. The `pytest -q` terminal-summary
+line is suppressed in this image's config, so the counts are a character census of the progress
+lines:
+
+```
+$ grep -E "^[.sxXFE]+ +\[ *[0-9]+%\]$" full.txt | tr -d ' []0-9%' | tr -d '\n' | fold -w1 | sort | uniq -c
+   3602 .      11 s      12 x
+$ grep -c '^FAILED' full.txt
+0
+```
+
+(`grep -c '^FAILED'`, per the house rule — a `grep -c F` over this output counts "FastAPI" in the
+deprecation prose.)
 
 ---
 
@@ -416,3 +433,72 @@ untouched.
 `transport_posture`-family findings (TLS/certificate) still get no impact block at all: their CWEs
 (295/297/326/327) map to `weak_ssh_crypto`, which is in neither table. That is missing text rather
 than false text, so it is out of this ticket's scope and left for a separate one.
+
+---
+
+## 4. Self-review pass — three things I got slightly wrong the first time
+
+Landed as one commit after the three tickets were green, because each is a smaller instance of the
+same defect the lane is about.
+
+**(a) Q-097: `http_ok = True` was set one line too early.** It sat immediately after
+`await self._http_send(...)`, before `headers = dict(r.headers or {})`. A response whose header view
+could not be built would therefore be flagged as observed while `headers` stayed `{}` — the exact
+hole, re-opened one step further in. It is now set after the header view exists, so `http_ok` means
+"we hold a real header view of a real response" rather than "a call returned".
+
+**(b) Q-096: an entry that is neither a host nor a pattern had no answer.** MEASURED:
+`_split_scope_entry("[::1]")` returns the bare host `"["` — it splits on `:` before `]`, so IPv6 has
+never been supported here — and `re.compile("[")` raises `unterminated character set at position 0`.
+True, and useless to an operator who typed an IPv6 literal; `"my host.com"` is the same shape of
+mistake. `looks_like_pattern()` now separates the third state and both get a
+`ScopeConfigurationError` naming the entry they actually wrote. Still no `try/except`, so the
+ratcheted silent-failure ceiling stays where it is.
+
+**(c) Q-098: my own replacement text was a smaller version of the bug I was fixing.** I wrote
+`security_misconfig`'s demonstrated line as *"the control's ABSENCE read directly out of the server's
+own response"* — but that family covers three kinds, and the `methods` ones are **presence** findings:
+`methods_trace_enabled` fires when TRACE echoes the exact random marker sent, and
+`methods_dangerous_advertised` when a write method appears in `Allow`. Describing those as absences is
+the same category error as describing a missing header as a served file, one size smaller. Reworded
+to *"an expected protective control is absent from it, or a permissive setting is present in it"*, and
+pinned by a test that builds a real TRACE-echo finding and asserts the wording holds for it.
+
+None of the three was caught by a green suite. (a) and (c) were caught by re-reading my own diff
+against the ticket's own thesis; (b) by asking what the new code does to an input the tests do not
+contain.
+
+---
+
+## 5. Summary of the lane
+
+| ticket | root cause | the one-line fix |
+|---|---|---|
+| Q-097 | `headers={}` from a dead socket is the same VALUE as a response with no headers | make it a different ARGUMENT (`http_observed`) and gate emission on it |
+| Q-096 | scope conflated PREDICATE with ADDRESS; a filter was dialled | patterns match, hosts are dialled, and neither role can borrow the other's list |
+| Q-098 | an evidence claim was bound to a CWE, which many unrelated checks share | bind it to the finding FAMILY, with a tiny curated alias map |
+
+**Files changed:** `agent/tools.py`, `agent/transport_posture.py`, `agent/scope.py`, `agent/report.py`
+(the module holding the evidence-graded impact text), plus three new test files.
+**Not touched:** `docs/QUEUE.md`, `docs/STATUS.md`, and the three guard files — one of which
+(`test_silent_failure_invariant`) went red on my first Q-096 attempt and was right to.
+
+**No traffic was sent to Shopify.** Every live measurement in this file is `juice-shop:3000` on
+`apolaki_default`.
+
+### Residuals, reported not fixed
+
+1. `web_security._looks_like_host_identifier` (`web_security.py:136`) tests for a host with
+   `"." in ident and no whitespace`, which an anchored regex passes. Same disease, second location,
+   outside this lane's writable set. Not exploitable the way `base_urls()` was — that path only ever
+   refuses — and `to_rules()` deliberately keeps emitting `type: "domain"` for a pattern so that
+   module's behaviour is byte-identical to before.
+2. `transport_posture`-family findings (TLS/certificate) still get no impact block: their CWEs map to
+   `weak_ssh_crypto`, which is in neither impact table. Missing text, not false text.
+3. `findings_gate.py:99` rebuilds a stored mission's scope inside a `try/except` that fails OPEN
+   ("scope engine unavailable -> do not block"). A stored all-pattern scope now raises there, so its
+   findings are admitted rather than all rejected as off-scope. The pre-existing fail-open is
+   deliberate and this changes which side of it an unusable scope lands on; worth a Coordinator
+   decision, not a silent change by me.
+4. `IPv6` scope entries are unsupported (see §4b). They now fail loudly instead of silently becoming
+   the host `"["`; making them actually work is a separate ticket.

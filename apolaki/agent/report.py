@@ -742,13 +742,13 @@ _BIZ = {
                             "On its own it corrupts client-side logic; chained with a suitable sink it becomes DOM "
                             "XSS — attacker script running in your customers' browsers (session theft, account "
                             "takeover)."),
-    "security_misconfig": ("A protective control this response was expected to carry is not configured — a "
-                           "security header, a session-cookie attribute, or a restriction on which HTTP "
-                           "methods the server advertises.",
-                           "On its own it exposes nothing: it is a missing layer of defence, not a breach. It "
-                           "matters because it removes the containment that would have limited some OTHER bug — "
-                           "an injected script with no Content-Security-Policy to stop it, a clickjacking frame "
-                           "with no X-Frame-Options, a session cookie a script can read."),
+    "security_misconfig": ("A protective control this response was expected to carry is missing, or a "
+                           "permissive setting is present — a security header, a session-cookie attribute, "
+                           "or the HTTP methods the server allows.",
+                           "On its own it exposes nothing: it is a weakened layer of defence, not a breach. "
+                           "It matters because it removes the containment that would have limited some OTHER "
+                           "bug — an injected script with no Content-Security-Policy to stop it, a "
+                           "clickjacking frame with no X-Frame-Options, a session cookie a script can read."),
     "csti": ("The page's client-side template engine (AngularJS) evaluates attacker text from a link as code in "
              "the visitor's browser — it runs JavaScript, it does NOT run code on your server.",
              "From a crafted link on your real domain, an attacker's script runs in a victim's browser: stealing "
@@ -1296,14 +1296,16 @@ _IMPACT_GRADE = {
              "broad data leakage across authenticated users"),
     # Q-098. The family that shipped 'Confirmed on this target: a sensitive file/resource served
     # directly over the web (a control path 404s)' under the title "No Referrer-Policy". What this
-    # check actually establishes is narrower and it is stated narrowly: the control is not in a
-    # response we RECEIVED (Q-097 is what makes the second half of that sentence true).
-    "security_misconfig": ("the control's absence read directly out of the server's own response — the "
-                           "response was received and the header/attribute is not in it",
-                           "an otherwise-contained bug in this application reaching further, because the "
-                           "layer that would have limited it is not present",
-                           "any concrete compromise — a missing control is not itself an exploit and must "
-                           "not be reported as one"),
+    # check actually establishes is narrower and it is stated narrowly: read out of a response we
+    # RECEIVED (Q-097 is what makes that half of the sentence true). Worded to be true of all three
+    # kinds the family covers -- header, cookie and methods -- so the presence findings (TRACE
+    # enabled, a dangerous method advertised) are not mis-described as absences.
+    "security_misconfig": ("the server's own response read directly, and it was received: an expected "
+                           "protective control is absent from it, or a permissive setting is present in it",
+                           "another bug in this application reaching further than it otherwise could, "
+                           "because a layer that would have limited it is missing or relaxed",
+                           "any concrete compromise — a configuration weakness is not itself an exploit "
+                           "and must not be reported as one"),
 }
 
 # Families that ARE another family's class, stated explicitly and reviewably.

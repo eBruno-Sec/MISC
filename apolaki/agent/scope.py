@@ -155,6 +155,11 @@ _HOST_RE = re.compile(
     r'^(?=.{1,253}\.?$)[a-z0-9_](?:[a-z0-9_-]{0,61}[a-z0-9_])?'
     r'(?:\.[a-z0-9_](?:[a-z0-9_-]{0,61}[a-z0-9_])?)*\.?$', re.I)
 
+# Deliberate regex syntax: an anchor, a quantifier, an alternation, a group or an escape. A scope
+# entry that is neither a hostname nor this is not a boundary anyone can evaluate.
+_REGEX_INTENT = re.compile(r'[\^$*+?|()\\]')
+
+
 def is_host_shaped(value: str) -> bool:
     r"""True when `value` is something a resolver or a socket could actually be handed.
 
@@ -173,6 +178,19 @@ def is_host_shaped(value: str) -> bool:
     if not v or v.startswith("*"):
         return False
     return bool(_HOST_RE.match(v))
+
+
+def looks_like_pattern(value: str) -> bool:
+    r"""True when a non-hostname entry carries deliberate regex syntax.
+
+    The third state nobody had a word for. An entry is a HOST (`shop.example.com`), a PATTERN
+    (`^.*\.shopify\.com$`), or NEITHER — and "neither" needs its own answer, because handing it to
+    `re.compile` produces a message about the wrong thing. MEASURED: `_split_scope_entry("[::1]")`
+    returns the bare host `"["` (it splits on `:` before it splits on `]`, so IPv6 has never been
+    supported here), and `re.compile("[")` raises `unterminated character set at position 0` — true,
+    and useless to an operator who typed an IPv6 literal. `"my host.com"` is the same shape of
+    mistake. Both now get a refusal that names the entry they actually wrote."""
+    return bool(_REGEX_INTENT.search(value or ""))
 
 
 def compile_pattern(value: str):
@@ -222,6 +240,12 @@ class ScopeEngine:
             if host:
                 declared += 1
                 if not host.startswith("*") and not is_host_shaped(host):
+                    if not looks_like_pattern(host):
+                        raise ScopeConfigurationError(
+                            'scope entry "%s" is neither a hostname nor a pattern, so it can be '
+                            "neither connected to nor matched against. (IPv6 literals are not "
+                            "supported here: the parser splits on ':' first, so \"[::1]\" arrives "
+                            'as "[".)' % (d,))
                     # Q-096: a PATTERN. It keeps its job as a predicate and loses the one it never
                     # had — being an address. Kept out of `in_scope` so no target list can pick it up.
                     self._pattern_rx[host] = compile_pattern(host)
@@ -242,6 +266,11 @@ class ScopeEngine:
             host, _ = _split_scope_entry(d)
             if host:
                 if not host.startswith("*") and not is_host_shaped(host):
+                    if not looks_like_pattern(host):
+                        raise ScopeConfigurationError(
+                            'out-of-scope entry "%s" is neither a hostname nor a pattern, so nothing '
+                            "can be excluded by it. An exclusion that matches nothing is an "
+                            "exclusion that is not there." % (d,))
                     # An EXCLUSION written as a pattern must keep excluding. Before Q-096 it matched
                     # only itself, so the carve-out the operator wrote was not enforced at all.
                     self._pattern_rx[host] = compile_pattern(host)

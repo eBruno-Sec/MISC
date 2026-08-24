@@ -201,6 +201,21 @@ def test_a_plain_host_is_never_interpreted_as_a_regex():
         assert eng.validate(imposter)[0] is False, "%s was authorised by regex-reading a plain host" % imposter
 
 
+def test_an_entry_that_is_neither_a_host_nor_a_pattern_is_refused_by_name():
+    """The third state, which nobody had a word for before this ticket.
+
+    An entry is a HOST, a PATTERN, or NEITHER. MEASURED: `_split_scope_entry("[::1]")` returns the
+    bare host `"["` -- it splits on `:` before `]`, so IPv6 has never been supported here -- and
+    handing `"["` to `re.compile` raises `unterminated character set at position 0`, which is true
+    and useless to whoever typed the address. The refusal must name what they wrote.
+    """
+    for bad in ("[::1]", "my host.com"):
+        eng = scope_mod.ScopeEngine()
+        with pytest.raises(scope_mod.ScopeConfigurationError) as ex:
+            eng.load_manual([LAB, bad], [], "junk")
+        assert bad in str(ex.value), "the refusal does not name the entry: %r" % (str(ex.value),)
+
+
 def test_an_explicit_port_and_path_pin_still_work():
     """SEC-1 / SEC-2 must be untouched by a change to how entries are typed."""
     eng = scope_mod.ScopeEngine()
