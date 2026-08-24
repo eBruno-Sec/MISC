@@ -135,10 +135,76 @@ def _split_scope_entry(d: str):
     return host, base
 
 
+class ScopeConfigurationError(ValueError):
+    """The operator declared assets but not one of them can be turned into a target.
+
+    Q-096. Raised by `load_manual` rather than returning an engine that quietly addresses nothing.
+    The discipline is already written down at `main.py:3081` for a malformed entry: *"Scope is the
+    boundary between authorised testing and hitting something nobody asked us to touch, so an
+    exception while BUILDING that boundary can only mean 'the boundary is unknown'. Unknown is not
+    permission. The fix is not to make `load_manual` tolerant."* A scope made entirely of patterns is
+    the same condition reached by a different road: the boundary is stateable, but there is nothing
+    inside it to connect to, and a mission built on it can only produce findings about nothing.
+    """
+
+
+# ── Target shape: the ingress that decides what may become an ADDRESS (Q-096) ──
+# RFC-1123-ish. Deliberately permissive about `_` (real DNS carries it) and about single-label names
+# (`juice-shop`, `box`, `dvwa`) because every Apolaki lab is one.
+_HOST_RE = re.compile(
+    r'^(?=.{1,253}\.?$)[a-z0-9_](?:[a-z0-9_-]{0,61}[a-z0-9_])?'
+    r'(?:\.[a-z0-9_](?:[a-z0-9_-]{0,61}[a-z0-9_])?)*\.?$', re.I)
+
+def is_host_shaped(value: str) -> bool:
+    r"""True when `value` is something a resolver or a socket could actually be handed.
+
+    Q-096 IS THIS PREDICATE. A bug-bounty scope written as anchored regex (`^.*\.shopify\.com$`) is a
+    FILTER, not an ADDRESS. `load_manual` typed an entry `wildcard` only when it started with `*`, so
+    a regex -- which starts with `^` -- was typed `domain`, survived every wildcard filter, and was
+    emitted verbatim as the base URL `https://^.*\.shopify\.com$`. The reproduction command in the
+    field report reads, character for character:
+
+        curl -i -sS -k --path-as-is 'https://^.*\.shopifycs\.com$'
+
+    A wildcard is False here too: `*.example.com` is a legitimate scope entry and a legitimate recon
+    root, but it is not an address either, and the wildcard branch handles it on its own terms.
+    """
+    v = (value or "").strip().lower()
+    if not v or v.startswith("*"):
+        return False
+    return bool(_HOST_RE.match(v))
+
+
+def compile_pattern(value: str):
+    r"""The compiled matcher for a scope entry that is a PATTERN rather than a host.
+
+    Used with `fullmatch`, so an operator's `.*\.example\.com` cannot be satisfied by
+    `a.example.com.attacker.tld` even when they forgot the `$`.
+
+    NO try/except, deliberately, and not only to keep the silent-failure ceiling ratcheted: an entry
+    that is neither a hostname nor a compilable pattern is a boundary nobody can evaluate, and
+    swallowing `re.error` here would hand back an engine whose scope silently matches nothing. Same
+    sentence as `main.py:3081` -- unknown is not permission. Compiling at LOAD time also means a
+    malformed entry fails where the operator can still fix it, not on the first request."""
+    return re.compile(value, re.I)
+
+
 class ScopeEngine:
     def __init__(self):
         self.in_scope: list = []
         self.out_of_scope: list = []
+        # Q-096: entries that are PATTERNS, not addresses. Held apart from `in_scope` because
+        # `in_scope` is what three drivers in agent.py read as their target list (`:3003` scoped-path
+        # seeding, `:3317` graph host observation, `:3758` the recon roots that seed subfinder /
+        # crtsh / run_dns / run_asn). They are consulted by `validate()` and reported by `to_dict()`
+        # and `to_rules()`, so nothing about the BOUNDARY is lost -- only the ability to dial one.
+        self.in_scope_patterns: list = []
+        self.out_of_scope_patterns: list = []
+        # entry value -> compiled matcher, built once at load time (see compile_pattern).
+        self._pattern_rx: dict = {}
+        # (raw entry, why) for every entry refused as a target — surfaced in to_dict() so the
+        # misconfiguration is nameable in the mission record instead of showing up as silence.
+        self.unusable: list = []
         self.program_name: str = ""
         # Extra answer-key surfaces to hard-block, beyond the default. Every benchmark target publishes
         # its ground truth somewhere different — /vulnerabilities for a PortSwigger-style page, an
@@ -150,9 +216,19 @@ class ScopeEngine:
 
     def load_manual(self, in_scope: list, out_of_scope: list, program_name: str = "Program") -> None:
         self.program_name = program_name
+        declared = 0
         for d in in_scope:
             host, base = _split_scope_entry(d)
             if host:
+                declared += 1
+                if not host.startswith("*") and not is_host_shaped(host):
+                    # Q-096: a PATTERN. It keeps its job as a predicate and loses the one it never
+                    # had — being an address. Kept out of `in_scope` so no target list can pick it up.
+                    self._pattern_rx[host] = compile_pattern(host)
+                    self.in_scope_patterns.append(ScopeEntry(host, "pattern"))
+                    self.unusable.append((str(d), "not a hostname — a scope pattern is a filter, "
+                                                  "never an address, so it cannot be a target"))
+                    continue
                 # capture the explicit port (if the operator pinned one) so validate()
                 # can enforce it against concrete request targets — see SEC-1.
                 port = ""
@@ -165,7 +241,21 @@ class ScopeEngine:
         for d in out_of_scope:
             host, _ = _split_scope_entry(d)
             if host:
+                if not host.startswith("*") and not is_host_shaped(host):
+                    # An EXCLUSION written as a pattern must keep excluding. Before Q-096 it matched
+                    # only itself, so the carve-out the operator wrote was not enforced at all.
+                    self._pattern_rx[host] = compile_pattern(host)
+                    self.out_of_scope_patterns.append(ScopeEntry(host, "pattern"))
+                    continue
                 self.out_of_scope.append(ScopeEntry(host, "wildcard" if host.startswith("*") else "domain"))
+        if declared and not self.in_scope:
+            raise ScopeConfigurationError(
+                "no in-scope entry can be a target: %s. A scope pattern matches hosts, it cannot be "
+                "connected to — supply at least one concrete host (or a wildcard root) alongside the "
+                "pattern(s), or the mission has nothing to address."
+                # NOT repr(): the entry is a regex, and repr doubles every backslash, so the operator
+                # would be told to fix a string that is not the one they typed.
+                % ", ".join('"%s"' % v for v, _why in self.unusable[:8]))
 
     def validate(self, target: str) -> tuple:
         host, port, is_request = self._parse_target(target)
@@ -185,6 +275,9 @@ class ScopeEngine:
         for entry in self.out_of_scope:
             if self._matches(host, entry.value):
                 return False, f"{host} is explicitly out of scope"
+        for entry in self.out_of_scope_patterns:
+            if self._pattern_matches(host, entry):
+                return False, f"{host} is explicitly out of scope (pattern {entry.value})"
         host_in_scope, path_pinned = False, False
         for entry in self.in_scope:
             if self._matches(host, entry.value):
@@ -205,6 +298,13 @@ class ScopeEngine:
                 suffix = f":{entry.port}" if entry.port else ""
                 psuffix = entry.path if entry.path else ""
                 return True, f"In scope via {entry.value}{suffix}{psuffix}"
+        # Q-096: patterns are consulted AFTER the concrete entries so a pinned port/path still wins
+        # where one exists, and they authorise a host by MATCHING it rather than by equalling it.
+        # This is the half the ticket calls the trap: scope must keep working as a predicate over
+        # real discovered hosts, and before this a pattern matched nothing except itself.
+        for entry in self.in_scope_patterns:
+            if self._pattern_matches(host, entry):
+                return True, f"In scope via pattern {entry.value}"
         if host_in_scope:
             if path_pinned:
                 return False, (f"{host}{req_path} not in scope "
@@ -252,16 +352,31 @@ class ScopeEngine:
         clean = pattern.lstrip("*.").lower()
         return host == clean or host.endswith("." + clean)
 
+    def _pattern_matches(self, host: str, entry) -> bool:
+        """Q-096: a PATTERN entry authorises (or excludes) a host by MATCHING it, anchored, never by
+        equalling it. The literal comparison in `_matches` is what let `^.*\\.shopify\\.com$` be
+        in scope as itself while `www.shopify.com` was refused."""
+        rx = self._pattern_rx.get(entry.value)
+        return bool(rx and rx.fullmatch((host or "").strip().lower()))
+
     def to_dict(self) -> dict:
-        return {
+        # Q-096: patterns ARE the boundary the operator declared, so they stay in this view — it is
+        # the scope the report prints and the model reads, not a target list. `unusable_as_targets`
+        # is added only when there is something to say, so a normal mission's dict (and therefore
+        # `memory.target_key`) is byte-identical to before.
+        d = {
             "program": self.program_name,
-            "in_scope": [e.value for e in self.in_scope],
-            "out_of_scope": [e.value for e in self.out_of_scope],
+            "in_scope": [e.value for e in self.in_scope] + [e.value for e in self.in_scope_patterns],
+            "out_of_scope": ([e.value for e in self.out_of_scope]
+                             + [e.value for e in self.out_of_scope_patterns]),
             # base URLs carry scheme+port for concrete hosts; consumers like the
             # cross-session memory key use these so apps on the same host but
             # different ports don't collide. Additive — in_scope stays bare hosts.
             "bases": self.base_urls(),
         }
+        if self.unusable:
+            d["unusable_as_targets"] = [{"entry": v, "why": why} for v, why in self.unusable]
+        return d
 
     def to_rules(self) -> dict:
         """Structured rules view consumed by web_security.is_url_in_scope
@@ -275,27 +390,41 @@ class ScopeEngine:
             return e.value
 
         def _type(e):
+            if e.asset_type == "pattern":
+                # `web_security` has no regex vocabulary, so emit the shape it already saw before
+                # Q-096. Its `_host_matches_rule` compares literally and will not match a pattern —
+                # exactly as today. Nothing is widened here and nothing is dropped; the enforcing
+                # choke point for a pattern is `validate()`, which now genuinely matches.
+                return "domain"
             return "url" if (e.path and e.asset_type != "wildcard") else e.asset_type
         return {
-            "in_scope": [{"identifier": _ident(e), "type": _type(e)} for e in self.in_scope],
-            "out_of_scope": [{"identifier": e.value, "type": e.asset_type} for e in self.out_of_scope],
+            "in_scope": [{"identifier": _ident(e), "type": _type(e)}
+                         for e in (self.in_scope + self.in_scope_patterns)],
+            "out_of_scope": [{"identifier": e.value, "type": _type(e)}
+                             for e in (self.out_of_scope + self.out_of_scope_patterns)],
         }
+
+    def _addressable(self) -> list:
+        """The in-scope entries that can be an ADDRESS.
+
+        Q-096: this used to be spelled as a NEGATIVE filter (`if e.asset_type == "wildcard":
+        continue`), which admits every shape nobody thought of — and an anchored regex was one, so
+        `https://^.*\\.shopify\\.com$` was emitted as a base URL. Stated POSITIVELY, the next
+        unforeseen shape is refused by default instead of dialled. `is_host_shaped` is re-checked
+        here rather than trusted from `asset_type` alone so an entry appended directly to `in_scope`
+        by some other code path cannot skip the ingress."""
+        return [e for e in self.in_scope
+                if e.asset_type in ("domain", "ip", "url") and is_host_shaped(e.value)]
 
     def base_urls(self) -> list:
         """Base URLs for concrete (non-wildcard) in-scope hosts — the operator's
         explicit scheme+port when given, else default https."""
-        out = []
-        for e in self.in_scope:
-            if e.asset_type == "wildcard":
-                continue
-            out.append(e.base or f"https://{e.value}")
-        return out
+        return [e.base or f"https://{e.value}" for e in self._addressable()]
 
     def base_map(self) -> dict:
         """host -> base URL (scheme+port) for concrete in-scope hosts, so the planner
         probes a non-standard port/scheme instead of assuming https on 443."""
-        return {e.value: (e.base or f"https://{e.value}")
-                for e in self.in_scope if e.asset_type != "wildcard"}
+        return {e.value: (e.base or f"https://{e.value}") for e in self._addressable()}
 
 
 # ── Multi-format scope-file parsing (adapted from OLYMPUS) ────────

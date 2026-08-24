@@ -172,7 +172,144 @@ a measurement. Subsequent full-suite runs are started only when the tree is sett
 
 ## 2. Q-096 — the scope REGEX is used as a hostname
 
-STATUS: not started (Q-097 first, per lane order).
+### MEASURED at HEAD, before writing a line of fix
+
+Three anchored patterns and nothing else, in the agent image:
+
+```python
+e = scope.ScopeEngine(); e.load_manual([r"^.*\.shopify\.com$", r"^.*\.shopifycs\.com$",
+                                        r"^.*\.myshopify\.com$"], [], "Shopify")
+```
+```
+in_scope types  [('^.*\\.shopify\\.com$', 'domain'), ...]        <- typed DOMAIN, not wildcard
+base_urls()     ['https://^.*\\.shopify\\.com$', ...]            <- the curl command in the report
+base_map()      {'^.*\\.shopify\\.com$': 'https://^.*\\.shopify\\.com$', ...}
+base_roots      ['^.*\\.shopify\\.com$', ...]   <- agent.py:3758, seeds subfinder/crtsh/dns/asn
+validate('https://^.*\\.shopify\\.com$')  -> (True,  'In scope via ^.*\\.shopify\\.com$')
+validate('https://www.shopify.com')       -> (False, 'www.shopify.com not in scope')
+```
+
+**Read the last two lines together — this is the fact the ticket did not have.** The predicate was
+not merely useless, it was **INVERTED**. The unresolvable pattern string was AUTHORISED (it literally
+equals itself, so `_matches` accepted it), and every real asset the operator owns was REFUSED. Even
+if recon had somehow discovered a live Shopify host, scope would have blocked it. That is the
+mechanism behind "self-amplifying": there was no path by which a real host could enter the mission.
+
+### Design decision, and why
+
+The ticket asks me to choose between dropping an invalid entry with a loud mission-level error and
+rejecting it at `load_manual`. **Both, split by what the entry can still be used for.** Scope does two
+jobs and they were conflated:
+
+| job | question | a pattern |
+|---|---|---|
+| PREDICATE | is this discovered host authorised? | **yes** — that is what a pattern is FOR |
+| ADDRESS | what do I connect to? | **never** |
+
+- A non-host entry is **typed `pattern` and parked in `in_scope_patterns`**, so it is absent from
+  `in_scope`. That single move fixes all three `agent.py` drivers (`:3003` path seeding, `:3317`
+  graph host observation, `:3758` recon roots) **without editing `agent.py`**, which this lane may not
+  write. It is also why the `run_asn` / `run_dns` junk rows stop: those engines are seeded from
+  `base_roots`, and a pattern is no longer in it. "SPF MISSING" on an unresolvable name cannot be
+  reported because the name is never dispatched.
+- It **still matches**, now as a real anchored `re.fullmatch` instead of a literal string compare —
+  which is what the operator meant and what the literal compare never delivered. `validate()` keeps
+  working as a predicate, which was the trap in this ticket.
+- `base_urls()` / `base_map()` change from a **negative** filter (`if asset_type == "wildcard":
+  continue`) to a **positive** one. The negative form is the actual root cause: it admits every shape
+  nobody thought of, and a regex was one. Stated positively, the next unforeseen shape is refused by
+  default.
+- **When EVERY entry is a pattern, `load_manual` raises `ScopeConfigurationError`.** There is then no
+  boundary that can become a target, and the discipline for that is already written down in this
+  codebase at `main.py:3081`: *"Scope is the boundary between authorised testing and hitting something
+  nobody asked us to touch... Unknown is not permission. The fix is not to make `load_manual`
+  tolerant."* That call site already wraps `load_manual` in a try/except that turns the raise into an
+  actionable refusal.
+
+**Blast radius I accept, stated plainly:** `main.py:197 _scope_for()` rebuilds a stored mission's
+scope, so re-opening a mission whose scope is all patterns now raises instead of returning an
+engine. That is the correct direction — a mission whose boundary cannot be turned into a target
+should not be re-armed — but it is a behaviour change for stored missions, and the Shopify mission is
+one of them.
+
+### The RED gate
+
+`agent/tests/test_scope_pattern_is_not_a_target.py` — **`FFFFFF....` = 6 failed, 4 passed at HEAD.**
+The four that already pass are the negative controls: a real-host scope is untouched, a wildcard keeps
+exactly its old suffix semantics, a plain host is never read as a regex (`example.com` must not match
+`exampleXcom` — the control on my own change, since widening a matcher is the dangerous direction),
+and the SEC-1/SEC-2 port and path pins still hold.
+
+The six failures, verbatim:
+
+```
+AttributeError: module 'scope' has no attribute 'ScopeConfigurationError'
+AssertionError: a regex was emitted as a base URL:
+  ['http://juice-shop:3000', 'https://^.*\\.shopify\\.com$', ...]
+AssertionError: a regex is still an authorised target: 'In scope via ^.*\\.shopify\\.com$'
+AssertionError: https://www.shopify.com is in the operator's scope: (False, 'www.shopify.com not in scope')
+AssertionError: the operator's exclusion was not enforced
+AssertionError: run_transport_posture was DISPATCHED at a regex instead of refused:
+  success=False error='no response from https://^.*\\.shopify\\.com$ ([Errno -2] Name or service not known)'
+```
+
+That last one is worth pausing on. Q-097 is already landed, so the engine now *fails honestly* at the
+pattern — and that is exactly why the assertion demands `SCOPE BLOCK` rather than "it failed". A
+gate satisfied by "the engine could not resolve it" would pass on a build that still dispatches
+active engines at a regex. The two defects are independent and the gate for each has to say so.
+
+### MEASURED after the fix — the same script, the same three patterns
+
+```
+ScopeConfigurationError: no in-scope entry can be a target: "^.*\.shopify\.com$",
+  "^.*\.shopifycs\.com$", "^.*\.myshopify\.com$". A scope pattern matches hosts, it cannot be
+  connected to — supply at least one concrete host (or a wildcard root) alongside the pattern(s)...
+```
+
+and with one real host added, so the engine builds:
+
+```
+in_scope      [('juice-shop', 'domain')]
+patterns      [('^.*\\.shopify\\.com$', 'pattern'), ...]
+base_urls()   ['http://juice-shop:3000']
+base_roots    ['juice-shop']                     <- recon can no longer be seeded with a regex
+validate('https://^.*\\.shopify\\.com$')      -> (False, '^.*\\.shopify\\.com$ not in scope')
+validate('https://www.shopify.com')           -> (True,  'In scope via pattern ^.*\\.shopify\\.com$')
+validate('https://www.shopify.com.evil.tld')  -> (False, ...)     <- anchored, no suffix confusion
+validate('http://juice-shop:3000/x')          -> (True,  'In scope via juice-shop:3000')
+```
+
+**The inversion is gone in both directions**: the pattern is refused as a target and the real host is
+authorised. `to_dict()` carries `unusable_as_targets` naming each refused entry and why, so the
+misconfiguration is in the mission record rather than being silence.
+
+### One thing this turned up that is worth the next reader's time
+
+The first fix used `try: re.compile(...) except re.error: None`, and
+`test_silent_failure_invariant.py` went red on `assert counts["optional"] <= 387` -> `388 <= 387`.
+That ceiling is ratcheted with zero slack precisely so a deleted swallow's seat cannot be silently
+refilled, and mine would have refilled it. **The guard was right and the code was wrong.** Compiling
+at LOAD time with no handler at all is the better design anyway: an entry that is neither a hostname
+nor a compilable pattern is a boundary nobody can evaluate, so it must fail where the operator can
+still fix it, not match nothing forever at request time.
+
+### MEASURED
+
+```
+tests/test_scope_pattern_is_not_a_target.py  FFFFFF....  ->  ..........
+```
+plus `test_scope_path`, `test_scope_origin_carry`, `test_junk_host_filter`, the whole of
+`test_bbh.py`, the Q-097 gate, and the `test_deadcode_gate` / `test_silent_failure_invariant`
+guards: **EXIT=0**.
+
+### Residual, reported not fixed (outside this lane's writable set)
+
+`web_security._looks_like_host_identifier` (`web_security.py:136`) is the same disease in a second
+place: its host test is `"." in ident and no whitespace`, which `^.*\.shopify\.com$` passes. So
+`is_url_in_scope` also treats a regex as a host rule. It is not exploitable the way `base_urls()` was
+— that path only ever REFUSES, never dials — and `web_security.py` is not writable in this lane, so
+it is recorded here rather than changed. `to_rules()` deliberately keeps emitting `type: "domain"`
+for a pattern so that module's behaviour is byte-identical to before.
 
 ---
 
