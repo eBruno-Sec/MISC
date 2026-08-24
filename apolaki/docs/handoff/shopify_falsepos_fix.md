@@ -27,16 +27,20 @@ Result at HEAD `08158c2`: **3581 passed / 11 skipped / 12 xfailed / 0 failed**, 
 Coordinator's figure. (Caveat recorded in §1: my first attempt at this run was contaminated by my own
 mid-flight edit; this is the settled re-measurement.)
 
-Result with all three fixes landed: **3602 passed / 11 skipped / 12 xfailed / 0 failed** — 3581 + the
-21 tests added by this lane (5 + 10 + 6), and **zero regressions**. The `pytest -q` terminal-summary
-line is suppressed in this image's config, so the counts are a character census of the progress
-lines:
+Result with all three fixes landed (`be19e0f`): **3602 passed / 11 skipped / 12 xfailed / 0 failed** —
+3581 + the 21 tests the three tickets added (5 + 10 + 6).
+
+**Final, at `ac75391` after the self-review pass: 3604 passed / 11 skipped / 12 xfailed / 0 failed** —
+3581 + 23, **zero regressions, and not one skip or xfail moved**. The `pytest -q` terminal-summary
+line is suppressed in this image's config, so the counts are a character census of the progress lines:
 
 ```
 $ grep -E "^[.sxXFE]+ +\[ *[0-9]+%\]$" full.txt | tr -d ' []0-9%' | tr -d '\n' | fold -w1 | sort | uniq -c
-   3602 .      11 s      12 x
+   3604 .      11 s      12 x
 $ grep -c '^FAILED' full.txt
 0
+$ grep "EXIT=" full.txt
+EXIT=0
 ```
 
 (`grep -c '^FAILED'`, per the house rule — a `grep -c F` over this output counts "FastAPI" in the
