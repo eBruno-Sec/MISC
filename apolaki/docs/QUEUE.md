@@ -1478,6 +1478,41 @@ run observed.
 containing a claim of file or source exposure. Non-vacuity control: a genuine exposure finding must
 still emit exactly that line.
 
+### Q-102 · A running assessment carries no per-event timestamps, so nothing can be placed in time · **READY** · **MEDIUM**
+
+**Operator-reported, 2026-08-27, during a live Shopify run.** The report carries exactly ONE time: the
+`**Date:**` header of the snapshot. Every finding, every tool-ledger row and every event in the live
+view is undated.
+
+**Why this is not cosmetic:**
+
+- **A live run is unreadable.** A snapshot taken mid-scan shows 10 findings and 478 tool calls with no
+  way to tell which arrived a minute ago and which have been sitting for an hour. The operator cannot
+  see whether the run is progressing or wedged, which is precisely the question a running report exists
+  to answer.
+- **A finding without a time cannot be retested honestly.** The `Retest / closure` block already tells
+  an operator to re-run the confirming request, and "was this observed before or after that deploy?"
+  is unanswerable. A target's posture changes; a finding is a claim about a MOMENT.
+- **Duration is evidence.** Timing-based oracles (time-based blind SQLi, the traversal differential)
+  are argued from elapsed time, and the report never states any.
+- **It is how you catch the wedged engine.** Three lanes and one full-suite run were lost this week to
+  a wedged Docker backend, and the tell was always "nothing has moved in N minutes". With no
+  timestamps, a stalled mission and a slow one look identical, which is this project's oldest defect
+  shape wearing yet another costume.
+
+**FIX:** every finding carries the UTC instant it was CONFIRMED (not when the report was rendered);
+every tool-ledger row carries first-dispatch and last-completion, so per-tool duration is derivable;
+the running report states the mission start and the age of the snapshot. Prefer the timestamps the
+DB rows and event log ALREADY hold over adding new clocks -- check `logs`/`exchanges` first, since the
+data is very likely present and simply not surfaced, which would make this a reporting fix rather than
+an instrumentation one.
+
+**GATE:** a finding rendered from a stored row carries that row's own confirmation time, not the render
+time. The negative control is the one that matters: freeze the clock, render the same mission twice a
+minute apart, and assert every finding timestamp is IDENTICAL across both renders. If they move, the
+report is timestamping itself rather than the evidence, which is worse than no timestamp because it
+looks authoritative.
+
 ### Q-101 · An ECDSA P-256 certificate is reported HIGH "weak key" against an RSA threshold · **READY** · **CRITICAL**
 
 **A FALSE POSITIVE AT HIGH SEVERITY, ON A LIVE BUG-BOUNTY TARGET.** The operator's 2026-08-27 Shopify

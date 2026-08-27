@@ -3400,6 +3400,7 @@ class ToolRegistry:
         findings = _tp.findings_for(origin, protocols=probe.get("protocols"),
                                     cipher=probe.get("cipher", ""), cert=probe.get("cert"),
                                     hostname=host, key_bits=probe.get("key_bits", 0),
+                                    key_algo=probe.get("key_algo", ""),
                                     set_cookies=set_cookies, headers=headers, is_https=is_https,
                                     allow_header=allow, trace_status=trace_status,
                                     trace_body=trace_body, trace_marker=marker,

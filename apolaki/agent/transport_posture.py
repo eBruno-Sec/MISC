@@ -38,7 +38,24 @@ _WEAK_CIPHER_TOKENS = ("NULL", "EXPORT", "ANON", "ADH", "AECDH", "RC4", "DES-CBC
 _SESSION_COOKIE_HINTS = ("sess", "session", "sid", "auth", "token", "jwt", "login", "remember",
                          "csrf", "xsrf", "phpsessid", "jsessionid", "asp.net_sessionid", "connect.sid")
 
-_MIN_RSA_BITS = 2048
+# Q-101. A key size means nothing without the ALGORITHM it belongs to. 256 bits is catastrophic for
+# RSA and entirely healthy for an elliptic curve -- ECDSA P-256 is roughly RSA-3072 equivalent, and it
+# is what most of the modern web serves. The old single `_MIN_RSA_BITS = 2048`, applied to every key
+# regardless of type, reported three HIGH "weak key" findings against live Shopify hosts fronted by
+# Cloudflare on TLSv1.3. The constant was named for RSA and used for everything, so the name was the
+# only thing carrying the discriminator and names do not run.
+#
+# UNKNOWN IS NOT WEAK. An algorithm this map has no entry for is left alone: a finding is a claim, and
+# "I could not identify this key" is not evidence of anything. Adding a permissive default here would
+# reintroduce the bug for the next algorithm nobody anticipated.
+_MIN_KEY_BITS = {
+    "rsa": 2048,
+    "dsa": 2048,
+    "dh": 2048,
+    "ec": 256,          # P-256 and up; P-192 and below are genuinely weak and still caught
+    "ed25519": 0,       # fixed-size modern curve -- a size comparison does not apply
+    "ed448": 0,
+}
 
 
 # ─────────────────────────────────────────────────────────────── pure: certificates
@@ -98,8 +115,14 @@ def hostname_matches(hostname: str, names) -> bool:
     return False
 
 
-def analyze_certificate(cert: dict, hostname: str, *, now=None, key_bits: int = 0) -> list:
-    """Certificate defects a client would actually reject or warn on. Pure; returns issue dicts."""
+def analyze_certificate(cert: dict, hostname: str, *, now=None, key_bits: int = 0,
+                        key_algo: str = "") -> list:
+    """Certificate defects a client would actually reject or warn on. Pure; returns issue dicts.
+
+    Q-101: `key_algo` is REQUIRED to judge `key_bits`. It defaults to "" rather than "rsa" so that a
+    caller which has not been taught to pass it yet reports NOTHING about key size, instead of
+    silently judging every curve against an RSA threshold -- which is the bug this parameter exists
+    to close, and a falsy default that guesses would rebuild it."""
     now = now or datetime.datetime.now(datetime.timezone.utc)
     issues = []
     if not cert:
@@ -126,10 +149,13 @@ def analyze_certificate(cert: dict, hostname: str, *, now=None, key_bits: int = 
         issues.append({"id": "cert_hostname_mismatch", "severity": "high",
                        "detail": "the certificate is valid for %s, not for %s"
                                  % (", ".join(names[:5]), hostname)})
-    if key_bits and key_bits < _MIN_RSA_BITS:
+    minimum = _MIN_KEY_BITS.get((key_algo or "").lower())
+    if key_bits and minimum and key_bits < minimum:
+        # The algorithm is NAMED in the detail. A reader who disagrees with the threshold can see
+        # which one was applied, instead of having to guess that "256 bits" was measured against RSA.
         issues.append({"id": "cert_weak_key", "severity": "high",
-                       "detail": "the public key is %d bits, below the %d-bit minimum"
-                                 % (key_bits, _MIN_RSA_BITS)})
+                       "detail": "the %s public key is %d bits, below the %d-bit minimum for %s"
+                                 % (key_algo.upper(), key_bits, minimum, key_algo.upper())})
     return issues
 
 
@@ -430,7 +456,7 @@ def _impact_for(iid: str, target: str) -> str:
 
 
 def findings_for(target: str, *, protocols=None, cipher: str = "", cert: dict = None, hostname: str = "",
-                 key_bits: int = 0, set_cookies=None, headers: dict = None, is_https: bool = False,
+                 key_bits: int = 0, key_algo: str = "", set_cookies=None, headers: dict = None, is_https: bool = False,
                  allow_header: str = "", trace_status: int = 0, trace_body: str = "",
                  trace_marker: str = "", http_observed: bool = True, now=None) -> list:
     """Every posture finding for one target, from already-collected observations. Pure.
@@ -458,7 +484,7 @@ def findings_for(target: str, *, protocols=None, cipher: str = "", cert: dict = 
         out.append(finding({"id": "tls_weak_cipher", "severity": "medium",
                             "detail": "the negotiated cipher suite %s uses %s" % (cipher, wc)},
                            target, kind="tls", evidence="negotiated cipher: %s" % cipher))
-    for iss in analyze_certificate(cert or {}, hostname, now=now, key_bits=key_bits):
+    for iss in analyze_certificate(cert or {}, hostname, now=now, key_bits=key_bits, key_algo=key_algo):
         out.append(finding(iss, target, kind="cert"))
     # Everything below this line is read off ONE HTTP response. With no response there is no
     # observation to grade, and `analyze_security_headers({})` would otherwise report all six
@@ -512,7 +538,7 @@ def probe_tls(host: str, port: int = 443, timeout: float = 6.0) -> dict:
     import socket
     import ssl
     out = {"host": host, "port": int(port), "reachable": False, "protocols": {}, "cipher": "",
-           "protocol": "", "cert": {}, "key_bits": 0, "note": ""}
+           "protocol": "", "cert": {}, "key_bits": 0, "key_algo": "", "note": ""}
     if not host:
         return {**out, "note": "no host"}
     # default negotiation first: what a normal client actually gets
@@ -531,7 +557,7 @@ def probe_tls(host: str, port: int = 443, timeout: float = 6.0) -> dict:
                     out["cert"] = {}
                 try:
                     der = ss.getpeercert(binary_form=True)
-                    out["key_bits"] = _key_bits(der)
+                    out["key_bits"], out["key_algo"] = _key_bits(der)
                     if not out["cert"]:      # CERT_NONE leaves the parsed dict empty — parse the DER
                         out["cert"] = cert_from_der(der)
                 except Exception:
@@ -600,20 +626,32 @@ def cert_from_der(der_bytes) -> dict:
             "notAfter": na, "notBefore": nb, "subjectAltName": tuple(sans)}
 
 
-def _key_bits(der_bytes) -> int:
-    """Public-key size from a DER certificate, best-effort without a crypto dependency."""
+def _key_bits(der_bytes):
+    r"""`(size, algorithm)` for a DER certificate, best-effort without a crypto dependency.
+
+    Q-101: this function ALREADY branched on RSA vs EC and then returned a bare int, so the caller
+    compared an elliptic-curve size against an RSA threshold and called a healthy P-256 certificate a
+    HIGH weak key. The discriminator was measured here and dropped on the way out -- the same defect
+    as `_cmd` discarding `proc.returncode` and `_http` discarding `status`. It is returned now.
+
+    `("", 0)` on any failure, and an unrecognised key type yields its size with an EMPTY algorithm,
+    which the threshold map deliberately has no entry for. Unknown is not weak."""
     try:
         from cryptography import x509
         from cryptography.hazmat.primitives.asymmetric import rsa, ec
         c = x509.load_der_x509_certificate(der_bytes)
         k = c.public_key()
         if isinstance(k, rsa.RSAPublicKey):
-            return k.key_size
+            return k.key_size, "rsa"
         if isinstance(k, ec.EllipticCurvePublicKey):
-            return k.curve.key_size
-        return getattr(k, "key_size", 0) or 0
+            return k.curve.key_size, "ec"
+        name = type(k).__name__.lower()
+        for algo in ("ed25519", "ed448", "dsa", "dh"):
+            if algo in name:
+                return getattr(k, "key_size", 0) or 0, algo
+        return (getattr(k, "key_size", 0) or 0), ""
     except Exception:
-        return 0
+        return 0, ""
 
 
 def trace_marker() -> str:
