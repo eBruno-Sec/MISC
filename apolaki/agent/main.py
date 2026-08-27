@@ -187,15 +187,59 @@ class GenerateWordlistRequest(BaseModel):
 
 # ── helpers ──────────────────────────────────────────────────────
 def _scope_for(sid: str) -> ScopeEngine:
+    """The mission's ScopeEngine, or a REFUSAL — never a permissive fallback.
+
+    Q-099. Q-096 made `load_manual` raise on a scope that cannot become a boundary (an all-pattern
+    bug-bounty scope, a malformed entry). That raise is correct and stays; what was wrong is that it
+    escaped from here into the UI as an unhandled 500, so reopening a real historical mission — the
+    2026-08-24 Shopify run — looked like the product had broken rather than like the mission's scope
+    being invalid.
+
+    409, and the reasoning is the whole decision:
+      * NOT a permissive engine and NOT a tolerant re-parse — that is the same fail-open this ticket
+        exists to close, moved one layer up; all five callers below send live traffic afterwards.
+      * NOT an engine that refuses everything — safe, but `_scope_guard` answers 400 "Off-scope" for
+        that, so the operator would chase their own URL instead of the mission's stored scope.
+      * NOT 404 (the mission exists) and NOT 422 (the REQUEST is well-formed; the STORED SCOPE is
+        what is invalid).
+      * 409 is what the retest scope guard already answers for this exact condition (`main.py:3115`),
+        so refusal has one status code and one vocabulary across the product.
+
+    The mission itself still OPENS: `GET /missions/{id}` is a 200 carrying `scope_error`, because
+    refusing to render a historical record helps nobody. Only the surfaces that would ACT under an
+    unstateable boundary refuse.
+    """
     if sid in sessions:
         return sessions[sid]["scope"]
     m = db.get_mission(sid)
     if not m:
         raise HTTPException(404, "Session not found")
-    eng = ScopeEngine()
     sc = m["scope"]
-    eng.load_manual(sc.get("in_scope", []), sc.get("out_of_scope", []), sc.get("program", m["program"]))
+    eng, refusal = scope_mod.build_boundary(
+        sc.get("in_scope", []), sc.get("out_of_scope", []), sc.get("program", m["program"]))
+    if refusal:
+        raise HTTPException(409, refusal)
     return eng
+
+
+def _mission_scope_error(m: dict) -> str:
+    """Q-099: the readable state a mission gets instead of a traceback when its scope is invalid.
+
+    Reports the WRITE gate's own verdict first — that is the one that decides whether the mission can
+    store a finding at all — then the request-guard road, which loads `in_scope` where the write gate
+    prefers `bases`. A mission can be unstateable on one road and not the other, and the operator
+    should hear it when they reopen the mission, not on their first workbench request. `""` for a
+    mission that declares no scope: that is a separate state, not this one."""
+    import findings_gate as _fg
+    sc = (m or {}).get("scope") or {}
+    why = _fg.scope_refusal(sc)
+    if why:
+        return why
+    if sc.get("in_scope"):
+        _eng, why = scope_mod.build_boundary(sc.get("in_scope") or [], sc.get("out_of_scope") or [],
+                                             sc.get("program") or m.get("program") or "Program")
+        return why
+    return ""
 
 
 def _scope_guard(eng: ScopeEngine, url: str) -> None:
@@ -772,6 +816,12 @@ async def mission_detail(session_id: str):
                     "strategy": m["context"].get("strategy", "agentic"),
                     "ai_summary": m["context"].get("ai_summary", "")},
         "scope": m["scope"],
+        # Q-099: "" for every well-formed mission; a sentence naming the entry to fix for one whose
+        # stored scope cannot be parsed into an enforceable boundary. The mission still opens with
+        # all of its rows — this is the state that replaces the traceback, not a refusal to render.
+        # The write gate refuses every finding while this is non-empty, so a reader who sees it also
+        # knows why the mission stopped producing.
+        "scope_error": _mission_scope_error(m),
         # Q-017: whole rows to the UI's mission detail — a reader. Gated, so a demoted row arrives
         # labelled `lead` with its `proof_gap` instead of masquerading as a confirmation. Nothing is
         # dropped: the gate is non-destructive, so this response carries the same row count as before.

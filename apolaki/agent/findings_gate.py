@@ -7,9 +7,12 @@ single place so no producer can route around them:
   * SCHEMA (#6): `normalize` coerces a finding to the canonical schema — reproduction_steps is ALWAYS a
     LIST (a producer that emitted a numbered string no longer breaks SARIF export / report / retest), and
     a couple of always-present fields get safe defaults.
-  * SCOPE  (#8): `off_scope` rejects a finding whose target host is provably OUTSIDE the mission scope, so
-    an off-scope finding can never be written — uniformly, from any producer. Fail-OPEN when scope is
-    absent or the target has no parseable host (we only block what we can PROVE is out of scope).
+  * SCOPE  (#8): `off_scope` rejects a finding whose target CANNOT BE PROVED to be inside the mission
+    scope, so an off-scope finding can never be written — uniformly, from any producer. Q-099: this one
+    fails CLOSED. An unbuildable boundary or an http(s) target with no parseable host is a REFUSAL, not
+    an admission; see `off_scope` for why this gate's direction is the opposite of an engine's. Two
+    arms still admit and neither is a fail-open: a mission that declares no scope, and a target that is
+    not an http(s) URL (cloud / network findings answer to their own authorization namespace).
   * TRUTH  (#7): `is_lead` flags a finding whose confidence is a LEAD so the DB layer routes it to the
     mission's leads list instead of the confirmed-findings table — a lead can never masquerade as a
     confirmed finding, even if a producer appended it to a findings list.
@@ -72,33 +75,81 @@ def _host_of(target) -> str:
         return ""
 
 
+def _boundary(scope: dict) -> tuple:
+    """`(ScopeEngine, "")` for a scope that states an enforceable boundary, `(None, reason)` for one
+    that does not, `(None, "")` for a mission that declares no boundary at all.
+
+    Rebuilt from `bases` when present (they carry scheme:host:port/path, so port and path pinning
+    survive); falls back to the bare `in_scope` hosts. Delegates to `scope.build_boundary` so the
+    write gate, the mission record and the request guards answer from ONE evaluation."""
+    scope = scope or {}
+    in_scope = scope.get("in_scope") or []
+    if not in_scope:
+        return None, ""                                # nothing declared — a different question
+    import scope as _scope
+    return _scope.build_boundary(scope.get("bases") or in_scope, scope.get("out_of_scope") or [],
+                                 scope.get("program") or "Program")
+
+
+def scope_refusal(scope: dict) -> str:
+    """Non-empty when this mission's declared scope CANNOT be built into an enforceable boundary —
+    the reason, in a sentence naming the entry to fix. `""` when it can, and `""` when the mission
+    declares no scope at all (that is the separate `not in_scope` state below, unchanged by Q-099).
+
+    Exists because `off_scope` answers with a bare `True`, which is the right answer and a useless
+    one to whoever has to fix the mission. Every operator-facing surface reads this."""
+    return _boundary(scope)[1]
+
+
 def off_scope(finding, scope: dict) -> bool:
-    """True ONLY when the finding's target is PROVABLY outside the mission scope (#8). Fail-open:
-    returns False (admit) when scope is empty / has no in_scope, when the finding has no target, or
-    when the target has no parseable host — we block only what we can prove is out of scope, so a
-    legitimate finding with a placeholder/non-URL target is never silently dropped."""
+    """True when the finding's target CANNOT BE PROVED to be inside the mission scope (#8).
+
+    Q-099 REVERSED THE DIRECTION OF TWO ARMS, deliberately. Both used to admit, both with a comment
+    saying so on purpose, and both fired exactly where scope is least trustworthy:
+
+        no parseable host on an http(s) target   -> was admit, now REFUSE
+        the boundary could not be built at all   -> was admit, now REFUSE
+
+    The second was the live one. Q-096 made `load_manual` RAISE on a scope made entirely of regex
+    patterns (the real 2026-08-24 Shopify engagement), and `ScopeEngine.to_dict` puts patterns into
+    `in_scope`, so such a mission sails past the `not in_scope` arm and every finding it produced was
+    admitted. MEASURED before this change: a mission with an unbuildable boundary published all 7 of
+    7 findings, `http://evil.example.com/p` among them.
+
+    WHY THIS GATE, AND ONLY THIS KIND OF GATE, FAILS CLOSED. An engine failing closed loses a
+    finding; a SCOPE gate failing open puts an out-of-scope finding into a report submitted to a bug
+    bounty program — a program-rules violation and a reputational hit, not a missed bug. The
+    discipline is already written at `main.py:3081`: an exception while BUILDING the boundary can
+    only mean the boundary is unknown, and **unknown is not permission**. Note the shape of the
+    refusal: with no boundary, the operator's OWN asset is refused too. That is not over-blocking,
+    it is what "unknown" means — the statement is about the boundary, never about the target.
+
+    The two arms that still ADMIT are unchanged and are not fail-opens:
+      * no scope declared — a different question, and `EngageRequest` requires `in_scope`, so no
+        mission created by the product reaches it;
+      * a non-http(s) target — a cloud-posture label ("fw-web"), a network host:port, a service/OT
+        identifier. These live in their own authorization namespace (the cloud token, the
+        service-pack scope) and the WEB ScopeEngine has no jurisdiction over them, so its failure to
+        build says nothing about them. Refusing them here would silently drop legitimate
+        cloud/network findings for an unrelated reason.
+    """
     scope = scope or {}
     in_scope = scope.get("in_scope") or []
     if not in_scope:
         return False                                   # no scope configured -> nothing to enforce
     target = (finding or {}).get("target") or (finding or {}).get("url") or ""
     t = str(target).strip().lower()
-    # The web ScopeEngine governs WEB/API targets only. A finding whose target is NOT an http(s) URL —
-    # a cloud-posture label ("fw-web"), a network host:port, a service/OT identifier — lives in its own
-    # authorization namespace (the cloud token, the service-pack scope) and is NOT subject to the web
-    # scope; never reject it here (that would silently drop legitimate cloud/network findings).
     if not (t.startswith("http://") or t.startswith("https://")):
-        return False
+        return False                                   # non-web target: not this scope's namespace
     if not _host_of(target):
-        return False                                   # no host to judge -> admit (fail-open)
+        return True                                    # Q-099: no host to judge -> cannot prove in scope
+    eng, refusal = _boundary(scope)
+    if refusal or eng is None:
+        return True                                    # Q-099: no enforceable boundary -> refuse
     try:
-        import scope as _scope
-        eng = _scope.ScopeEngine()
-        # rebuild from `bases` when present (they carry scheme:host:port/path so port/path pinning is
-        # preserved); fall back to the bare in_scope hosts.
-        eng.load_manual(scope.get("bases") or in_scope, scope.get("out_of_scope") or [],
-                        scope.get("program") or "Program")
         ok, _reason = eng.validate(target)
-        return not ok
     except Exception:
-        return False                                   # scope engine unavailable -> do not block
+        # The boundary built, then could not answer for this target. Same sentence: a predicate that
+        # cannot evaluate has not said yes.
+        return True
+    return not ok

@@ -148,6 +148,36 @@ class ScopeConfigurationError(ValueError):
     """
 
 
+def build_boundary(in_scope, out_of_scope=(), program_name: str = "Program") -> tuple:
+    r"""`(ScopeEngine, "")` when these entries build into an ENFORCEABLE boundary; `(None, reason)`
+    when they do not. Never raises.
+
+    Q-099. `load_manual` raising is correct and stays correct -- the caller is what mishandled it,
+    three times over, each in its own dialect: `findings_gate.off_scope` swallowed the raise and
+    ADMITTED the finding, `main._scope_for` let it escape into the UI as a 500, and
+    `main.retest_findings` handled it properly but wrote its own sentence for the operator. This is
+    that one evaluation and that one sentence, in the module that owns the question, so a mission
+    cannot be unstateable at the write gate and fine on the mission record.
+
+    THE REASON IS THE PRODUCT. A bare "scope invalid" sends an operator hunting; the message names
+    the exception type and carries `load_manual`'s own text, which already names the offending entry
+    verbatim (deliberately NOT `repr()` -- the entry is a regex and repr doubles every backslash, so
+    the operator would be told to fix a string they never typed).
+
+    `(None, reason)` rather than an exception because every caller here has to make the SAME
+    decision -- refuse -- and a return value keeps that decision at the call site where the reader
+    can see it, instead of in a handler that can quietly grow a fall-through.
+    """
+    eng = ScopeEngine()
+    try:
+        eng.load_manual(list(in_scope or []), list(out_of_scope or []), program_name)
+    except Exception as ex:
+        return None, ("this mission's scope could not be parsed into an enforceable boundary "
+                      "(%s: %s); fix the offending entry in scope['bases'] / scope['in_scope'] "
+                      "and re-run" % (type(ex).__name__, str(ex)[:400]))
+    return eng, ""
+
+
 # ── Target shape: the ingress that decides what may become an ADDRESS (Q-096) ──
 # RFC-1123-ish. Deliberately permissive about `_` (real DNS carries it) and about single-label names
 # (`juice-shop`, `box`, `dvwa`) because every Apolaki lab is one.
