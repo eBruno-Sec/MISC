@@ -237,6 +237,67 @@ def compile_pattern(value: str):
     return re.compile(value, re.I)
 
 
+# Q-100. Everything a real bug-bounty scope authorizes is written in anchored regex, so a scope
+# engine that only understands bare hostnames understands nothing an operator actually exports.
+# These two answer "what does this pattern DENOTE?" -- deliberately narrowly, because the failure
+# mode on this road is INVENTING authorization, which is far worse than declining to derive one.
+_PATTERN_META = set(".^$*+?{}[]|()\\")
+
+
+def literal_host_from_pattern(value: str) -> str:
+    r"""The single hostname an ANCHORED LITERAL pattern denotes, or `""` when it denotes anything else.
+
+    `^partners\.shopify\.com$` -> `partners.shopify.com`. That is a hostname wearing punctuation, and
+    refusing it costs the operator 8 real assets out of the 15 in their Shopify export.
+
+    UNESCAPING IS NOT GUESSING, and the line between them is the whole point of this function. Only
+    `\.` is unescaped; ANY other backslash escape or surviving metacharacter returns `""`. So
+    `^a\.b\.com$` resolves and `^a.b\.com$` does NOT -- in the second, `.` is still a metacharacter
+    matching any character, so it denotes a SET of hosts and picking one would be inventing
+    authorization the operator never wrote. The result is re-checked with `is_host_shaped`, so
+    nothing that is not dialable can escape through here."""
+    v = (value or "").strip()
+    if not (v.startswith("^") and v.endswith("$")) or len(v) < 3:
+        return ""
+    body, out, i = v[1:-1], [], 0
+    while i < len(body):
+        c = body[i]
+        if c == "\\":
+            if i + 1 < len(body) and body[i + 1] == ".":
+                out.append(".")
+                i += 2
+                continue
+            return ""                      # any other escape: not a plain literal
+        if c in _PATTERN_META:
+            return ""                      # a live metacharacter: denotes a set, not a host
+        out.append(c)
+        i += 1
+    host = "".join(out)
+    return host if is_host_shaped(host) else ""
+
+
+def wildcard_host_from_pattern(value: str) -> str:
+    r"""The `*.apex` RECON ROOT a subdomain-wildcard pattern denotes, or `""`.
+
+    `^.*\.shopify\.com$` -> `*.shopify.com`, which is this codebase's existing word for the same
+    idea, so `agent.py:3758` seeds subfinder/crt.sh from it and `base_urls()` refuses to dial it.
+
+    THE APEX IS NOT A TARGET. `^.*\.shopify\.com$` authorizes the SUBdomains of shopify.com and says
+    nothing about shopify.com itself; returning the bare apex here would manufacture authorization
+    from a rule that never granted it. Returning the `*.` form keeps that distinction in the type
+    rather than in a comment, and every host recon discovers is still validated against the pattern
+    before anything is dialled."""
+    v = (value or "").strip()
+    if not (v.startswith("^") and v.endswith("$")):
+        return ""
+    body = v[1:-1]
+    for prefix in (".*\\.", ".+\\.", "[^.]*\\.", "[^.]+\\."):
+        if body.startswith(prefix):
+            apex = literal_host_from_pattern("^" + body[len(prefix):] + "$")
+            return ("*." + apex) if apex else ""
+    return ""
+
+
 class ScopeEngine:
     def __init__(self):
         self.in_scope: list = []
@@ -280,8 +341,32 @@ class ScopeEngine:
                     # had — being an address. Kept out of `in_scope` so no target list can pick it up.
                     self._pattern_rx[host] = compile_pattern(host)
                     self.in_scope_patterns.append(ScopeEntry(host, "pattern"))
-                    self.unusable.append((str(d), "not a hostname — a scope pattern is a filter, "
-                                                  "never an address, so it cannot be a target"))
+                    # Q-100: the pattern stays the predicate, AND we ask what it DENOTES. A real
+                    # bug-bounty scope is written entirely in anchored regex, so refusing every one
+                    # of them refuses the engagement — Q-096 stopped the harm and left the operator
+                    # unable to scan. Both derivations translate into vocabulary this codebase
+                    # already has, so nothing downstream needs to learn a new kind of entry:
+                    #   ^partners\.shopify\.com$  -> ScopeEntry("partners.shopify.com", "domain")
+                    #        an anchored literal is a hostname wearing punctuation; `base_urls()`
+                    #        turns a `domain` into a target.
+                    #   ^.*\.shopify\.com$        -> ScopeEntry("*.shopify.com", "wildcard")
+                    #        a RECON ROOT, never a target. `agent.py:3758` already does
+                    #        `.lstrip("*.")` over `in_scope` to seed subfinder/crt.sh, and
+                    #        `base_urls()` already skips wildcards — so the apex is searched and
+                    #        never dialled. This is the distinction that matters: the rule
+                    #        authorized the SUBdomains, so promoting `shopify.com` itself to a
+                    #        target would invent authorization the operator never wrote.
+                    literal = literal_host_from_pattern(host)
+                    if literal:
+                        self.in_scope.append(ScopeEntry(literal, "domain"))
+                        continue
+                    root = wildcard_host_from_pattern(host)
+                    if root:
+                        self.in_scope.append(ScopeEntry(root, "wildcard"))
+                        continue
+                    self.unusable.append((str(d), "a scope pattern that denotes neither one literal "
+                                                  "host nor one wildcard root, so it stays a filter "
+                                                  "only — it still matches, it cannot be a target"))
                     continue
                 # capture the explicit port (if the operator pinned one) so validate()
                 # can enforce it against concrete request targets — see SEC-1.
@@ -651,16 +736,30 @@ def _parse_burp_json(content: str) -> dict:
         data = data["target"]["scope"]
 
     def extract(items: list) -> list:
-        result = []
+        result, seen = [], set()
         for item in (items or []):
             if isinstance(item, str):
                 entry = _parse_target(item)
             elif isinstance(item, dict):
+                # Q-100: a rule the operator switched OFF is not a rule. Burp writes `enabled` on
+                # every entry and this read it as though every rule were live, which silently
+                # widened an INCLUDE the operator had disabled and, worse, honoured a disabled
+                # EXCLUDE as if it were protecting them. Absent means enabled (Burp omits it in
+                # some exports); only an explicit false is a switch-off.
+                if item.get("enabled") is False:
+                    continue
                 raw = item.get("host") or item.get("url") or item.get("file") or ""
                 entry = _parse_target(raw)
             else:
                 entry = None
             if entry:
+                # Burp writes one rule PER PROTOCOL, so a 15-host scope arrives as 30 entries that
+                # are identical once the protocol is dropped. Deduping here keeps the mission's
+                # scope list, its report header and its recon roots from carrying every host twice.
+                key = entry.get("identifier")
+                if key in seen:
+                    continue
+                seen.add(key)
                 result.append(entry)
         return result
 

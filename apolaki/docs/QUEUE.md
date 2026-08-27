@@ -1478,7 +1478,7 @@ run observed.
 containing a claim of file or source exposure. Non-vacuity control: a genuine exposure finding must
 still emit exactly that line.
 
-### Q-100 · A Burp scope file is REFUSED whole when its patterns contain 8 concrete scannable hosts · **READY** · **HIGH**
+### Q-100 · A Burp scope file is REFUSED whole when its patterns contain 9 concrete scannable hosts · **READY** · **HIGH**
 
 **Q-096 stopped the harm. It did not deliver the capability.** The operator's real HackerOne/Burp scope
 export (`shopify20260827T16_04_11Z.json`) is the input that produced the 18 fabricated findings. After
@@ -1498,9 +1498,11 @@ EMPTY, and the mission is refused.
 
 **An anchored literal regex IS a hostname with extra punctuation.** `^partners\.shopify\.com$`
 un-escapes to `partners.shopify.com` mechanically and without guessing: strip `^`/`$`, unescape `\.`,
-then confirm no metacharacter survives. That is 8 real assets available with NO recon at all. The
-ninth, `your-store.myshopify.com`, is the program's placeholder for the tester's OWN store and must
-NOT be dialled. The 6 wildcards give apex roots to seed `subfinder`/`crtsh` with, which is exactly
+then confirm no metacharacter survives. That is 9 real assets available with NO recon at all, one of which (`your-store.myshopify.com`) is
+the program's placeholder for the tester's OWN store; it IS in the include list, so it is derived like
+any other and simply will not resolve. REVERSED ON IMPLEMENTATION: this ticket first said to exclude
+it by name, and special-casing one hostname is the hardcoding this project forbids everywhere else.
+The scope says in-scope, so the code says in-scope. The 6 wildcards give apex roots to seed `subfinder`/`crtsh` with, which is exactly
 what the failed mission's recon needed and never got.
 
 **FIX, and the ordering is the point.** Scope patterns stay patterns and remain the PREDICATE.
@@ -1525,8 +1527,7 @@ the same path**, so `cdn.shopify.com`, `community.shopify.com`, `academy.shopify
 survive as patterns too. An exclude that fails to match is far worse than an include that does.
 
 **GATE:** load the operator's real file (commit it as a fixture, no network) and assert it yields
-**8 concrete targets, 6 recon roots, 7 exclude patterns**; that `your-store.myshopify.com` is NOT among
-the targets; that `cdn.shopify.com` is refused by the predicate; and that port and path pinning survive.
+**9 concrete targets, 6 recon roots, 7 exclude patterns**; that `cdn.shopify.com` is refused by the predicate; and that port and path pinning survive.
 Negative controls: an all-wildcard scope yields 0 concrete targets and still does not raise so long as
 it yields recon roots; a genuinely unusable scope (`[::1]`, `my host.com`) still raises.
 
