@@ -226,3 +226,92 @@ above touches. And this correction to my own classification:
 > whether *some* probe in `ERROR_PROBES` happens to break the statement with an empty prefix.
 > On juice-shop `')` does, so it survives **there**. That is a coincidence of this endpoint, not
 > a property of the oracle. **A-err is UNRELIABLE under a blank value, not immune.**
+
+## 4. My own sqlmap A/B — MEASURED, identical flags on both sides
+
+The ticket's proof used different `--level`/`--risk` on the two arms. This run holds every flag
+constant, so the only variable is the value. Container `apolaki-agent`, `--network apolaki_default`:
+
+```
+sqlmap -u 'http://juice-shop:3000/rest/products/search?q'       --batch --level 3 --risk 2 \
+       --flush-session --random-agent --technique=BEUST
+  [WARNING] heuristic (basic) test shows that parameter 'User-Agent' might not be injectable
+  [WARNING] heuristic (basic) test shows that parameter 'Referer'    might not be injectable
+  [ERROR]   all tested parameters do not appear to be injectable.
+
+sqlmap -u 'http://juice-shop:3000/rest/products/search?q=apple' --batch --level 3 --risk 2 \
+       --flush-session --random-agent --technique=BEUST
+  [WARNING] heuristic (basic) test shows that GET parameter 'q' might not be injectable
+  [INFO]    heuristic (extended) test shows that the back-end DBMS could be 'SQLite'
+  GET parameter 'q' is vulnerable.
+  Parameter: q (GET)
+      Type: boolean-based blind   Title: AND boolean-based blind - WHERE or HAVING clause
+      Type: time-based blind      Title: SQLite > 2.0 AND time-based blind (heavy query)
+  back-end DBMS: SQLite
+```
+
+**Note which parameters the valueless run tested: `User-Agent` and `Referer`. Never `q`.** The
+dynamicity check dropped the parameter the whole dispatch existed to test, and the run still
+printed a confident negative. That is the Q-095 shape exactly: a dispatch that opened its
+transport, carried input incapable of proving anything, and reported a clean bill of health.
+
+## 5. THE FIX — `planner.merge_observed_params`, one call site
+
+`planner.py:293`. `have` counted a blank-valued parameter as "already have it":
+
+```python
+-   have  = {k for k, _ in pairs}
+-   extra = [(k, values[k]) for k in sorted(values) if k not in have]
+-   if not extra:
+-       return url
+-   return urlunparse(p._replace(query=urlencode(pairs + extra, doseq=True)))
++   upgraded = [(k, values[k]) if (not v and values.get(k)) else (k, v) for k, v in pairs]
++   have  = {k for k, _ in pairs}
++   extra = [(k, values[k]) for k in sorted(values) if k not in have]
++   if upgraded == pairs and not extra:
++       return url                      # a no-op must be a no-op -- see below
++   return urlunparse(p._replace(query=urlencode(upgraded + extra, doseq=True)))
+```
+
+**Single production call site: `planner.py:627`, inside `_ex(ep)`.** Every per-endpoint engine the
+phase-E loop dispatches takes its URL from there, so class A is fixed at one point and class B is
+carried along unchanged (its probe is byte-identical either way — that is the definition of the
+class, and the gate asserts it).
+
+**The byte-for-byte no-op branch is load-bearing, not tidiness.** Re-encoding unconditionally
+rewrites `?q` as `?q=` — the same request on the wire (MEASURED: both 16572 bytes) but a different
+STRING — on all 9873 valueless dispatches, churning every dedup key, step key and cached result for
+endpoints this fix does not help. `test_a_parameter_never_observed_with_a_value_stays_blank` caught
+that in the first draft.
+
+**Nothing is synthesized.** `values` comes only from `observed_param_values(urls)`. A parameter
+never observed with a value keeps its blank, and `test_every_value_on_every_probe_url_was_observed_
+on_that_endpoint` asserts the general form.
+
+## 6. THE GATE — `agent/tests/test_observed_param_value_delivery.py`
+
+Committed RED (`02d66dc`) before the fix. **MEASURED before: 3 failed / 8 passed. After: 11 passed.**
+
+| Test | Before | After | Role |
+|---|---|---|---|
+| `test_merge_observed_params_upgrades_a_blank_value_to_the_observed_one` | **RED** | green | the defect, at the helper |
+| `test_a_baseline_dependent_engine_is_handed_the_observed_value_not_a_blank` | **RED** | green | the defect, at all 5 class-A engines the planner dispatches here |
+| `test_the_probe_url_does_not_depend_on_the_order_the_crawl_saw_the_urls_in` | **RED** | green | crawl order decided the answer |
+| `test_a_value_overwriting_engine_is_unaffected_in_both_directions` (x3) | green | green | **the non-vacuity control** — class B unaffected in BOTH directions |
+| `test_the_two_classes_are_actually_distinguishable_on_this_fixture` | green | green | negative control *for the control*: if the two URLs produced the same baseline too, "class B unaffected" would be vacuous |
+| `test_a_parameter_never_observed_with_a_value_stays_blank` | green | green | never synthesize |
+| `test_every_value_on_every_probe_url_was_observed_on_that_endpoint` | green | green | never synthesize, general form |
+| `test_a_real_value_is_never_churned_by_the_upgrade` | green | green | no churn on endpoints that were never broken |
+| `test_live_a_blank_value_returns_a_different_page_than_the_observed_value` | green | green | the raw-byte fixture on the live lab |
+
+**Why the executable gate sits at the planner boundary rather than on a class-A engine
+end-to-end:** both candidate engine-level fixtures were measured and disproved (section 3), and the
+one surviving class-A proof is sqlmap, a several-minute external run unfit for a unit suite. The
+gate therefore asserts the thing the fix changes and the thing every class-A engine depends on —
+that the probe URL carries the value the crawl observed — with the sqlmap A/B of section 4 as the
+recorded end-to-end evidence that the URL choice decides the verdict.
+
+The class-B control is deliberately NOT "the URL handed to `run_xss` is unchanged" — after the fix
+it *does* change, because every engine takes the same `_ex(ep)`. It is "the PROBE `run_xss` puts on
+the wire is byte-identical either way", which is what "unaffected" actually means for class B and
+is true before and after.

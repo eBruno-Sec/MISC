@@ -308,6 +308,38 @@ def merge_observed_params(url: str, values: dict) -> str:
 
     Parameters already present keep their own value. Missing ones are appended in sorted order
     so the URL is deterministic across runs.
+
+    A PARAMETER PRESENT WITH A BLANK VALUE IS UPGRADED TO THE OBSERVED ONE (Q-095).
+    -------------------------------------------------------------------------------
+    `?q` and `?q=apple` are not two spellings of the same request. MEASURED on juice-shop:
+    `?q` and `?q=` both return 16572 bytes (the whole UNFILTERED product list) while `?q=apple`
+    returns 921. A BASELINE-DEPENDENT engine -- one that fetches the URL as given and compares a
+    probe against it (`_run_sqli`, `_run_nosqli`, `_run_cmdi`, `_run_web_probes`, the SSTI branch
+    of `_run_injection_probes`, and `run_sqlmap`'s own dynamicity check) -- therefore measures its
+    differential against a page the probe can never reproduce, and reports CLEAN on a vulnerable
+    field. MEASURED with identical flags on both sides:
+
+        sqlmap -u '.../search?q'       --batch --level 3 --risk 2 --technique=BEUST
+            -> "all tested parameters do not appear to be injectable"
+               (it tested User-Agent and Referer; `q` itself was dropped as non-dynamic)
+        sqlmap -u '.../search?q=apple' --batch --level 3 --risk 2 --technique=BEUST
+            -> Parameter: q (GET)  boolean-based blind + time-based blind, back-end DBMS: SQLite
+
+    `have` counted a blank-valued parameter as "already have it", so the value `observed_param_values`
+    had ALREADY recovered was dropped on the floor. Worse, `build_inventory` keeps the FIRST URL it
+    sees as the endpoint's `example`, so whether a mission probed a working URL or a dead one was
+    decided by the order the crawl happened to reach them in.
+
+    NOTHING IS SYNTHESIZED, and that is the load-bearing constraint rather than a nicety. `values`
+    comes only from `observed_param_values(urls)`, which reads real discovered URLs; a parameter
+    never observed with a value keeps its blank. An INVENTED value can make baseline and probe fail
+    identically, which is precisely how an engine reports clean on a vulnerable field -- the failure
+    mode that has bitten three engines here in one day. This is also the rule
+    `observed_param_values` already applies internally ("a real value beats a blank one",
+    line 286): the fix makes the two halves of D3 agree, it does not add a new policy.
+
+    A parameter that already carries a REAL value keeps its own -- no churn on endpoints that were
+    never broken, so their dedup keys, exchange ledgers and cached results do not move.
     """
     if not url or not values:
         return url
@@ -316,11 +348,17 @@ def merge_observed_params(url: str, values: dict) -> str:
     except Exception:
         return url
     pairs = parse_qsl(p.query, keep_blank_values=True)
+    # Q-095: upgrade in place, preserving position, so only the value moves.
+    upgraded = [(k, values[k]) if (not v and values.get(k)) else (k, v) for k, v in pairs]
     have = {k for k, _ in pairs}
     extra = [(k, values[k]) for k in sorted(values) if k not in have]
-    if not extra:
+    if upgraded == pairs and not extra:
+        # NOTHING RECOVERED -> RETURN THE URL BYTE-FOR-BYTE. Re-encoding here would rewrite `?q`
+        # as `?q=` on all 9873 valueless dispatches: the same request on the wire (MEASURED:
+        # both 16572 bytes) but a different STRING, which churns every dedup key, step key and
+        # cached result for endpoints this fix does not help. A no-op must be a no-op.
         return url
-    return urlunparse(p._replace(query=urlencode(pairs + extra, doseq=True)))
+    return urlunparse(p._replace(query=urlencode(upgraded + extra, doseq=True)))
 
 
 def _allowed(tool: str, mode: str) -> bool:
