@@ -1478,6 +1478,59 @@ run observed.
 containing a claim of file or source exposure. Non-vacuity control: a genuine exposure finding must
 still emit exactly that line.
 
+### Q-101 · An ECDSA P-256 certificate is reported HIGH "weak key" against an RSA threshold · **READY** · **CRITICAL**
+
+**A FALSE POSITIVE AT HIGH SEVERITY, ON A LIVE BUG-BOUNTY TARGET.** The operator's 2026-08-27 Shopify
+run produced three of these against `partners.shopify.com`, `accounts.shopify.com` and
+`your-store.myshopify.com`:
+
+> Weak TLS certificate key: the public key is 256 bits, below the 2048-bit minimum. **Severity: HIGH.**
+
+**All three are wrong.** 256 bits is **ECDSA P-256**, a modern strong curve roughly equivalent to
+RSA-3072. Shopify sits behind Cloudflare (`AS13335`, confirmed in the same report's `run_asn` row) and
+serves ECDSA certificates. The run also recorded `"negotiated": "TLSv1.3"`, so this is a current,
+healthy TLS configuration being reported as a critical weakness.
+
+**Submitting this to a program is worse than submitting nothing.** It is a confident HIGH about
+cryptography, aimed at a mature security team, and it is trivially disprovable in one command.
+
+**ROOT CAUSE, and it is this codebase's most repeated defect for the FIFTH time: the producer measured
+the discriminator and discarded it at the return edge.**
+
+`transport_posture._key_bits` (`:603`) ALREADY knows the algorithm. It branches on it explicitly:
+
+```python
+if isinstance(k, rsa.RSAPublicKey):
+    return k.key_size
+if isinstance(k, ec.EllipticCurvePublicKey):
+    return k.curve.key_size      # <- knows it is EC, returns a bare int
+return getattr(k, "key_size", 0) or 0
+```
+
+and the caller (`:129`) compares that int against a constant whose NAME says what it is for:
+
+```python
+_MIN_RSA_BITS = 2048             # :41
+if key_bits and key_bits < _MIN_RSA_BITS:
+```
+
+Nothing is broken about either half in isolation. The type existed, was computed, and was dropped
+between the two. Same sentence as `_cmd` discarding `proc.returncode` (Q-092), `_http` discarding
+`status`/`error` (Q-093), and the DB writers of Q-089/Q-090.
+
+**FIX:** `_key_bits` returns the algorithm alongside the size, and the threshold is chosen per
+algorithm: RSA/DSA >= 2048, EC >= 256, Ed25519 always acceptable. Rename `_MIN_RSA_BITS` so the
+constant cannot be applied to a non-RSA key by accident again. An UNKNOWN algorithm must NOT be
+flagged: unknown is not evidence, and a finding is a claim.
+
+**GATE:** an ECDSA P-256 certificate produces NO weak-key finding; a genuine RSA-1024 certificate
+still DOES. Both halves, or the fix is indistinguishable from deleting the check. Use fixtures, not a
+live host, so the gate does not depend on what a CDN serves this week.
+
+**WATCH FOR THE SAME SHAPE ELSEWHERE IN THIS FILE.** The defect is not the number 2048, it is comparing
+across a discriminator that was thrown away. Audit every other certificate and cipher assertion in
+`analyze_certificate` for the same pattern before closing.
+
 ### Q-100 · A Burp scope file is REFUSED whole when its patterns contain 9 concrete scannable hosts · **READY** · **HIGH**
 
 **Q-096 stopped the harm. It did not deliver the capability.** The operator's real HackerOne/Burp scope
