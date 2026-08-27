@@ -1478,6 +1478,58 @@ run observed.
 containing a claim of file or source exposure. Non-vacuity control: a genuine exposure finding must
 still emit exactly that line.
 
+### Q-100 · A Burp scope file is REFUSED whole when its patterns contain 8 concrete scannable hosts · **READY** · **HIGH**
+
+**Q-096 stopped the harm. It did not deliver the capability.** The operator's real HackerOne/Burp scope
+export (`shopify20260827T16_04_11Z.json`) is the input that produced the 18 fabricated findings. After
+Q-096 that file is now REFUSED at `load_manual` with `ScopeConfigurationError`, which is correct and
+safe. **But the operator still cannot scan Shopify, and the file contains everything needed to.**
+
+`_parse_burp_json` (`scope.py:648`) correctly unwraps `target.scope` and reads `item["host"]`. Every
+host it hands on is an anchored regex, so all of them are now typed `pattern`, `in_scope` ends up
+EMPTY, and the mission is refused.
+
+**MEASURED from the operator's file. 15 unique include hosts (x2 for http/https = 30 entries):**
+
+| kind | count | examples |
+|---|---|---|
+| **anchored LITERAL, directly scannable today** | **9** | `^partners\.shopify\.com$`, `^accounts\.shopify\.com$`, `^admin\.shopify\.com$`, `^shop\.app$`, `^shopify\.plus$`, `^linkpop\.com$`, `^shopifyinbox\.com$`, `^arrive-server\.shopifycloud\.com$`, `^your-store\.myshopify\.com$` |
+| **true wildcard, a RECON ROOT and not an address** | **6** | `^.*\.shopify\.com$`, `^.*\.shopifycs\.com$`, `^.*\.shopify\.io$`, `^.*\.pci\.shopifyinc\.com$`, `^.*\.shopifykloud\.com$`, `^.*\.shopifycloud\.com$` |
+
+**An anchored literal regex IS a hostname with extra punctuation.** `^partners\.shopify\.com$`
+un-escapes to `partners.shopify.com` mechanically and without guessing: strip `^`/`$`, unescape `\.`,
+then confirm no metacharacter survives. That is 8 real assets available with NO recon at all. The
+ninth, `your-store.myshopify.com`, is the program's placeholder for the tester's OWN store and must
+NOT be dialled. The 6 wildcards give apex roots to seed `subfinder`/`crtsh` with, which is exactly
+what the failed mission's recon needed and never got.
+
+**FIX, and the ordering is the point.** Scope patterns stay patterns and remain the PREDICATE.
+Alongside them, derive:
+
+1. **concrete seeds** from anchored-literal patterns by un-escaping. Never by guessing, and never by
+   stripping `.*` off a wildcard, which would invent `shopify.com` as a target from a rule that only
+   ever authorized its SUBdomains.
+2. **recon roots** from wildcard patterns, fed to `subfinder`/`crtsh`, with every discovered host
+   validated back through the predicate before anything is dialled.
+
+Refuse only when BOTH sets come back empty. `ScopeConfigurationError` would then mean "nothing here can
+be turned into a target", which is true, rather than today's "no entry is literally a hostname", which
+is a different and weaker claim.
+
+**SECOND DEFECT IN THE SAME PARSER, a scope-SAFETY issue rather than a coverage one.**
+`_parse_burp_json` reads ONLY `host`. The operator's file also pins `"protocol"`, `"port": "^80$"` /
+`"^443$"`, and `"file": "^/.*"` on every entry, and **all three are discarded**. Port and path pinning
+already exist in `ScopeEntry` (SEC-1, SEC-2) and are simply never populated from Burp JSON, so a Burp
+scope authorizing only `:443` is silently widened to every port. **The 14 EXCLUDE entries parse through
+the same path**, so `cdn.shopify.com`, `community.shopify.com`, `academy.shopify.com` and the rest must
+survive as patterns too. An exclude that fails to match is far worse than an include that does.
+
+**GATE:** load the operator's real file (commit it as a fixture, no network) and assert it yields
+**8 concrete targets, 6 recon roots, 7 exclude patterns**; that `your-store.myshopify.com` is NOT among
+the targets; that `cdn.shopify.com` is refused by the predicate; and that port and path pinning survive.
+Negative controls: an all-wildcard scope yields 0 concrete targets and still does not raise so long as
+it yields recon roots; a genuinely unusable scope (`[::1]`, `my host.com`) still raises.
+
 ### Q-099 · `findings_gate` FAILS OPEN in exactly the two states where scope is broken · **READY** · **HIGH**
 
 Surfaced as a residual by the Q-096/097/098 lane and confirmed by the Coordinator. The function returns
