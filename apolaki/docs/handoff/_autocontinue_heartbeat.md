@@ -18,3 +18,5 @@ Format:
 
 ---
 
+FIRED 2026-08-27T15:16:11Z  head=02d66dc  open=35
+DONE  2026-08-27T15:29:09Z  BLOCKED (interim): docker daemon unresponsive (WSL docker-desktop distro Stopped); Stop-Process denied by classifier; relaunched Docker Desktop.exe (non-destructive), Monitor armed 180s waiting for recovery before running tests to commit the Q-095/Q-099 fixes already staged in the working tree
