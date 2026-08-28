@@ -32,7 +32,44 @@ reproducible release blockers.
 | I-9 | caps preserve highest-value ordering | ⏳ CLAIMED closed, NOT yet verified | never measured by us; guard `test_cap_ordering_invariant` 8 tests |
 | I-11 | reachable / framework-invoked / retained-with-reason | ❌ **44 vs ceiling 37** | pin held; three lanes declined to force it |
 
-## SHIP GATE GREEN: 3604 passed, 11 skipped, 12 xfailed, 0 failed - Q-096/Q-097/Q-098 CLOSED
+## SHIP GATE GREEN: 3671 passed, 11 skipped, 12 xfailed, 0 failed
+
+`PYTEST_EXIT=0` at `ce59bad`, verified on a clean `git archive HEAD` snapshot on `apolaki_default`.
+Baseline before this batch was 3604. **Q-095, Q-099, Q-100, Q-101, Q-102, Q-103 all CLOSED and
+VERIFIED.**
+
+### The week's real lesson: an unverifiable fix is not a fix
+
+Docker's service was stopped on this machine for most of this batch and could not be started without
+elevation, so six tickets were committed **explicitly labelled UNVERIFIED**. When the daemon finally
+came back, the first honest full-suite run was **10 failed / 3654 passed**, and every one of the ten
+was a consequence of those six changes.
+
+**None of the ten was fixed by editing an assertion.** They fell into four groups:
+
+**Q-100 superseded a FIXTURE, not an invariant.** Q-096 and Q-099 both used the operator's real
+Shopify wildcard scope as their example of an unbuildable boundary. That was true when no target
+could be derived from any pattern; Q-100 makes wildcards yield recon roots, so that scope is
+buildable now **and must be**. Both files moved to patterns that genuinely denote nothing
+(alternation, a digit class). Editing the assertions instead would have re-opened Q-099.
+
+**The literal-return census rose 61 -> 63 and the ceiling was NOT raised.** Both new sites were named
+exactly by diffing the census against `eb5d012` **by owner rather than by line** -- line numbers shift
+and make that diff lie. `findings_gate.off_scope` and `transport_posture._key_bits` now record through
+`tools._ACTIVE_REGISTRY`. `_key_bits` mattered most: returning `(0, "")` silently means "say nothing
+about this key", so a certificate it could not parse produced **the same silence as a healthy one**.
+
+**Three self-inflicted errors caught in the same pass:** the first recorder fix wrapped `_swallow` in
+`try/except: pass`, which is another silent swallow and would have grown the census it was meant to
+shrink (`_swallow` is documented as unable to raise); `perl -0pi` collapsed backslashes twice, writing
+`^(a|b).example.com` and then Perl concatenation syntax into a Python file; and `test_sast_entry`
+compared persisted findings by equality, which Q-102's read-time `observed_at` legitimately broke.
+
+**A wrong instrument reads as an explanation, not an error.** Two runs this cycle reported `exit 0`
+while pytest had exited 1, because the harness reports the LAST command in a compound background job.
+The `N failed` line is the only thing worth believing.
+
+### Previously (Q-096/Q-097/Q-098 cycle): 3604 passed
 
 Independently verified by the Coordinator on a clean `git archive HEAD` snapshot on `apolaki_default`.
 Baseline 3581 + exactly the 23 tests these tickets added; no skip, xfail or ceiling moved.

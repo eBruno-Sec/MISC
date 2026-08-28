@@ -1516,7 +1516,15 @@ own vocabulary. `_zero_re` only catches "no X confirmed" wording and would not s
 model read before anything is changed; guessing a numeric-mismatch rule here would produce false
 contradictions on every recon row.
 
-### Q-102 · A running assessment carries no per-event timestamps, so nothing can be placed in time · **READY** · **MEDIUM**
+### Q-102 · A running assessment carries no per-event timestamps, so nothing can be placed in time · **CLOSED** · **MEDIUM**
+
+**VERIFIED.** Full suite GREEN at `ce59bad`: **3671 passed / 11 skipped / 12 xfailed / 0 failed**, `PYTEST_EXIT=0`, on a clean `git archive HEAD` snapshot attached to `apolaki_default`. Baseline before this batch was 3604.
+
+`db.get_findings` attaches `observed_at` from the row's own `created_at` -- the column the statement was already ORDERING BY and never SELECTing. The report prints `Observed:` per finding and `First/Latest evidence` in the header, all read from stored rows and never from a render clock. The gate that matters renders the same mission twice and asserts every evidence line is byte-identical while `Report generated` differs: a report that stamps ITSELF would pass every other assertion while telling the reader nothing, and would look authoritative doing it.
+
+ORIGINAL TICKET FOLLOWS.
+
+### Q-102 (as filed)
 
 **Operator-reported, 2026-08-27, during a live Shopify run.** The report carries exactly ONE time: the
 `**Date:**` header of the snapshot. Every finding, every tool-ledger row and every event in the live
@@ -1551,7 +1559,17 @@ minute apart, and assert every finding timestamp is IDENTICAL across both render
 report is timestamping itself rather than the evidence, which is worse than no timestamp because it
 looks authoritative.
 
-### Q-101 · An ECDSA P-256 certificate is reported HIGH "weak key" against an RSA threshold · **READY** · **CRITICAL**
+### Q-101 · An ECDSA P-256 certificate is reported HIGH "weak key" against an RSA threshold · **CLOSED** · **CRITICAL**
+
+**VERIFIED.** Full suite GREEN at `ce59bad`: **3671 passed / 11 skipped / 12 xfailed / 0 failed**, `PYTEST_EXIT=0`, on a clean `git archive HEAD` snapshot attached to `apolaki_default`. Baseline before this batch was 3604.
+
+`_key_bits` returns `(size, algorithm)` and the threshold is per-algorithm: RSA/DSA/DH 2048, EC 256, Ed25519/Ed448 not judged on size at all. The single `_MIN_RSA_BITS` is gone, so a non-RSA key cannot be measured against it by accident. `key_algo` defaults to `""` rather than `"rsa"` deliberately -- a guessing default would rebuild the bug for any call site not yet updated -- and an unrecognised algorithm is not flagged, because a finding is a claim and failing to identify a key is not evidence about it.
+
+Its `except` now RECORDS: returning `(0, "")` means "say nothing about this key", so a certificate it could not parse produced the same silence as a healthy one.
+
+ORIGINAL TICKET FOLLOWS.
+
+### Q-101 (as filed)
 
 **A FALSE POSITIVE AT HIGH SEVERITY, ON A LIVE BUG-BOUNTY TARGET.** The operator's 2026-08-27 Shopify
 run produced three of these against `partners.shopify.com`, `accounts.shopify.com` and
@@ -1604,7 +1622,17 @@ live host, so the gate does not depend on what a CDN serves this week.
 across a discriminator that was thrown away. Audit every other certificate and cipher assertion in
 `analyze_certificate` for the same pattern before closing.
 
-### Q-100 · A Burp scope file is REFUSED whole when its patterns contain 9 concrete scannable hosts · **READY** · **HIGH**
+### Q-100 · A Burp scope file is REFUSED whole when its patterns contain 9 concrete scannable hosts · **CLOSED** · **HIGH**
+
+**VERIFIED.** Full suite GREEN at `ce59bad`: **3671 passed / 11 skipped / 12 xfailed / 0 failed**, `PYTEST_EXIT=0`, on a clean `git archive HEAD` snapshot attached to `apolaki_default`. Baseline before this batch was 3604.
+
+A Burp/HackerOne export yields **9 concrete targets and 6 recon roots** instead of a refusal, confirmed on the operator's real file (committed as a fixture). Patterns stay the predicate; alongside them an anchored literal becomes a `domain` entry and a subdomain wildcard becomes a `*.apex` wildcard entry -- both vocabulary this codebase already had, so `base_urls()` dials the first and refuses the second while `agent.py:3758` seeds recon from it. Un-escaping is not guessing: only `\.` is unescaped and any surviving metacharacter derives nothing, so `^a\.b\.com$` resolves and `^a.b\.com$` does not. The parser also honoured `enabled: false` rules, treating a disabled EXCLUDE as protection the operator did not have.
+
+**LIVE CONFIRMATION** from the operator's rerun: Surface URLs 0 -> **6213**, subfinder 0 -> 2 subdomains, crtsh 0 -> 2 CT entries, `run_dns` "SPF MISSING" -> **SPF set, DMARC set**, `run_asn` 0 IPs -> AS13335 Cloudflare, TLS `reachable: false` -> **`reachable: true, TLSv1.3`**.
+
+ORIGINAL TICKET FOLLOWS.
+
+### Q-100 (as filed)
 
 **Q-096 stopped the harm. It did not deliver the capability.** The operator's real HackerOne/Burp scope
 export (`shopify20260827T16_04_11Z.json`) is the input that produced the 18 fabricated findings. After
@@ -1657,7 +1685,17 @@ survive as patterns too. An exclude that fails to match is far worse than an inc
 Negative controls: an all-wildcard scope yields 0 concrete targets and still does not raise so long as
 it yields recon roots; a genuinely unusable scope (`[::1]`, `my host.com`) still raises.
 
-### Q-099 · `findings_gate` FAILS OPEN in exactly the two states where scope is broken · **READY** · **HIGH**
+### Q-099 · `findings_gate` FAILS OPEN in exactly the two states where scope is broken · **CLOSED** · **HIGH**
+
+**VERIFIED.** Full suite GREEN at `ce59bad`: **3671 passed / 11 skipped / 12 xfailed / 0 failed**, `PYTEST_EXIT=0`, on a clean `git archive HEAD` snapshot attached to `apolaki_default`. Baseline before this batch was 3604.
+
+Both fail-open arms of `findings_gate.off_scope` reversed. The deeper finding was that `load_manual` raising is CORRECT and three callers mishandled it three different ways: `off_scope` swallowed and ADMITTED, `main._scope_for` leaked a 500 into the UI, `retest_findings` handled it but wrote its own sentence. `scope.build_boundary` is now the one evaluation and the one sentence. `_scope_for` answers 409; `GET /missions/{id}` still answers 200 carrying `scope_error`, so a historical mission with invalid scope still OPENS and only the surfaces that would send traffic refuse.
+
+The `off_scope` handler now RECORDS its swallow through `tools._ACTIVE_REGISTRY`: failing closed keeps the finding out of the report, but a boundary that silently stopped answering looks identical to a scope that legitimately refuses everything.
+
+ORIGINAL TICKET FOLLOWS.
+
+### Q-099 (as filed)
 
 Surfaced as a residual by the Q-096/097/098 lane and confirmed by the Coordinator. The function returns
 `True` to BLOCK an out-of-scope finding, so every `return False` ADMITS it. There are two:
@@ -1691,7 +1729,15 @@ all-pattern mission (such as the Shopify run that produced Q-096). That is the c
 means a historical mission may fail to open in the UI. Decide whether it should surface as a clean
 "this mission's scope was invalid" state rather than an exception.
 
-### Q-095 · Param mining yields NAMES, not VALUES, and 81.2% of dispatches probe a valueless parameter · **READY** · **HIGH**
+### Q-095 · Param mining yields NAMES, not VALUES, and 81.2% of dispatches probe a valueless parameter · **CLOSED** · **HIGH**
+
+**VERIFIED.** Full suite GREEN at `ce59bad`: **3671 passed / 11 skipped / 12 xfailed / 0 failed**, `PYTEST_EXIT=0`, on a clean `git archive HEAD` snapshot attached to `apolaki_default`. Baseline before this batch was 3604.
+
+`planner.merge_observed_params` upgrades a blank-valued parameter to the OBSERVED one. `have` counted a blank as "already have it", so the value `observed_param_values` had already recovered was dropped. Nothing is synthesised: a parameter never observed with a value keeps its blank. The byte-for-byte no-op branch is load-bearing, not tidiness -- re-encoding unconditionally rewrites `?q` as `?q=`, the same request on the wire but a different STRING, churning dedup keys across all 9873 valueless dispatches for endpoints this does not help.
+
+ORIGINAL TICKET FOLLOWS.
+
+### Q-095 (as filed)
 
 **A baseline-dependent engine handed `?q` instead of `?q=apple` reports CLEAN on a genuinely
 vulnerable endpoint.** Proven on sqlmap by the Q-092 audit, then measured corpus-wide by the
