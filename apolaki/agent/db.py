@@ -520,6 +520,30 @@ def iter_logs(mid: str):
             yield {"type": r["etype"], **payload, "ts": r["created_at"]}
 
 
+def mission_heartbeat(mid: str) -> dict:
+    """`{"last_dispatch": iso-or-'', "dispatches": n}` — is this mission still WORKING?
+
+    Q-107. The operator could not tell a running mission from a wedged one, and none of the three
+    signals the platform published could answer it. Measured over 85 minutes of a live run:
+
+        Latest evidence   moved 2 minutes   - derived from FINDINGS (Q-102), and a healthy scan may
+                                              legitimately produce none for hours
+        Tools Invoked     573 -> 570        - the ledger was a window (Q-105), so it went BACKWARDS
+        Surface Urls      flat              - grows during crawl, correctly flat during probe
+        Report generated  advanced          - a fact about the RENDERER; it advances for a hung run too
+
+    A heartbeat has to be independent of findings, of phase, and of the ledger. `tool_call` rows are
+    the one thing a working mission emits continuously whatever it is doing and whatever it finds.
+
+    Counted in SQL rather than by folding `iter_logs`, so polling this is a single indexed aggregate
+    and stays cheap enough to hit repeatedly on a long mission.
+    """
+    rows = _query("SELECT COUNT(*) AS n, MAX(created_at) AS last FROM logs "
+                  "WHERE mission_id=? AND etype='tool_call'", (mid,))
+    r = rows[0] if rows else {}
+    return {"dispatches": int(r.get("n") or 0), "last_dispatch": r.get("last") or ""}
+
+
 # ── Notes ────────────────────────────────────────────────────────
 def add_note(mid: str, body: str) -> str:
     nid = uuid.uuid4().hex[:12]

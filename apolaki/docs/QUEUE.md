@@ -1478,7 +1478,23 @@ run observed.
 containing a claim of file or source exposure. Non-vacuity control: a genuine exposure finding must
 still emit exactly that line.
 
-### Q-107 · A running mission has NO heartbeat: three separate signals all read flat while it works · **READY** · **HIGH**
+### Q-107 · A running mission has NO heartbeat: three separate signals all read flat while it works · **CLOSED** · **HIGH**
+
+**CLOSED.** `db.mission_heartbeat(mid)` returns `{"last_dispatch", "dispatches"}` from a single
+indexed SQL aggregate over `tool_call` rows -- independent of findings, of phase, and of the ledger.
+Surfaced as `**Last activity:**` in the report header and as `heartbeat` on `GET /missions/{id}`, so
+an operator can poll one number instead of resorting to `docker stats`.
+
+**GATE** (`tests/test_mission_heartbeat.py`, 7 passed): activity with ZERO findings advances it (the
+case all three existing signals fail); a mission with no activity does NOT advance (the control that
+stops it being another clock); and `dispatches` only ever rises, applying Q-105's lesson before it
+could repeat.
+
+**The last test exists because I nearly shipped this useless.** `generate_report` has a separate
+short path for a mission with no confirmed findings, and I had added the heartbeat only to the full
+report -- so it would have been **absent from the exact document the waiting operator reads**. A
+mission that has found nothing yet is precisely when "is it still working?" gets asked.
+
 
 **Reported by the operator mid-run, and he was right to keep asking.** He could not answer "is it still
 working or has it hung?" from anything the platform publishes. Measured across 85 minutes of a live

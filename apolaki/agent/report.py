@@ -403,7 +403,7 @@ def generate_report(program: str, findings: list, scope: dict,
                      coverage: dict = None, chains: list = None, status: str = None,
                      ai_summary: str = None, execution: dict = None, leads: list = None,
                      delta: dict = None, tool_ledger: dict = None, intel: dict = None,
-                     orchestration: dict = None) -> str:
+                     orchestration: dict = None, heartbeat: dict = None) -> str:
     now = _now()
     findings = sanitize_finding_urls(findings)   # collapse any duplicated-host URL from prior-scan memory
     findings = _with_capec(findings)
@@ -433,8 +433,15 @@ def generate_report(program: str, findings: list, scope: dict,
         return (
             f"# Security Assessment Report: {program}\n\n"
             + (banner + "\n\n" if banner else "")
-            + f"**Date:** {now}\n"
-            f"**Scope:** {', '.join(scope.get('in_scope', []))}\n\n"
+            + f"**Report generated:** {now}\n"
+            # Q-107: THE HEARTBEAT MATTERS MOST ON THIS PATH. A mission that has found nothing yet
+            # renders the short report, and "found nothing yet" is exactly when an operator needs to
+            # know whether it is still working. Omitting it here would have left the feature missing
+            # from the only report the waiting case ever produces.
+            + (f"**Last activity:** {heartbeat['last_dispatch']} "
+               f"({heartbeat.get('dispatches', 0)} tool dispatches)\n"
+               if (heartbeat or {}).get("last_dispatch") else "")
+            + f"**Scope:** {', '.join(scope.get('in_scope', []))}\n\n"
             + ai_block
             + "No confirmed vulnerabilities were recorded" + tail + "\n"
             + leads_md
@@ -464,6 +471,15 @@ def generate_report(program: str, findings: list, scope: dict,
         lines.append(f"**First evidence:** {_seen[0]}")
         if _seen[-1] != _seen[0]:
             lines.append(f"**Latest evidence:** {_seen[-1]}")
+    # Q-107: is the mission still WORKING? The three lines above cannot answer that. `First/Latest
+    # evidence` is derived from FINDINGS, and a healthy scan may legitimately produce none for hours;
+    # `Report generated` is a fact about this file and advances identically for a wedged run. The
+    # heartbeat is the last TOOL DISPATCH, which a working mission emits continuously whatever phase
+    # it is in and whatever it finds. Silent when the caller did not supply one, rather than printing
+    # a zero that would read as "nothing has run".
+    if heartbeat and heartbeat.get("last_dispatch"):
+        lines.append(f"**Last activity:** {heartbeat['last_dispatch']} "
+                     f"({heartbeat.get('dispatches', 0)} tool dispatches)")
     lines += [
         f"**Scope:** {', '.join(scope.get('in_scope', []))}",
         f"**Total Findings:** {len(findings)}", "",

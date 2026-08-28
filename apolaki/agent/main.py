@@ -810,6 +810,11 @@ async def list_missions():
 async def mission_detail(session_id: str):
     m = _require_mission(session_id)
     return {
+        # Q-107: the one number an operator can poll to tell a working mission from a wedged one.
+        # Independent of findings (a healthy scan may find nothing for hours), of phase (surface
+        # stops growing after the crawl), and of the ledger. `last_dispatch` advances while the
+        # mission works; `dispatches` only ever rises.
+        "heartbeat": db.mission_heartbeat(session_id),
         "mission": {**{k: m[k] for k in ("id", "program", "mode", "status", "phase", "objective", "created_at")},
                     "parent_id": m["context"].get("parent_id"),
                     "recon_cycles": m["context"].get("recon_cycles", 1),
@@ -1290,6 +1295,7 @@ async def get_report(session_id: str):
                                     status=m["status"], ai_summary=_ai_summary(m),
                                     execution=_execution(m), leads=_leads(m),
                                     delta=_delta(session_id), tool_ledger=_tool_ledger(session_id),
+                                    heartbeat=db.mission_heartbeat(session_id),
                                     intel=m["context"].get("intel"),
                                     orchestration=m["context"].get("orchestration"))
     return {"markdown": md, "findings": findings, "status": m["status"], "leads": _leads(m)}
@@ -1320,6 +1326,7 @@ async def get_report_md(session_id: str):
                                     status=m["status"], ai_summary=_ai_summary(m),
                                     execution=_execution(m), leads=_leads(m),
                                     delta=_delta(session_id), tool_ledger=_tool_ledger(session_id),
+                                    heartbeat=db.mission_heartbeat(session_id),
                                     intel=m["context"].get("intel"),
                                     orchestration=m["context"].get("orchestration"))
     fname = _report_fname(m, scope, "md")
@@ -2466,6 +2473,7 @@ async def get_report_html(session_id: str, download: bool = False):
         status=m["status"], ai_summary=_ai_summary(m), execution=_execution(m), leads=_leads(m),
         attack_surface=_attack_surface(session_id), playbook=m["context"].get("playbook", []),
         mode=m.get("mode"), delta=_delta(session_id), tool_ledger=_tool_ledger(session_id),
+                                    heartbeat=db.mission_heartbeat(session_id),
         report_id=session_id, security_headers=_sec_headers(session_id),
         intel=m["context"].get("intel"), kev_cwes=_kev_cwes(), kev_cves=_kev_cves(),
         orchestration=m["context"].get("orchestration"),
