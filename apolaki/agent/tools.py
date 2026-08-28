@@ -8965,6 +8965,7 @@ class ToolRegistry:
         broadens the match back to baseline-shaped output, while the control does
         not, confirms the parameter reaches a NoSQL query unsanitised. Also checks
         for a driver error signature. Read-only payloads."""
+        import time                      # Q-110: the call-budget deadline uses it
         import httpx
         import nosqli_tool as ns
         url = inp["url"]
