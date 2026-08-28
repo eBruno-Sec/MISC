@@ -2308,7 +2308,12 @@ class BBHAgent:
             except Exception:
                 pass
         self._session_lifecycle_result = {
-            "ran": bool(res.ran), "confirmed": len(res.findings or []),
+            # Q-108: `ToolResult` has `success`, never `ran`. This read `res.ran`, so every mission
+            # raised AttributeError here, the artery handler caught it, and the WHOLE
+            # session-lifecycle leg (CWE-613) was lost on every run -- visible in the operator's live
+            # log only as one line: "session-lifecycle artery error: AttributeError: 'ToolResult'
+            # object has no attribute 'ran'". The engine ran; nothing it produced ever landed.
+            "ran": bool(res.success), "confirmed": len(res.findings or []),
             "sacrificial_identity": ident or None,
             "session_kill_endpoints_quarantined": len(getattr(self.tools, "session_kill_urls", []) or []),
             "detail": (res.output or "")[:400],

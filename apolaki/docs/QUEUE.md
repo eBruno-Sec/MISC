@@ -1478,6 +1478,35 @@ run observed.
 containing a claim of file or source exposure. Non-vacuity control: a genuine exposure finding must
 still emit exactly that line.
 
+### Q-108 · `res.ran` on a ToolResult that has `success`: one typo, one engine lost every run · **CLOSED** · **HIGH**
+
+Visible in the operator's live log as exactly one line:
+
+```
+session-lifecycle artery error: AttributeError: 'ToolResult' object has no attribute 'ran'
+```
+
+`agent.py:2311` built the session-lifecycle result with `bool(res.ran)`. `ToolResult` exposes
+`success`. So **every mission raised AttributeError there**, the artery's `except` turned it into an
+info line, and **the entire session-lifecycle leg (CWE-613) was discarded on every run**. The engine
+executed; nothing it produced ever reached a report.
+
+**THE ARTERY HANDLER MADE IT WORSE, and it is still right to keep.** It exists so one broken leg
+cannot kill a scan. But it converts a crash into prose, and prose scrolls past. The mission looked
+healthy, the suite was green, and the only evidence was one line in a live log nobody diffs. **A
+swallowed AttributeError is indistinguishable from an engine that found nothing** -- the same shape as
+Q-092, Q-093, Q-097 and Q-105.
+
+**GATE** (`tests/test_toolresult_attribute_contract.py`, 4 passed). The durable half is an **AST**
+scan for `.ran` as an ATTRIBUTE access in `agent.py`. Deliberately not grep: `"ran"` is a legitimate
+DICT KEY throughout this codebase -- the session-lifecycle result publishes one -- and a text search
+cannot tell a key from an attribute, so it would either miss the defect or drown in false hits.
+Verified by restoring `res.ran` in production: the guard fails, naming the line. A fourth test plants
+the same shape in a parsed snippet so the scan cannot pass by finding nothing.
+
+Fixing the call site fixes today. The guard is what stops the next `.ran` / `.ok` / `.ran_ok` from
+costing another engine in silence.
+
 ### Q-107 · A running mission has NO heartbeat: three separate signals all read flat while it works · **CLOSED** · **HIGH**
 
 **CLOSED.** `db.mission_heartbeat(mid)` returns `{"last_dispatch", "dispatches"}` from a single
