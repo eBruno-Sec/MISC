@@ -220,6 +220,43 @@ def _rank_host_names(hosts, roots=()) -> list:
     return sorted(unique, key=lambda host: host.lower() in root_set, reverse=True)
 
 
+def _rank_recon_roots(hosts, scope_roots=(), seen_hosts=()) -> list:
+    r"""Operator assets, then hosts we have OBSERVED, then everything else.
+
+    Q-104b. `CAP_RECON_ROOTS` bounded phase A correctly and then spent its budget on nothing,
+    because `_rank_host_names` orders non-operator hosts LEXICALLY. MEASURED on the operator's
+    Shopify engagement:
+
+        run_subfinder domain: shopify.com  ->  25023 subdomains found
+        ... the 25 roots then chosen were 0.shopify.com, 000.shopify.com, 007.shopify.com,
+            080d3d.shopify.com, 1-cushoncovers.shopify.com ...
+        ... and http_probe answered 404 to essentially all of them.
+
+    Shopify runs a wildcard resolver, so a subdomain list is mostly hosts that do not exist as
+    services. Sorting that lexically hands the cap to whatever sorts first, which is numeric junk.
+
+    THE DISCRIMINATOR IS EVIDENCE, not a name heuristic. A host that appears in the observed URL
+    surface (crawl, wayback, archived links) is one something actually REFERENCED. A host that
+    exists only because a wildcard answered a DNS query is not. Judging by name instead -- "looks
+    numeric", "too short", "hash-like" -- would eventually drop a real asset for looking wrong,
+    which is a far worse failure than crawling a 404.
+
+    Ties break lexically inside each tier, so the order stays deterministic and replayable.
+    """
+    sr = {str(r).lower().lstrip("*.") for r in (scope_roots or []) if r}
+    seen = {str(h).lower() for h in (seen_hosts or []) if h}
+
+    def tier(host: str) -> int:
+        hl = str(host).lower()
+        if hl in sr:
+            return 0                       # the operator declared it
+        if hl in seen:
+            return 1                       # something actually referenced it
+        return 2                           # a resolver said it exists; nothing pointed at it
+
+    return sorted({str(h) for h in (hosts or []) if h}, key=lambda h: (tier(h), h.lower()))
+
+
 def _form_value(form: dict) -> int:
     names = [str((p or {}).get("name") or "").lower()
              for p in (form.get("body_params") or []) if isinstance(p, dict)]
@@ -707,7 +744,17 @@ def next_batch(state: dict) -> list:
     # them, so without a cap it never drains and `if a: return a` below starves every later phase.
     # `scope_roots` are the operator's own declared assets; ranking them first means the cap only
     # ever trims DISCOVERED hosts, and an operator's asset cannot be crowded out by a CDN's.
-    recon_roots = _rank_host_names(roots, state.get("scope_roots") or [])[:CAP_RECON_ROOTS]
+    # Q-104b: hosts we have OBSERVED outrank hosts a wildcard resolver merely answered for. The
+    # cap is the same; what changes is that it is no longer spent on lexically-first junk.
+    _seen_hosts = set()
+    for _u in (urls or []):
+        try:
+            _h = urlparse(str(_u)).hostname
+        except Exception:
+            _h = None
+        if _h:
+            _seen_hosts.add(_h.lower())
+    recon_roots = _rank_recon_roots(roots, state.get("scope_roots") or [], _seen_hosts)[:CAP_RECON_ROOTS]
     for root in recon_roots:
         for tool in ("run_subfinder", "run_crtsh", "run_wayback", "run_dns", "run_asn", "run_github_recon"):
             a.append(_step(tool, {"domain": root}, f"{tool}:{root}"))

@@ -96,3 +96,42 @@ def test_a_growing_graph_still_reaches_a_later_phase():
     raise AssertionError(
         "phase A never drained after %d discovered hosts -- the planner cannot reach an active "
         "phase, which is the fourteen-hour Shopify mission" % discovered)
+
+
+# ── Q-104b: the cap must be spent on evidence, not on lexical order ───────────
+
+OBSERVED = "cdn.example.com"
+JUNK = ["0%03d.example.com" % i for i in range(60)]      # sorts first, exists only via wildcard DNS
+
+
+def test_the_cap_prefers_hosts_something_actually_referenced():
+    """The Shopify failure: 25023 wildcard subdomains, and the 25 roots chosen were 0.shopify.com,
+    000.shopify.com, 007.shopify.com ... all 404. Lexical order handed the whole budget to junk.
+
+    A host in the observed URL surface was REFERENCED by something. A host that exists only because
+    a wildcard resolver answered was not. That is evidence, not a name heuristic -- judging by shape
+    would eventually drop a real asset for looking wrong.
+    """
+    hosts = JUNK + [OBSERVED] + OPERATOR
+    st = _state(hosts, urls=["https://%s/assets/app.js" % OBSERVED])
+    targets = _recon_targets(planner.next_batch(st))
+    assert OBSERVED in targets, sorted(targets)[:6]
+    for asset in OPERATOR:
+        assert asset in targets, asset
+
+
+def test_junk_still_gets_in_when_there_is_room():
+    """Non-vacuity. Unreferenced hosts are DEPRIORITISED, not banned -- a scope with few assets must
+    still recon what it discovered, or the fix trades one blindness for another."""
+    hosts = ["a.example.com", "b.example.com"] + OPERATOR
+    targets = _recon_targets(planner.next_batch(_state(hosts)))
+    assert "a.example.com" in targets and "b.example.com" in targets, targets
+
+
+def test_the_order_is_deterministic():
+    """Same inputs, same roots. A planner that reshuffles is not replayable."""
+    hosts = JUNK + [OBSERVED] + OPERATOR
+    st = _state(hosts, urls=["https://%s/x" % OBSERVED])
+    first = _recon_targets(planner.next_batch(st))
+    second = _recon_targets(planner.next_batch(_state(hosts, urls=["https://%s/x" % OBSERVED])))
+    assert first == second

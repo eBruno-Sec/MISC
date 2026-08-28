@@ -749,10 +749,36 @@ def analyze_open_redirect(status: int, location: str, final_url: str) -> dict | 
 
 
 def analyze_host_header(body: str, location: str) -> dict | None:
-    """Flag host-header injection: the spoofed Host is reflected into the response
-    body or a redirect Location (link/cache/reset-poisoning primitive)."""
-    if _EVIL_HOST in (location or "").lower():
-        return {"severity": "MEDIUM", "detail": f"spoofed Host reflected in Location: {location[:120]}"}
+    """Flag host-header injection: the spoofed Host BECAME the redirect target's host.
+
+    Q-106b -- the same defect shape as the CRLF oracle, found by auditing its neighbours after that
+    one reported a false HIGH on a live target. `_EVIL_HOST in location` is a SUBSTRING test, so it
+    fires on a Location that merely CONTAINS the string anywhere:
+
+        Location: https://legit.example/login?next=https%3A%2F%2Fbbh-evil.example
+        Location: https://legit.example/?ref=bbh-evil.example
+
+    Neither is host-header injection. The first is an open-redirect parameter (a different finding,
+    with its own engine) and the second is a query echo. The claim this oracle makes -- "the app
+    trusts the Host header" -- is only supported when the spoofed host is the AUTHORITY the victim
+    would actually be sent to.
+
+    So the test is structural: parse the Location and require `hostname == _EVIL_HOST`. A relative
+    Location cannot carry a host at all and is now correctly silent, where the substring test would
+    have matched `/redir?to=bbh-evil.example`.
+
+    The BODY branch stays a substring test on purpose. It is already LOW, it claims only reflection
+    rather than a redirect primitive, and a host string in HTML has no structure to parse.
+    """
+    loc = (location or "").strip()
+    if loc:
+        try:
+            host = (urlparse(loc).hostname or "").lower()
+        except Exception:
+            host = ""
+        if host == _EVIL_HOST:
+            return {"severity": "MEDIUM",
+                    "detail": f"spoofed Host became the redirect target: {loc[:120]}"}
     if _EVIL_HOST in (body or "").lower():
         return {"severity": "LOW", "detail": "spoofed Host reflected in response body"}
     return None
