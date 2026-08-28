@@ -452,7 +452,19 @@ def generate_report(program: str, findings: list, scope: dict,
     if banner:
         lines += [banner, ""]
     lines += [
-        f"**Date:** {now}",
+        f"**Report generated:** {now}",
+    ]
+    # Q-102: the span of the EVIDENCE, not of the render. `Report generated` above is a fact about
+    # this file; these two are facts about the assessment, and on a RUNNING report they are the only
+    # way to tell a mission that is progressing from one that is wedged. Derived from the findings'
+    # own `observed_at` rather than a clock, so re-rendering an old mission reproduces the same span.
+    # Silent when no finding carries a time: a report with nothing to say about when says nothing.
+    _seen = sorted(str(f.get("observed_at")) for f in findings if f.get("observed_at"))
+    if _seen:
+        lines.append(f"**First evidence:** {_seen[0]}")
+        if _seen[-1] != _seen[0]:
+            lines.append(f"**Latest evidence:** {_seen[-1]}")
+    lines += [
         f"**Scope:** {', '.join(scope.get('in_scope', []))}",
         f"**Total Findings:** {len(findings)}", "",
     ]
@@ -498,6 +510,14 @@ def generate_report(program: str, findings: list, scope: dict,
         # would be a claim about provenance that this report cannot make.
         if f.get("engine"):
             lines.append(f"**Found by:** `{f['engine']}`")
+        # Q-102: WHEN this was observed. Read from the finding's own stored instant (`db.get_findings`
+        # attaches it from the row's `created_at`), never from the clock at render time -- a report
+        # that stamps itself looks authoritative and says nothing about the evidence. A finding is a
+        # claim about a MOMENT: the target's posture changes, and `Retest / closure` below cannot be
+        # acted on without knowing which moment is being retested. Printed only when the row carries
+        # one, so a finding stored before this landed says nothing rather than inventing a time.
+        if f.get("observed_at"):
+            lines.append(f"**Observed:** {f['observed_at']}")
         _cv = estimated_cvss(f)
         _cvss_line = (f"{_cv[0]}{' (est.)' if _cv[2] else ''}" + (f" {_cv[1]}" if _cv[1] else "")) if _cv else "N/A"
         lines += [f"**CVSS:** {_cvss_line}", f"**CWE:** {f.get('cwe', 'N/A')}"]

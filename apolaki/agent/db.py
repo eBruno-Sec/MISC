@@ -335,9 +335,25 @@ def get_findings(mid: str) -> list:
     """RAW findings, exactly as the engines stored them — the proof gate has NOT been applied.
 
     Prefer `get_findings_gated()` for anything a human or a model will read. See its docstring for why
-    this distinction is load-bearing."""
-    return [json.loads(r["data"]) for r in _query(
-        "SELECT data FROM findings WHERE mission_id=? ORDER BY created_at", (mid,))]
+    this distinction is load-bearing.
+
+    Q-102: `observed_at` is attached here, from the row's OWN `created_at`. This statement already
+    ORDERED BY that column and did not SELECT it -- the timestamp was used and discarded inside a
+    single query, so every consumer downstream had to invent a time or print none. That is the same
+    shape as `_cmd` discarding `proc.returncode` and `_key_bits` discarding the key algorithm.
+
+    It is attached only when the finding does not already carry one, because a re-imported or
+    replayed finding's own recorded instant beats the moment this database happened to store it. And
+    it comes from the ROW, never from `now()`: a report that stamps itself at render time looks
+    authoritative while saying nothing about when the evidence was seen."""
+    out = []
+    for r in _query("SELECT data, created_at FROM findings WHERE mission_id=? ORDER BY created_at",
+                    (mid,)):
+        f = json.loads(r["data"])
+        if isinstance(f, dict) and not f.get("observed_at") and r["created_at"]:
+            f["observed_at"] = r["created_at"]
+        out.append(f)
+    return out
 
 
 def get_findings_gated(mid: str, enforce_families=None) -> list:
