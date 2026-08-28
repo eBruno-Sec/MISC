@@ -1611,7 +1611,26 @@ progression test marked one whole batch done at once, which drains even uncapped
 roots GREW BETWEEN BATCHES, and a test that holds the root set still is testing a mission that never
 existed.
 
-### Q-105 · The tool ledger is not cumulative: rows vanish and notes go backwards · **READY** · **MEDIUM**
+### Q-105 · The tool ledger is not cumulative: rows vanish and notes go backwards · **CLOSED** · **MEDIUM**
+
+**CLOSED.** `_tool_ledger` folded `db.get_logs(session_id, limit=4000)`, and `get_logs` keeps the
+NEWEST rows when that limit bites -- correct for a log VIEW (Q-017 made it that way so a truncated
+tail could not make a live mission look stopped) and wrong for an AGGREGATE. Early rows fell out of
+the window, which is exactly why `run_transport_posture` ran in the first minute and was absent from
+the second render.
+
+Fixed with a SECOND accessor rather than by changing `get_logs`, because both behaviours are right
+for their own caller. `db.iter_logs(mid)` yields every event oldest-first as a GENERATOR, so a
+mission with tens of thousands of rows costs nothing to fold into running totals. It also skips a
+malformed row instead of raising -- the old path would have taken the whole report down with one
+unreadable event, which the gate now pins.
+
+**GATE** (`tests/test_ledger_is_cumulative.py`, 6 passed): a mutant restoring the windowed read is
+**killed by 5 of the 6**, including a `JSONDecodeError` proving the old path crashed rather than
+skipped. The load-bearing one is
+`test_a_tool_that_ran_early_survives_a_long_tail_of_later_events`, which reproduces the field
+failure directly: one early tool, then 5200 rows of noise past the old window.
+
 
 **MEASURED across the operator's two snapshots of one running Shopify mission:**
 

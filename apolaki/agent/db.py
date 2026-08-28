@@ -487,6 +487,39 @@ def get_logs(mid: str, limit: int = 1000) -> list:
     return [{"type": r["etype"], **json.loads(r["data"]), "ts": r["created_at"]} for r in rows]
 
 
+def iter_logs(mid: str):
+    """EVERY event for the mission, oldest first. For AGGREGATES, not for display.
+
+    Q-105. `_tool_ledger` built the report's tool table from `get_logs(limit=4000)`, and `get_logs`
+    deliberately keeps the NEWEST rows when the limit bites (Q-017 fixed the opposite defect, where
+    a truncated tail made a live mission look stopped). Both behaviours are right for a LOG VIEW and
+    both are wrong for an AGGREGATE: a window over a running mission means early rows fall out, so
+    the ledger's counts DECREASE and tools that ran early vanish entirely.
+
+    MEASURED across two renders of one live mission, everything else held still:
+
+        tools listed 12 -> 7        run_transport_posture: executed 3 calls -> ABSENT
+        run_subfinder calls 67 -> 286 while its note went "2 subdomains" -> "1 subdomains"
+        "never dispatched" 83 -> 86, and ASVS "engine ran clean" 7 -> 4
+
+    An engine that RAN was reported as never dispatched, which is the invisible false negative this
+    project refuses everywhere else -- and it reached the ASVS coverage numbers, so the damage was
+    not cosmetic.
+
+    A GENERATOR, not a list: a long mission has tens of thousands of rows and the ledger only folds
+    each one into a running total, so nothing needs to be held. The caller decides what to keep.
+    """
+    with _lock:
+        cur = _conn.execute(
+            "SELECT etype,data,created_at FROM logs WHERE mission_id=? ORDER BY id", (mid,))
+        for r in cur:
+            try:
+                payload = json.loads(r["data"])
+            except Exception:
+                continue                      # a malformed row is skipped, never fatal to a report
+            yield {"type": r["etype"], **payload, "ts": r["created_at"]}
+
+
 # ── Notes ────────────────────────────────────────────────────────
 def add_note(mid: str, body: str) -> str:
     nid = uuid.uuid4().hex[:12]

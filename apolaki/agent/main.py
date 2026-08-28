@@ -1056,7 +1056,11 @@ def _tool_ledger(session_id: str) -> dict:
     ctx = (m or {}).get("context", {}) or {}
     ex = ctx.get("execution", {}) or {}
     agg = {}
-    for l in db.get_logs(session_id, limit=4000):
+    # Q-105: EVERY row, not the newest 4000. This is an aggregate over the whole mission, and a
+    # window made it non-cumulative -- counts decreased between renders and tools that ran early
+    # vanished into "never dispatched". `iter_logs` streams, so no row limit is needed and nothing
+    # is held in memory.
+    for l in db.iter_logs(session_id):
         t = l.get("tool")
         if not t or l.get("type") not in ("tool_call", "tool_result", "tool_error",
                                           "scope_block", "tool_negative"):
