@@ -11,6 +11,7 @@ dalfox, sqlmap) degrade gracefully to a skip if not installed.
 """
 import asyncio
 import contextvars
+import html as _html
 import json
 import os
 import re
@@ -4096,6 +4097,18 @@ class ToolRegistry:
         for u in urls:
             if not u:
                 continue
+            # Q-111b: HTML-unescape at the SURFACE CHOKEPOINT, not only where markup is parsed.
+            #
+            # Q-111 fixed `intel._add_ref`, which stopped MINTING `?a=1&amp;language=en` into the
+            # phantom parameters `a` and `amp;language`. It could not clean history. Warm start
+            # replays stored endpoint URLs out of `memory_assets` (`main.py:_warm_start`), and those
+            # rows were harvested BEFORE the fix -- so the operator's next run still raised findings
+            # on `amp;language`, `amp;signup_page` and `amp;signup_types[]`. A fix at the producer
+            # leaves every previously-poisoned record intact; only the intake can catch those.
+            #
+            # Idempotent for a clean URL: `&amp;` does not occur in one. Cheap, and it means any
+            # future producer that forgets to decode cannot poison the surface either.
+            u = _html.unescape(u)
             u = _collapse_dup_host(u)   # never let a duplicated-host URL into the surface
             if u in self.urls:
                 continue

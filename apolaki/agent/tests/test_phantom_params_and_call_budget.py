@@ -24,7 +24,14 @@ import time
 import pytest
 
 import intel
+import scope as scope_mod
 import tools
+
+
+def _registry():
+    eng = scope_mod.ScopeEngine()
+    eng.load_manual(["x.test"], [], "t")
+    return tools.ToolRegistry(eng, mission_id="q111b", lab_mode=True)
 
 
 # ── Q-111: phantom parameters ─────────────────────────────────────────────────
@@ -91,3 +98,26 @@ def test_a_truncated_sweep_is_reported_not_returned_as_clean(engine):
     src = inspect.getsource(getattr(tools.ToolRegistry, engine))
     assert "TRUNCATED" in src, engine
     assert "not _budget_hit" in src, engine        # success=False, so the ledger sees it too
+
+
+# ── Q-111b: the intake chokepoint, because a producer fix cannot clean history ─
+
+def test_a_poisoned_url_replayed_from_memory_is_cleaned_at_intake():
+    """Q-111 fixed the PRODUCER (`intel._add_ref`) and stopped new phantom params. It could not
+    clean history. Warm start replays stored endpoint URLs out of `memory_assets`, and those rows
+    were harvested before the fix -- so the operator's very next run still raised findings on
+    `amp;language`, `amp;signup_page` and `amp;signup_types[]`.
+
+    Only the INTAKE can catch a record that was already poisoned."""
+    reg = _registry()
+    reg._add_urls(["https://x.test/p?locale=en&amp;language=fr"])
+    assert reg.urls == ["https://x.test/p?locale=en&language=fr"], reg.urls
+
+
+def test_a_clean_url_is_untouched_at_intake():
+    """Idempotent. `&amp;` does not occur in a clean URL, so this must be a no-op for the 99% and
+    cannot quietly rewrite ordinary surface."""
+    reg = _registry()
+    clean = "https://x.test/p?a=1&b=2"
+    reg._add_urls([clean])
+    assert reg.urls == [clean], reg.urls
