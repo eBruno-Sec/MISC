@@ -16,9 +16,6 @@ stamps itself at render time would pass every other assertion in this file while
 nothing about the evidence -- and it would look authoritative doing it, which makes it worse than
 printing no time at all.
 """
-import os
-import tempfile
-
 import pytest
 
 import db
@@ -28,7 +25,8 @@ import report
 @pytest.fixture()
 def mission(tmp_path):
     db.init(str(tmp_path / "ts.db"))
-    mid = db.create_mission("ts-program", {"in_scope": ["example.test"]})
+    mid = "ts-mission"
+    db.create_mission(mid, "ts-program", "active", "obj", {"in_scope": ["example.test"]}, {})
     return mid
 
 
