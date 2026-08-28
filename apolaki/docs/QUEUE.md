@@ -1478,6 +1478,35 @@ run observed.
 containing a claim of file or source exposure. Non-vacuity control: a genuine exposure finding must
 still emit exactly that line.
 
+### Q-109 · 30 graph endpoint nodes carry no host, every run · **READY** · **MEDIUM**
+
+Present in every one of the operator's Shopify snapshots:
+
+```
+graph_primary_state.hostless_endpoint | failed | DEGRADED: swallowed exception at
+graph_primary_state.hostless_endpoint: ValueError: 30 graph endpoint node(s) carry no host, so no
+absolute URL exists for them
+```
+
+**THE REPORTER IS NOT THE BUG.** `agent.py:3452` deliberately drops an endpoint it cannot resolve,
+records the drop through `_swallow` with a count and the first offenders, and its own comment states
+they "were NOT faked onto a bare scheme". That is Q-093's discipline working exactly as intended --
+the alternative, inventing `https:///path`, is the defect that hid for weeks.
+
+**The open question is what MINTS them.** Q-093 fixed `planner._addressable`, which lost the netloc
+when building steps. Something else is still creating endpoint NODES with no host, and 30 endpoints
+per run are therefore never probed. That is a real coverage loss, silently bounded.
+
+**NOT INVESTIGATED.** I confirmed the reporter is correct and stopped there rather than guess at the
+producer while the operator was asleep. The next reader should start from the recorded offenders --
+`_swallow` carries the first three verbatim in the mission record, so the shape of the bad keys is
+already captured and needs no new instrumentation.
+
+**Do NOT "fix" this by relaxing the drop or by silencing the ledger row.** The row is the only reason
+anyone knows 30 endpoints are missing. An engine that ERRORED is correctly reported as a broken
+instrument rather than a clean result; the honest resolution is to stop producing hostless nodes, not
+to stop counting them.
+
 ### Q-108 · `res.ran` on a ToolResult that has `success`: one typo, one engine lost every run · **CLOSED** · **HIGH**
 
 Visible in the operator's live log as exactly one line:
