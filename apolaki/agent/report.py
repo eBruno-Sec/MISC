@@ -672,7 +672,14 @@ def generate_report(program: str, findings: list, scope: dict,
 
     # report-integrity guarantee (metrics agree with findings; leads never inflate risk)
     import report_integrity as _ri
-    _integ = _ri.check_report_consistency(findings, leads, risk_score(findings), counts)
+    # Q-103: the ledger and the chains are PASSED now. This called with four arguments, so
+    # `tool_ledger` and `chains` arrived as None and their checks reported themselves "not applicable
+    # to this report" -- in a document that printed a full tool ledger two sections above and, in the
+    # operator's 2026-08-27 Shopify run, a genuine contradiction inside it. The HTML renderer at
+    # :3480 has always passed them; the markdown one, which is what an operator actually reads, never
+    # did. One projection, two renderers, and only one of them was being checked.
+    _integ = _ri.check_report_consistency(findings, leads, risk_score(findings), counts,
+                                          tool_ledger=tool_ledger, chains=chains)
     # Three states, not two — see the HTML renderer: `ok` is True whenever no ERROR exists, which a
     # report with nothing to check satisfies for free, and a green "Consistent" over zero applied
     # checks is a verdict on nothing. One projection, two renderers.

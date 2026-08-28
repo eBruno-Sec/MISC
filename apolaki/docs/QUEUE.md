@@ -1478,6 +1478,44 @@ run observed.
 containing a claim of file or source exposure. Non-vacuity control: a genuine exposure finding must
 still emit exactly that line.
 
+### Q-103 · The integrity checker reported a WIRING GAP as a clean bill of health · **CLOSED** `see commit` · **HIGH**
+
+**From the operator's 2026-08-27 Shopify run.** The Report Integrity block said:
+
+> ✓ **Consistent** — 5 of 10 automated consistency checks applied and passed
+> _Not applicable to this report: ... ledger-note-contradiction (the report carries no tool ledger
+> rows to cross-check)_
+
+**The report printed a full tool ledger two sections above that sentence.**
+
+`report.py:675`, the MARKDOWN renderer, called `check_report_consistency(findings, leads, risk,
+counts)` with four arguments, so `tool_ledger` and `chains` arrived as `None`. `applicable()` treated
+`None` and empty as the same answer and rendered both as "not applicable to this report". **A plumbing
+mistake was laundered into reassurance.** The HTML renderer at `:3480` had always passed six
+arguments; only the markdown one, which is what an operator actually reads, went unchecked.
+
+**FIXED, both halves.** The renderer now passes `tool_ledger` and `chains`. And `applicable()`
+distinguishes `None` (the caller never supplied it) from empty (the report genuinely has none), so a
+future wiring gap reports itself as **"NOT SUPPLIED to the integrity check by this renderer -- this is
+a wiring gap, not a clean result"** instead of as a pass.
+
+**The second half is the one that matters.** Passing the argument fixes today's bug; teaching the
+checker that ABSENT and NOT-SUPPLIED are different answers is what stops the next one. Reassurance is
+the single output a verifier must never invent, and this project has now shipped this exact shape in a
+guard (I-4/I-5/I-9), an engine (`_cmd`, `_http`), a parser (dalfox) and now a report.
+
+**GATE** (`tests/test_integrity_wiring.py`, 6 passed): not-supplied is named a wiring gap; a genuinely
+empty ledger still reads as not-applicable (the non-vacuity control, or every skip would become
+noise); a contradictory ledger is caught; a consistent one is not; and the markdown renderer end-to-end
+both emits the contradiction and never claims a ledger it was not given.
+
+**NOT FIXED, and deliberately not guessed at.** The same run shows `run_subfinder | 40094 findings |
+"2 subdomains found"` and `run_asn | 67 findings | "1 IP(s)"`. The ledger's `findings` column appears
+to count DATA ITEMS for recon tools rather than findings, which is a different defect in the ledger's
+own vocabulary. `_zero_re` only catches "no X confirmed" wording and would not see it. Needs the data
+model read before anything is changed; guessing a numeric-mismatch rule here would produce false
+contradictions on every recon row.
+
 ### Q-102 · A running assessment carries no per-event timestamps, so nothing can be placed in time · **READY** · **MEDIUM**
 
 **Operator-reported, 2026-08-27, during a live Shopify run.** The report carries exactly ONE time: the

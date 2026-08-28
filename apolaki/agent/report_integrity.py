@@ -127,11 +127,26 @@ def check_report_consistency(findings: list, leads: list, risk: dict = None,
         issues.append({"level": level, "check": check, "detail": detail})
 
     def applicable(name: str, has_input, reason: str) -> bool:
-        """Count a check only if it had something to look at; otherwise record WHY it did not."""
+        """Count a check only if it had something to look at; otherwise record WHY it did not.
+
+        Q-103: `None` and empty are DIFFERENT ANSWERS and this used to conflate them. `None` means the
+        CALLER NEVER PASSED IT; empty means the report genuinely has none. Both were reported to the
+        reader as "not applicable to this report", so a wiring bug read as a clean bill of health --
+        which is exactly what happened: the markdown renderer called this with four arguments and no
+        `tool_ledger`, and every report it produced said "the report carries no tool ledger rows to
+        cross-check" while printing a full tool ledger two sections above.
+
+        A checker that cannot distinguish ABSENT from NOT-SUPPLIED will always launder a plumbing
+        mistake into reassurance, and reassurance is the one output a verifier must never invent."""
         nonlocal checks
         if has_input:
             checks += 1
             return True
+        if has_input is None:
+            skipped.append({"check": name,
+                            "reason": "NOT SUPPLIED to the integrity check by this renderer, so it "
+                                      "was not evaluated -- this is a wiring gap, not a clean result"})
+            return False
         skipped.append({"check": name, "reason": reason})
         return False
 
