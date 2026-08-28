@@ -1478,6 +1478,59 @@ run observed.
 containing a claim of file or source exposure. Non-vacuity control: a genuine exposure finding must
 still emit exactly that line.
 
+### Q-106 · The CRLF oracle reported a HIGH on an ECHO, against a live bug-bounty target · **CLOSED** · **CRITICAL**
+
+**This one nearly went to Shopify.** The operator's engagement produced two HIGH findings,
+"CRLF / response-header injection", on `linkpop.com` (an in-scope asset). He verified by hand and they
+did not reproduce:
+
+```
+curl -is 'https://linkpop.com/480cd2?fbclid=1%0D%0AX-bbhcrlf%3A+bbhcrlfpwned'
+Location: https://linkpop.com/480cd2/index.html?fbclid=1%0D%0AX-bbhcrlf:+bbhcrlfpwned
+```
+
+The marker sits INSIDE the `Location` value and **`%0D%0A` is still percent-encoded**. Note that
+`%3A` decoded to `:` while the newline did NOT -- the server declining to decode a CRLF, which is the
+defence working exactly as intended. Nothing split.
+
+**The oracle:**
+
+```python
+if CRLF_MARKER in kl or f"{CRLF_MARKER}pwned" in vl:      # web_security.py:793
+```
+
+with a docstring justifying it as *"the marker cannot occur naturally"*. **It can, and routinely
+does.** Our payload is in the request URL, and any app that echoes that URL into a header hands the
+marker straight back. A redirect preserving the query string is the most ordinary behaviour on the web.
+
+**The oracle checked a WEAKER property than the one it reported.** "The marker appears somewhere in
+the response headers" is not "the marker became its own header", and only the second is a
+response-splitting primitive.
+
+**FIXED.** A KEY match stays HIGH and is the sound test -- a genuine split is parsed by the client as
+a separate header, so the marker becomes a header NAME. A VALUE match now has to rule out the
+still-encoded payload first (`%0d%0a` and the overlong-UTF-8 variant `%e5%98%8a%e5%98%8d` that
+`build_crlf_probes` also sends). The Set-Cookie value-split sink, where the CRLF genuinely decoded,
+still reports.
+
+**GATE** (`tests/test_crlf_oracle_needs_a_split.py`, 6 passed): a mutant restoring the old permissive
+oracle is **killed by exactly the 3 tests that encode the false positive**, while the 3 that must
+survive -- a real split is still HIGH, a decoded Set-Cookie split is still HIGH, a clean response is
+silent -- correctly do. The sharpest is
+`test_the_same_value_differs_only_by_whether_the_crlf_decoded`: identical marker, identical header,
+identical position, the only difference being whether the server decoded the newline. That is the
+line between a defence that held and a primitive that exists.
+
+**WHY THIS ONE MATTERS MOST.** Every other ticket this week hid a true positive or wasted budget.
+This one manufactured a HIGH severity claim about a specific company's specific endpoint, with a
+copy-paste reproduction that disproves itself in one command. Submitting it would have cost the
+operator standing with the program. **A false negative is a missed bug; a false HIGH is a false
+accusation.**
+
+**STILL SUSPECT, not yet examined:** the same run produced two MEDIUM "Host header injection" findings
+on the same two endpoints, from the same `run_injection_probes` pass. Same shape, same reflection
+source. Verify that oracle before trusting it.
+
 ### Q-104 · Phase A feeds itself and starves every later phase: 14 hours, 1000 calls, zero active engines · **CLOSED** · **CRITICAL**
 
 **Found in the field.** The operator's 2026-08-27 Shopify engagement, two snapshots of ONE mission:
