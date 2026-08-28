@@ -584,6 +584,13 @@ TOOL_PERMISSIONS = {
     "benchmark_lab": PermissionLevel.ACTIVE,       # score coverage vs a known lab's completion oracle (separate module)
 }
 
+# Q-110: the wall-clock ceiling on ONE parameter-probing engine call. Per-request timeouts
+# bound a single request; nothing bounded the SUM, and against a tarpitting target that let
+# one endpoint run for 6h43m while 427 others were never reached. 240s is generous for a
+# healthy host -- the whole probe set finishes in seconds -- and decisive against one that
+# is stalling. Deliberately NOT scaled by intensity: a deeper scan means more endpoints, not
+# permission for any single one to run unbounded.
+_PROBE_CALL_BUDGET_S = 240
 _UA = "Mozilla/5.0 (compatible; Apolaki/2.0; +authorized-testing)"
 # Session-destroying endpoints. Crawling or probing these on an AUTHENTICATED scan
 # logs the scanner out and silently kills all subsequent authenticated coverage, so
@@ -8501,7 +8508,29 @@ class ToolRegistry:
         headers = {"User-Agent": _UA, **(self.session_headers or {})}
         findings, ev = [], []
 
+        # Q-110: a WALL-CLOCK DEADLINE for the whole call, not just per request.
+        #
+        # Each request already had its own timeout, and that was never the problem. This engine
+        # probes many parameters with several payloads each, so the AGGREGATE is hundreds of
+        # requests. Against a target that tarpits -- the operator's Shopify run answered 403 to
+        # every http_probe -- each request approaches its timeout and one call runs for hours.
+        #
+        # MEASURED on that run: the injection sweep covers 465 endpoints, every sibling engine had
+        # completed exactly 37, and run_sqli had STARTED a 38th. It sat there SIX HOURS 43 MINUTES.
+        # Endpoints 39-465 were never reached, and because the generator was blocked inside the
+        # call it yielded no events -- the live page stopped while the report kept re-rendering
+        # unchanged data. One endpoint ate the whole night.
+        #
+        # Checked BETWEEN requests, so a probe in flight keeps its own timeout and nothing is cut
+        # mid-response. Exhausting it is REPORTED, never silent: "0 confirmed" after a truncated
+        # sweep and "0 confirmed" after a complete one are different facts about the target.
+        _deadline = time.monotonic() + _PROBE_CALL_BUDGET_S
+        _budget_hit = False
         async def get(c, target):
+            nonlocal _budget_hit
+            if time.monotonic() > _deadline:
+                _budget_hit = True
+                return None, 0.0
             if not self.scope.validate(target)[0]:
                 return None, 0.0
             t0 = time.perf_counter()
@@ -8726,8 +8755,15 @@ class ToolRegistry:
                 findings[0]["severity"] = "critical"          # data-plane access confirmed
                 findings[0]["settings"] = ((findings[0].get("settings") or "sqli oracle")
                                            + " ; enrich: " + settings).strip(" ;")
-        return ToolResult("sqli", url, True,
-                          f"tested {len(params)} param(s), {len(findings)} confirmed SQLi", findings)
+        # Q-110: a sweep cut short by the budget is NOT a clean result. "0 confirmed" after
+        # probing every parameter and "0 confirmed" after stopping partway are different
+        # facts about the target, and only one of them is evidence.
+        _trunc = (" -- DEGRADED: call budget of %ds exhausted, sweep TRUNCATED (a stalling or "
+                  "rate-limiting target); this is NOT a clean result" % _PROBE_CALL_BUDGET_S
+                  ) if _budget_hit else ""
+        return ToolResult("sqli", url, not _budget_hit,
+                          f"tested {len(params)} param(s), {len(findings)} confirmed SQLi" + _trunc,
+                          findings)
 
     async def _sqlmap_enrich(self, url: str) -> tuple:
         """Read-only DB-metadata extraction for a CONFIRMED SQLi: run sqlmap on the exact
@@ -8941,7 +8977,29 @@ class ToolRegistry:
         headers = {"User-Agent": _UA, **(self.session_headers or {})}
         findings, ev = [], []
 
+        # Q-110: a WALL-CLOCK DEADLINE for the whole call, not just per request.
+        #
+        # Each request already had its own timeout, and that was never the problem. This engine
+        # probes many parameters with several payloads each, so the AGGREGATE is hundreds of
+        # requests. Against a target that tarpits -- the operator's Shopify run answered 403 to
+        # every http_probe -- each request approaches its timeout and one call runs for hours.
+        #
+        # MEASURED on that run: the injection sweep covers 465 endpoints, every sibling engine had
+        # completed exactly 37, and run_sqli had STARTED a 38th. It sat there SIX HOURS 43 MINUTES.
+        # Endpoints 39-465 were never reached, and because the generator was blocked inside the
+        # call it yielded no events -- the live page stopped while the report kept re-rendering
+        # unchanged data. One endpoint ate the whole night.
+        #
+        # Checked BETWEEN requests, so a probe in flight keeps its own timeout and nothing is cut
+        # mid-response. Exhausting it is REPORTED, never silent: "0 confirmed" after a truncated
+        # sweep and "0 confirmed" after a complete one are different facts about the target.
+        _deadline = time.monotonic() + _PROBE_CALL_BUDGET_S
+        _budget_hit = False
         async def get(c, target):
+            nonlocal _budget_hit
+            if time.monotonic() > _deadline:
+                _budget_hit = True
+                return None, 0.0
             if not self.scope.validate(target)[0]:
                 return None
             try:
@@ -8996,8 +9054,15 @@ class ToolRegistry:
 
         if self.mission_id and ev:
             await self._http(ev[0], "GET", capture=True)
-        return ToolResult("nosqli", url, True,
-                          f"tested {len(params)} param(s), {len(findings)} confirmed NoSQL injection", findings)
+        # Q-110: a sweep cut short by the budget is NOT a clean result. "0 confirmed" after
+        # probing every parameter and "0 confirmed" after stopping partway are different
+        # facts about the target, and only one of them is evidence.
+        _trunc = (" -- DEGRADED: call budget of %ds exhausted, sweep TRUNCATED (a stalling or "
+                  "rate-limiting target); this is NOT a clean result" % _PROBE_CALL_BUDGET_S
+                  ) if _budget_hit else ""
+        return ToolResult("nosqli", url, not _budget_hit,
+                          f"tested {len(params)} param(s), {len(findings)} confirmed NoSQL injection" + _trunc,
+                          findings)
 
     async def _run_form_nosqli(self, inp: dict) -> ToolResult:
         """POST/JSON body NoSQL auth-bypass on a login-style endpoint — the canonical
@@ -9051,7 +9116,29 @@ class ToolRegistry:
         headers = {"User-Agent": _UA, **(self.session_headers or {})}
         findings, ev = [], []
 
+        # Q-110: a WALL-CLOCK DEADLINE for the whole call, not just per request.
+        #
+        # Each request already had its own timeout, and that was never the problem. This engine
+        # probes many parameters with several payloads each, so the AGGREGATE is hundreds of
+        # requests. Against a target that tarpits -- the operator's Shopify run answered 403 to
+        # every http_probe -- each request approaches its timeout and one call runs for hours.
+        #
+        # MEASURED on that run: the injection sweep covers 465 endpoints, every sibling engine had
+        # completed exactly 37, and run_sqli had STARTED a 38th. It sat there SIX HOURS 43 MINUTES.
+        # Endpoints 39-465 were never reached, and because the generator was blocked inside the
+        # call it yielded no events -- the live page stopped while the report kept re-rendering
+        # unchanged data. One endpoint ate the whole night.
+        #
+        # Checked BETWEEN requests, so a probe in flight keeps its own timeout and nothing is cut
+        # mid-response. Exhausting it is REPORTED, never silent: "0 confirmed" after a truncated
+        # sweep and "0 confirmed" after a complete one are different facts about the target.
+        _deadline = time.monotonic() + _PROBE_CALL_BUDGET_S
+        _budget_hit = False
         async def get(c, target):
+            nonlocal _budget_hit
+            if time.monotonic() > _deadline:
+                _budget_hit = True
+                return None, 0.0
             if not self.scope.validate(target)[0]:
                 return None, 0.0
             t0 = time.perf_counter()
@@ -9129,8 +9216,15 @@ class ToolRegistry:
 
         if self.mission_id and ev:
             await self._http(ev[0], "GET", capture=True)
-        return ToolResult("cmdi", url, True,
-                          f"tested {len(params)} param(s), {len(findings)} confirmed command injection", findings)
+        # Q-110: a sweep cut short by the budget is NOT a clean result. "0 confirmed" after
+        # probing every parameter and "0 confirmed" after stopping partway are different
+        # facts about the target, and only one of them is evidence.
+        _trunc = (" -- DEGRADED: call budget of %ds exhausted, sweep TRUNCATED (a stalling or "
+                  "rate-limiting target); this is NOT a clean result" % _PROBE_CALL_BUDGET_S
+                  ) if _budget_hit else ""
+        return ToolResult("cmdi", url, not _budget_hit,
+                          f"tested {len(params)} param(s), {len(findings)} confirmed command injection" + _trunc,
+                          findings)
 
     async def _run_form_cmdi(self, inp: dict) -> ToolResult:
         """INTRUSIVE: POST/form-body OS command injection on a captured HTML form — the body-

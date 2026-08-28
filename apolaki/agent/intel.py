@@ -24,6 +24,7 @@ from __future__ import annotations
 import base64
 import binascii
 import codecs
+import html as _html_mod
 import json
 import re
 
@@ -340,8 +341,21 @@ _PARAM_STOP = {"submit", "button", "", "csrfmiddlewaretoken"}
 
 
 def _add_ref(ref: str, source: str, store: IntelStore) -> None:
-    """Classify a URL/href/src reference as an external url or an internal route, and mine its params."""
-    ref = ref.strip()
+    """Classify a URL/href/src reference as an external url or an internal route, and mine its params.
+
+    Q-111: the href is HTML-UNESCAPED first. An attribute in real markup is entity-encoded, so
+    `?a=1&amp;language=en` was split on the literal text and mined as TWO parameters, `a` and
+    **`amp;language`**. Those names do not exist on the server.
+
+    MEASURED on the operator's Shopify run: four findings were raised against `amp;language`,
+    `amp;signup_page` and `amp;signup_types[]`, including a **HIGH "Server-side template injection"**
+    on a parameter that is not real. Every probe against them was wasted, and every finding from
+    them was false.
+
+    `html.unescape` is the whole fix and it belongs HERE, at the one boundary where markup becomes a
+    URL, rather than in each consumer -- a decode repeated per-engine is a decode someone forgets.
+    """
+    ref = _html_mod.unescape(ref.strip())
     if not ref or ref.startswith(("#", "javascript:", "mailto:", "data:", "tel:")):
         return
     base = ref.split("?", 1)[0].split("#", 1)[0]

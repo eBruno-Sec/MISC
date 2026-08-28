@@ -1478,6 +1478,71 @@ run observed.
 containing a claim of file or source exposure. Non-vacuity control: a genuine exposure finding must
 still emit exactly that line.
 
+### Q-110 · No budget on a probe CALL: one endpoint ate 6h43m while 427 were never reached · **CLOSED** · **CRITICAL**
+
+The operator's overnight Shopify run stopped producing anything at 07:22 and was still "running" at
+14:05. Not the network, and not a crash.
+
+**MEASURED from the ledger.** The injection sweep covers **465 parameterized endpoints** and runs its
+engines per endpoint, in order:
+
+```
+run_injection_probes 37   run_css_injection 37   run_ldap 37   run_ssi 37
+run_sqli_structural  37   run_waf_bypass    37   run_xpath 37
+run_sqli             38   <-- STARTED a 38th and never returned
+```
+
+Every sibling had finished 37. `run_sqli` had begun one more. It sat there **6 hours 43 minutes**.
+Endpoints 39-465 were never touched.
+
+**It also explains the frozen live page.** The generator was blocked inside that call, so it yielded
+no events. The stream was not broken; it had nothing to emit. The report kept re-rendering because it
+reads the database, which had not changed since 07:22.
+
+**Per-request timeouts existed and were never the problem.** Each request had `timeout=seconds + 20`.
+Nothing bounded the SUM: up to 40 parameters x several payloads each is hundreds of requests, and
+every `http_probe` in that run answered **403** -- a target that tarpits pushes each request toward
+its timeout and the call runs for hours.
+
+**FIXED** with `_PROBE_CALL_BUDGET_S = 240` and a wall-clock deadline checked BETWEEN requests, so a
+probe in flight keeps its own timeout and nothing is cut mid-response. Applied to **all three engines
+that share the shape** -- `_run_sqli`, `_run_nosqli`, `_run_cmdi` -- not only the one that happened to
+hang, because fixing one route and leaving two open is how this comes back.
+
+**Exhaustion is REPORTED, never silent.** The engine returns `success=False` and appends *"DEGRADED:
+call budget exhausted, sweep TRUNCATED"*. "0 confirmed" after probing every parameter and "0
+confirmed" after stopping partway are different facts about the target, and only one is evidence.
+
+**GATE** (11 passed): a mutant that drops the deadline from **only `_run_cmdi`** is killed by both
+parametrised tests for that engine -- which is precisely the fixed-one-route-missed-another failure.
+
+### Q-111 · Phantom parameters: `&amp;` never decoded, so a HIGH was raised on a parameter that does not exist · **CLOSED** · **HIGH**
+
+`intel._add_ref` mined hrefs straight out of markup with no HTML unescaping. An attribute in real
+markup is entity-encoded, so `?a=1&amp;language=en` was split on the LITERAL text into two
+parameters: `a` and **`amp;language`**.
+
+**From the operator's run, four findings on parameters that do not exist:**
+
+```
+Finding 8:  Server-side template injection on 'amp;language'      <-- HIGH
+Finding 19: Reflected DOM data manipulation in 'amp;language'
+Finding 20: Reflected DOM data manipulation in 'amp;signup_page'
+Finding 21: Reflected DOM data manipulation in 'amp;signup_types[]'
+```
+
+A **HIGH SSTI against a parameter the server has never heard of.** Every probe fired at these was
+wasted budget, and every finding from them was false -- the same category as Q-106, reaching the
+report by a different road.
+
+**FIXED** with `html.unescape` at `_add_ref`, the one boundary where markup becomes a URL. Deliberately
+there rather than in each consumer: a decode repeated per-engine is a decode someone forgets.
+
+**GATE** (part of the same 11): removing the unescape kills three tests. The second half is asserted
+too -- the real parameters BEHIND the entity must be RECOVERED (`language`, `signup_page`), because a
+fix that merely stopped emitting `amp;language` while also losing `language` would trade a false
+positive for a blind spot.
+
 ### Q-109 · 30 graph endpoint nodes carry no host, every run · **READY** · **MEDIUM**
 
 Present in every one of the operator's Shopify snapshots:
