@@ -61,8 +61,15 @@ def clean(key, nonce):
     return root
 
 
+# `id` and `observed_at` are both assigned BY STORAGE, not by the analyzer, so neither can appear in
+# a comparison against what the analyzer produced. Q-102 added `observed_at` at read time (the row's
+# own `created_at`, which `get_findings` had been sorting on and discarding); this helper already
+# existed to drop exactly this category of storage-assigned metadata.
+_STORAGE_ASSIGNED = {"id", "observed_at"}
+
+
 def _without_ids(findings):
-    return [{k: v for k, v in finding.items() if k != "id"} for finding in findings]
+    return [{k: v for k, v in finding.items() if k not in _STORAGE_ASSIGNED} for finding in findings]
 
 
 def test_real_mission_persists_exact_source_tree_findings_and_reports_the_lane(api, tmp_path):

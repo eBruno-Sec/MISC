@@ -148,8 +148,16 @@ def off_scope(finding, scope: dict) -> bool:
         return True                                    # Q-099: no enforceable boundary -> refuse
     try:
         ok, _reason = eng.validate(target)
-    except Exception:
+    except Exception as _apolaki_exc:
         # The boundary built, then could not answer for this target. Same sentence: a predicate that
         # cannot evaluate has not said yes.
+        #
+        # RECORDED, not just returned. Failing closed keeps the finding out of the report, but a
+        # boundary that silently stopped answering looks exactly like a scope that legitimately
+        # refuses everything -- and the operator would see zero findings either way. `_swallow`
+        # reaches the ledger through `tools._ACTIVE_REGISTRY`, which is published for the span of
+        # `ToolRegistry.execute`; the import is function-level so the dead-code gate can resolve it.
+        import tools as _tools
+        _tools._swallow(_apolaki_exc, "findings_gate.off_scope", str(target))
         return True
     return not ok

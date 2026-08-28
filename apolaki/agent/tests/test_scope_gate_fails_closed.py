@@ -59,7 +59,18 @@ SHOPIFY = [r"^.*\.shopify\.com$", r"^.*\.shopifycs\.com$", r"^.*\.myshopify\.com
 # What `ScopeEngine.to_dict()` stores for that mission: patterns land in `in_scope` (scope.py:398
 # concatenates in_scope + in_scope_patterns), so `in_scope` is non-empty and the "no scope
 # configured" arm cannot catch this.
-UNBUILDABLE = {"in_scope": list(SHOPIFY), "bases": [], "out_of_scope": [], "program": "Shopify"}
+# Q-100 SUPERSEDED THE ORIGINAL FIXTURE, NOT THIS INVARIANT. This was `list(SHOPIFY)`, because at the
+# time no target could be derived from any pattern and a wildcard scope was genuinely unbuildable.
+# Q-100 made wildcards yield recon roots and anchored literals yield hosts, so the operator's real
+# Shopify scope is buildable now and MUST be -- that is the whole point of it. What still has to fail
+# closed is a scope from which nothing at all can be derived, so the fixture moved to patterns that
+# denote neither one host nor one root: alternation and a digit class.
+#
+# Changing the ASSERTIONS instead would have re-opened Q-099. The invariant is unchanged and every
+# test below still runs against a boundary that truly cannot be built.
+UNUSABLE_ENTRY = r"^(a|b)\.example\.com$"
+UNBUILDABLE = {"in_scope": [UNUSABLE_ENTRY, r"^\d+\.example\.com$"],
+               "bases": [], "out_of_scope": [], "program": "Unusable"}
 
 # A second, independent way to reach the same state -- a malformed `bases` entry, the shape
 # `tests/test_retest_scope_guard.py` uses. Two roads to "the boundary is unknown", so the fix is
@@ -144,7 +155,7 @@ def test_scope_refusal_states_why_and_stays_silent_on_a_good_scope():
     """
     why = fg.scope_refusal(UNBUILDABLE)
     assert why, "an unbuildable scope produced no reason at all"
-    assert SHOPIFY[0] in why, "the reason does not name the entry to fix: %r" % (why,)
+    assert UNUSABLE_ENTRY in why, "the reason does not name the entry to fix: %r" % (why,)
 
     why2 = fg.scope_refusal(MALFORMED)
     assert why2 and ("bases" in why2 or "in_scope" in why2), why2
@@ -234,7 +245,7 @@ def test_reopening_a_mission_with_an_invalid_scope_is_a_readable_state(client):
     assert r.status_code == 200, r.text
     err = r.json().get("scope_error")
     assert err, "a mission whose scope cannot be parsed reports no scope_error at all"
-    assert SHOPIFY[0] in err, "scope_error does not name the entry to fix: %r" % (err,)
+    assert UNUSABLE_ENTRY in err, "scope_error does not name the entry to fix: %r" % (err,)
 
     ok = client.get("/missions/good")
     assert ok.status_code == 200
@@ -253,7 +264,7 @@ def test_a_scope_guarded_endpoint_refuses_409_instead_of_raising(client):
     r = client.post("/workbench/bad/replay", json={"method": "GET", "url": "http://app:3000/x"})
     assert r.status_code == 409, r.text
     detail = str(r.json().get("detail", ""))
-    assert "scope" in detail.lower() and SHOPIFY[0] in detail, detail
+    assert "scope" in detail.lower() and UNUSABLE_ENTRY in detail, detail
     assert _NeverCalled.calls == [], _NeverCalled.calls
 
 

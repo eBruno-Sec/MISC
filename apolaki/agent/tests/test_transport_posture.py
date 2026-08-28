@@ -46,9 +46,16 @@ def test_hostname_mismatch_and_wildcard_rules():
 
 
 def test_weak_key_flagged_only_below_the_minimum():
-    assert [i["id"] for i in tp.analyze_certificate(_cert(), "example.com", now=NOW, key_bits=1024)] \
-        == ["cert_weak_key"]
-    assert tp.analyze_certificate(_cert(), "example.com", now=NOW, key_bits=2048) == []
+    """Q-101: the threshold is per-ALGORITHM now, so the algorithm must be stated. 1024 is weak for
+    RSA and 256 is healthy for an elliptic curve, and the old single 2048 floor called both weak --
+    which produced three HIGH false positives against live Shopify hosts."""
+    assert [i["id"] for i in tp.analyze_certificate(_cert(), "example.com", now=NOW,
+                                                    key_bits=1024, key_algo="rsa")] == ["cert_weak_key"]
+    assert tp.analyze_certificate(_cert(), "example.com", now=NOW,
+                                  key_bits=2048, key_algo="rsa") == []
+    # The regression this ticket exists for: a modern curve is not a weak key.
+    assert tp.analyze_certificate(_cert(), "example.com", now=NOW,
+                                  key_bits=256, key_algo="ec") == []
 
 
 # ── protocols + ciphers ───────────────────────────────────────────────────────

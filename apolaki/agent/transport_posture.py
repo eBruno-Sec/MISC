@@ -650,7 +650,13 @@ def _key_bits(der_bytes):
             if algo in name:
                 return getattr(k, "key_size", 0) or 0, algo
         return (getattr(k, "key_size", 0) or 0), ""
-    except Exception:
+    except Exception as _apolaki_exc:
+        # RECORDED. Returning `(0, "")` means "no key size and no algorithm", which `analyze_certificate`
+        # reads as "say nothing about this key" -- so a certificate this could not parse produces the
+        # same silence as a healthy one. That is the shape this whole ticket family is about, and
+        # Q-101 would be half a fix without it.
+        import tools as _tools
+        _tools._swallow(_apolaki_exc, "transport_posture._key_bits", "")
         return 0, ""
 
 

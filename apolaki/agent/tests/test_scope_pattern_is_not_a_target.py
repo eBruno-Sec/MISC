@@ -65,17 +65,31 @@ LAB_ORIGIN = "http://juice-shop:3000"
 
 # ── the defect ────────────────────────────────────────────────────────────────
 
-def test_a_scope_made_only_of_patterns_is_refused_instead_of_scanning_nothing():
-    """MUST FAIL before the fix (no such exception exists; nothing refuses).
 
-    Every entry is a filter, so no target can be derived from any of them. A ScopeEngine built from
-    this cannot address anything, and the mission it would have produced is the 18-finding report.
+def test_a_scope_that_denotes_nothing_is_refused_instead_of_scanning_nothing():
+    """SUPERSEDED FIXTURE, SAME INVARIANT. Q-096 asserted this with the operator's Shopify wildcards,
+    because at the time NO target could be derived from any pattern. Q-100 changed that: a wildcard
+    now yields a recon root and an anchored literal yields a host, so the Shopify scope is buildable
+    and SHOULD be. The invariant that survives is the real one -- a scope from which nothing at all
+    can be derived must refuse, rather than run and find nothing.
+
+    The fixture is now patterns that genuinely denote no single host and no single root: alternation
+    and a digit class. Weakening this to "never refuses" would have re-opened the 18-finding defect.
     """
     eng = scope_mod.ScopeEngine()
     with pytest.raises(scope_mod.ScopeConfigurationError) as ex:
-        eng.load_manual(list(SHOPIFY), [], "Shopify")
+        eng.load_manual([r"^(a|b)\.example\.com$", r"^\d+\.example\.com$"], [], "unusable")
     msg = str(ex.value)
-    assert SHOPIFY[0] in msg, "the error must name the entry the operator has to fix: %r" % (msg,)
+    assert "example" in msg, "the error must name the entry the operator has to fix: %r" % (msg,)
+
+
+def test_the_operators_real_shopify_scope_is_now_buildable():
+    """The Q-100 counterpart, and the reason the fixture above had to change. This exact scope was
+    refused whole after Q-096; it must now yield recon roots, or the operator cannot scan."""
+    eng = scope_mod.ScopeEngine()
+    eng.load_manual(list(SHOPIFY), [], "Shopify")
+    roots = sorted(e.value for e in eng.in_scope)
+    assert roots == ["*.myshopify.com", "*.shopify.com", "*.shopifycs.com"], roots
 
 
 def test_a_pattern_never_becomes_an_address():
@@ -93,9 +107,15 @@ def test_a_pattern_never_becomes_an_address():
         "a regex became a base-map host key: %r" % (eng.base_map(),))
     # The exact expression `agent.py:3758` uses to seed subfinder / crtsh / run_dns / run_asn.
     base_roots = [e.value.lower().lstrip("*.") for e in eng.in_scope]
-    assert base_roots == ["juice-shop"], (
-        "recon would be seeded with a pattern -- this is the self-amplifying half of the defect, and "
-        "the reason run_dns reported 'SPF MISSING' for a name that does not exist: %r" % (base_roots,))
+    # Q-100: recon IS seeded from the wildcards now, and that is the point -- it is what found real
+    # subdomains on the operator's rerun. What must never appear is a RAW PATTERN. Asserting on regex
+    # metacharacters rather than on a fixed list keeps this honest as the derivation grows.
+    assert "juice-shop" in base_roots, base_roots
+    assert sorted(base_roots) == ["juice-shop", "myshopify.com", "shopify.com", "shopifycs.com"], base_roots
+    for r in base_roots:
+        assert not any(c in r for c in "^*"), (
+            "recon would be seeded with a pattern -- this is the self-amplifying half of the defect, "
+            "and the reason run_dns reported 'SPF MISSING' for a name that does not exist: %r" % (r,))
 
 
 def test_the_pattern_string_is_not_in_its_own_scope():
