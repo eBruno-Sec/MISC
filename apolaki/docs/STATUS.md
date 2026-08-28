@@ -32,6 +32,67 @@ reproducible release blockers.
 | I-9 | caps preserve highest-value ordering | ⏳ CLAIMED closed, NOT yet verified | never measured by us; guard `test_cap_ordering_invariant` 8 tests |
 | I-11 | reachable / framework-invoked / retained-with-reason | ❌ **44 vs ceiling 37** | pin held; three lanes declined to force it |
 
+## THE NIGHT THE TOOL WAS POINTED AT A REAL PROGRAM
+
+Everything below was found by ONE live engagement against a real HackerOne target, not by a lab. The
+operator ran it, read it, and disproved it faster than the platform could defend itself. That is the
+single most valuable testing this project has had.
+
+### The finding that must never happen again
+
+Apolaki reported **two HIGH "CRLF / response-header injection"** findings against `linkpop.com`, a
+real in-scope asset. The operator disproved one with a single command:
+
+```
+Location: https://linkpop.com/480cd2/index.html?fbclid=1%0D%0AX-bbhcrlf:+bbhcrlfpwned
+```
+
+The marker is INSIDE the Location value and `%0D%0A` is **still percent-encoded** -- while `%3A`
+decoded to `:`. The server correctly refused to decode a newline. **Nothing split.**
+
+The oracle tested `"bbhcrlfpwned" in header_value`, with a docstring justifying it as *"the marker
+cannot occur naturally"*. **Our payload is in the request URL**, so any app echoing that URL into a
+header hands it back. A redirect preserving the query string is the most ordinary behaviour on the
+web.
+
+**The oracle checked a WEAKER property than the one it reported.** "Appears in the headers" is not
+"became its own header", and only the second is a response-splitting primitive.
+
+**Auditing its neighbours found the same shape in the same hour.** `analyze_host_header` used
+`_EVIL_HOST in location`, which fires on an open-redirect parameter, on a relative Location that
+cannot name an authority, and on `bbh-evil.example.attacker.tld`. **Four false findings in one run,
+one root cause: substring matching standing in for structural matching.**
+
+**A false negative is a missed bug. A false HIGH is a false accusation**, aimed at a named company's
+named endpoint, disprovable by them in one command. This is the worst defect class this project has
+shipped.
+
+### What else that one run exposed
+
+- **Q-104** phase A fed itself and starved every later phase: 1000 calls, 7 tools, 0 active engines,
+  14 hours. Every other phase had a cap; the only self-feeding one had none.
+- **Q-104b** the cap then spent its budget on nothing, because non-operator hosts were ordered
+  LEXICALLY -- 25023 wildcard subdomains meant the roots chosen were `0.shopify.com`,
+  `000.shopify.com`, `007.shopify.com`, all 404. Now tiered by EVIDENCE: operator assets, then hosts
+  something actually referenced, then the rest.
+- **Q-105** the tool ledger was a 4000-row WINDOW, so it went backwards. An engine that RAN was
+  reported as never dispatched, and the error reached the ASVS coverage numbers.
+- **Q-107** no heartbeat existed at all. Three separate signals read flat while the mission worked,
+  and the operator had to use `docker stats` to see whether his own tool was alive.
+
+### Three times my own fix was half a fix
+
+1. **Q-102** built `Latest evidence` to answer "is it alive" and bound it to FINDINGS -- the one thing
+   a healthy scan may produce none of for hours.
+2. **Q-107's** heartbeat was nearly shipped absent from the zero-findings short report, which is the
+   exact document a waiting operator reads.
+3. **Q-104's** gate was VACUOUS: `assert len(x) <= planner.CAP_RECON_ROOTS` asserted against the
+   constant under test, so a mutant removing the cap survived all four tests. **A bound that tracks
+   the thing it bounds is not a bound.** Its progression test also held the root set still, which
+   drains even uncapped, while the real failure was roots growing BETWEEN batches.
+
+Every one was caught by mutating the fix rather than by a green run.
+
 ## SHIP GATE GREEN: 3671 passed, 11 skipped, 12 xfailed, 0 failed
 
 `PYTEST_EXIT=0` at `ce59bad`, verified on a clean `git archive HEAD` snapshot on `apolaki_default`.
