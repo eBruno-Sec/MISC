@@ -2473,7 +2473,6 @@ async def get_report_html(session_id: str, download: bool = False):
         status=m["status"], ai_summary=_ai_summary(m), execution=_execution(m), leads=_leads(m),
         attack_surface=_attack_surface(session_id), playbook=m["context"].get("playbook", []),
         mode=m.get("mode"), delta=_delta(session_id), tool_ledger=_tool_ledger(session_id),
-                                    heartbeat=db.mission_heartbeat(session_id),
         report_id=session_id, security_headers=_sec_headers(session_id),
         intel=m["context"].get("intel"), kev_cwes=_kev_cwes(), kev_cves=_kev_cves(),
         orchestration=m["context"].get("orchestration"),

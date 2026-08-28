@@ -513,11 +513,37 @@ def iter_logs(mid: str):
         cur = _conn.execute(
             "SELECT etype,data,created_at FROM logs WHERE mission_id=? ORDER BY id", (mid,))
         for r in cur:
-            try:
-                payload = json.loads(r["data"])
-            except Exception:
-                continue                      # a malformed row is skipped, never fatal to a report
+            payload = _decode_log_row(r["data"])
+            if payload is None:
+                continue                      # unreadable row: skipped, RECORDED, never fatal
             yield {"type": r["etype"], **payload, "ts": r["created_at"]}
+
+
+def _decode_log_row(raw):
+    """One log row's JSON, or `None` when it cannot be read -- and the failure is RECORDED.
+
+    Split out of `iter_logs` rather than left inline. A bare `except: continue` there was a silent
+    discard, and the silent-failure census caught it immediately (control-plane 77 -> 78). Skipping
+    an unreadable row is the right BEHAVIOUR -- one bad event must not take a whole report down --
+    but "I could not read N of your events" is a fact the operator is entitled to, and a report
+    quietly built from 99% of the log looks identical to one built from all of it.
+
+    `tools` is imported inside the function: `tools` imports `db` at module level, so a top-level
+    import here would be a cycle. This is the same shape `dns_recon`, `bie` and `enip_audit_tool`
+    use to reach the ledger, and a function-level import stays resolvable to the dead-code gate.
+    """
+    try:
+        return json.loads(raw)
+    except Exception as _apolaki_exc:
+        # An explicit CHECK, not a nested try/except. Wrapping the recorder would be a second silent
+        # swallow inside the handler that exists to stop one -- I wrote that first and the census
+        # would have counted it. `tools` imports `db` at module level, so during tools' own
+        # initialisation this returns a PARTIAL module; `getattr` handles that without swallowing.
+        import tools as _tools
+        _sw = getattr(_tools, "_swallow", None)
+        if _sw is not None:
+            _sw(_apolaki_exc, "db.iter_logs.unreadable_row", "")
+        return None
 
 
 def mission_heartbeat(mid: str) -> dict:
