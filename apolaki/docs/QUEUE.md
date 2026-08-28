@@ -1478,6 +1478,40 @@ run observed.
 containing a claim of file or source exposure. Non-vacuity control: a genuine exposure finding must
 still emit exactly that line.
 
+### Q-107 · A running mission has NO heartbeat: three separate signals all read flat while it works · **READY** · **HIGH**
+
+**Reported by the operator mid-run, and he was right to keep asking.** He could not answer "is it still
+working or has it hung?" from anything the platform publishes. Measured across 85 minutes of a live
+mission:
+
+| signal | reading | why it cannot answer the question |
+|---|---|---|
+| `Latest evidence` | moved 2 min in 85 | derived from FINDINGS only (Q-102). A scan whose job is mostly to find nothing shows a flat line while working perfectly. |
+| `Tools Invoked` | 573 -> 570 | **decreases.** The ledger is not cumulative (Q-105), so the one counter that should monotonically rise goes backwards. |
+| `Surface Urls` | 4823 -> 4823 | grows during crawl, flat during probe. Correct, and useless once the phase it tracks has ended. |
+
+`Report generated` advances, but that is a fact about the RENDERER, not the mission -- it advances
+identically for a wedged run.
+
+**Q-102 is mine and it is half a fix.** I built `Latest evidence` yesterday to answer exactly this
+question and bound it to findings, which is the one thing a healthy scan may legitimately produce none
+of for hours. The operator then had to fall back on `docker stats` to see whether his own tool was
+alive.
+
+**FIX:** publish a mission HEARTBEAT that is independent of findings, of phase, and of the ledger --
+the timestamp of the last TOOL DISPATCH, plus a monotonic count of dispatches. Both come from rows the
+`logs` table already holds (`tool_call` events carry `created_at`), so this is surfacing data, not
+instrumenting new. Put it in the running report's header beside `Report generated`, and expose it on
+`GET /missions/{id}` so an operator can poll one number.
+
+**GATE:** a mission with tool activity but ZERO findings must show a heartbeat that ADVANCES between
+two renders. That is the exact case all three current signals fail. Negative control: a mission with
+no activity at all must show a heartbeat that does NOT advance, or the field is just another clock and
+answers nothing.
+
+**RELATED:** fix Q-105 first or the dispatch count inherits the same non-cumulative defect. A heartbeat
+that can go backwards is worse than none, because it looks authoritative.
+
 ### Q-106 · The CRLF oracle reported a HIGH on an ECHO, against a live bug-bounty target · **CLOSED** · **CRITICAL**
 
 **This one nearly went to Shopify.** The operator's engagement produced two HIGH findings,
