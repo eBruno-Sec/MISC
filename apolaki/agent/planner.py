@@ -63,6 +63,25 @@ _ALLOWED = {
 _HEAVY_FULL_ONLY = {"run_sqlmap", "run_zap", "run_nmap_vuln"}
 
 # caps keep every run bounded + terminating
+CAP_RECON_ROOTS = 25    # roots handed the 7-tool PASSIVE recon fan-out in phase A.
+#
+# Q-104. This was the one phase in this file with NO cap, and it is the phase that FEEDS ITSELF:
+# `_graph_primary_state` makes a recon root out of EVERY host node in the graph, phase A runs seven
+# passive tools per root, and what they discover becomes more host nodes. Phase A also ends with
+# `if a: return a`, so while any fresh recon step exists NO LATER PHASE RUNS AT ALL.
+#
+# MEASURED on the operator's 2026-08-27 Shopify engagement, two snapshots of one mission:
+#   22:10 UTC   12 tools dispatched, run_transport_posture had run, 67 calls per recon tool
+#   03:49 UTC    7 tools dispatched, ALL passive recon, 286 calls per recon tool, 1000 invocations
+#                6 of the 9 in-scope targets never probed, zero active engines ever dispatched
+# Roots had grown to ~41 and the mission could not reach phase B in fourteen hours.
+#
+# Q-100 did not cause this; it UNMASKED it. Before Q-100 a regex-only scope produced an empty
+# `in_scope`, so the graph was never seeded, phase A had nothing to expand and the mission did
+# nothing at all (Surface URLs 0). The moment the scope worked, the unbounded fan-out was free to run.
+#
+# Operator roots are ranked FIRST and are never displaced, so the cap trims discovered hosts rather
+# than the assets the operator actually declared.
 CAP_HOSTS = 30          # hosts we http_probe / fingerprint
 CAP_ENDPOINTS = 25      # parameterized endpoints we actively probe
 CAP_REST = 30           # high-value NON-parameterized REST/sensitive endpoints we fetch
@@ -684,7 +703,12 @@ def next_batch(state: dict) -> list:
 
     # ── phase A: passive recon on each root ──
     a = []
-    for root in roots:
+    # Q-104: BOUNDED. `roots` is every host node in the graph, and this phase manufactures more of
+    # them, so without a cap it never drains and `if a: return a` below starves every later phase.
+    # `scope_roots` are the operator's own declared assets; ranking them first means the cap only
+    # ever trims DISCOVERED hosts, and an operator's asset cannot be crowded out by a CDN's.
+    recon_roots = _rank_host_names(roots, state.get("scope_roots") or [])[:CAP_RECON_ROOTS]
+    for root in recon_roots:
         for tool in ("run_subfinder", "run_crtsh", "run_wayback", "run_dns", "run_asn", "run_github_recon"):
             a.append(_step(tool, {"domain": root}, f"{tool}:{root}"))
         # offline, PASSIVE: operator-ready search-dork queries for the root (no scraping)

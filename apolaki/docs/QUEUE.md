@@ -1478,6 +1478,89 @@ run observed.
 containing a claim of file or source exposure. Non-vacuity control: a genuine exposure finding must
 still emit exactly that line.
 
+### Q-104 · Phase A feeds itself and starves every later phase: 14 hours, 1000 calls, zero active engines · **CLOSED** · **CRITICAL**
+
+**Found in the field.** The operator's 2026-08-27 Shopify engagement, two snapshots of ONE mission:
+
+```
+22:10 UTC   12 tools dispatched, run_transport_posture had run,  67 calls per recon tool
+03:49 UTC    7 tools dispatched, ALL passive recon,             286 calls per recon tool
+             1000 invocations - 6 of 9 in-scope targets never probed - 0 active engines
+```
+
+`_graph_primary_state` (`agent.py:3402`) makes a recon root out of **every host node in the graph**:
+
+```python
+hosts = sorted({n.get("label") for n in g.nodes("host") if n.get("label")})
+```
+
+Planner phase A runs **seven passive tools per root**, and what those tools discover becomes more host
+nodes. Phase A ends with `if a: return a`, so **while one fresh recon step exists, no later phase runs
+at all.** Roots had grown to ~41 and the mission could not reach phase B in fourteen hours.
+
+**Every other phase in `planner.py` has a cap** -- `CAP_HOSTS 30`, `CAP_ENDPOINTS 25`, `CAP_JS 40`,
+`CAP_ZAP 3`. Phase A, the only SELF-FEEDING one, had none.
+
+**Q-100 did not cause this. It UNMASKED it.** Before Q-100 a regex-only scope produced an empty
+`in_scope`, so the graph was never seeded, phase A had nothing to expand, and the mission did nothing
+at all (Surface URLs 0). The moment scope worked, the unbounded fan-out was free to run. Worth stating
+because the tempting conclusion was "the new feature broke it" -- the new feature revealed it.
+
+**FIXED.** `CAP_RECON_ROOTS = 25`, and roots are ranked with the OPERATOR's declared assets first (a
+new `scope_roots` in the planner state, distinct from `roots`, which is everything the graph has
+learned). The cap trims discovered hosts and can never crowd out an asset the operator actually put in
+scope -- which would be a worse bug than the fan-out, since the mission would skip what it was pointed
+at.
+
+**GATE** (`tests/test_recon_fanout_is_bounded.py`): pristine 4 passed; a mutant restoring the
+unbounded behaviour is **killed by 2 of the 4**, reporting `43` roots and "phase A never drained after
+360 discovered hosts". The other two are non-vacuity controls (a small engagement is not capped;
+operator assets are never trimmed) and correctly survive a cap-removal mutant.
+
+**MY FIRST VERSION OF THAT GATE WAS VACUOUS, and the mutant proved it: 0 of 4 killed.** Two causes,
+both worth remembering. It asserted `len(targets) <= planner.CAP_RECON_ROOTS` -- **a bound that tracks
+the thing it bounds is not a bound**, so raising the constant raised the assertion with it. And the
+progression test marked one whole batch done at once, which drains even uncapped; the real mission's
+roots GREW BETWEEN BATCHES, and a test that holds the root set still is testing a mission that never
+existed.
+
+### Q-105 · The tool ledger is not cumulative: rows vanish and notes go backwards · **READY** · **MEDIUM**
+
+**MEASURED across the operator's two snapshots of one running Shopify mission:**
+
+| | 22:10 UTC | 03:49 UTC |
+|---|---|---|
+| tools listed | 12 | **7** |
+| `run_transport_posture` | executed, 3 calls, 10 findings | **absent entirely** |
+| `run_crtsh` note | 2 CT log entries | **0 CT log entries** |
+| `run_subfinder` note | 2 subdomains found | **1 subdomains found** |
+| `run_subfinder` calls | 67 | 286 |
+
+**Calls climb while the note goes DOWN**, and tools that stopped running disappear. So the `note`
+column is the **most recent call's** note rendered as if it summarised the tool -- a per-call value
+presented as a per-tool fact, the same shape as every other ticket this week.
+
+**Apolaki caught it itself**, which is the encouraging half:
+
+> Ledger disagreement: `run_transport_posture` produced findings but the tool ledger has no record of
+> running them. Two independent records of this mission do not agree, so one of them is wrong.
+
+**Why it matters beyond tidiness:** the Arsenal-coverage section reads the ledger to decide what "ran
+and found nothing" versus "was never dispatched". With rows vanishing, an engine that RAN is reported
+as never dispatched -- exactly the invisible false negative this document elsewhere refuses to
+tolerate.
+
+**FIX:** the ledger accumulates over the mission rather than being rebuilt from a window. A note that
+summarises a tool must aggregate its calls, or say plainly that it is the latest of N.
+
+**GATE:** snapshot a mission twice with more calls in between; no tool row may disappear and no count
+may decrease. Negative control: a tool that genuinely never ran must still be absent.
+
+**RELATED, still unresolved and deliberately not guessed at:** `run_subfinder` reports 40094 findings
+beside a note reading 2 subdomains found, and `run_asn` 286 findings beside 1 IP. The `findings`
+column appears to count DATA ITEMS for recon tools. Read the data model before changing anything; a
+numeric-mismatch rule invented here would flag every recon row.
+
 ### Q-103 · The integrity checker reported a WIRING GAP as a clean bill of health · **CLOSED** `see commit` · **HIGH**
 
 **From the operator's 2026-08-27 Shopify run.** The Report Integrity block said:

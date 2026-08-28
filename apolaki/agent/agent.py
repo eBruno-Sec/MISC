@@ -3800,6 +3800,11 @@ class BBHAgent:
                 if not g_roots and not g_urls:
                     break
                 state = {"mode": self.mode, "roots": g_roots, "done": done,
+                         # Q-104: the OPERATOR's declared assets, distinct from `roots`, which is
+                         # every host the graph has learned about. Phase A caps its recon fan-out and
+                         # ranks these first, so the cap trims discovered hosts and never an asset the
+                         # operator actually put in scope.
+                         "scope_roots": base_roots,
                          "recon": g_recon, "urls": g_urls,
                          "bases": self.scope.base_map(),
                          # Q-065, second cause. `planner.py:641` gates run_jwt on
