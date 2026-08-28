@@ -32,6 +32,21 @@ reproducible release blockers.
 | I-9 | caps preserve highest-value ordering | ⏳ CLAIMED closed, NOT yet verified | never measured by us; guard `test_cap_ordering_invariant` 8 tests |
 | I-11 | reachable / framework-invoked / retained-with-reason | ❌ **44 vs ceiling 37** | pin held; three lanes declined to force it |
 
+## SHIP GATE GREEN: 3709 passed, 11 skipped, 12 xfailed, 0 failed
+
+`PYTEST_EXIT=0` at `daed676`, on a clean `git archive HEAD` snapshot attached to `apolaki_default`.
+Session opened at 3671. **Q-104b, Q-105, Q-106, Q-106b, Q-107, Q-108 CLOSED; Q-109 filed.**
+
+The first run of this batch came back **2 failed**, and both were mine:
+`generate_html_report()` does not take the `heartbeat` kwarg my Q-107 threading matched into it, and
+the silent-failure census went `78 <= 77` because `iter_logs` used a bare `except: continue`. Neither
+was fixed by relaxing anything: the HTML side was REVERTED rather than given a parameter it would
+accept and ignore, and the decode now RECORDS through `_swallow` before skipping the row. **No
+ceiling was raised.** Census back to 387 / 77 / 61 / 13.
+
+**The HTML report still has no heartbeat.** Recorded, not papered over. The markdown report and
+`GET /missions/{id}` both carry it, which is what the operator reads.
+
 ## THE NIGHT THE TOOL WAS POINTED AT A REAL PROGRAM
 
 Everything below was found by ONE live engagement against a real HackerOne target, not by a lab. The
