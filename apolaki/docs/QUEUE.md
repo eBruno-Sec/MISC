@@ -1516,6 +1516,41 @@ confirmed" after stopping partway are different facts about the target, and only
 **GATE** (11 passed): a mutant that drops the deadline from **only `_run_cmdi`** is killed by both
 parametrised tests for that engine -- which is precisely the fixed-one-route-missed-another failure.
 
+### Q-113 · The injection sweep ignores `CAP_ENDPOINTS`, so a real engagement cannot finish · **READY** · **HIGH**
+
+The operator's Shopify run reached **endpoint 69 of 465 in roughly seven hours** of active sweeping,
+about six minutes each. At that rate the remaining 396 take **another ~46 hours**. Nothing was
+stalling: Q-110's budget never fired (`TRUNCATED` count 0), and the heartbeat advanced normally. It is
+simply doing 465 endpoints x ~8 engines against a Cloudflare-fronted target where every request is
+slow.
+
+The mission announces it plainly:
+
+> "Deterministic injection sweep: directly probing 465 parameterized endpoint(s) ... **(coverage
+> guarantee, planner-independent)**"
+
+**`CAP_ENDPOINTS = 25` exists and this path deliberately bypasses it.** Every other phase in
+`planner.py` is capped -- `CAP_HOSTS 30`, `CAP_JS 40`, `CAP_ZAP 3`, and Q-104's `CAP_RECON_ROOTS 25`.
+This one opted out to guarantee coverage.
+
+**A coverage guarantee with no time bound is not a guarantee, it is a promise the run cannot keep.**
+The operator stopped at 15% and got the same findings he had at 5%; the other 85% was never evidence,
+it was intention.
+
+**FIX -- and the ordering is the point.** Do not simply apply `CAP_ENDPOINTS` here: truncating
+lexically would repeat Q-104b, where a cap spent its whole budget on wildcard-DNS junk. Rank
+endpoints by value first (parameters that look like sinks, distinct shapes, hosts the operator
+declared) and cap the total, so the sweep tests the most promising 25-50 rather than the
+alphabetically first 25. Then say so: a capped sweep must report **how many endpoints it declined**,
+because "0 confirmed across 465" and "0 confirmed across the 40 we chose" are different claims.
+
+**GATE:** a mission with 465 parameterized endpoints dispatches a bounded number of injection steps
+and REPORTS the count it skipped. Negative control: a mission with 10 endpoints probes all 10 and
+reports no skips, so the cap cannot silently shrink an ordinary engagement.
+
+**RELATED:** Q-110 bounds one CALL; this bounds the SWEEP. Both are needed -- Q-110 alone stops a
+single endpoint eating a night, and still permits 465 well-behaved endpoints to eat a week.
+
 ### Q-112 · A middlebox eating our own payloads is indistinguishable from a clean target · **READY** · **HIGH**
 
 **Reported by the operator from his ISP router's app, mid-scan.** His own gateway IPS was dropping
