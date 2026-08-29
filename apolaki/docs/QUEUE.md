@@ -334,18 +334,63 @@ Full suite MEASURED green on an isolated `git archive HEAD` snapshot via `--juni
 `tests="3865" errors="0" failures="0" skipped="23"`, 937.4s -- +3 over the Q-094 baseline, exactly the
 new tests.
 
-### Q-120 · `ingest_intel` is wired one phase too late to steer the mission that feeds it · **READY** · **MEDIUM**
+### Q-120 · `ingest_intel` is wired one phase too late to steer the mission that feeds it · **CLOSED** · **MEDIUM**
 
 MEASURED across a full mission: `graph_primary_state x14` then `ingest_intel x1`. The intel feed
 lands after the last planner state read, so nothing it contributes can influence what the mission
 does -- it enriches a report rather than a decision. **Also the reason Lane C could not reproduce the
 Q-109 ledger row in a single run**, which is recorded there as unreconciled.
 
-### Q-121 · The live `tools.graph` is never persisted, so every live-graph defect is un-postmortem-able · **READY** · **MEDIUM**
+**CLOSED.** Traced the actual mission structure: the primary planning loop (`agent.py`'s
+`while steps < MAX_STEPS`) calls `_seed_and_project_graph` every iteration (the measured x14), and
+THAT is what feeds `_graph_primary_state`. `ingest_intel` lived only in `_close_autonomy_loop`,
+called once after the loop exits -- the post-mission "next best action" advisory, not the live
+decision path. `_seed_and_project_graph` now also re-ingests `self.tools.intel` on every call it
+makes, guarded with `getattr(self.tools, "intel", None)` so the several existing tests driving it
+with a minimal `_Tools` stub (no `.intel` attribute) are unaffected. `ingest_intel`'s own `observe()`
+calls merge by key, so re-running it each cycle on a growing intel store is idempotent, matching the
+"Idempotent (observe merges)" contract the rest of this projector already relies on. The post-loop
+call in `_close_autonomy_loop` stays -- it still feeds the separate next-scan advisory.
+
+**GATE** (`agent/tests/test_q120_intel_steers_live_mission.py`, 4 tests): a single projector call
+promotes a harvested `route` candidate into the graph (not after mission end); the observation it
+contributes (`has_login`) is readable immediately, not only post-loop; repeated projection across
+planning iterations does not grow the graph (idempotence); and the pre-existing bare-stub tests
+(no `.intel` attribute) still project cleanly -- the negative control that matters most, since a
+naive `self.tools.intel.to_dict()` without the `getattr` guard would have broken every one of them.
+
+**MUTATION-VERIFIED**: reverting only the new block (keeping the tests) reproduces the defect -- 2 of
+4 new tests fail (no `route` node, `has_login` absent). Restoring the fix turns all 4 green, and the
+full existing `_seed_and_project_graph` regression suite (`test_live_graph_projection.py`,
+`test_graph_primary.py`, `test_hostless_target_guard.py`, `test_deterministic_reach.py`,
+`test_typed_params.py`, `test_whole_product_reach.py`) stays green alongside it.
+
+Full suite MEASURED green on an isolated `git archive HEAD` snapshot via `--junit-xml`:
+`tests="3869" errors="0" failures="0" skipped="23"`, 961.7s -- +4 over the Q-119 baseline, exactly the
+new tests.
+
+### Q-121 · The live `tools.graph` is never persisted, so every live-graph defect is un-postmortem-able · **CLOSED** · **MEDIUM**
 
 Only the report-time `build_from_engagement` graph reaches `/app/data/graph`. The graph the mission
 actually reasoned over is discarded at exit. Q-109 needed a bespoke reproduction harness for exactly
 this reason, and the next graph defect will need another one.
+
+**CLOSED.** `AssetGraph.save`/`load` (`asset_graph.py`) take an additive `suffix` param, default
+`""` -- every existing caller (the report-time reconstruction) is byte-for-byte unaffected.
+`main._record_memory`, the one teardown call site that already saves the report-time graph, now
+also best-effort-saves `tools.graph` -- the object `_seed_and_project_graph`/`_graph_primary_state`
+actually read and wrote to during the run -- under `suffix="_live"`, so it lands at
+`/app/data/graph/<session_id>_live.json` without colliding with the report-time file.
+
+**GATE** (`agent/tests/test_q121_live_graph_persisted.py`, 4 tests): the default-suffix path stays
+byte-identical to the pre-fix filename; a suffixed save never collides with an unsuffixed one and
+each round-trips its own content; a node kind no report-time producer would ever project (`capability`)
+survives the live file specifically; and the real teardown call site (`main._record_memory`, not just
+the library function) is exercised end-to-end and asserted to write `<session_id>_live.json` to disk.
+
+**MUTATION-VERIFIED**: reverting `asset_graph.py` + `main.py` (keeping the new tests) fails 3 of 4 --
+the live file is never written, so both the collision test and the end-to-end teardown test fail.
+Restoring the fix turns all 4 green.
 
 ### Q-114 · Host-header injection is graded MEDIUM with no check for a sink · **CLOSED** · **MEDIUM**
 

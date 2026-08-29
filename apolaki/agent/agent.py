@@ -3484,6 +3484,18 @@ class BBHAgent:
                 if hid:
                     g.link(hid, eid, "serves", source="recon")
             self._project_body_params(g)
+            # Q-120. `ingest_intel` used to fire exactly ONCE, in `_close_autonomy_loop`, AFTER the
+            # primary planning loop's last `_graph_primary_state` read (MEASURED across a full
+            # mission: `graph_primary_state x14` then `ingest_intel x1`) -- so everything the harvest
+            # contributes (has_login/has_api/has_sensitive_route/has_object_id, and every `route`
+            # candidate) could only enrich the FINAL report/next-scan advisory, never steer the
+            # mission that produced it. Re-ingesting here, every iteration this projector runs, closes
+            # that gap; `ingest_intel`'s own `observe()` calls merge by key (idempotent, like every
+            # other write in this function), so re-running it on a growing intel store each cycle is
+            # cheap and safe. The post-loop call stays -- it feeds the separate next-scan advisory.
+            _intel_store = getattr(self.tools, "intel", None)
+            if _intel_store is not None:
+                g.ingest_intel(_intel_store.to_dict() if hasattr(_intel_store, "to_dict") else {})
             for f in (self.findings or []):
                 fam = (f.get("family") or "")
                 # D5: the capability a confirmed finding unlocks — the input the chase_capability
