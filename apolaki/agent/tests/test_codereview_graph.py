@@ -20,12 +20,15 @@ def _seeded():
 
 def test_seed_projects_static_facts_with_boundaries():
     g = _seeded()
-    # endpoint: STATIC, reachable UNVERIFIED (never assumed reachable), provenance code_review
-    eps = g.nodes("endpoint")
-    assert eps and any("/api" in (e.get("label") or "") for e in eps)
-    p = eps[0].get("props") or {}
-    assert p.get("evidence_kind") == "static" and p.get("reachable") == "unverified"
-    assert eps[0]["sources"][0]["source"] == "code_review"
+    # Q-117: a bare path pulled from source (fetch("/api/admin/config")) carries no host, so it is a
+    # `route` node — STATIC, provenance code_review — never a fabricated-host `endpoint`.
+    routes = g.nodes("route")
+    assert routes and any("/api" in (r.get("label") or "") for r in routes)
+    p = routes[0].get("props") or {}
+    assert p.get("evidence_kind") == "static"
+    assert routes[0]["sources"][0]["source"] == "code_review"
+    # no endpoint node is ever keyed on the source-tree token ("src:...") the old code fabricated
+    assert not any(str(e.get("key") or "").startswith("src:") for e in g.nodes("endpoint"))
     # sink: CANDIDATE hypothesis with vuln-class + source location, confidence <= 0.3
     sinks = g.nodes("sink")
     assert sinks
@@ -60,4 +63,16 @@ def test_link_runtime_to_source_cross_references_black_to_white():
 
 def test_build_from_engagement_accepts_and_seeds_code_review():
     g = AG.build_from_engagement("m", code_review=codereview.review(_SRC, "app.js"), scope_asset="app")
-    assert g.nodes("sink") and g.nodes("source_secret") and g.nodes("endpoint")
+    assert g.nodes("sink") and g.nodes("source_secret") and g.nodes("route")
+
+
+def test_a_genuine_absolute_url_in_source_still_yields_an_endpoint():
+    """NEGATIVE CONTROL on Q-117: the reclassification must not swallow a real host. A URL literal
+    lifted straight from source (not a fabricated one) carries a real netloc and still becomes a
+    probeable `endpoint`, keyed netloc+path per the `ingest_intel` convention."""
+    src = 'fetch("https://api.example.com/v1/orders");'
+    g = AG.AssetGraph("m")
+    CRG.seed(g, codereview.review(src, "app.js"), scope_asset="app")
+    eps = g.nodes("endpoint")
+    assert {n["key"] for n in eps} == {"api.example.com/v1/orders"}
+    assert not any(str(n.get("key") or "").startswith("src:") for n in eps)

@@ -17,6 +17,7 @@ Boundaries encoded here:
 from __future__ import annotations
 
 import hashlib
+from urllib.parse import urlparse as _up
 
 # code-review sink tag SUBSTRING -> (vuln-class hypothesis, capability it would unlock) for black-box
 # validation. Tags are free-text labels ("dom xss", "code injection / RCE"), so match by substring, most
@@ -55,19 +56,42 @@ def _sink_class(tags: list):
     return ("injection", None)
 
 
-def seed(graph, review: dict, *, scope_asset: str = "", repo: str = "") -> dict:
+def seed(graph, review: dict, *, scope_asset: str = "") -> dict:
     """Project a codereview.review() result into the AssetGraph as STATIC facts + CANDIDATE hypotheses.
     Returns {endpoints, sinks, secrets, nodes_added}. Mutates the graph deterministically."""
     review = review or {}
     n0 = graph.stats()["nodes"]
     counts = {"endpoints": 0, "sinks": 0, "secrets": 0}
-    pfx = (repo + ":") if repo else "src:"
 
     for ep in (review.get("endpoints") or []):
-        path = str(ep)
-        graph.observe("endpoint", pfx + path, label=path, source="code_review", confidence=0.3,
-                      scope_asset=scope_asset, evidence_kind="static", reachable="unverified",
-                      provenance_kind="repo")
+        # Q-117. `codereview.extract_endpoints()` mixes two shapes: a genuine absolute URL lifted
+        # from source (`_FULL_URL`), and a bare PATH (`_FETCH`/`_PATH`/`_API_TREE`/`_API_STD` all
+        # match without a host). The old code keyed every one of them as an `endpoint` under a
+        # fabricated "src:" host — `src:/api/foo` — which `_endpoint_url` (agent.py) then RESOLVED
+        # to `https://src:/api/foo` because the string parses. A fabricated host that resolves walks
+        # straight past the guard Q-093/Q-109 built for the unresolvable case and reaches the probe
+        # surface. Split exactly the way `AssetGraph.ingest_intel` already does for the same shape:
+        # a real netloc stays an `endpoint`, a bare path becomes a `route` — known, provenance-
+        # tagged, never promoted to an address. `to_observations()` reads both kinds, so has_api /
+        # has_login / has_sensitive_route etc. survive the reclassification.
+        s = str(ep).strip()
+        if not s:
+            continue
+        if "://" in s:
+            p = _up(s)
+            if p.netloc:
+                key, label = p.netloc + (p.path or "/"), (p.path or "/")
+                graph.observe("endpoint", key, label=label, source="code_review", confidence=0.3,
+                              scope_asset=scope_asset, evidence_kind="static", reachable="unverified",
+                              provenance_kind="repo")
+                counts["endpoints"] += 1
+            elif p.path:
+                graph.observe("route", p.path, label=p.path, source="code_review", confidence=0.3,
+                              scope_asset=scope_asset, evidence_kind="static", provenance_kind="repo")
+                counts["endpoints"] += 1
+            continue
+        graph.observe("route", s, label=s, source="code_review", confidence=0.3,
+                      scope_asset=scope_asset, evidence_kind="static", provenance_kind="repo")
         counts["endpoints"] += 1
 
     for f in (review.get("findings") or []):

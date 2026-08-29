@@ -184,7 +184,7 @@ never measured.** The mission knows why it stopped; the banner should say that o
 **GATE:** a deterministic run's failure banner never mentions a provider quota. Negative control: a
 run that genuinely died on a provider error still says so.
 
-### Q-117 · `codereview_graph` mints a fabricated host that REACHES THE PROBE SURFACE · **READY** · **HIGH**
+### Q-117 · `codereview_graph` mints a fabricated host that REACHES THE PROBE SURFACE · **CLOSED** · **HIGH**
 
 Found by Lane C while hunting Q-109, and it is **worse than Q-109**. `codereview_graph.py:68` keys
 endpoint nodes as `src:/api/foo`. `_endpoint_url` then resolves that to:
@@ -206,6 +206,26 @@ straight through it.
 `route` kind now exists for precisely this. **GATE:** a code-review ingest produces zero `endpoint`
 nodes whose host is a source-tree token, and the observations it contributed survive. Negative
 control: a code-review finding that genuinely carries a host still yields an endpoint.
+
+**CLOSED.** `codereview_graph.seed()` now applies the exact netloc/bare-path split
+`AssetGraph.ingest_intel` already uses for the identical shape (Q-109): a genuine absolute URL lifted
+from source (`_FULL_URL` match) keeps its real netloc and stays an `endpoint`; a bare path (`_FETCH`/
+`_PATH`/`_API_TREE`/`_API_STD` matches, and a `scheme:///path` with an empty netloc) becomes a `route`
+-- known, provenance-tagged, never promoted to an address. The dead `repo=` parameter (no caller ever
+passed it; it only fed the fabricated-host prefix) is removed. `to_observations()` already reads both
+`endpoint` and `route` nodes, so `has_api`/`has_login`/`has_sensitive_route` survive unchanged.
+
+**MUTATION-VERIFIED**, not just gated: reverting only `codereview_graph.py` (keeping the new tests)
+reproduces the defect and fails 3 tests, one of them showing the exact fabricated key
+`src:https://api.example.com/v1/orders` on a case that should have kept its real host. Restoring the
+fix turns all 3 green. **NEGATIVE CONTROL** (the ticket's own GATE, previously untested):
+`test_a_genuine_absolute_url_in_source_still_yields_an_endpoint` proves a real host from source is
+still promoted to `endpoint`, keyed `netloc+path` -- the reclassification does not trade the phantom
+finding for a blind spot on a genuine one.
+
+Full suite MEASURED green on an isolated `git archive HEAD` snapshot plus this change, junit-xml
+(terminal summary line did not print for the full run -- a display quirk, not a failure signal;
+verified via `--junit-xml`): `tests="3857" errors="0" failures="0" skipped="23"`, 915.9s.
 
 ### Q-118 · `agent.py:1625` appends to `tools.urls` past `_add_urls`, so the scope gate is bypassed · **CLOSED** · **HIGH**
 
