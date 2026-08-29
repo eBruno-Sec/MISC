@@ -631,3 +631,180 @@ FAILED tests/test_technique_planner.py::test_planner_is_graph_authoritative_flat
 
 The full test file body is in section 9.
 
+---
+
+## 8. What the Builder should and should not do next cycle
+
+**Do, in this order:**
+
+1. Apply the two hunks in section 6 to `agent/asset_graph.py`. Nothing else changes; `ingest_intel`'s
+   signature is unchanged and its only production caller (`agent.py:1769`) needs no edit.
+2. Add `agent/tests/test_q109_hostless_producer.py` verbatim from section 9.
+3. Run the suite. Expect `test_asset_graph.py::test_ingest_intel_gives_graph_the_full_planner_
+   vocabulary` and `test_technique_planner.py::test_planner_is_graph_authoritative_flat_recon_cannot_
+   drive_it` to stay GREEN - they are the positive control for hunk 2 and they must not need editing.
+4. Re-run `scratchpad/q109/q109_fullrun.py` (section 5a) against juice-shop and confirm
+   `END-OF-RUN live graph: ... hostless=0`. That is the end-to-end proof, and 113 -> 0 on the same
+   target is the number to quote.
+
+**Do NOT:**
+
+- Relax `_endpoint_url` or widen the resolver. It is correct.
+- Silence, aggregate away, or downgrade the `graph_primary_state.hostless_endpoint` ledger row. It is
+  the only reason this producer was ever found, and the gate in section 7 includes a control that
+  fails if the reporter is disabled.
+- Absolutize harvested paths onto the mission base to make the count reach zero. Section 6 records
+  the measurement that rejects it.
+
+**Separate tickets this investigation turned up. None belongs in the Q-109 patch:**
+
+- **`_swallow` truncates the offender list.** `str(exc)[:160]` against a 145-character message leaves
+  15 characters, so only the first offender survives and only in the `target` field. Any swallow that
+  puts evidence at the END of its message loses it. (Section 1b.)
+- **`ingest_intel` is wired one phase too late to steer the mission that feeds it.** (Section 5c.)
+- **`agent.py:1625` appends past `_add_urls`.** A code-intelligence endpoint that does not start with
+  `/` enters `tools.urls` with no `clean_url`, no `scope.validate`, and no session-kill quarantine,
+  and then keys an endpoint node that resolves to a PHANTOM host. (Section 4, H2.)
+- **`codereview_graph.py:68` mints `src:/api/foo`,** which `_endpoint_url` resolves to
+  `https://src:/api/foo` - a fabricated host that reaches the probe surface and that no ledger row
+  ever names, because it resolves. (Section 4, H5.)
+- **The live `tools.graph` is never persisted.** Only the report-time `build_from_engagement` graph is
+  saved to `/app/data/graph`. Every live-graph defect is therefore un-postmortem-able. (Section 4, H7.)
+
+---
+
+## 9. `agent/tests/test_q109_hostless_producer.py`
+
+```python
+"""Q-109 - the PRODUCER behind `graph_primary_state.hostless_endpoint`.
+
+Q-019 built the REPORTER: `_graph_primary_state` drops an endpoint node it cannot resolve to an
+absolute URL and RECORDS the drop naming the producer (see test_hostless_target_guard.py). Q-093
+fixed one producer, `planner._addressable`. This is the other one.
+
+`AssetGraph.ingest_intel` keyed an `endpoint` node on a harvested intel candidate, and every
+`route` / `endpoint` candidate `intel.py` writes is a BARE PATH by construction -- `intel.py:269`
+(the `_PATH` regex is anchored on a leading "/"), `intel.py:327` and `intel.py:365` each prepend one.
+So every harvested route became an endpoint node with no host, which the reporter then dropped.
+
+MEASURED on the local juice-shop lab through the real crawl -> code-intelligence -> projection path:
+hostless endpoint nodes went 0 -> 3 across exactly one `ingest_intel` call, and every one of them
+carried `source='harvest'` -- ingest_intel's own default, used by no other endpoint writer in the
+tree.
+
+BOTH HALVES ARE ASSERTED. A fix that merely stopped minting hostless endpoints while also losing
+`has_login` / `has_api` would trade a false probe target for a real blind spot, which is the shape
+Q-111's gate was written against.
+"""
+from __future__ import annotations
+
+import agent as agent_mod
+import asset_graph as AG
+
+
+def _hostless(g):
+    return sorted(n["key"] for n in g.nodes("endpoint")
+                  if not agent_mod.BBHAgent._endpoint_url(n["key"], {}))
+
+
+def test_ingest_intel_mints_no_hostless_endpoint_node():
+    """FAILS BEFORE THE FIX: three bare paths become three unresolvable `endpoint` nodes."""
+    g = AG.AssetGraph("q109")
+    g.ingest_intel({"candidates": {"route": ["/rest/user/login", "/api/orders"],
+                                   "endpoint": ["/admin/config"]}})
+    assert _hostless(g) == [], _hostless(g)
+
+
+def test_the_knowledge_is_kept_as_a_route_never_discarded():
+    """The fact is real intel. Only its CLAIM to be an address is refused."""
+    g = AG.AssetGraph("q109")
+    g.ingest_intel({"candidates": {"route": ["/rest/user/login"], "endpoint": ["/admin/config"]}})
+    assert {n["key"] for n in g.nodes("route")} == {"/rest/user/login", "/admin/config"}
+
+
+def test_the_planner_observations_survive_the_reclassification():
+    """THE OTHER HALF. Silencing the drop by dropping the knowledge would be the worse defect."""
+    g = AG.AssetGraph("q109")
+    g.ingest_intel({"candidates": {"endpoint": ["/rest/user/login", "/api/orders", "/admin/config"]}})
+    assert {"has_login", "has_api", "has_sensitive_route"} <= g.to_observations()
+
+
+def test_an_addressable_candidate_is_still_an_endpoint_keyed_netloc_path():
+    """NOT VACUOUS: zero-hostless must not be achieved by minting no endpoints at all. The key is
+    the netloc+path convention `_graph_add_url` and `_project_body_params` already use, so a
+    harvested absolute URL MERGES onto the node the crawler already made instead of forking a
+    second identity for the same asset."""
+    g = AG.AssetGraph("q109")
+    g.ingest_intel({"candidates": {"endpoint": ["https://h.example/x?a=1"]}})
+    assert {n["key"] for n in g.nodes("endpoint")} == {"h.example/x"}
+    assert _hostless(g) == []
+
+
+def test_a_scheme_with_no_host_is_recorded_as_a_path_never_as_an_address():
+    """`https:///benchmark/cmdi-Index.html` is the exact string mission 90cee81c produced."""
+    g = AG.AssetGraph("q109")
+    g.ingest_intel({"candidates": {"endpoint": ["https:///benchmark/cmdi-Index.html"]}})
+    assert g.nodes("endpoint") == []
+    assert {n["key"] for n in g.nodes("route")} == {"/benchmark/cmdi-Index.html"}
+
+
+def test_the_reporter_still_fires_when_a_hostless_node_reaches_the_graph_some_other_way():
+    """NEGATIVE CONTROL ON THE FIX ITSELF. A producer fix that also disabled the reporter would
+    hide the NEXT producer, and the ledger row is the only reason this one was ever found."""
+    import asyncio
+
+    import scope as scope_mod
+
+    class _Tools:
+        def __init__(self):
+            self.graph = AG.AssetGraph("t")
+            self.recon = {"target": "h", "domain": "h", "subdomains": [], "live_hosts": [],
+                          "forms": []}
+            self.urls = []
+            self.intensity = "standard"
+            self.swallowed = []
+
+        def _swallow(self, exc, where, target=""):
+            self.swallowed.append({"where": where, "target": str(target)[:200],
+                                   "error": "%s: %s" % (type(exc).__name__, exc)})
+
+        def get_openai_tools(self):
+            return []
+
+        def get_claude_tools(self):
+            return []
+
+    t = _Tools()
+    eng = scope_mod.ScopeEngine()
+    eng.load_manual(["h.example"], [], "P")
+    a = agent_mod.BBHAgent(eng, t, asyncio.Event(), strategy="deterministic", mission_id=None)
+    t.graph.observe("endpoint", "/orphan.html", label="/orphan.html", source="some-other-producer")
+    a._graph_primary_state(t.graph)
+    rec = [s for s in t.swallowed if s["where"] == "graph_primary_state.hostless_endpoint"]
+    assert rec, "the reporter was disabled by the producer fix: %s" % t.swallowed
+```
+
+---
+
+## 10. Reproduction harnesses
+
+Both live in the session scratchpad, not in the repo. Neither writes to the shared mission DB
+(`mission_id=None`), and both run against the authorized local lab only.
+
+- `q109_repro.py` - crawl -> code-intelligence -> projection -> `_graph_primary_state`, then one
+  `ingest_intel`, reporting hostless counts and provenance on each side. This is the isolating
+  experiment (section 3a).
+- `q109_fullrun.py` - the whole `BBHAgent.run()`, recording call order and the end-of-run hostless
+  census. This is the scale + ordering experiment (section 5a).
+
+Invocation for both:
+
+```
+MSYS_NO_PATHCONV=1 docker run --rm --network apolaki_default \
+  -v "<SNAPSHOT>/agent:/app" -v "<SCRATCH>/q109:/work" -w /app \
+  -e PYTHONPATH=/app -e BBH_DATA_DIR=/tmp/q109 apolaki-agent python -u /work/<script>.py
+```
+
+`--network apolaki_default` is required (Q-094), and `PYTHONPATH=/app` is required because the
+harness lives outside `/app`.
+
