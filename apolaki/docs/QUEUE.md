@@ -52,7 +52,7 @@ Still open from this cycle, filed by Lane C during the Q-109 hunt and NOT worked
   (`graph_primary_state x14 -> ingest_intel x1`, hostless swallows recorded during the run: 0). The
   producer finding does not depend on that ordering; the ledger row's exact provenance does.
 
-### Q-126 · Q-021B's own Definition of Done requires a `liveness.py` CHECKS entry, and it was never added · **READY** · **MEDIUM**
+### Q-126 · Q-021B's own Definition of Done requires a `liveness.py` CHECKS entry, and it was never added · **CLOSED** · **MEDIUM**
 
 **Queue-rot correction, found while sweeping the pre-Cycle-15 backlog for genuinely open work
 (`docs/QUEUE.md:5191`, Q-021B).** Its header still read the not-yet-started marker, but `git log --grep=Q-021B`
@@ -96,6 +96,40 @@ target with no fingerprintable bytes must report DEAD, not a false CONFIRMED fro
 list. Wire it against `dvwa` (add to `liveness_run._LAB_ADDR`) for the WIRING proof; leave a
 follow-up note (do not block this ticket on it) for a CVE_ELIGIBLE-grade target once one is found or
 built into a lab fixture.
+
+**CLOSED, same cycle.** `liveness.py` gained a `kind: "recon"` branch in `verdict()` -- proof is
+`recon_key` non-empty in `tools.recon` with each counted record carrying a real evidence string
+(>=8 chars), not a confirmed finding, so a `candidate`-confidence TechnologyFact (the only kind
+Q-021B's design ever produces) can satisfy it. `liveness_run.py` gained `kind: "recon"` dispatch
+(calls the tool, then reads `tb.recon[recon_key]` instead of `res.findings`) and a `dvwa` lab
+address. The `technology_detection` check runs `_run_fingerprint` against `http://dvwa/`.
+
+**MEASURED END-TO-END against the live lab, not simulated:**
+```
+[confirmed] technology_detection    recon['technology'] gained 1 fact(s) with evidence (needed 1)
+engine liveness: 18 checked, 18 confirmed, 0 dead, 0 skipped, 0 error
+  newly live    technology_detection
+```
+Baseline ratcheted 17 -> 18 (`liveness_run.py --update`).
+
+**NEGATIVE CONTROL, run for real, not asserted:** pointed the same check at `owaspbench` (verified
+moments earlier to serve no `Server`/`X-Powered-By` header and no identifiable body signature) --
+`[dead] technology_detection recon['technology'] has 0 evidenced fact(s), needed 1` and the ratchet
+correctly reported it as a **REGRESSION**, not a silent skip. Reverted to the real `dvwa` check
+immediately after and re-confirmed 18/18 before committing.
+
+**GATE** (`agent/tests/test_liveness.py`, 5 new pure unit tests: positive control, empty-list,
+no-evidence, non-dict-junk, higher-`min_facts` threshold; plus the two table-sanity tests extended
+to accept `kind: "recon"`). `test_validated_on.py::_NON_TECHNIQUE_LIVENESS` gained
+`technology_detection`, same allowlist shape as `surface_discovery` -- a recon capability check, not
+a vulnerability technique, so it has no typed `validated_on` claim to carry.
+
+**MUTATION-VERIFIED**: reverting `liveness.py` + `liveness_run.py` (keeping the new tests and the
+ratcheted baseline) fails 4 of the 5 new unit tests plus
+`test_the_committed_baseline_only_names_techniques_the_table_checks` (the baseline names a technique
+the reverted table no longer declares). Restoring the fix turns all green again.
+
+Q-021B's Definition of Done is now fully met; its header is upgraded from HALF CLOSED to CLOSED.
 
 ### Q-125 · `html.unescape` on a URL destroys real parameters -- the fix WAS the defect · **CLOSED** · **HIGH**
 
@@ -5233,7 +5267,7 @@ paired **producer-side** assertion, not extend this one.
 
 ---
 
-### Q-021B · Stop discarding the version — persist a canonical TechnologyFact · **HIGH** · **HALF CLOSED** `82538c4` `883d879` `8b002aa` `1f342c9` `cf63cf1` `88b95ed` — the liveness proof is Q-126
+### Q-021B · Stop discarding the version — persist a canonical TechnologyFact · **HIGH** · **CLOSED** `82538c4` `883d879` `8b002aa` `1f342c9` `cf63cf1` `88b95ed` + Q-126 for the liveness proof
 
 **QUEUE-ROT CORRECTION, 2026-08-29.** This header sat unmarked-as-started for weeks after the work shipped
 (commits below). MEASURED before touching the marker: all 3 oracle assertions and all 3 mandatory

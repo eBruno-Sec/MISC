@@ -32,6 +32,9 @@ from __future__ import annotations
 # and what counts as proof. `kind` selects the runner:
 #   "tool" -> a ToolRegistry coroutine, invoked with `input`
 #   "call" -> a module-level function, invoked with `kwargs`
+#   "recon" -> a ToolRegistry coroutine invoked with `input`, proof is `recon_key` in `tools.recon`
+#              afterward rather than a confirmed finding (Q-126: some engines, like technology
+#              detection, deliberately never emit one)
 CHECKS = (
     # ── SURFACE DISCOVERY: can the product still REACH a target at all? ───────────────────────────
     # Five orchestration defects shipped while 1645 unit tests stayed green, because every one of them
@@ -103,6 +106,13 @@ CHECKS = (
                 "attacker_headers": {"Cookie": "sid=sess-alice"},
                 "owner": "bob-admin", "attacker": "alice-user",
                 "seed_paths": ["/panel"], "screenshots": False}},
+    # ── Q-126: Q-021B's persistence half, proven live (recon, not a vulnerability) ─────────────
+    # `dvwa` serves a plain `Server: Apache/2.4.25 (Debian)` banner -- a real target, not a fixture --
+    # so this proves the producer -> recon["technology"] wiring is still carrying a version, evidence
+    # and all, rather than merely that the unit tests still construct a TechnologyFact by hand.
+    {"technique": "technology_detection", "lab": "dvwa", "kind": "recon",
+     "tool": "_run_fingerprint", "input": {"url": "http://dvwa/"},
+     "recon_key": "technology", "min_facts": 1},
 )
 
 # Verdicts a check can produce.
@@ -166,6 +176,23 @@ def verdict(check: dict, findings, lab_up: bool, error: str = "") -> dict:
         return {"technique": check["technique"], "lab": check["lab"], "verdict": DEAD,
                 "detail": "crawl reached only %d URL(s), needed %d — the product cannot see the target"
                           % (n, need)}
+    # Q-126: a `recon` check proves a FACT reached persistence, not a confirmed vulnerability. Some
+    # engines (Q-021B's technology detection) deliberately never emit a `confirmed`/`high`-confidence
+    # finding — detection is not a vulnerability by that ticket's own design — so `_match()` would
+    # reject every one of them and this gate could never prove that class of engine live at all. The
+    # runner passes whatever the named `recon_key` held after the call as `findings`; still requires
+    # real evidence per record, so an empty-shell dict landing in the list cannot count.
+    if check.get("kind") == "recon":
+        facts = [f for f in (findings or []) if isinstance(f, dict)]
+        with_evidence = [f for f in facts if len(str(f.get("evidence") or "").strip()) >= 8]
+        n, need = len(with_evidence), int(check.get("min_facts") or 1)
+        if n >= need:
+            return {"technique": check["technique"], "lab": check["lab"], "verdict": CONFIRMED,
+                    "detail": "recon[%r] gained %d fact(s) with evidence (needed %d)"
+                              % (check.get("recon_key"), n, need)}
+        return {"technique": check["technique"], "lab": check["lab"], "verdict": DEAD,
+                "detail": "recon[%r] has %d evidenced fact(s), needed %d — the wiring did not persist "
+                          "a detection" % (check.get("recon_key"), n, need)}
     hit = next((f for f in (findings or []) if _match(f, check)), None)
     if hit:
         return {"technique": check["technique"], "lab": check["lab"], "verdict": CONFIRMED,

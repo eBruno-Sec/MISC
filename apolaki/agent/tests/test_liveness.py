@@ -96,13 +96,59 @@ def test_verdict_reports_a_down_lab_as_skipped_never_confirmed():
     assert v["verdict"] == lv.SKIPPED and "NOT a pass" in v["detail"]
 
 
+# ── Q-126: a `recon` check proves a fact reached persistence, not a confirmed finding ──────────
+_RECON_CHECK = {"technique": "technology_detection", "lab": "l", "kind": "recon",
+                "recon_key": "technology", "min_facts": 1}
+
+
+def test_a_recon_check_confirms_on_an_evidenced_fact():
+    """POSITIVE CONTROL. A `candidate`-confidence TechnologyFact — exactly what Q-021B's own design
+    guarantees a detector will ever emit — still proves the wiring live here, unlike `_match()`."""
+    fact = {"product": "apache", "version": "2.4.25", "confidence": "low",
+            "evidence": "Server: Apache/2.4.25 (Debian)"}
+    v = lv.verdict(_RECON_CHECK, [fact], lab_up=True)
+    assert v["verdict"] == lv.CONFIRMED
+    assert "1" in v["detail"]
+
+
+def test_a_recon_check_is_dead_on_an_empty_list():
+    """NEGATIVE CONTROL: the wiring did not persist anything — a real zero, not a false pass."""
+    v = lv.verdict(_RECON_CHECK, [], lab_up=True)
+    assert v["verdict"] == lv.DEAD
+
+
+def test_a_recon_fact_with_no_evidence_does_not_count():
+    """NEGATIVE CONTROL, the one that matters most: a bare/junk record landing in the recon list must
+    not satisfy the check just because the list is non-empty — same evidence bar `_match()` enforces
+    for confirmed findings, applied here to facts instead."""
+    v = lv.verdict(_RECON_CHECK, [{"product": "apache"}], lab_up=True)
+    assert v["verdict"] == lv.DEAD
+    v2 = lv.verdict(_RECON_CHECK, [{"product": "apache", "evidence": "short"}], lab_up=True)
+    assert v2["verdict"] == lv.DEAD
+
+
+def test_a_recon_check_ignores_non_dict_junk_in_the_list():
+    v = lv.verdict(_RECON_CHECK, [None, "not a fact", 42], lab_up=True)
+    assert v["verdict"] == lv.DEAD
+
+
+def test_a_recon_check_respects_a_higher_min_facts():
+    fact = {"product": "apache", "evidence": "Server: Apache/2.4.25 (Debian)"}
+    v = lv.verdict({**_RECON_CHECK, "min_facts": 2}, [fact], lab_up=True)
+    assert v["verdict"] == lv.DEAD
+    v2 = lv.verdict({**_RECON_CHECK, "min_facts": 2}, [fact, fact], lab_up=True)
+    assert v2["verdict"] == lv.CONFIRMED
+
+
 # ── the checks table itself ───────────────────────────────────────────────────
 def test_every_check_names_a_real_technique():
     """Engine checks must name a technique that exists. A `surface` check is exempt because it proves
-    REACH, not a vulnerability class — but it is not exempt from accountability; see the test below."""
+    REACH, not a vulnerability class, and a `recon` check is exempt for the same reason -- Q-126's
+    technology detection is deliberately never a vulnerability either. Neither is exempt from
+    accountability generally; see the test below."""
     import techniques as T
     for c in lv.CHECKS:
-        if c["kind"] == "surface":
+        if c["kind"] in ("surface", "recon"):
             continue
         assert c["technique"] in T.TECHNIQUES, c["technique"]
 
@@ -119,13 +165,19 @@ def test_every_check_states_what_would_prove_it():
     """Every entry declares its own success condition up front, so a check can never be scored against
     a bar invented after the fact. Engine checks say which family/CWE would prove them; a surface check
     says how much reach is enough AND that the reach is addressable — a URL with no host is refused by
-    scope, so counting it as coverage is exactly the Q-019 defect."""
+    scope, so counting it as coverage is exactly the Q-019 defect. A recon check (Q-126) says which
+    recon key it reads and how many evidenced facts is enough."""
     for c in lv.CHECKS:
-        assert c["kind"] in ("tool", "call", "surface"), c["technique"]
+        assert c["kind"] in ("tool", "call", "surface", "recon"), c["technique"]
         if c["kind"] == "surface":
             assert c.get("seed"), c["technique"]
             assert int(c.get("min_urls") or 0) > 0, c["technique"]
             assert c.get("max_hostless") is not None, c["technique"]
+            continue
+        if c["kind"] == "recon":
+            assert c.get("recon_key"), c["technique"]
+            assert int(c.get("min_facts") or 0) > 0, c["technique"]
+            assert c.get("tool") and c.get("input"), c["technique"]
             continue
         assert c.get("family") or c.get("cwe"), c["technique"]
 

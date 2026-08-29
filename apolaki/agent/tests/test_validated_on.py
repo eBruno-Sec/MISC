@@ -101,6 +101,10 @@ def test_every_production_producer_of_validated_on_is_a_hand_typed_literal():
 _NON_TECHNIQUE_LIVENESS = {
     # Q-113/Q-109: the crawl grew the surface and every endpoint it produced was addressable.
     "surface_discovery",
+    # Q-126/Q-021B: a persisted TechnologyFact is a recon observation, never a confirmed
+    # vulnerability by that ticket's own design -- there is no lab to validate a "technique" of
+    # detection against, only wiring to prove still carries a version to `recon["technology"]`.
+    "technology_detection",
 }
 
 

@@ -30,6 +30,8 @@ _LAB_ADDR = {
     # Surface-discovery check: an app mounted on a SUBPATH with RELATIVE links — the exact shape that
     # defeated recon seeding, the unauthenticated crawl, and link resolution.
     "owaspbench": ("owaspbench", 8443),
+    # Q-126: a plain Server-header banner for the technology-detection recon check.
+    "dvwa": ("dvwa", 80),
 }
 
 
@@ -52,7 +54,7 @@ def _reachable(lab: str, timeout: float = 3.0) -> bool:
 def _scope_for(check: dict):
     from scope import ScopeEngine
     hosts = set()
-    if check["kind"] == "tool":
+    if check["kind"] in ("tool", "recon"):
         u = check["input"].get("url")
         hosts.add(urlparse(u).hostname if u else check["input"].get("host"))
     else:
@@ -84,6 +86,13 @@ async def _run_one(check: dict) -> dict:
             tb = ToolRegistry(_scope_for(check), lab_mode=True)
             res = await getattr(tb, check["tool"])(check["input"])
             findings = list(getattr(res, "findings", []) or [])
+        elif check["kind"] == "recon":
+            # Q-126: the proof lives in `tools.recon`, not in the call's own ToolResult.findings --
+            # `_run_fingerprint` deliberately returns those as low-severity leads, never confirmed.
+            from tools import ToolRegistry
+            tb = ToolRegistry(_scope_for(check), lab_mode=True)
+            await getattr(tb, check["tool"])(check["input"])
+            findings = list(tb.recon.get(check["recon_key"]) or [])
         else:
             mod = __import__(check["module"])
             sc = _scope_for(check)
