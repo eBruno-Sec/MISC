@@ -183,4 +183,238 @@ Three distinct key CONVENTIONS are in use, which is the root of the whole class:
 
 Convention C is the offender class.
 
-(work in progress - producer attribution and reproduction follow)
+> LINE NUMBERS. Everything below is pinned to the blobs at commit `899e768`. Verified identical to
+> my `git archive` snapshot before use (other lanes were mid-commit in the shared tree, and I did get
+> one torn read early on - my first pass cited `agent.py:3452/3458`, which is a stale numbering):
+>
+> ```
+> $ for f in agent/agent.py agent/asset_graph.py agent/tools.py agent/intel.py; do ... md5sum ...
+> agent/agent.py      snap=bbbb615e376ab8223f90007752f89ba6 head=bbbb615e376ab8223f90007752f89ba6 SAME
+> agent/asset_graph.py snap=73f956ea9556121a50b287d7416e2711 head=73f956ea9556121a50b287d7416e2711 SAME
+> agent/tools.py      snap=f393329ad10ff803a6f0f134017f538d head=f393329ad10ff803a6f0f134017f538d SAME
+> agent/intel.py      snap=e6b48644b1987d6adc7956bbb7e9759c head=e6b48644b1987d6adc7956bbb7e9759c SAME
+> ```
+
+---
+
+## 3. THE PRODUCER - `AssetGraph.ingest_intel`, `agent/asset_graph.py:329-330`
+
+```python
+309:    def ingest_intel(self, intel: dict, source: str = "harvest") -> int:
+...
+329:        for r in (cands.get("route", []) or []) + (cands.get("endpoint", []) or []):
+330:            self.observe("endpoint", str(r), label=str(r), source=source)
+```
+
+The `route` and `endpoint` candidates come out of `IntelStore`, and every writer of them produces a
+**bare path by construction**:
+
+| writer | line | what it stores |
+|---|---|---|
+| `intel.harvest_text` | `intel.py:269` | `_PATH` regex, anchored on a leading `/` (`intel.py:45`) |
+| `intel.harvest_js` | `intel.py:327` | `store.add("route", "/" + m.lstrip("/"), source)` |
+| `intel._add_ref` | `intel.py:365` | `store.add("route", "/" + base.lstrip("/"), source)` |
+| `intel.harvest_html` | `intel.py:387` | `store.add("endpoint", <form action>, source)` - relative for most real forms |
+
+`observe` keys the node on that string unchanged, so the node key is `/rest/user/login`, and
+`_endpoint_url` refuses it at `agent.py:3495` (`if not host: return ""`) exactly as designed.
+
+The live call site is `agent/agent.py:1769`, inside `_close_autonomy_loop`:
+
+```python
+1769:                    _g.ingest_intel(self.tools.intel.to_dict() if hasattr(self.tools.intel, "to_dict") else {})
+```
+
+`_g` is `self.tools.graph` - the SAME `AssetGraph` object `_graph_primary_state` reads
+(`tools.py:1620` constructs it; `agent.py:3785` fetches it with `getattr(self.tools, "graph", None)`).
+
+### 3a. MEASURED - the producer actually produces the offenders
+
+Not "it could". Driven on the authorized local lab (`apolaki-juice-shop-1`, `juice-shop:3000` on
+`apolaki_default`) through the REAL `_surface_crawl`, `_recon_code_intelligence`,
+`_seed_and_project_graph`, `_endpoint_url` and `_graph_primary_state` - no monkeypatching of the
+projection or the resolver, `mission_id=None` so nothing is written to the shared mission DB.
+Harness: `scratchpad/q109/q109_repro.py`.
+
+```
+$ MSYS_NO_PATHCONV=1 docker run --rm --network apolaki_default \
+    -v "<SNAP>/agent:/app" -v "<SCRATCH>/q109:/work" -w /app \
+    -e PYTHONPATH=/app -e BBH_DATA_DIR=/tmp/q109 apolaki-agent python /work/q109_repro.py
+
+scope base_map: {'juice-shop': 'http://juice-shop:3000'}
+surface crawl visited=18  tools.urls=38
+after code-intel  tools.urls=59
+tools.urls entries with NO scheme (0): []
+[live graph, after crawl+codeintel (pre-projection)] endpoint nodes=38  HOSTLESS=0
+[after _seed_and_project_graph  <= THIS is the state _execute_plan sees] endpoint nodes=97  HOSTLESS=0
+_graph_primary_state -> roots=2 urls=59
+intel candidates: route=3 endpoint=0 url=10
+  sample route: ['/juice-shop/build/routes/fileServer.js', '/juice-shop/node_modules/express/lib/router/index.js', '/juice-shop/node_modules/express/lib/router/layer.js']
+ingest_intel added 6 node(s)
+[after ingest_intel (what _close_autonomy_loop does)] endpoint nodes=100  HOSTLESS=3
+     source=harvest                  count=3
+     key='/juice-shop/build/routes/fileServer.js' sources=('harvest',)
+     key='/juice-shop/node_modules/express/lib/router/index.js' sources=('harvest',)
+     key='/juice-shop/node_modules/express/lib/router/layer.js' sources=('harvest',)
+   SWALLOW where=graph_primary_state.hostless_endpoint target='/juice-shop/build/routes/fileServer.js'
+           error='ValueError: 3 graph endpoint node(s) carry no host, so no absolute URL exists for them; they cannot be probed and were NOT faked onto a bare scheme. First: /juice-shop/buil'
+DELTA hostless: 0 -> 3
+```
+
+Four things this establishes, all measured:
+
+1. **Every hostless node carries `source='harvest'`**, which is `ingest_intel`'s default `source=`
+   argument and is used by no other endpoint writer. The provenance names the producer.
+2. **The count goes 0 -> 3 across exactly one call to `ingest_intel`** and nothing else. A negative
+   control is built in: the same graph, same target, same projection, measured immediately before.
+3. The real swallow reproduces with the production message, and its `target` field carries the
+   first offender in full.
+4. The `error` string is truncated at `First: /juice-shop/buil`, confirming section 1b empirically.
+
+### 3b. What the offenders actually ARE - and why this is not simply "30 lost endpoints"
+
+Two of the three offenders on juice-shop are **server-side filesystem paths mined out of a stack
+trace** (`/juice-shop/node_modules/express/lib/router/index.js`), not URLs on the target at all.
+They are real intel, but they are not addresses.
+
+This matters for the fix. "30 endpoints per run are never probed" assumes all 30 are URLs that
+should be probed. At least on a measured target they are not - and minting
+`https://<base>/juice-shop/node_modules/express/lib/router/index.js` to make the count go to zero
+would be the SAME class of error as `https:///path`: claiming an address nobody observed. The
+patch in section 6 therefore reclassifies rather than absolutizes.
+
+---
+
+## 4. Hypotheses I DISPROVED
+
+Every one of these was a plausible producer. All are eliminated, so the next lane does not re-walk
+them.
+
+**H1. `tools._graph_add_url` (`tools.py:4077`) mints `path` when a crawled URL is relative.**
+DISPROVED. The line is `(host + path) if host else path`, so the shape is there - but its only
+caller is `_add_urls` (`tools.py:4096`), which reaches it only after `surface_mod.clean_url(u) and
+self.scope.validate(u)[0]`. MEASURED, both gates reject a bare path:
+
+```
+$ ... apolaki-agent python -c "import scope as S, surface; sc=S.ScopeEngine(); sc.load_manual(['juice-shop:3000'],[],'lab'); ..."
+'/rest/user/login'             validate=(False, 'Invalid target') clean_url=False
+'//evil.com/x'                 validate=(False, 'Invalid target') clean_url=True
+'rest/products'                validate=(False, 'rest not in scope') clean_url=False
+'https://juice-shop:3000/x'    validate=(True, 'In scope via juice-shop:3000') clean_url=True
+'#/search'                     validate=(False, '# not in scope') clean_url=False
+'src:/api/foo'                 validate=(False, 'src not in scope') clean_url=False
+```
+
+**H2. Something else writes `tools.urls` past `_add_urls`, and `_seed_and_project_graph` keys an
+endpoint node on it.** DISPROVED as a HOSTLESS producer, though the bypass is real. There are
+exactly two writers in the whole tree:
+
+```
+$ grep -rn "\.urls\.append\|\.urls\.extend\|\.urls +=\|urls\.insert\|self\.urls =" --include=*.py agent/ | grep -v tests
+agent/agent.py:1625:                self.tools.urls.append(u)
+agent/tools.py:4129:                self.urls.append(u)
+```
+
+`tools.py:4129` is inside `_add_urls` (gated, see H1). `agent.py:1625` is the code-intelligence
+bypass, and its own comment admits it bypasses `_add_urls`. But the value it appends is
+`base.rstrip("/") + ep if str(ep).startswith("/") else str(ep)` - so a `/`-leading mined endpoint
+becomes ABSOLUTE, and a relative one keeps a non-empty first segment. Measured on juice-shop:
+`tools.urls entries with NO scheme (0): []`. It is not a hostless producer.
+
+> Not a hostless bug, but worth its own ticket: the else-branch appends the raw string. A mined
+> `ep` of `rest/products` would enter `tools.urls` UNVALIDATED (no `clean_url`, no `scope.validate`,
+> no session-kill quarantine) and would then key an endpoint node `rest/products`, which
+> `_endpoint_url` resolves to the PHANTOM host `https://rest/products`. That resolves, so no
+> swallow ever names it.
+
+**H3. `archive_intel.ingest_repo_findings` (`archive_intel.py:50`) mints a bare repo route.**
+DISPROVED on the live path. The branch is real (`if kind == "route" and val:` -> `observe("endpoint",
+val, ...)`) but the only production caller, `tools.py:4470`, constructs its items as
+`{"kind": "secret", ...}` only:
+
+```python
+            secrets = [{"kind": "secret", "value": f.get("evidence", ""), "ref": None}
+                       for f in findings if "secret-leak" in (f.get("tags") or [])]
+```
+
+No live caller ever passes `kind == "route"`. The route branch is reachable only from tests.
+
+**H4. `archive_intel.ingest_archived_endpoints` (`archive_intel.py:34`) falls back to a bare path
+when the host is unknown.** DISPROVED on the live path. `h = p.netloc or host`, and its only
+production caller `tools.py:4380` feeds it a list every element of which already passed
+`self.scope.validate(u)[0]` inside `_run_wayback` - which, per H1, is impossible for a hostless
+string. `p.netloc` is therefore always non-empty.
+
+**H5. `codereview_graph.seed` (`codereview_graph.py:68`) mints a bare path.** DISPROVED.
+`pfx = (repo + ":") if repo else "src:"`, so the key is `src:/api/foo`; `partition("/")` yields a
+non-empty head and `_endpoint_url` returns `https://src:/api/foo`. It is not hostless.
+
+> Again a separate defect rather than this one: that node RESOLVES to a fabricated host and enters
+> the planner's probe surface. Worth a ticket; it is not Q-109.
+
+**H6. Warm start replays hostless rows out of `memory_assets` (the Q-111b precedent).** DISPROVED,
+twice over.
+- The graph itself is never replayed: `tools.py:1620` builds a FRESH `AssetGraph(mission_id)` every
+  mission. `AssetGraph.load` has no production caller (`grep -rn "AssetGraph.load"` -> tests only),
+  and the only `.save()` in the tree is `main.py:2600`, which saves the REPORT-TIME
+  `build_from_engagement` graph, not the live one.
+- The stored endpoint rows cannot be hostless anyway: `memory.py:163` derives them from
+  `surface.build_inventory(tools.urls)` as `f"{e['host']}{e['path']}"`, and `main.py:_warm_start`
+  re-admits them through `tools._add_urls`, which re-validates (H1).
+
+**So, unlike Q-111b, a producer-only fix IS sufficient here. There is no poisoned history to clean.**
+
+**H7. The persisted mission graphs would show the offenders.** DISPROVED as an evidence source, and
+this is worth recording because it looks like it should work. I scanned every persisted graph:
+
+```
+$ MSYS_NO_PATHCONV=1 docker run --rm -v apolaki_bbh_data:/d:ro apolaki-agent python -c "...scan /d/graph/*.json..."
+graph files scanned 491 endpoint nodes 26827 HOSTLESS 0
+```
+
+Zero hostless nodes in 26,827 endpoint nodes. Not because there are none - because
+`/app/data/graph/*.json` is the REPORT-TIME graph from `build_from_engagement`
+(`main.py:2600-2601`), whose endpoints come from `surface.build_inventory(urls)` and are all
+`host+path`. **The live `tools.graph`, the one that carries the defect, is never persisted at all.**
+A future lane looking for live-graph evidence will not find it in that directory.
+
+---
+
+## 5. Ordering: when the offenders exist relative to when they are read
+
+This is the one part of the picture that does NOT line up cleanly, and I am flagging it rather than
+papering over it.
+
+Static call order inside `BBHAgent.run()` (`agent.py:3216-3276`):
+
+```
+run()
+  -> strategy branch          _run_deterministic (4378) / _run_low_ai (4415) / agentic floor (3234)
+       -> _execute_plan (3881)
+            -> loop:  _seed_and_project_graph (3425)  ->  _graph_primary_state (3520)   [the swallow]
+  -> _probe_cloud_storage
+  -> _technique_advisor
+  -> _close_autonomy_loop (3271)
+       -> ingest_intel (1769)                                                 [the producer]
+  -> _validate_candidates       (does not touch the graph)
+  -> _triage
+```
+
+`_execute_plan` has exactly three call sites (3234, 4378, 4415), all reached from the strategy
+branch, all BEFORE 3271. `_close_autonomy_loop` has exactly one production call site (3271).
+`main._drive_mission` runs `agent.run()` exactly once per mission (`main.py:3016`, guarded by
+`_ensure_run_started`). So on THIS build, in a single mission, the producer fires after the last
+read - and the swallow should not fire at all.
+
+It plainly did fire on the operator's Shopify runs. Three candidate explanations, none of them yet
+proven; the full-run measurement below is what discriminates:
+
+- **(i)** The operator's build ordered `_close_autonomy_loop` before the executor. That is a history
+  question, answerable with `git log -L` on the `run()` region.
+- **(ii)** A second reader exists that I have not found.
+- **(iii)** The graph outlives one `run()` in some path (a resumed / re-driven session).
+
+What is NOT in doubt is the producer: it is the only writer in the tree that can key an endpoint
+node on a bare path on the LIVE graph (sections 3 and 4 enumerate and eliminate all nine others),
+and it is measured doing exactly that.
+
