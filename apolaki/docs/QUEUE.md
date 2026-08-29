@@ -147,7 +147,7 @@ closes both roads and the third one found on the way:
 Recording the ambiguity rather than picking the likelier story: a mechanism reproduced is not a
 cause proven, and three roads are closed either way.
 
-### Q-123 · The ledger's "Findings" column does not contain findings · **CLOSED** `d0b2c0f` · **MEDIUM**
+### Q-123 · The ledger's "Findings" column does not contain findings · **CLOSED** `ddc0750` · **MEDIUM**
 
 From the same run, in one table, against a report whose total is **23**:
 
@@ -183,7 +183,7 @@ still read the same `t["findings"]` field; this is a display fix, not a data fix
 5 tests; the 5th (the raw count itself reaching the row unchanged) still passes on the revert, which
 is correct -- it is the negative control proving the rename did not also silently change the data.
 
-### Q-124 · The FAILED banner asserts a cause it never measured · **CLOSED** · **MEDIUM**
+### Q-124 · The FAILED banner asserts a cause it never measured · **CLOSED** `ddc0750` · **MEDIUM**
 
 Every failed run prints:
 
