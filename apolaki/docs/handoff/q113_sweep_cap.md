@@ -183,7 +183,34 @@ unable to run for two days on a slow target.
 M8 is the one that matters: it is the shape of "a bound that quietly shrinks an ordinary
 engagement", and it is caught by the negative controls rather than by the bound's own test.
 
-## THE ONE RED I AM LEAVING, deliberately, in a file I do not own
+## Honest island check on `_sweep_budget`
+
+The operator-facing half is NOT an island: the declined count is on a `{"type": "info"}` event and
+the deadline on a `{"type": "degraded"}` event, both of which go up the live mission event stream to
+the UI, and the `degraded` event shape is the one `agent.py` already uses for the graph-projection
+halt.
+
+`scan._sweep_budget` IS currently unread by product code. MEASURED - `main.py:2782` is the place
+that lifts durable mission facts into the report context, and it reads `ag._degraded` and
+`ag._candidate_assurance` and nothing else:
+
+    deg = getattr(ag, "_degraded", None)
+    if deg:
+        ctx["degraded"] = deg
+
+I deliberately did NOT route the sweep budget through `_degraded`: `benchmark_assert.py:138` asserts
+`ck("run_not_degraded", not deg, ...)`, so marking every capped run degraded would fail the
+benchmark's own health check on a mission that is behaving exactly as designed.
+
+PATCH FOR THE OWNER OF `agent/main.py` (three lines, next to the `deg` block above):
+
+    +        # Q-113: what the injection sweep DECLINED, so the report can say "40 of 465" rather
+    +        # than letting a bounded run read as whole-surface coverage.
+    +        swb = getattr(ag, "_sweep_budget", None)
+    +        if swb:
+    +            ctx["sweep_budget"] = swb
+
+## THE REDS I AM LEAVING, deliberately, in files I do not own
 
     $ docker run ... pytest tests/test_sweep_targets.py ... -rfE
     1 failed, 50 passed, 7 skipped in 14.89s
@@ -195,6 +222,50 @@ engagement", and it is caught by the negative controls rather than by the bound'
     E   AssertionError: assert 40 >= 200
 
 `agent/tests/test_sweep_targets.py` is not in my write list, so I did not touch it.
+
+### RED 2 - the live whole-product reach floor, MEASURED against the real lab
+
+Not inferred. Run against the standing authorised `apolaki-owaspbench-1` container:
+
+    $ docker run --rm --network apolaki_default -e APOLAKI_LIVE_LAB=1 \
+        -v .../snap/apolaki/agent:/app -w /app apolaki-agent \
+        python -m pytest tests/test_whole_product_reach.py -p no:cacheprovider -rfE -q
+    ....F..
+    FAILED tests/test_whole_product_reach.py::test_the_sweep_selects_a_real_fraction_of_the_surface
+    E   AssertionError: sweep selected 40 target(s) from a 3046-URL surface
+    E   assert 40 >= 100
+
+Six of the seven live reach checks pass (250 pages fetched, unchanged). The seventh is
+`MIN_TARGETS = int(os.environ.get("APOLAKI_LIVE_MIN_TARGETS", "100"))`, and it is the SAME collision
+as RED 1 wearing different clothes: it is the OWASP whole-product surface, where 3046 URLs cost
+seconds each and a 40-endpoint budget is genuinely too small.
+
+This is the regression I predicted from `wp3_precondition.md` before running it, now measured, and
+it is the concrete cost of the ticket's `<= 60` gate. It is already env-parameterised, so the
+benchmark protocol change fixes this one with no code edit at all:
+
+    APOLAKI_LIVE_LAB=1 BBH_SWEEP_TARGETS=700 python -m pytest tests/test_whole_product_reach.py
+
+I did not verify that exact invocation goes green (the live crawl is slow and I had one lane budget
+to spend); UNVERIFIED, but the mechanism is the same env override that produced the 700 default.
+
+PATCH FOR THE OWNER OF `agent/tests/test_whole_product_reach.py` - **do not lower `MIN_TARGETS` to
+40.** That floor exists to catch the Q-019 collapse (20 selected from 2756) and lowering it to fit
+the new default is weakening an oracle to make a change pass. Change the INVOCATION, not the number:
+
+    -MIN_TARGETS = int(os.environ.get("APOLAKI_LIVE_MIN_TARGETS", "100"))
+    +# Q-113 made the SHIPPED default an engagement bound (40). This is a WHOLE-PRODUCT reach floor,
+    +# so it must be run with the whole-product budget:
+    +#   APOLAKI_LIVE_LAB=1 BBH_SWEEP_TARGETS=700 python -m pytest tests/test_whole_product_reach.py
+    +# The floor itself does not move - it guards the Q-019 collapse (20 of 2756) and is not a
+    +# goalpost to drag down to whatever the current default happens to be.
+    +MIN_TARGETS = int(os.environ.get("APOLAKI_LIVE_MIN_TARGETS", "100"))
+
+Worth recording separately: on the OWASP surface the value ranking is a NO-OP. Every case parameter
+is `BenchmarkTestNNNNN` (not in `_HIGH_VALUE_PARAM`) and every path is `/benchmark/<class>-NN/` (not
+in `_HIGH_VALUE_ROUTE`), so all 3046 candidates score 1 and the selection is pure shape spread. The
+ranking earns its place on a real application's surface, not on this one, and saying otherwise from
+this run would be an unsupported claim.
 
 **This is a head-on contradiction between Q-019 and Q-113, not an accident.** Q-019 concluded "a
 budget below the surface of a real app is the old bug"; Q-113 MEASURED that a budget the size of a
