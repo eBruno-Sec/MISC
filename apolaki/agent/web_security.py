@@ -809,43 +809,39 @@ def build_crlf_probes(url: str, max_probes: int = 6) -> list:
     return probes
 
 
-# Q-106: the payload's CRLF, still percent-encoded. Its presence in a header value is proof the
-# server did NOT decode it -- the defence working -- so the marker beside it is an ECHO of our own
-# request, not a split. `%E5%98%8A%E5%98%8D` is the overlong-UTF-8 variant `build_crlf_probes` sends.
-_ENCODED_CRLF = ("%0d%0a", "%e5%98%8a%e5%98%8d")
-
-
 def analyze_crlf(resp_headers: dict, resp_status: int = 0) -> dict | None:
-    """Confirmed when our injected marker made it into the RESPONSE header block as a REAL split.
+    """Confirmed ONLY when our injected marker became its OWN HEADER NAME.
 
-    Q-106 -- THIS REPORTED A FALSE HIGH ON A LIVE BUG-BOUNTY TARGET. The old test was
-    `CRLF_MARKER in header_name OR "bbhcrlfpwned" in header_value`, justified by "the marker cannot
-    occur naturally". It can, and commonly does: any app that echoes the request URL into a header
-    puts our own payload there. MEASURED on linkpop.com, an in-scope asset:
+    Q-106 / Q-106c. This reported a false HIGH against a live bug-bounty target TWICE.
 
-        Location: https://linkpop.com/480cd2/index.html?fbclid=1%0D%0AX-bbhcrlf:+bbhcrlfpwned
+    Round one: the test was `marker in header_name OR "bbhcrlfpwned" in header_value`, justified by
+    "the marker cannot occur naturally". Our payload is in the request URL, so any app echoing that
+    URL into a header hands it back. `linkpop.com` returned it inside `Location` with `%0D%0A` still
+    encoded. I tightened the VALUE branch to reject a still-encoded CRLF and kept it.
 
-    The `%3A` decoded to `:` while **`%0D%0A` stayed encoded** -- the server refusing to decode the
-    newline, which is exactly the defence holding. Nothing split. Reporting that as HIGH is a false
-    claim of a header-injection primitive against a company that will check it in one command.
+    Round two proved that was the wrong repair. `partners.shopify.com` returned:
 
-    THE KEY MATCH IS THE SOUND TEST. If the header block genuinely splits, the HTTP client parses the
-    injected line as its own header, so `X-bbhcrlf` appears as a KEY. A value-only match is kept, but
-    only once the still-encoded CRLF is ruled out, because a value hit without a decode is an echo.
+        location: .../organizations?redirect_to=...itcat%3Dpartner_blog%250D%250AX-bbhcrlf%253A%2Bbbhcrlfpwned
+
+    **`%250D%250A` -- DOUBLE-encoded.** The server URL-encoded our input into a `redirect_to`
+    parameter, so my single-encoding check missed it. Chasing encodings is unwinnable: there is
+    always another layer.
+
+    THE VALUE BRANCH HAS NO LEGITIMATE CASE, which is why it is gone rather than tightened. A real
+    response split is parsed BY THE HTTP CLIENT as a separate header, so the marker arrives as a
+    KEY -- including the Set-Cookie sink, where `Set-Cookie: a=b
+X-bbhcrlf: pwned` reaches us as
+    two parsed headers, not one value. If the marker only ever appears inside a value, nothing split
+    and we are reading our own request back.
+
+    Two field false positives, zero true positives, and no mechanism by which a value-only match
+    could be real. The key test is the whole oracle.
     """
-    for k, v in (resp_headers or {}).items():
-        kl, vl = str(k).lower(), str(v).lower()
-        if CRLF_MARKER in kl:
+    for k in (resp_headers or {}):
+        if CRLF_MARKER in str(k).lower():
             return {"severity": "HIGH",
                     "detail": f"injected header surfaced in the response ({k}) — response-splitting/"
                               "header-injection primitive (cache poisoning, cookie/redirect injection)"}
-        if f"{CRLF_MARKER}pwned" in vl:
-            if any(enc in vl for enc in _ENCODED_CRLF):
-                continue          # our payload echoed back UNDECODED — no split occurred
-            return {"severity": "HIGH",
-                    "detail": f"injected header surfaced in the response ({k} (value split)) — "
-                              "response-splitting/header-injection primitive (cache poisoning, "
-                              "cookie/redirect injection)"}
     return None
 
 
