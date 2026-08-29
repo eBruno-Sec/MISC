@@ -106,13 +106,24 @@ def _confirmed_counts(findings: list) -> dict:
 
 
 # ── Markdown (original H1/BC format, enhanced) ───────────────────
-def _status_note(status: str) -> str:
+def _status_note(status: str, execution: dict = None) -> str:
     """A one-line run-outcome note for a mission that did not finish cleanly, so a
     report never silently reads 'no vulnerabilities' for an aborted run."""
     s = (status or "").lower()
     if s in ("failed", "error"):
-        return ("> ⚠ **Run status: FAILED.** This assessment did not complete (commonly a provider "
-                "quota/rate-limit or network error, not a target result). Coverage below is partial — re-run to finish.")
+        # Q-124: "commonly a provider quota/rate-limit" is a GUESS, and a deterministic run
+        # (0 AI calls, no provider in the loop) proves it wrong on the same report that
+        # names the real cause -- a ZAP daemon error, failed connections -- three sections
+        # further down in the Tool Ledger. The mission knows why it stopped; the banner must
+        # not blame a provider it never called. `ai_calls` is the direct signal (a provider
+        # quota cannot be the cause of a run that made zero provider calls) rather than
+        # `strategy`, so a low-AI run that happened to make one call before dying still gets
+        # the provider explanation.
+        if (execution or {}).get("ai_calls"):
+            return ("> ⚠ **Run status: FAILED.** This assessment did not complete (commonly a provider "
+                    "quota/rate-limit or network error, not a target result). Coverage below is partial — re-run to finish.")
+        return ("> ⚠ **Run status: FAILED.** This assessment did not complete. See the **Tool Ledger** "
+                "below for which engine(s) stopped and why. Coverage below is partial — re-run to finish.")
     if s in ("stopped", "stopping"):
         return "> ⏹ **Run status: STOPPED by operator.** Coverage below is partial."
     if s == "interrupted":
@@ -409,7 +420,7 @@ def generate_report(program: str, findings: list, scope: dict,
     findings = _with_capec(findings)
     delta_block = "\n".join(_delta_lines(delta, findings))
     ledger_block = "\n".join(_ledger_md(tool_ledger) + _arsenal_md(tool_ledger, findings) + _technique_md())
-    status_banner = _status_note(status)          # only failed/stopped/interrupted
+    status_banner = _status_note(status, execution)  # only failed/stopped/interrupted
     exec_note = _exec_note(execution)             # strategy + AI usage (always for det/low-AI)
     banner = "\n\n".join(b for b in (status_banner, exec_note) if b)
     ai_block = (f"## Executive Summary\n\n{ai_summary.strip()}\n\n" if (ai_summary or "").strip() else "")
@@ -2270,7 +2281,17 @@ def _ledger_md(ledger: dict) -> list:
               f"- **ZAP (DAST):** {_zap_status_text(ledger.get('zap_status'))}", ""]
     tools = ledger.get("tools") or []
     if tools:
-        lines += ["| Tool | Status | Calls | Findings | Note |", "|---|---|---|---|---|"]
+        # Q-123: this used to say "Findings", but the number is a per-call sum of raw
+        # `ToolResult.findings` items (subdomains, probe rows, DOM-trace candidates,
+        # sqlmap log-tail carriers) -- recon volume for informational engines, not
+        # confirmed vulnerabilities, and it disagreed with the tool's own note on the
+        # same line (25 next to "1 DOM source-to-sink finding(s)"). It is not
+        # reconcilable with the report's confirmed-findings total, because most of what
+        # it counts never reaches that gate. Renamed to what it actually counts.
+        lines += ["_The **Items** column is the raw result count each tool call returned "
+                  "(subdomains, probe rows, candidate sinks, etc.) -- not confirmed "
+                  "findings. See **Confirmed Findings** below for the number that matters._", ""]
+        lines += ["| Tool | Status | Calls | Items | Note |", "|---|---|---|---|---|"]
         for t in tools:
             lines.append(f"| {t.get('tool','')} | {t.get('status','')} | {t.get('calls',0)} "
                          f"| {t.get('findings',0)} | {(t.get('note') or '').replace('|','/')} |")
@@ -3428,7 +3449,10 @@ def generate_html_report(program: str, findings: list, scope: dict,
                      f"<td><span class='sev' style='--c:{scol}'>{e(st.upper() or 'N/A')}</span></td>"
                      f"<td>{e(str(t.get('calls',0)))}</td><td>{e(str(t.get('findings',0)))}</td>"
                      f"<td>{e(str(t.get('note') or ''))}</td></tr>")
-        tbl = (f"<table class='tbl'><tr><th>Tool</th><th>Status</th><th>Calls</th><th>Findings</th>"
+        # Q-123: "Items", not "Findings" -- the number is a per-call sum of raw
+        # `ToolResult.findings` (subdomains, probe rows, DOM-trace candidates), not confirmed
+        # vulnerabilities, and it is not reconcilable with the Confirmed Findings total below.
+        tbl = (f"<table class='tbl'><tr><th>Tool</th><th>Status</th><th>Calls</th><th>Items</th>"
                f"<th>Note</th></tr>{rows}</table>") if rows else ""
         method_html = (
             "<h2 id='methodology'>Methodology &amp; Tool Ledger</h2>"
@@ -3438,7 +3462,10 @@ def generate_html_report(program: str, findings: list, scope: dict,
             f"<div class='cov'><span style='color:{zcls}'>{e(_zap_badge(zs))}</span><label>ZAP</label></div>"
             "</div>"
             f"<p class='sub'><b>ZAP (DAST):</b> <span style='color:{zcls}'>{e(_zap_status_text(zs))}</span> · "
-            f"<b>Auth:</b> {e(auth)}</p>" + tbl)
+            f"<b>Auth:</b> {e(auth)}</p>"
+            "<p class='sub'>The <b>Items</b> column is the raw result count each tool call "
+            "returned (subdomains, probe rows, candidate sinks, etc.) &mdash; not confirmed "
+            "findings. See <b>Confirmed Findings</b> for the number that matters.</p>" + tbl)
         # Q-050/Q-051: the arsenal gap and technique coverage reach the HTML report too.
         #
         # THEY DID NOT, AND THAT WAS AN ISLAND I BUILT MYSELF. Both sections were wired into
@@ -3579,7 +3606,7 @@ def generate_html_report(program: str, findings: list, scope: dict,
 
     # header meta / banners
     scope_str = e(", ".join(scope.get("in_scope", [])))
-    _sn = _status_note(status)
+    _sn = _status_note(status, execution)
     status_html = (f'<div class="statusbar">{e(_sn.lstrip("> ").replace("**",""))}</div>' if _sn else "")
     _en = _exec_note(execution)
     exec_html = (f'<div class="execbar">{e(_en.replace("**",""))}</div>' if _en else "")

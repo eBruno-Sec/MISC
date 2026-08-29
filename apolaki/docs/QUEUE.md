@@ -147,7 +147,7 @@ closes both roads and the third one found on the way:
 Recording the ambiguity rather than picking the likelier story: a mechanism reproduced is not a
 cause proven, and three roads are closed either way.
 
-### Q-123 · The ledger's "Findings" column does not contain findings · **CLOSED** · **MEDIUM**
+### Q-123 · The ledger's "Findings" column does not contain findings · **CLOSED** `d0b2c0f` · **MEDIUM**
 
 From the same run, in one table, against a report whose total is **23**:
 
@@ -183,7 +183,7 @@ still read the same `t["findings"]` field; this is a display fix, not a data fix
 5 tests; the 5th (the raw count itself reaching the row unchanged) still passes on the revert, which
 is correct -- it is the negative control proving the rename did not also silently change the data.
 
-### Q-124 · The FAILED banner asserts a cause it never measured · **READY** · **MEDIUM**
+### Q-124 · The FAILED banner asserts a cause it never measured · **CLOSED** · **MEDIUM**
 
 Every failed run prints:
 
@@ -199,6 +199,25 @@ Same disease as Q-114, at the top of the report instead of in a severity: **stat
 never measured.** The mission knows why it stopped; the banner should say that or say nothing.
 **GATE:** a deterministic run's failure banner never mentions a provider quota. Negative control: a
 run that genuinely died on a provider error still says so.
+
+**CLOSED.** `report._status_note` now takes `execution` and gates the provider/quota sentence on
+`execution["ai_calls"]` -- the direct signal (a provider quota cannot be the cause of a run that made
+zero provider calls), not `strategy`, so a low-AI run that made one call before dying still gets the
+provider explanation. When `ai_calls` is falsy (0, missing, or `execution` itself absent -- unknown
+AI usage is not confirmed AI usage), the banner instead points at the Tool Ledger, where the real
+per-engine cause already lives. Both `generate_report` and `generate_html_report` now pass `execution`
+through at their one call site each.
+
+**A pre-existing test pinned the wrong behaviour**, found by this fix rather than the other way
+around: `test_bbh.py::test_report_status_banner_on_failed_run` asserted `"provider quota" in
+md.lower()` for a status-only call with no `execution` -- i.e. it pinned the bug. Corrected to assert
+the opposite, which is what Q-124 exists to fix.
+
+**GATE** (`agent/tests/test_q124_failed_banner_measured_cause.py`, 7 tests, both renderers).
+**MUTATION-VERIFIED**: reverting `report.py` alone (keeping the new tests) fails all 7 -- the negative
+control (`ai_calls: 4` still names the provider) fails too on the revert, because the reverted
+function no longer accepts the `execution` argument the mutation-test call passes, which is itself
+evidence the two call shapes (blame / don't-blame) did not exist before this fix.
 
 ### Q-117 · `codereview_graph` mints a fabricated host that REACHES THE PROBE SURFACE · **CLOSED** · **HIGH**
 

@@ -3126,8 +3126,14 @@ def test_no_cycle_labels_when_single_cycle():
 
 # ── failed-run surfacing: report banner + error sanitisation ─────
 def test_report_status_banner_on_failed_run():
+    # Q-124: the banner used to blame "a provider quota/rate-limit" on EVERY failed run,
+    # including deterministic runs that never called a provider at all -- an unmeasured guess
+    # that sent the operator to check API billing instead of the real cause named further down
+    # in the Tool Ledger. No `execution` context here means AI usage is unknown, not confirmed,
+    # so the banner must not guess a provider was involved. A run that DID use a provider still
+    # gets that explanation -- see test_q124_failed_banner_measured_cause.py for both directions.
     md = report.generate_report("P", [], {"in_scope": ["x.com"]}, status="failed")
-    assert "FAILED" in md and "provider quota" in md.lower()
+    assert "FAILED" in md and "provider quota" not in md.lower()
     html = report.generate_html_report("P", [], {"in_scope": ["x.com"]}, status="failed")
     assert "statusbar" in html and "FAILED" in html
     # a clean/complete run has no banner (unchanged behaviour)
