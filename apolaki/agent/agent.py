@@ -1625,32 +1625,23 @@ class BBHAgent:
         if not isinstance(h, dict):
             return
         # 1) fold mined endpoints into the surface the planner probes
-        existing = set(getattr(self.tools, "urls", []) or [])
-        added = 0
-        for ep in (h.get("endpoints") or []):
-            u = base.rstrip("/") + ep if str(ep).startswith("/") else str(ep)
-            if u not in existing:
-                # Q-080. `_add_urls` is the ONLY writer to `self.tools.urls` in `tools.py`, which is
-                # what lets every consumer treat that list as quarantine-clean -- it is where a
-                # session-destroying URL is diverted into `session_kill_urls`. This line appends
-                # PAST it, so a `/logout` in a mined SPA route table would enter the surface every
-                # other reader trusts. MEASURED: the bypass is structural (there is no filter on this
-                # path); UNVERIFIED that a real target yields one -- `codeintel.harvest` on juice-shop
-                # (21 endpoints / 53 routes) and sessionlife mined zero session-kill routes, and juice
-                # shop's logout is client-side, so that is a weak negative rather than a clean bill.
-                # Filtered here regardless: restoring the invariant costs one comparison, and the
-                # alternative is a list whose guarantee depends on which producer last wrote to it.
-                import planner as _planner
-                if _planner.is_session_kill_url(u):
-                    self.tools._swallow(
-                        ValueError("code-intelligence mined the session-destroying route %r; it was "
-                                   "NOT appended to tools.urls (Q-080 -- this append bypasses "
-                                   "_add_urls, so nothing else would have quarantined it)" % u[:160]),
-                        "codeintel.session_kill_route", u)
-                    continue
-                self.tools.urls.append(u)
-                existing.add(u)
-                added += 1
+        # Q-118. THE BYPASS IS GONE. This built its own append loop and then retrofitted ONE of
+        # `_add_urls`'s guarantees (the session-kill quarantine), leaving the other three off: no
+        # `clean_url`, no `scope.validate`, and -- once Q-122 landed -- no entity-split repair. A
+        # mined endpoint therefore entered the surface every other reader treats as quarantine-clean
+        # without ever being checked against the operator's scope, which on a bug-bounty engagement
+        # is the one guarantee that matters most.
+        #
+        # The local session-kill check is dropped rather than kept: `_add_urls` handles that case
+        # BETTER, quarantining the URL into `session_kill_urls` where `_run_session_lifecycle` can
+        # still use it, where this loop discarded it outright. The cost is the `_swallow` row that
+        # named code-intelligence as the source; the guarantee is worth more than the attribution.
+        _mined = [(base.rstrip("/") + ep if str(ep).startswith("/") else str(ep))
+                  for ep in (h.get("endpoints") or [])]
+        before = len(getattr(self.tools, "urls", []) or [])
+        if _mined:
+            self.tools._add_urls(_mined)
+        added = len(getattr(self.tools, "urls", []) or []) - before
         # 2) sensitive / unlinked routes -> attack-surface leads
         ns = 0
         for r in (h.get("sensitive_routes") or [])[:12]:

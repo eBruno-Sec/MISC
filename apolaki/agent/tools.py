@@ -20,7 +20,7 @@ import tempfile
 import xml.etree.ElementTree as ET
 from dataclasses import dataclass, field
 from typing import Optional
-from urllib.parse import urlparse, urlunparse, urljoin, quote
+from urllib.parse import urlparse, urlunparse, urljoin, quote, parse_qsl, urlencode
 
 import browser_engine as _browser_engine
 import authz_tool as authz
@@ -364,6 +364,49 @@ def _collapse_dup_host(u: str) -> str:
             path = path[path.index(h) + len(h):]
         return urlunparse((p.scheme, p.netloc, path, p.params, p.query, p.fragment)) if path != (p.path or "") else s
     except Exception:
+        return s
+
+
+#: An `&amp;` that got split on `&` leaves the literal token `amp;` welded to the front of the NEXT
+#: parameter's name. `&amp;amp;` (double-encoded markup, which is common) leaves `amp;amp;`.
+_ENTITY_SPLIT_PREFIX = re.compile(r"^(?:amp;)+")
+
+
+def _repair_entity_split_params(u: str) -> str:
+    r"""Repair parameter NAMES welded to an undecoded `&amp;`, at the surface choke point.
+
+    Q-122, and it is the third road into the same defect. Q-111 fixed the producer
+    (`intel._add_ref` now unescapes markup) and Q-111b fixed the URL intake (`_html.unescape` in
+    `_add_urls`). The operator's next run STILL raised three findings on parameters that do not
+    exist, and his report shows exactly why:
+
+        https://admin.shopify.com/signup?locale=en&amp%3Blanguage=domtr...&amp%3Bsignup_page=...
+
+    `amp%3B`. The semicolon is PERCENT-ENCODED, so there is no `&amp;` text left for `html.unescape`
+    to find -- the entity was split into the literal token `amp;language` somewhere upstream and the
+    URL was then rebuilt (`urlencode` over a `parse_qsl` result escapes the `;`), producing a
+    well-formed URL that both earlier fixes inspect and correctly find nothing wrong with.
+
+    So the repair has to happen on the PARSED NAME, not on the URL text. `amp;` as a literal prefix
+    is diagnostic and cannot be legitimate: to actually send a parameter named `amp;x` a client must
+    encode the ampersand, which arrives as `&amp;x` after decoding, never as `amp;x`.
+
+    Rebuilds only when something was actually repaired, so an ordinary URL is returned byte-identical
+    and its identity for de-duplication is unchanged.
+    """
+    s = str(u or "")
+    if "amp;" not in s and "amp%3" not in s.lower():
+        return s
+    try:
+        p = urlparse(s)
+        if not p.query:
+            return s
+        pairs = parse_qsl(p.query, keep_blank_values=True)
+        fixed = [(_ENTITY_SPLIT_PREFIX.sub("", k), v) for k, v in pairs]
+        if fixed == pairs:
+            return s
+        return p._replace(query=urlencode(fixed)).geturl()
+    except (ValueError, UnicodeError):
         return s
 
 
@@ -4109,7 +4152,17 @@ class ToolRegistry:
             #
             # Idempotent for a clean URL: `&amp;` does not occur in one. Cheap, and it means any
             # future producer that forgets to decode cannot poison the surface either.
-            u = _html.unescape(u)
+            # Q-125: SEMICOLON-TERMINATED entities only. This was `_html.unescape(u)`, which decodes a
+            # named reference WITHOUT its semicolon -- correct for text content, catastrophic for a
+            # query string, where every parameter name is preceded by `&`. MEASURED: `?ampersand=2`
+            # became `?ersand=2`, and `?times=&lt=&gt=&copy=&reg=&sect=&not=` became eight mojibake
+            # names. The fix for phantom parameters was itself corrupting real ones.
+            u = surface_mod.unescape_url_entities(u)
+            # Q-122: and then repair the names, because unescaping the TEXT is not enough once the
+            # split has already happened and the URL has been re-encoded (`amp%3Blanguage`). Runs
+            # after the unescape deliberately -- that handles the still-raw `&amp;` case, and this
+            # handles the already-broken-and-rebuilt one. Neither subsumes the other.
+            u = _repair_entity_split_params(u)
             u = _collapse_dup_host(u)   # never let a duplicated-host URL into the surface
             if u in self.urls:
                 continue

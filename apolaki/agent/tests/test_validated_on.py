@@ -95,17 +95,38 @@ def test_every_production_producer_of_validated_on_is_a_hand_typed_literal():
         "ledger, the defect this file pins is fixed: delete this test and the xfails below." % computed)
 
 
+#: Liveness checks that assert a platform CAPABILITY rather than a vulnerability technique. Each one
+#: is listed deliberately: an entry here is a statement that the id has no typed claim to carry and
+#: never will, so adding one is a decision rather than an oversight.
+_NON_TECHNIQUE_LIVENESS = {
+    # Q-113/Q-109: the crawl grew the surface and every endpoint it produced was addressable.
+    "surface_discovery",
+}
+
+
 def test_the_liveness_ledger_is_the_only_run_derived_record():
     """The honest artifact exists and is disjoint in kind from the typed field: liveness_baseline.json
     is WRITTEN BY A RUN, validated_on is written by a human. Both name techniques; only one is earned."""
     base = json.load(open(os.path.join(_HERE, "liveness_baseline.json"), encoding="utf8"))
     live = set(base.get("live") or [])
     assert live, "empty liveness baseline would make every claim below vacuous"
+
+    # Not every liveness check is a vulnerability TECHNIQUE. `surface_discovery` asserts REACH -- the
+    # crawl grew the surface and every endpoint it produced was addressable -- which is a capability
+    # of the platform, not a technique with labs to validate against, so it has no typed claim to
+    # carry and never will. The allowlist is EXPLICIT rather than an intersection so that a genuinely
+    # new technique cannot slip out of the assertion below by being absent from `TECHNIQUES`.
+    unclassified = live - set(T.TECHNIQUES) - _NON_TECHNIQUE_LIVENESS
+    assert not unclassified, (
+        "a liveness id is neither a technique nor a declared capability check, so nothing checks "
+        "whether it carries a typed claim: %s" % sorted(unclassified))
+
+    proven = live & set(T.TECHNIQUES)
     claims = _claims()
-    # every liveness-earned id also carries a typed claim -> the two ledgers do not contradict,
-    # the typed one is simply a superset. That is the honesty debt, and it is reportable.
-    assert live <= set(claims), sorted(live - set(claims))
-    assert len(claims) > len(live), (len(claims), len(live))
+    # every liveness-earned TECHNIQUE also carries a typed claim -> the two ledgers do not
+    # contradict, the typed one is simply a superset. That is the honesty debt, and it is reportable.
+    assert proven <= set(claims), sorted(proven - set(claims))
+    assert len(claims) > len(proven), (len(claims), len(proven))
 
 
 def test_technique_status_is_the_fixed_rule_and_still_holds():

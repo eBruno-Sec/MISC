@@ -5,13 +5,18 @@ deduplicated endpoint / parameter catalog the analyst can browse and pivot from
 into the workbench (fuzz a param) or access-check (test an endpoint per role).
 Pure and deterministic — no network, no AI. Ported from OLYMPUS core/surface.py.
 """
+import html as _html
 import re
 from urllib.parse import urlparse, parse_qsl, unquote
 
 # HTML entities that only appear in a URL because it was scraped out of markup
 # (e.g. an <a href> value that swallowed the closing tag). Decoded markup chars
 # (< > " \) are caught separately after percent-decoding.
-_ENTITY_RE = re.compile(r"&(?:quot|lt|gt|nbsp|amp;lt|amp;gt|#x?[0-9a-f]+);?", re.I)
+# Q-125: `(?!=)` is the whole difference between residue and a parameter. Without it this rejected
+# `?lt=1&gt=2` outright -- `lt` and `gt` are ordinary comparison-filter parameter names and also
+# entity names, and a semicolon-less `&lt` followed by `=` is a parameter, not swallowed markup. The
+# residue this exists to catch (`/users/delete/carlos%3C/a%3E&quot`) is never followed by `=`.
+_ENTITY_RE = re.compile(r"&(?:quot|lt|gt|nbsp|amp;lt|amp;gt|#x?[0-9a-f]+);?(?!=)", re.I)
 _MARKUP_CHARS_RE = re.compile(r'[<>"\\]')
 # Paths that likely accept an XML/SOAP request BODY (XXE sinks) rather than query
 # params — kept in sync with the planner's run_xxe trigger.
@@ -223,3 +228,36 @@ def surface_stats(inventory: list) -> dict:
         "parameterized": sum(1 for e in inventory if e.get("parameterized")),
         "unique_params": len(params),
     }
+
+
+#: A named or numeric HTML entity that ENDS IN A SEMICOLON. The semicolon is the whole point -- see
+#: `unescape_url_entities`.
+_TERMINATED_ENTITY = re.compile(
+    r"&(?:[a-zA-Z][a-zA-Z0-9]{1,31}|#[0-9]{1,7}|#[xX][0-9a-fA-F]{1,6});")
+
+
+def unescape_url_entities(s: str) -> str:
+    r"""HTML-unescape a URL taken from markup, decoding ONLY semicolon-terminated entities.
+
+    Q-125. `html.unescape` MUST NOT be applied to a URL. It implements the HTML5 rule for text
+    content, where a named reference is decoded even WITHOUT its semicolon -- and in a query string
+    every parameter name is preceded by `&`, so an ordinary name that happens to start with an entity
+    name is silently destroyed. MEASURED, one line, seven casualties:
+
+        in       ?lamp=1&ampersand=2&amplitude=3
+        blanket  ?lamp=1&ersand=2&litude=3
+        in       ?a=1&times=2&lt=3&gt=4&copy=5&reg=6&sect=7&not=8
+        blanket  ?a=1x=2<=3>=4(c)=5(r)=6S=7!=8
+
+    `copy`, `reg`, `sect`, `not`, `times`, `para`, `sup`, `deg` and `micro` are all real parameter
+    names and all legacy entities. Q-111/Q-111b shipped the blanket call at two chokepoints, so this
+    was corrupting the surface while fixing a different corruption of it.
+
+    Requiring the semicolon IS the HTML5 attribute-value rule: inside an attribute, a reference
+    without a semicolon followed by `=` or an alphanumeric is not a reference. Browsers already
+    behave this way, which is why `<a href="?ampersand=2">` requests `ampersand`, not `ersand`.
+
+    `&amp;` still decodes, which is the case Q-111 existed for and the only one that ever mattered:
+    it is what every HTML escaper emits for a literal `&`.
+    """
+    return _TERMINATED_ENTITY.sub(lambda m: _html.unescape(m.group(0)), str(s or ""))

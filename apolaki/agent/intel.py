@@ -27,6 +27,7 @@ import codecs
 import html as _html_mod
 import json
 import re
+import surface as _surface
 
 # Candidate kinds the store tracks.
 KINDS = ("email", "username", "object_id", "route", "endpoint", "url", "encoded",
@@ -352,10 +353,19 @@ def _add_ref(ref: str, source: str, store: IntelStore) -> None:
     on a parameter that is not real. Every probe against them was wasted, and every finding from
     them was false.
 
-    `html.unescape` is the whole fix and it belongs HERE, at the one boundary where markup becomes a
-    URL, rather than in each consumer -- a decode repeated per-engine is a decode someone forgets.
+    The decode belongs HERE, at the one boundary where markup becomes a URL, rather than in each
+    consumer -- a decode repeated per-engine is a decode someone forgets.
+
+    Q-125 CORRECTS THE DECODER, not the placement. This was a bare `html.unescape`, which decodes a
+    named reference WITHOUT its semicolon. That is the HTML5 rule for TEXT CONTENT and it is wrong
+    for an attribute, where the rule is that a reference not followed by `;` is not a reference when
+    an `=` or an alphanumeric follows it. Browsers already behave that way, which is why
+    `<a href="?ampersand=2">` requests `ampersand`. MEASURED under the old call: `?ampersand=2` ->
+    `?ersand=2`, `?times=2` -> mojibake, and the same for `copy`, `reg`, `sect`, `not`, `lt`, `gt` --
+    all real parameter names and all legacy entities. The fix for phantom parameters was itself
+    minting phantom parameters.
     """
-    ref = _html_mod.unescape(ref.strip())
+    ref = _surface.unescape_url_entities(ref.strip())
     if not ref or ref.startswith(("#", "javascript:", "mailto:", "data:", "tel:")):
         return
     base = ref.split("?", 1)[0].split("#", 1)[0]

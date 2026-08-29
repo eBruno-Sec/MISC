@@ -52,7 +52,50 @@ Still open from this cycle, filed by Lane C during the Q-109 hunt and NOT worked
   (`graph_primary_state x14 -> ingest_intel x1`, hostless swallows recorded during the run: 0). The
   producer finding does not depend on that ordering; the ledger row's exact provenance does.
 
-### Q-122 · Q-111b did NOT close the phantom parameters -- MY fix, and the field says otherwise · **READY** · **HIGH**
+### Q-125 · `html.unescape` on a URL destroys real parameters -- the fix WAS the defect · **CLOSED** · **HIGH**
+
+**Found while fixing Q-122, and it is worse than Q-122.** `html.unescape` implements the HTML5 rule
+for TEXT CONTENT, where a named reference is decoded even **without its semicolon**. In a query
+string every parameter name is preceded by `&`, so any name beginning with a legacy entity name is
+silently destroyed. MEASURED, two lines:
+
+```
+in       ?lamp=1&ampersand=2&amplitude=3
+blanket  ?lamp=1&ersand=2&litude=3
+
+in       ?a=1&times=2&lt=3&gt=4&copy=5&reg=6&sect=7&not=8
+blanket  ?a=1<mojibake>=2 <=3 >=4 (c)=5 (r)=6 S=7 !=8
+```
+
+`copy`, `reg`, `sect`, `not`, `times`, `para`, `sup`, `deg`, `micro`, `lt`, `gt` are all ordinary
+parameter names and all legacy entities. **Q-111 and Q-111b shipped that blanket call at two
+chokepoints** -- `intel._add_ref` and `tools._add_urls` -- so the fix for phantom parameters was
+itself minting phantom parameters, on every URL entering the surface, in the operator's live build.
+
+**THE RULE IS THE SEMICOLON, and it is not a heuristic.** Inside an attribute, HTML5 says a reference
+without `;` followed by `=` or an alphanumeric is not a reference. Browsers already behave this way,
+which is why `<a href="?ampersand=2">` requests `ampersand`. `&amp;` still decodes -- the only case
+Q-111 ever existed for, and what every HTML escaper emits for a literal `&`.
+
+**FIXED** with `surface.unescape_url_entities`, one shared decoder, semicolon-terminated named and
+numeric references only, used at both chokepoints.
+
+**A FOURTH SITE, same confusion, found by the gate:** `surface._ENTITY_RE` -- the markup-residue
+detector inside `clean_url` -- matched `&lt`/`&gt`/`&quot` with the semicolon OPTIONAL, so
+`?lt=1&gt=2` was **rejected outright and never entered the surface at all.** Fixed with a `(?!=)`
+lookahead: the residue this exists to catch (`/users/delete/carlos%3C/a%3E&quot`) is never followed
+by `=`, and a parameter always is.
+
+**GATE** (21 tests). **MUTATION 4 of 4 killed**: restoring the blanket unescape (6 tests), making the
+decoder a no-op (3), removing the name repair (3), making the semicolon optional again (6). The
+negative controls are the half that matters -- `&amp;`, `&#38;` and `&#x26;` must still decode, or
+"decode nothing" satisfies every other test and reopens Q-111.
+
+**RECORDED BECAUSE IT IS THE REUSABLE PART:** the three fixes for this one defect were all correct
+about WHERE and all wrong about WHAT. Q-111 fixed the producer, Q-111b fixed the intake, and both
+reached for the same over-broad tool. A chokepoint is only as good as the transform you put in it.
+
+### Q-122 · Q-111b did NOT close the phantom parameters -- MY fix, and the field says otherwise · **CLOSED** · **HIGH**
 
 **Measured on the operator's overnight VPN run (`Shopify_28Aug2026@2004`), which HAS both Q-111 and
 Q-111b.** Three findings on parameters that do not exist are still there:
@@ -91,6 +134,18 @@ survives is not only a URL -- it is a PARAMETER NAME, and a param name never pas
 `agent.py:1625` road is unescaped. Negative control: `language` and `signup_page` -- the REAL
 parameters behind the entity -- must still be probed, or this trades a false positive for a blind
 spot, which is the failure Q-111's own gate was written against.
+
+**CLOSED -- and WHICH of the two candidate producers ran on his machine is still UNPROVEN.** The
+report alone cannot distinguish them, and I did not have his `memory_assets` to check. What shipped
+closes both roads and the third one found on the way:
+
+- `_repair_entity_split_params` at the intake strips an `amp;`-welded NAME after parsing, which is
+  the only place a URL that has already been split and re-encoded (`amp%3B`) can be repaired.
+- Q-118 closed the `_add_urls` bypass, so a mined URL cannot arrive un-normalised any more.
+- Q-125 replaced the decoder that both earlier fixes used, which was corrupting real parameters.
+
+Recording the ambiguity rather than picking the likelier story: a mechanism reproduced is not a
+cause proven, and three roads are closed either way.
 
 ### Q-123 · The ledger's "Findings" column does not contain findings · **READY** · **MEDIUM**
 
@@ -152,7 +207,7 @@ straight through it.
 nodes whose host is a source-tree token, and the observations it contributed survive. Negative
 control: a code-review finding that genuinely carries a host still yields an endpoint.
 
-### Q-118 · `agent.py:1625` appends to `tools.urls` past `_add_urls`, so the scope gate is bypassed · **READY** · **HIGH**
+### Q-118 · `agent.py:1625` appends to `tools.urls` past `_add_urls`, so the scope gate is bypassed · **CLOSED** · **HIGH**
 
 A code-intelligence endpoint that does not start with `/` is appended DIRECTLY to `tools.urls`,
 skipping `_add_urls` and therefore skipping all three of its jobs: `clean_url`, `scope.validate`,
@@ -167,6 +222,19 @@ never authorised to touch.
 the rule for entity-decoding, for the same reason -- a normalisation repeated per-caller is one
 someone forgets). **GATE:** an out-of-scope code-intelligence endpoint never reaches `tools.urls`,
 and an in-scope one still does.
+
+**CLOSED.** The fold goes through `_add_urls` and the local re-implementation is gone. Two knock-ons,
+both recorded because each is a guard doing its job:
+
+- The `codeintel.session_kill_route` `_swallow` recorder was deleted with it, which tripped
+  `test_swallow_recorders_are_never_silently_deleted`. That ratchet asks for the baseline to be
+  lowered IN THE SAME COMMIT WITH THE REASON, and it was. The reason is that the record existed only
+  because this function had to re-implement the quarantine by hand; `_add_urls` does it better,
+  putting the URL into `session_kill_urls` where `_run_session_lifecycle` can still test CWE-613 with
+  it, where the local filter discarded it outright.
+- `test_session_kill_door` moved WITH the fix: it asserted the swallow row and now asserts the
+  quarantine list. That is a stronger claim -- refused AND retained AND usable, rather than
+  dropped-and-logged.
 
 ### Q-119 · `_swallow`'s 160-char cap eats the evidence of 5 sites, 3 of them entirely · **READY** · **MEDIUM**
 

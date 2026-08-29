@@ -354,15 +354,22 @@ def test_the_sweep_also_guards_the_page_action_split():
 
 
 def test_codeintel_mined_routes_do_not_bypass_the_quarantine():
-    """`agent.py`'s code-intelligence fold appends mined endpoints STRAIGHT to `tools.urls`,
+    """`agent.py`'s code-intelligence fold used to append mined endpoints STRAIGHT to `tools.urls`,
     bypassing `_add_urls` -- the only writer in `tools.py`, and the reason every other consumer may
     treat that list as quarantine-clean.
 
-    The bypass is structural (MEASURED: there is no filter on that path). That a real target yields
-    a session-killing route is UNVERIFIED -- `codeintel.harvest` mined 21 endpoints / 53 routes from
-    juice-shop and zero from sessionlife with no session-kill match, and juice-shop's logout is
-    client-side, which makes that a weak negative rather than a clean bill. Guarded regardless: the
-    invariant is what the other readers depend on.
+    That a real target yields a session-killing route is UNVERIFIED -- `codeintel.harvest` mined 21
+    endpoints / 53 routes from juice-shop and zero from sessionlife with no session-kill match, and
+    juice-shop's logout is client-side, which makes that a weak negative rather than a clean bill.
+    Guarded regardless: the invariant is what the other readers depend on.
+
+    Q-118 CLOSED THE BYPASS ITSELF rather than patching around it, and this test moved WITH the fix,
+    not against it. It used to assert that a `codeintel.session_kill_route` swallow row existed --
+    the local filter's only trace, because that filter DISCARDED the URL. Routing the fold through
+    `_add_urls` gets the same refusal plus the thing the swallow could not give: the URL is
+    QUARANTINED into `session_kill_urls`, where `_run_session_lifecycle` can still mint a sacrificial
+    session and test CWE-613 with it. So the assertion is now on the quarantine list, which is a
+    stronger claim than "a log line was written" -- the URL is refused AND retained AND usable.
     """
     import codeintel
 
@@ -384,8 +391,11 @@ def test_codeintel_mined_routes_do_not_bypass_the_quarantine():
     # so this asserts a filter rather than a harvest that silently did nothing.
     assert any(u.endswith("/rest/user/whoami") for u in t.urls), t.urls
     assert any(u.endswith("/api/orders") for u in t.urls), t.urls
-    rows = [e for e in (t.swallowed or []) if "codeintel.session_kill_route" in str(e.get("where"))]
-    assert rows, "the bypass was closed silently; tools.swallowed=%r" % (t.swallowed,)
+    quarantined = [u for u in (t.session_kill_urls or []) if u.endswith("/api/logout")]
+    assert quarantined, (
+        "the mined session-killing route was refused SILENTLY -- it is neither in tools.urls nor in "
+        "session_kill_urls, so nothing can test CWE-613 with it. session_kill_urls=%r"
+        % (t.session_kill_urls,))
 
 
 def test_executor_ingress_lets_everything_else_through():

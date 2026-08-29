@@ -383,7 +383,14 @@ _SWALLOW_RECORDERS = {
     ("agent.py", "_probe_for_creds"): 1,
     ("agent.py", "_project_spec_params"): 1,
     ("agent.py", "_reacquire_personas"): 1,
-    ("agent.py", "_recon_code_intelligence"): 1,
+    # Q-118: LOWERED 1 -> 0, with the reason the ratchet asks for. The deleted recorder was
+    # `codeintel.session_kill_route`, which existed only because this function appended to
+    # `tools.urls` PAST `_add_urls` and therefore had to re-implement one of that intake's
+    # guarantees by hand. The fold now goes THROUGH `_add_urls`, so the refusal is no longer local
+    # and no longer needs a local record: the URL is QUARANTINED into `session_kill_urls`, where
+    # `_run_session_lifecycle` can still use it, instead of being discarded with a log line. The
+    # trace got stronger, not weaker -- `test_session_kill_door` now asserts the quarantine list.
+    ("agent.py", "_recon_code_intelligence"): 0,
     ("agent.py", "_reject_hostless_step"): 1,
     ("agent.py", "_reject_session_kill_step"): 1,
     ("agent.py", "_run_pack"): 1,
