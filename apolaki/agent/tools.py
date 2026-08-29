@@ -27,6 +27,7 @@ import authz_tool as authz
 import db
 import dns_recon
 import guidance as guidance_mod
+import middlebox as _mbx
 import surface as surface_mod
 import web_security as ws
 import xss_tool as xt
@@ -4161,9 +4162,14 @@ class ToolRegistry:
             dead = {"error": str(e), "status": 0, "headers": {}, "body": "", "length": 0,
                     "final_url": url}
             _http_record(url, dead)
+            # Q-112: the same outcome, booked per HOST and split by whether the request carried a
+            # payload. `_http` is the GET-parameter carrier for _run_xpath/_run_ldap/_run_ssi, so
+            # this one line is where their probes become visible to the interception differential.
+            self._mb_observe(url, False, body=body)
             return dead
 
         _http_record(url, resp)                       # Q-093: the live half, booked unconditionally
+        self._mb_observe(url, bool(resp["status"]), body=body)     # Q-112
         if capture and self.mission_id:
             db.add_exchange(self.mission_id, {
                 "url": url, "method": method.upper(), "request_headers": req_headers,
@@ -4298,6 +4304,74 @@ class ToolRegistry:
                 # a target request, oracle, finding write, or engine dispatch.
                 self._observer_error = "%s: %s" % (
                     type(observer_exc).__name__, str(observer_exc)[:160])
+
+    # ── Q-112: upstream interception ledger ──────────────────────────────────
+    #
+    # A middlebox on OUR side of the wire that drops payload-bearing requests produces a
+    # legitimate-looking zero in every injection engine: nothing in the process sees an error,
+    # because the request was answered by the middlebox or simply timed out. MEASURED on a live
+    # engagement -- the operator's ISP gateway IPS logged "HTTP URI Union Select SQL Injection was
+    # blocked" at the same minutes the report was printing "tested 3 param(s), 0 confirmed SQLi".
+    #
+    # The evidence needed to tell that apart from a clean target spans HOSTS, so it cannot live in
+    # one engine call: a single host dropping every payload is a WAF on the TARGET. The ledger is
+    # therefore mission-scoped (one ToolRegistry == one mission, `main.py:628`) and accumulates
+    # across every engine and every endpoint the mission touches. `middlebox.assess` is the pure
+    # verdict over it.
+    def _mb_ledger(self):
+        """The mission's interception ledger, created on first use."""
+        led = getattr(self, "_middlebox_ledger", None)
+        if led is None:
+            led = _mbx.Ledger()
+            self._middlebox_ledger = led
+        return led
+
+    def _mb_observe(self, url: str, ok: bool, payload_bearing=None, body=None) -> None:
+        """Book ONE request outcome against the mission ledger.
+
+        `ok` is transport-level: True when a response arrived at all, whatever its status.
+        `payload_bearing` is passed explicitly by engines that BUILT the probe and therefore know;
+        `None` lets `middlebox` classify by content, which is what the middlebox itself does.
+
+        NOT wrapped in a handler, deliberately. `Ledger.record` has no branch that can raise, and a
+        `try/except: pass` around the recorder for silent failures would be a silent failure inside
+        the fix for silent failures -- which is how this exact mistake got made twice already.
+        """
+        self._mb_ledger().record(url, ok, payload_bearing=payload_bearing, body=body)
+
+    def _middlebox_note(self) -> str:
+        """"" when nothing indicates upstream interception, else the DEGRADED line to append.
+
+        Engines use the return value as BOTH the flag and the text:
+
+            _mb = self._middlebox_note()
+            return ToolResult("sqli", url, not _mb, "... 0 confirmed" + _mb, findings)
+
+        so a voided sweep reports `success=False` to the execution ledger instead of a clean zero,
+        exactly as Q-110's truncated-sweep line already does.
+        """
+        verdict = _mbx.assess(self._mb_ledger().stats())
+        if not verdict.intercepted:
+            return ""
+        # Durable at the producer, once per mission, in the `tool_error` vocabulary
+        # `main._tool_ledger` already consumes -- the same route `_swallow` uses, so the mission
+        # report states the interception even for engines that finished before the second host
+        # made the pattern visible.
+        if not getattr(self, "_middlebox_reported", False):
+            self._middlebox_reported = True
+            if self.mission_id:
+                try:
+                    db.add_log(self.mission_id, "tool_error", {
+                        "tool": "middlebox",
+                        "error": "DEGRADED: injection testing INTERCEPTED UPSTREAM. " + verdict.reason,
+                        "target": ", ".join(verdict.hosts)[:200],
+                    })
+                except Exception as observer_exc:
+                    # Control-plane persistence failure cannot abort target testing. Recorded, not
+                    # discarded (same rule as `_swallow`'s observer handler).
+                    self._observer_error = "%s: %s" % (
+                        type(observer_exc).__name__, str(observer_exc)[:160])
+        return verdict.note()
 
     def _ni(self, std: int, deep: int, insane: int) -> int:
         """Intensity-scaled cap: the native probes widen their parameter/payload breadth
@@ -5563,7 +5637,9 @@ class ToolRegistry:
         except Exception as _apolaki_swallowed_5056:
             self._swallow(_apolaki_swallowed_5056, 'tools:_run_xpath:5056', "")
             pass
-        return ToolResult("xpath", url, True, "%d XPath injection finding(s)" % len(findings), findings)
+        _mb = self._middlebox_note()                                        # Q-112
+        return ToolResult("xpath", url, not _mb,
+                          "%d XPath injection finding(s)" % len(findings) + _mb, findings)
 
     async def _run_ldap(self, inp: dict) -> ToolResult:
         """ACTIVE: LDAP injection (CWE-90) — distilled from *Beginner Web Application Pentester*. Apps that
@@ -5663,7 +5739,9 @@ class ToolRegistry:
         except Exception as _apolaki_swallowed_5155:
             self._swallow(_apolaki_swallowed_5155, 'tools:_run_ldap:5155', "")
             pass
-        return ToolResult("ldap", url, True, "%d LDAP injection finding(s)" % len(findings), findings)
+        _mb = self._middlebox_note()                                        # Q-112
+        return ToolResult("ldap", url, not _mb,
+                          "%d LDAP injection finding(s)" % len(findings) + _mb, findings)
 
     async def _run_ssi(self, inp: dict) -> ToolResult:
         """ACTIVE: Server-Side Includes injection (CWE-97) — distilled from *Beginner Web Application
@@ -5722,7 +5800,9 @@ class ToolRegistry:
         except Exception as _apolaki_swallowed_5213:
             self._swallow(_apolaki_swallowed_5213, 'tools:_run_ssi:5213', "")
             pass
-        return ToolResult("ssi", url, True, "%d SSI injection finding(s)" % len(findings), findings)
+        _mb = self._middlebox_note()                                        # Q-112
+        return ToolResult("ssi", url, not _mb,
+                          "%d SSI injection finding(s)" % len(findings) + _mb, findings)
 
     async def _run_form_xss(self, inp: dict) -> ToolResult:
         """ACTIVE: reflected XSS through POST FORM fields (general). The GET-query engine misses a value
@@ -8549,8 +8629,14 @@ class ToolRegistry:
             t0 = time.perf_counter()
             try:
                 r = await c.get(target)
+                # Q-112: this is the line where a probe DROPPED BY OUR OWN UPLINK used to become a
+                # clean zero -- the exception below is caught and the caller sees `None`, which it
+                # reads as "no differential". Booked per host so the cross-host differential can
+                # tell an upstream middlebox from a defence on the target.
+                self._mb_observe(target, True)
                 return r, time.perf_counter() - t0
             except Exception:
+                self._mb_observe(target, False)
                 return None, time.perf_counter() - t0
 
         async with _target_client(verify=False, follow_redirects=True, headers=headers,
@@ -8774,8 +8860,11 @@ class ToolRegistry:
         _trunc = (" -- DEGRADED: call budget of %ds exhausted, sweep TRUNCATED (a stalling or "
                   "rate-limiting target); this is NOT a clean result" % _PROBE_CALL_BUDGET_S
                   ) if _budget_hit else ""
-        return ToolResult("sqli", url, not _budget_hit,
-                          f"tested {len(params)} param(s), {len(findings)} confirmed SQLi" + _trunc,
+        # Q-112: a sweep whose payloads never left our own network is NOT a clean result either.
+        # Same mechanism, one layer further out, so it lands on the same `success` flag.
+        _mb = self._middlebox_note()
+        return ToolResult("sqli", url, not _budget_hit and not _mb,
+                          f"tested {len(params)} param(s), {len(findings)} confirmed SQLi" + _trunc + _mb,
                           findings)
 
     async def _sqlmap_enrich(self, url: str) -> tuple:
@@ -9017,8 +9106,11 @@ class ToolRegistry:
             if not self.scope.validate(target)[0]:
                 return None
             try:
-                return await c.get(target)
+                r = await c.get(target)
+                self._mb_observe(target, True)                    # Q-112
+                return r
             except Exception as _apolaki_swallowed_8382:
+                self._mb_observe(target, False)                   # Q-112
                 self._swallow(_apolaki_swallowed_8382, 'tools:get:8382', "")
                 return None
 
@@ -9074,8 +9166,10 @@ class ToolRegistry:
         _trunc = (" -- DEGRADED: call budget of %ds exhausted, sweep TRUNCATED (a stalling or "
                   "rate-limiting target); this is NOT a clean result" % _PROBE_CALL_BUDGET_S
                   ) if _budget_hit else ""
-        return ToolResult("nosqli", url, not _budget_hit,
-                          f"tested {len(params)} param(s), {len(findings)} confirmed NoSQL injection" + _trunc,
+        _mb = self._middlebox_note()                                        # Q-112
+        return ToolResult("nosqli", url, not _budget_hit and not _mb,
+                          f"tested {len(params)} param(s), {len(findings)} confirmed NoSQL injection"
+                          + _trunc + _mb,
                           findings)
 
     async def _run_form_nosqli(self, inp: dict) -> ToolResult:
@@ -9158,8 +9252,10 @@ class ToolRegistry:
             t0 = time.perf_counter()
             try:
                 r = await c.get(target)
+                self._mb_observe(target, True)                    # Q-112
                 return r, time.perf_counter() - t0
             except Exception:
+                self._mb_observe(target, False)                   # Q-112
                 return None, time.perf_counter() - t0
 
         async with _target_client(verify=False, follow_redirects=True, headers=headers,
@@ -9236,8 +9332,10 @@ class ToolRegistry:
         _trunc = (" -- DEGRADED: call budget of %ds exhausted, sweep TRUNCATED (a stalling or "
                   "rate-limiting target); this is NOT a clean result" % _PROBE_CALL_BUDGET_S
                   ) if _budget_hit else ""
-        return ToolResult("cmdi", url, not _budget_hit,
-                          f"tested {len(params)} param(s), {len(findings)} confirmed command injection" + _trunc,
+        _mb = self._middlebox_note()                                        # Q-112
+        return ToolResult("cmdi", url, not _budget_hit and not _mb,
+                          f"tested {len(params)} param(s), {len(findings)} confirmed command injection"
+                          + _trunc + _mb,
                           findings)
 
     async def _run_form_cmdi(self, inp: dict) -> ToolResult:
@@ -9959,7 +10057,9 @@ class ToolRegistry:
             confirmed, hits = sq.structural_confirmed(base, ok_body, bad_body)
             if confirmed:
                 findings.append(self._attach_poc(sq.structural_finding(url, name, hits), _setq(name, p["bad"]), None))
-        return ToolResult("sqli", url, True, "%d structural SQLi finding(s)" % len(findings), findings)
+        _mb = self._middlebox_note()                                        # Q-112
+        return ToolResult("sqli", url, not _mb,
+                          "%d structural SQLi finding(s)" % len(findings) + _mb, findings)
 
     async def _run_session_token(self, inp: dict) -> ToolResult:
         """ACTIVE: session-token predictability analyzer (WAHH ch7, CWE-330/384). Fetches the session-issuing
@@ -10667,7 +10767,9 @@ class ToolRegistry:
                     findings.append(self._attach_poc(
                         sq.error_finding(url, "path segment %d" % i, segs[i] + payload, hits), u2, None))
                     break
-        return ToolResult("sqli", url, True, "%d path-param SQLi finding(s)" % len(findings), findings)
+        _mb = self._middlebox_note()                                        # Q-112
+        return ToolResult("sqli", url, not _mb,
+                          "%d path-param SQLi finding(s)" % len(findings) + _mb, findings)
 
     async def _run_snmp_audit(self, inp: dict) -> ToolResult:
         """ACTIVE (network service, beyond web): SNMP default-community audit (CWE-1188). One read-only UDP GET
@@ -10922,7 +11024,9 @@ class ToolRegistry:
                                     % (css.custom_property(t), css.cssom_value(t), node))
                 findings.append(self._attach_poc(css.finding(url, name, ev["where"], ev["oracle"]),
                                                  probe_url, None))
-        return ToolResult("css_injection", url, True, "%d CSS injection finding(s)" % len(findings), findings)
+        _mb = self._middlebox_note()                                        # Q-112
+        return ToolResult("css_injection", url, not _mb,
+                          "%d CSS injection finding(s)" % len(findings) + _mb, findings)
 
     async def _run_llm_probe(self, inp: dict) -> ToolResult:
         """LLM/chatbot prompt-injection probe (CWE-1427 / OWASP LLM01). Only fires
