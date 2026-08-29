@@ -256,7 +256,35 @@ def _is_generic_objective(objective: str) -> bool:
 # The claim came from reading the wp3 SEAL, which has 0 mentions of 00438 -- but that seal's keys
 # carry CLAIMS ONLY and no probed-cases list, so "unprobed" was an inference from "no claim".
 # Absence of a claim is not evidence of absence of a probe.
-SWEEP_TARGET_CAP = max(1, int(os.getenv("BBH_SWEEP_TARGETS", "700") or 700))
+# Q-113 · 700 IS NOT A BOUND, IT IS A NUMBER LARGER THAN ANY SURFACE WE HAVE MET.
+#
+# MEASURED on the operator's authorised Shopify engagement: the sweep reached endpoint 69 of 465 in
+# roughly seven hours — ~6 minutes per endpoint against a Cloudflare-fronted target where every
+# request is slow. The remaining 396 needed ANOTHER ~46 HOURS. Nothing was stalling: Q-110's
+# per-call budget (`tools._PROBE_CALL_BUDGET_S`) never fired (TRUNCATED count 0) and the mission
+# heartbeat advanced normally. 465 endpoints x 8 HTTP engines is simply more work than an engagement
+# has. He killed it at 15% holding exactly the findings he already had at 5%.
+#
+# MEASURED baseline of this constant at 700, synthetic 465-endpoint surface
+# (tests/test_injection_sweep_is_bounded.py): 465 candidates -> 465 selected -> 465 endpoints swept
+# -> 3816 injection dispatches, and the announcement said "probing 465" with no statement that
+# anything had been declined, because nothing was. At the measured per-endpoint cost that is 46.5 h.
+#
+# A COVERAGE GUARANTEE WITH NO TIME BOUND IS NOT A GUARANTEE, IT IS A PROMISE THE RUN CANNOT KEEP.
+# Every other phase is capped (`planner.CAP_HOSTS` 30, `CAP_ENDPOINTS` 25, `CAP_JS` 40, `CAP_ZAP` 3,
+# Q-104's `CAP_RECON_ROOTS` 25); this one opted out. 40 is inside the ticket's 25-50 band and just
+# above `planner.CAP_ENDPOINTS`, so the sweep still out-covers the planner it exists to backstop.
+#
+# THE NUMBER IS THE SMALL HALF OF THE FIX. `select_sweep_targets` ranks by observable security value
+# and operator-declared assets BEFORE it truncates: Q-104b bounded phase A correctly and then spent
+# the whole budget on wildcard-DNS junk because the order underneath the cap was lexical.
+#
+# COST, STATED PLAINLY: `docs/benchmarks/wp3_precondition.md` raised this to 700 on a pre-registered
+# OWASP whole-product experiment (the dominant class draws 38 slots at cap 400 and 59 at 605, and
+# nine sqli true positives sit at class indices 38-58). Those runs must now set
+# `BBH_SWEEP_TARGETS=700` in the environment. The env override is unchanged and is the whole
+# mechanism — see docs/handoff/q113_sweep_cap.md, which also records the one test this collides with.
+SWEEP_TARGET_CAP = max(1, int(os.getenv("BBH_SWEEP_TARGETS", "40") or 40))
 # targets that additionally get the browser-backed confirmers, taken off the FRONT of the shape-spread
 # order so they are representatives of the whole site rather than the first N of one directory.
 SWEEP_BROWSER_CAP = max(0, int(os.getenv("BBH_SWEEP_BROWSER_TARGETS", "30") or 30))
@@ -364,9 +392,46 @@ def target_security_value(url: str) -> int:
     return score
 
 
-def rank_targets_for_budget(targets) -> list:
-    """Highest observable security value first; equal-value work stays in discovery order."""
-    return sorted(list(targets or []), key=target_security_value, reverse=True)
+def operator_roots(scope) -> list:
+    """The hosts the OPERATOR declared, lower-cased and de-wildcarded.
+
+    Q-113. This derivation already existed inline at the planner-state call site; naming it once is
+    what lets the injection sweep rank by the same fact the recon phase does, instead of restating
+    it and drifting."""
+    try:
+        return [str(e.value).lower().lstrip("*.") for e in (getattr(scope, "in_scope", None) or [])
+                if getattr(e, "value", None)]
+    except Exception:
+        return []
+
+
+def _is_operator_asset(url: str, roots: set) -> bool:
+    """True when the URL's host IS a declared root or a subdomain of one."""
+    if not roots:
+        return False
+    host = str(url or "").split("://", 1)[-1].split("/", 1)[0].split("@")[-1]
+    host = host.split(":")[0].lower()
+    return bool(host) and any(host == r or host.endswith("." + r) for r in roots)
+
+
+def rank_targets_for_budget(targets, scope_roots=()) -> list:
+    """Highest observable security value first; equal-value work stays in discovery order.
+
+    Q-113 · OPERATOR ASSETS OUTRANK DISCOVERED HOSTS, which is Q-104's pattern
+    (`planner._rank_recon_roots`, `_rank_live_hosts`) applied to the injection budget. A wildcard
+    resolver or an over-broad crawl can put thousands of hosts on the surface that the operator
+    never declared; when a budget forces a cut, the cut must fall on those and never on an asset
+    that is actually in the engagement. `scope_roots` defaults empty, so every existing caller keeps
+    pure value ranking and this is additive.
+
+    Two stable sorts, applied value-first then asset-first, so asset membership is the PRIMARY key
+    and security value orders within each tier.
+    """
+    ranked = sorted(list(targets or []), key=target_security_value, reverse=True)
+    roots = {str(r).lower().lstrip("*.") for r in (scope_roots or []) if r}
+    if not roots:
+        return ranked
+    return sorted(ranked, key=lambda u: _is_operator_asset(u, roots), reverse=True)
 
 
 def _spread_by_shape(targets: list) -> list:
@@ -384,7 +449,48 @@ def _spread_by_shape(targets: list) -> list:
     return out
 
 
-def sweep_targets(urls, forms, in_scope, limit: int = SWEEP_TARGET_CAP) -> list:
+def select_sweep_targets(candidates, limit: int = SWEEP_TARGET_CAP, scope_roots=()) -> list:
+    """Apply the sweep's BUDGET to an already-built candidate list.
+
+    Q-113 split this out of `sweep_targets` for one reason: the mission must be able to say how many
+    endpoints it DECLINED, and a function that returns only the survivors cannot be asked. The caller
+    now holds both numbers — `len(candidates)` and `len(selection)` — and the difference is a fact it
+    reports rather than an inference nobody can make from a log line.
+
+    UNDER BUDGET, NOTHING MOVES. Reordering is a truncation strategy, not a behaviour change: an
+    ordinary engagement that fits must come back in discovery order, untouched and unshrunk.
+    """
+    candidates = list(candidates or [])
+    if len(candidates) <= limit:
+        return candidates
+    # Shape spreading prevents one large route family consuming the budget. Security-value ranking
+    # before that spread also prevents an early collection of low-value shapes consuming every slot,
+    # and operator-declared assets outrank discovered hosts inside that (Q-113/Q-104b).
+    return _spread_by_shape(rank_targets_for_budget(candidates, scope_roots))[:limit]
+
+
+def sweep_candidates(urls, forms, in_scope) -> list:
+    """The FULL parameterized surface the sweep could probe, in discovery order, before any budget.
+
+    Q-113. This is the denominator of every claim the sweep makes. "0 confirmed across 465 endpoints"
+    and "0 confirmed across the 40 we chose" are different claims about the target and only one of
+    them is evidence; the mission cannot tell them apart without this number.
+    """
+    return _sweep_candidate_set(urls, forms, in_scope)
+
+
+def sweep_targets(urls, forms, in_scope, scope_roots=(), limit: int = SWEEP_TARGET_CAP) -> list:
+    """`sweep_candidates` composed with `select_sweep_targets` — the exact composition the mission
+    call site runs, kept callable in one step for the many tests that drive the selection directly.
+
+    `scope_roots` sits BEFORE `limit` on purpose: `limit` must stay the LAST default so the call site
+    and the module budget remain pinned to each other (Q-019), and every caller passes `limit` by
+    keyword.
+    """
+    return select_sweep_targets(sweep_candidates(urls, forms, in_scope), limit, scope_roots)
+
+
+def _sweep_candidate_set(urls, forms, in_scope) -> list:
     """Endpoints the deterministic injection sweep will probe.
 
     Query-bearing URLs, one representative per (path, param-signature) — PLUS the page that carries each
@@ -402,6 +508,9 @@ def sweep_targets(urls, forms, in_scope, limit: int = SWEEP_TARGET_CAP) -> list:
     because candidates were emitted in discovery order, all twenty landed in the first category folder
     the crawl walked. The candidate set is now built in full and then round-robined across structural
     shapes before truncation, so whatever the budget is, it is spent across the whole application.
+
+    Q-113: this function now builds the FULL candidate set and applies NO budget. `select_sweep_targets`
+    owns the cut, so the caller can hold both the numerator and the denominator.
     """
     from urllib.parse import urlparse, parse_qs
     import planner as _planner                  # Q-080 — one predicate, imported not restated
@@ -454,11 +563,7 @@ def sweep_targets(urls, forms, in_scope, limit: int = SWEEP_TARGET_CAP) -> list:
                 seen_sig.add(sig)
                 seen_paths.add(urlparse(action).path)
                 targets.append(merged)
-    if len(targets) <= limit:
-        return targets
-    # Shape spreading prevents one large route family consuming the budget. Security-value ranking
-    # before that spread also prevents an early collection of low-value shapes consuming every slot.
-    return _spread_by_shape(rank_targets_for_budget(targets))[:limit]
+    return targets
 
 
 # ── Q-050 · the observation that gives `run_hash_id` a deterministic trigger ─────────────────
@@ -4052,17 +4157,39 @@ class BBHAgent:
         # THE BUDGET IS PASSED EXPLICITLY (Q-019). The call site used to omit `limit`, so the function
         # signature's default — 20 — was the real bound on the whole sweep, and nothing at the call site
         # said so. Naming it here makes the budget visible where the cost is paid.
-        targets = sweep_targets(self.tools.urls, self.tools.recon.get("forms"),
-                                lambda u: self.scope.validate(u)[0], limit=SWEEP_TARGET_CAP)
+        # Q-113. THE DENOMINATOR IS BUILT FIRST AND KEPT. `sweep_targets` returns only the survivors,
+        # so a mission that used it could never say how much surface it had walked away from — and
+        # "0 confirmed across 465 endpoints" and "0 confirmed across the 40 we chose" are different
+        # claims about the target, only one of which is evidence.
+        _candidates = sweep_candidates(self.tools.urls, self.tools.recon.get("forms"),
+                                       lambda u: self.scope.validate(u)[0])
+        targets = select_sweep_targets(_candidates, SWEEP_TARGET_CAP,
+                                       scope_roots=operator_roots(self.scope))
+        _declined = len(_candidates) - len(targets)
+        # A COUNTED FACT, NOT A FORMATTED STRING. Q-110 made its truncation countable for the same
+        # reason: a number that exists only inside a log line cannot be read by the report, and the
+        # report is where "we tested 40 of 465" has to survive to.
+        self._sweep_budget = {"candidates": len(_candidates), "selected": len(targets),
+                              "declined": _declined, "cap": SWEEP_TARGET_CAP}
         swept_paths = {urlparse(t).path for t in targets}   # paths the param sweep already DOM-traced
         if not targets:
             return
+        # EXHAUSTION IS REPORTED, NEVER SILENT (Q-093, Q-110). The declined count is stated in the same
+        # breath as the coverage claim, so the claim cannot be read as whole-surface coverage.
+        _budget_note = (
+            "BUDGET: %d of %d candidate endpoint(s) selected by security value + operator scope; "
+            "%d DECLINED and NOT tested, so a clean result here is a claim about the %d probed and "
+            "not about the %d discovered (raise BBH_SWEEP_TARGETS to widen)."
+            % (len(targets), len(_candidates), _declined, len(targets), len(_candidates))
+            if _declined else
+            "BUDGET: the full candidate surface of %d endpoint(s) was selected, 0 declined."
+            % len(_candidates))
         yield {"type": "info", "content": "Deterministic injection sweep: directly probing %d "
                "parameterized endpoint(s) for SQLi / reflected-XSS / header-injection / open-redirect + "
                "runtime DOM source-to-sink (coverage guarantee, planner-independent). The %d "
                "browser-backed confirmer(s) at the front of the shape-spread order additionally get "
-               "run_xss + run_dom_trace (~19 s each, measured)."
-               % (len(targets), min(SWEEP_BROWSER_CAP, len(targets)))}
+               "run_xss + run_dom_trace (~19 s each, measured). %s"
+               % (len(targets), min(SWEEP_BROWSER_CAP, len(targets)), _budget_note)}
         # encoded-cookie/param injection once per distinct host base (cookies are host-wide)
         _cookie_origins = list(self._scope_origins())
         for t in targets:
