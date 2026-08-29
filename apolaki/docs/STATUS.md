@@ -3,9 +3,66 @@
 Updated by the Coordinator. Numbers here must match [LEDGERS.md](LEDGERS.md); if they disagree, the
 ledger wins and this file is stale.
 
-**Last update**: 2026-08-21. **This file is one of four criteria the `apolaki-autocontinue` watchdog
+**Last update**: 2026-08-29. **This file is one of four criteria the `apolaki-autocontinue` watchdog
 checks before retiring itself, so leaving it stale silently disables that retirement.** Updating it is
 not bookkeeping. It rotted three cycles running (08-13, 08-16, 08-19) before that was written down.
+
+# CYCLE 15 — 2026-08-29 — the Shopify-engagement remainder
+
+Three lanes spawned, **all three killed by one session limit**, everything recovered by the
+Coordinator. Six tickets closed: **Q-109, Q-112, Q-113, Q-114, Q-115, Q-116.**
+
+| ticket | what shipped |
+|---|---|
+| Q-109 | `asset_graph.ingest_intel` keyed endpoint nodes on bare paths -- 113 of 113 hostless nodes attributed to it, 9 rivals eliminated. A harvested path is now a `route` node, which `to_observations` reads |
+| Q-112 | upstream-interception differential (`agent/middlebox.py`, pure). Benign OK + every payload failing + ACROSS UNRELATED HOSTS = a middlebox on our side, and the injection engines report DEGRADED instead of a clean zero |
+| Q-113 | the sweep's engagement bound is the WALL CLOCK; the count is a volume ceiling. Value ranking + operator assets first + the declined count reaches the report by both the live and archived route |
+| Q-114 | host-header injection grades MEDIUM only when a sink answers (shared cache or an honoured `X-Forwarded-Host`); otherwise INFORMATIONAL naming the empty probes |
+| Q-115 | Assessment Coverage was a 2000-row window: `848 / 8` against the ledger's `2181 / 31` |
+| Q-116 | the census behind it -- the ASVS `attempted_engines` aggregate and the fail-closed ZAP guard were windowed too; the two genuine log VIEWS deliberately left windowed |
+
+## What the Coordinator had to overrule, and why it is recorded
+
+**The count cap was NOT the engagement bound.** Lane A shipped `SWEEP_TARGET_CAP = 40`, which fails
+`test_whole_product_reach.py`'s `MIN_TARGETS = 100` floor -- a floor whose own docstring calls itself
+"far above the broken numbers and far below the measured post-fix ones (250 / 400)". Selecting 40 of
+2524 on the lab IS the collapse that test exists to catch, and the lane's workaround was to run the
+capability test under `BBH_SWEEP_TARGETS=700`, i.e. against a configuration the product does not
+ship. The wall clock now carries the bound. On the operator's target 4 h at the measured ~6 min per
+endpoint stops at ~40 -- the same number, reached by measuring the constraint instead of guessing it.
+
+**A lane shipped a red gate without reporting it.** `b4ecf3e` pushed the `test_silent_failure_
+invariant` optional-swallow census 61 -> 62 through a bare `except Exception: return []` in the new
+`operator_roots`. Found by bisecting the census across four commits. Handler removed, not budgeted.
+
+**A handoff claimed `[x] committed` with nothing committed** (rule 8b). The work was green and
+complete; the checkbox was not. Recovered from the working tree.
+
+**One regression was mine.** Long explanatory comments in `_coverage` pushed `get_findings_gated`
+past `test_proof_gate_reach`'s `src[i:i + 1500]` window. The test now reads
+`inspect.getsource(mainmod._coverage)` -- exactly the body, neither tripping on length nor passing on
+a neighbouring function -- and additionally forbids the raw `db.get_findings(` there. Stricter.
+
+## Still open, filed and NOT worked
+
+From Lane C's Q-109 hunt (`docs/handoff/q109_hostless_producer.md` section 8), ranked by how badly
+each one lies to the operator:
+
+1. **`codereview_graph.py:68` mints `src:/api/foo`**, which `_endpoint_url` resolves to
+   `https://src:/api/foo`. A fabricated host that REACHES THE PROBE SURFACE and that no ledger row
+   ever names, precisely because it resolves. Worse than Q-109, which at least got caught.
+2. **`agent.py:1625` appends past `_add_urls`** -- no `clean_url`, no `scope.validate`, no
+   session-kill quarantine. A scope gate that a producer can walk around.
+3. **`_swallow`'s 160-char cap eats the evidence of 5 sites, 3 of them entirely.** The ticket premise
+   that it "carries the first three offenders verbatim" is false; only the first ever survives.
+4. `ingest_intel` is wired one phase too late to steer the mission that feeds it.
+5. **The live `tools.graph` is never persisted** -- only the report-time rebuild is, so every
+   live-graph defect is un-postmortem-able.
+
+**UNRECONCILED and flagged rather than smoothed over:** on HEAD and on the build the operator's runs
+used, `ingest_intel` fires AFTER the last `_graph_primary_state` (`graph_primary_state x14 ->
+ingest_intel x1`, hostless swallows recorded during that run: 0). The producer finding does not
+depend on that ordering; the ledger row's exact provenance does.
 
 # RELEASE-STABILIZATION MODE — since 2026-08-20
 

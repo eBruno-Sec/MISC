@@ -52,6 +52,85 @@ Still open from this cycle, filed by Lane C during the Q-109 hunt and NOT worked
   (`graph_primary_state x14 -> ingest_intel x1`, hostless swallows recorded during the run: 0). The
   producer finding does not depend on that ordering; the ledger row's exact provenance does.
 
+### Q-117 · `codereview_graph` mints a fabricated host that REACHES THE PROBE SURFACE · **READY** · **HIGH**
+
+Found by Lane C while hunting Q-109, and it is **worse than Q-109**. `codereview_graph.py:68` keys
+endpoint nodes as `src:/api/foo`. `_endpoint_url` then resolves that to:
+
+```
+https://src:/api/foo
+```
+
+**`src` is not a host.** It is the source-tree root of the code under review. But the string parses,
+so `_endpoint_url` RESOLVES it, so `_graph_primary_state` never drops it, so **no ledger row ever
+names it**. Q-109's hostless nodes were at least caught and counted; these are silently promoted to
+probe surface and spend budget on a name that cannot exist.
+
+That is the exact inversion of Q-093's lesson: the defect there was inventing `https:///path`, and
+the guard added afterwards refuses what cannot resolve. A fabricated host that DOES resolve walks
+straight through it.
+
+**FIX.** A node minted from static analysis is not an address and must not be keyed as one -- Q-109's
+`route` kind now exists for precisely this. **GATE:** a code-review ingest produces zero `endpoint`
+nodes whose host is a source-tree token, and the observations it contributed survive. Negative
+control: a code-review finding that genuinely carries a host still yields an endpoint.
+
+### Q-118 · `agent.py:1625` appends to `tools.urls` past `_add_urls`, so the scope gate is bypassed · **READY** · **HIGH**
+
+A code-intelligence endpoint that does not start with `/` is appended DIRECTLY to `tools.urls`,
+skipping `_add_urls` and therefore skipping all three of its jobs: `clean_url`, `scope.validate`,
+and the session-kill quarantine. It then keys an endpoint node that resolves to a phantom host.
+
+**A scope gate a producer can walk around is not a scope gate.** This is the Q-018 shape (a gate
+skipped rather than failed) on the intake side, and it matters more than the phantom node: on a
+bug-bounty engagement the thing `scope.validate` prevents is a request to a host the operator was
+never authorised to touch.
+
+**FIX:** route it through `_add_urls`, which is the one intake chokepoint (Q-111b already made that
+the rule for entity-decoding, for the same reason -- a normalisation repeated per-caller is one
+someone forgets). **GATE:** an out-of-scope code-intelligence endpoint never reaches `tools.urls`,
+and an in-scope one still does.
+
+### Q-119 · `_swallow`'s 160-char cap eats the evidence of 5 sites, 3 of them entirely · **READY** · **MEDIUM**
+
+MEASURED by AST census over every `_swallow` call whose message is built from string literals:
+
+```
+./agent.py:3567   literal_len=258  (cap is 160)
+./agent.py:3870   literal_len=257  (cap is 160)
+./agent.py:1619   literal_len=175  (cap is 160)
+./agent.py:3578   literal_len=149  (cap is 160)   <- the Q-109 reporter itself
+./agent.py:3837   literal_len=136  (cap is 160)
+```
+
+Every one is a swallow that explains itself carefully and then appends the evidence -- and the cap
+eats the half that is evidence. **Three exceed 160 outright, so their runtime detail is discarded
+completely.**
+
+**This falsifies a premise the project has been relying on.** Q-109's ticket said `_swallow` "carries
+the first three offenders verbatim in the mission record, so the shape of the bad keys is already
+captured". It does not: at 145 characters of prose there are 15 left, so only the FIRST offender ever
+survives, truncated. Lane C could not recover them and correctly reported UNVERIFIED rather than
+inventing them.
+
+**FIX:** the cap belongs on the RUNTIME half, not on the whole string -- or the prose moves to a
+separate field. **GATE:** a swallow whose explanation is 250 characters still records its exception
+text. Negative control: the total record stays bounded, because an unbounded ledger row is the defect
+this cap was added for.
+
+### Q-120 · `ingest_intel` is wired one phase too late to steer the mission that feeds it · **READY** · **MEDIUM**
+
+MEASURED across a full mission: `graph_primary_state x14` then `ingest_intel x1`. The intel feed
+lands after the last planner state read, so nothing it contributes can influence what the mission
+does -- it enriches a report rather than a decision. **Also the reason Lane C could not reproduce the
+Q-109 ledger row in a single run**, which is recorded there as unreconciled.
+
+### Q-121 · The live `tools.graph` is never persisted, so every live-graph defect is un-postmortem-able · **READY** · **MEDIUM**
+
+Only the report-time `build_from_engagement` graph reaches `/app/data/graph`. The graph the mission
+actually reasoned over is discarded at exit. Q-109 needed a bespoke reproduction harness for exactly
+this reason, and the next graph defect will need another one.
+
 ### Q-114 · Host-header injection is graded MEDIUM with no check for a sink · **CLOSED** · **MEDIUM**
 
 **Filed from the field.** The Shopify run raised 8 host-header injection findings on `linkpop.com`.
