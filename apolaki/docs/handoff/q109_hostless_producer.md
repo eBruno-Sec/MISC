@@ -406,15 +406,82 @@ branch, all BEFORE 3271. `_close_autonomy_loop` has exactly one production call 
 `_ensure_run_started`). So on THIS build, in a single mission, the producer fires after the last
 read - and the swallow should not fire at all.
 
-It plainly did fire on the operator's Shopify runs. Three candidate explanations, none of them yet
-proven; the full-run measurement below is what discriminates:
+### 5a. MEASURED on a complete real mission
 
-- **(i)** The operator's build ordered `_close_autonomy_loop` before the executor. That is a history
-  question, answerable with `git log -L` on the `run()` region.
-- **(ii)** A second reader exists that I have not found.
-- **(iii)** The graph outlives one `run()` in some path (a resumed / re-driven session).
+`scratchpad/q109/q109_fullrun.py` runs the REAL `BBHAgent.run()` end to end against juice-shop and
+records the order in which the two sites are reached. Both wrappers call straight through to the
+real implementation; nothing else is changed, `mission_id=None` so the shared DB is untouched.
 
-What is NOT in doubt is the producer: it is the only writer in the tree that can key an endpoint
-node on a bare path on the LIVE graph (sections 3 and 4 enumerate and eliminate all nine others),
-and it is measured doing exactly that.
+```
+$ MSYS_NO_PATHCONV=1 docker run --rm --network apolaki_default -v "<SNAP>/agent:/app" \
+    -v "<SCRATCH>/q109:/work" -w /app -e PYTHONPATH=/app -e BBH_DATA_DIR=/tmp/q109 \
+    -e BBH_SURFACE_PAGES=40 apolaki-agent python -u /work/q109_fullrun.py
+
+EV complete Deterministic scan complete - 182 step(s). See Playbooks for cURL-ready leads and the report.
+events=819
+CALL ORDER: graph_primary_state x14 -> ingest_intel x1
+hostless swallows recorded during the run: 0
+END-OF-RUN live graph: endpoints=628 hostless=113
+   source=harvest              count=113
+   key='/' sources=('harvest',)
+   key='/#' sources=('harvest',)
+   key='/#/bee-haven' sources=('harvest',)
+   key='/#/complain' sources=('harvest',)
+   key='/#/contact' sources=('harvest',)
+   key='/#/forgot-password' sources=('harvest',)
+   key='/#/search?q=OWASP' sources=('harvest',)
+   key='/#recycle' sources=('harvest',)
+   key='/${e}' sources=('harvest',)
+   key='/${this.snapshot.routeConfig&&this.snapshot.routeConfig.path||' sources=('harvest',)
+```
+
+Four measured facts:
+
+1. **113 hostless endpoint nodes on one ordinary mission, 113 of 113 attributed to `source='harvest'`.**
+   Same magnitude class as the operator's 30, and the attribution is total - not a majority, all of them.
+2. **The order is `graph_primary_state x14 -> ingest_intel x1`.** The producer fires once, after all
+   fourteen reads.
+3. **Zero hostless swallows during the run.** On THIS build, in a single mission, the reporter never
+   sees what the producer makes.
+4. The offenders are SPA hash-routes (`/#/forgot-password`) and **minified-JS garbage**
+   (`/${this.snapshot.routeConfig&&this.snapshot.routeConfig.path||`). The latter is not a path at
+   all; it is a fragment of an Angular expression that the `_PATH` regex matched. Binding those to a
+   base would put junk on the probe surface.
+
+### 5b. What that means for the operator's ledger row - stated honestly
+
+The row plainly appeared on the Shopify runs, and on the build those runs used. I checked:
+
+```
+$ C=$(git rev-list -1 --before="2026-08-24T20:30:00-07:00" HEAD); git show $C:apolaki/agent/agent.py | grep -n ...
+commit-at-shopify-run=02d66dc  2026-08-24 12:55:32 -0700
+3087:            async for ev in self._run_deterministic(session_id):
+3090:            async for ev in self._run_low_ai(objective, session_id):
+3105:                async for ev in self._execute_plan(session_id):
+3142:        async for ev in self._close_autonomy_loop(session_id):
+```
+
+Same ordering. So "their build ordered it differently" is DISPROVED, and I could not reproduce the
+row in a single mission. The remaining explanation I could not test is that the live graph was read
+a second time after `_close_autonomy_loop` - a re-driven or resumed session. Circumstantial support,
+not proof: two of the five stored Shopify missions (`351e163d`, `d9ce9f0a`) carry the same program
+name and byte-identical log profiles (928 logs / 46 tool_error each), which is what a duplicated
+drive of one engagement looks like.
+
+**This does not weaken the producer finding.** `ingest_intel` is the only writer in the tree that
+can key an endpoint node on a bare path on the LIVE graph (sections 3 and 4 enumerate and eliminate
+all nine others), and it is measured minting 113 of them.
+
+### 5c. A SECOND defect the ordering exposes, which is arguably the bigger one
+
+Because `ingest_intel` is the last thing to touch the graph, **nothing the intel harvest learns can
+influence the plan of the mission that learned it.** The write at `agent.py:1769` lands after all 14
+planner decisions - and it carries far more than endpoints: `object_id`, `param`, `version`,
+`credential` and `coupon` candidates all arrive at the same moment (`asset_graph.py:316-328`).
+
+Its comment says the feed exists "so the planner reads a complete world model FROM the graph
+(graph-as-brain)". Measured, the only in-mission consumer is `plan_graph_authoritative` twelve lines
+below it, which produces the ADVISORY next-best-action list. The executor never sees it. That is a
+separate ticket and I am not folding it into the Q-109 patch, but it should be filed: the
+graph-as-brain feed is real and it is wired one phase too late to steer anything.
 
