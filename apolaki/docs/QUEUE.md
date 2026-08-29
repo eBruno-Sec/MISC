@@ -369,7 +369,7 @@ Full suite MEASURED green on an isolated `git archive HEAD` snapshot via `--juni
 `tests="3869" errors="0" failures="0" skipped="23"`, 961.7s -- +4 over the Q-119 baseline, exactly the
 new tests.
 
-### Q-121 · The live `tools.graph` is never persisted, so every live-graph defect is un-postmortem-able · **CLOSED** · **MEDIUM**
+### Q-121 · The live `tools.graph` is never persisted, so every live-graph defect is un-postmortem-able · **CLOSED** `cc61d79` · **MEDIUM**
 
 Only the report-time `build_from_engagement` graph reaches `/app/data/graph`. The graph the mission
 actually reasoned over is discarded at exit. Q-109 needed a bespoke reproduction harness for exactly
