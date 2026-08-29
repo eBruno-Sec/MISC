@@ -523,7 +523,19 @@ def test_the_ai_wrapup_does_not_assert_demoted_findings_to_the_model():
 
 
 def test_coverage_counts_agree_with_the_gated_set():
-    src = open(os.path.join(AGENT_DIR, "main.py"), encoding="utf8").read()
-    i = src.find("def _coverage")
-    assert i > 0
-    assert "get_findings_gated" in src[i:i + 1500], "_coverage still counts raw findings"
+    """The invariant is unchanged: the Assessment Coverage tile must count the GATED set, or it
+    disagrees with the proof-gated Total Findings printed beside it.
+
+    THE WINDOW IS GONE. This read `src[i:i + 1500]`, a byte slice from the `def` line, and Q-113 and
+    Q-115 added comments to `_coverage` that pushed the call past 1500 characters -- so the test went
+    red over documentation while the behaviour it guards was untouched. A slice is also wrong in the
+    other direction: a `get_findings_gated` in the NEXT function would have satisfied it.
+
+    `inspect.getsource` on the function object is exactly the body and nothing else, so it neither
+    trips on length nor passes on a neighbour."""
+    import inspect
+
+    import main as mainmod
+    body = inspect.getsource(mainmod._coverage)
+    assert "get_findings_gated" in body, "_coverage still counts raw findings"
+    assert "db.get_findings(" not in body, "_coverage reads the raw set as well as the gated one"

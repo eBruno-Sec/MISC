@@ -1003,7 +1003,21 @@ def _coverage(session_id: str) -> dict:
         if not t:
             continue
         tools_run[t] = tools_run.get(t, 0) + 1
+    # Q-113: the sweep's DENOMINATOR, next to the other coverage numbers, because that is where a
+    # reader decides how much the zeros mean. Live from the running agent, falling back to the
+    # snapshot persisted at mission end so an archived report still carries it -- the same
+    # live-then-snapshot pattern `_intel_provenance` uses. Silent when the sweep never ran or never
+    # declined anything, rather than printing a zero that would read as a bounded run.
+    _swb = getattr(sessions.get(session_id, {}).get("agent"), "_sweep_budget", None)
+    if not _swb:
+        _swb = ((db.get_mission(session_id) or {}).get("context") or {}).get("sweep_budget") or {}
+    _sweep_line = {}
+    if _swb and _swb.get("candidates"):
+        _sweep_line["injection_sweep"] = "%d of %d parameterized endpoint(s) probed, %d declined%s" % (
+            _swb.get("selected", 0), _swb["candidates"], _swb.get("declined", 0),
+            " (wall-clock budget exhausted)" if _swb.get("timed_out") else "")
     return {"tools_invoked": sum(tools_run.values()), "distinct_tools": len(tools_run),
+            **_sweep_line,
             "surface_urls": len(sessions.get(session_id, {}).get("tools").urls) if session_id in sessions else "n/a",
             # GATED: rendered as "Assessment Coverage -> Findings" beside a proof-gated Total Findings,
             # so counting raw rows here made the two numbers disagree with the demoted set.
@@ -2788,6 +2802,14 @@ def _record_orchestration(session_id: str) -> None:
         if cval:
             ctx["candidate_validation"] = {"counts": getattr(ag, "_candidate_validation_counts", {}) or {},
                                            "records": cval[:200]}
+        # Q-113: WHAT THE INJECTION SWEEP DECLINED. "0 confirmed across 465 endpoints" and "0
+        # confirmed across the 40 we reached before the clock stopped" are different claims about the
+        # target and only one is evidence. The sweep records the numerator, the denominator and the
+        # wall-clock timeout on the mission; without this line they live only inside a formatted log
+        # string, so a bounded run reads in the report as whole-surface coverage.
+        swb = getattr(ag, "_sweep_budget", None)
+        if swb:
+            ctx["sweep_budget"] = swb
         db.update_mission(session_id, context=ctx)
     except Exception:
         pass

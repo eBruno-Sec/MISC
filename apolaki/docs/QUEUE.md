@@ -15,7 +15,44 @@ Lane C is read-only deliberately: the producer is unknown, and every plausible h
 (`agent.py`, `planner.py`, `intel.py`) is either owned by another lane this cycle or shared. A
 diagnosis with a measured reproduction is the completable result; the patch lands next cycle.
 
-### Q-114 · Host-header injection is graded MEDIUM with no check for a sink · **READY** · **MEDIUM**
+### CYCLE 15 OUTCOME -- all three lanes killed by one session limit, everything recovered
+
+**Q-109 CLOSED, Q-112 CLOSED, Q-113 CLOSED, Q-114 CLOSED, Q-115 CLOSED, Q-116 CLOSED.** Six.
+
+Write-as-you-go paid for itself again. Lanes A and C landed nine commits between them before dying;
+Lane B landed ZERO and its entire contribution was recovered from the working tree and its handoff.
+
+What the Coordinator had to repair, recorded because each one is a lesson rather than an accident:
+
+1. **Lane A shipped a red gate it did not report.** Its first commit `b4ecf3e` pushed the
+   `test_silent_failure_invariant` optional-swallow census 61 -> 62 via a bare
+   `except Exception: return []` in the new `operator_roots`. Bisected across four commits to find
+   it. Handler removed rather than budgeted: it is a ratchet, and returning an empty root set would
+   have silently disabled operator-asset ranking -- the `x or DEFAULT` failure mode again.
+2. **Lane A's central decision was reversed.** It shipped `SWEEP_TARGET_CAP = 40`, which fails
+   `test_whole_product_reach.py`'s `MIN_TARGETS = 100` floor, and proposed running that capability
+   test under `BBH_SWEEP_TARGETS=700` to keep it green -- i.e. running the oracle against a
+   configuration the product does not ship. The count is now a volume ceiling (700) and the WALL
+   CLOCK is the engagement bound. The lane's own comment had already argued for exactly this.
+3. **Lane B's handoff claimed `[x] committed` with nothing committed.** Rule 8b: a handoff records
+   what HAPPENED. The work itself was green and complete and is now committed; the checkbox was not.
+4. **Lane B never reached Q-114.** The Coordinator took it.
+5. **Lane C's patch was applied and independently re-verified** rather than trusted: 4 of 6 gate
+   tests confirmed failing on HEAD, and hunk 1 without hunk 2 confirmed to fail three tests, two of
+   them pre-existing. Its diagnosis held up under both checks.
+
+Still open from this cycle, filed by Lane C during the Q-109 hunt and NOT worked:
+
+- **`_swallow`'s 160-character cap truncates the evidence of 5 swallow sites**, 3 of them losing it
+  entirely -- so the ticket premise that "`_swallow` carries the first three offenders verbatim" is
+  false; only the first ever survives.
+- Four further tickets in `docs/handoff/q109_hostless_producer.md` section 6/8.
+- **UNRECONCILED, and flagged rather than smoothed over:** on HEAD and on the build the operator's
+  Shopify runs used, `ingest_intel` fires AFTER the last `_graph_primary_state`
+  (`graph_primary_state x14 -> ingest_intel x1`, hostless swallows recorded during the run: 0). The
+  producer finding does not depend on that ordering; the ledger row's exact provenance does.
+
+### Q-114 · Host-header injection is graded MEDIUM with no check for a sink · **CLOSED** · **MEDIUM**
 
 **Filed from the field.** The Shopify run raised 8 host-header injection findings on `linkpop.com`.
 Eight of nine survived the structural oracle (Q-106b) and the operator reproduced one by hand:
@@ -1653,7 +1690,7 @@ confirmed" after stopping partway are different facts about the target, and only
 **GATE** (11 passed): a mutant that drops the deadline from **only `_run_cmdi`** is killed by both
 parametrised tests for that engine -- which is precisely the fixed-one-route-missed-another failure.
 
-### Q-113 · The injection sweep ignores `CAP_ENDPOINTS`, so a real engagement cannot finish · **READY** · **HIGH**
+### Q-113 · The injection sweep ignores `CAP_ENDPOINTS`, so a real engagement cannot finish · **CLOSED** · **HIGH**
 
 The operator's Shopify run reached **endpoint 69 of 465 in roughly seven hours** of active sweeping,
 about six minutes each. At that rate the remaining 396 take **another ~46 hours**. Nothing was
@@ -1688,7 +1725,7 @@ reports no skips, so the cap cannot silently shrink an ordinary engagement.
 **RELATED:** Q-110 bounds one CALL; this bounds the SWEEP. Both are needed -- Q-110 alone stops a
 single endpoint eating a night, and still permits 465 well-behaved endpoints to eat a week.
 
-### Q-112 · A middlebox eating our own payloads is indistinguishable from a clean target · **READY** · **HIGH**
+### Q-112 · A middlebox eating our own payloads is indistinguishable from a clean target · **CLOSED** · **HIGH**
 
 **Reported by the operator from his ISP router's app, mid-scan.** His own gateway IPS was dropping
 Apolaki's probes OUTBOUND, before they ever left his network:
@@ -1772,7 +1809,7 @@ too -- the real parameters BEHIND the entity must be RECOVERED (`language`, `sig
 fix that merely stopped emitting `amp;language` while also losing `language` would trade a false
 positive for a blind spot.
 
-### Q-109 · 30 graph endpoint nodes carry no host, every run · **READY** · **MEDIUM**
+### Q-109 · 30 graph endpoint nodes carry no host, every run · **CLOSED** · **MEDIUM**
 
 Present in every one of the operator's Shopify snapshots:
 
