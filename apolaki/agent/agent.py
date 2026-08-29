@@ -2,6 +2,7 @@ import asyncio
 import json
 import os
 import re
+import time
 import uuid
 from typing import AsyncGenerator
 
@@ -285,6 +286,24 @@ def _is_generic_objective(objective: str) -> bool:
 # `BBH_SWEEP_TARGETS=700` in the environment. The env override is unchanged and is the whole
 # mechanism — see docs/handoff/q113_sweep_cap.md, which also records the one test this collides with.
 SWEEP_TARGET_CAP = max(1, int(os.getenv("BBH_SWEEP_TARGETS", "40") or 40))
+# Q-113, THE SECOND BOUND, AND THE ONE THE TICKET IS ACTUALLY NAMED AFTER.
+#
+# A COUNT IS ONLY A TIME BOUND IF EVERY ENDPOINT COSTS THE SAME, AND THEY DO NOT. MEASURED: the eight
+# HTTP engines total 1.1 s per URL on a local lab and ~6 MINUTES per endpoint on the operator's
+# Cloudflare-fronted target. That is a 300x spread, so ANY single count is simultaneously too small
+# for a fast target and too large for a slow one — which is exactly the collision this ticket ran
+# into: 40 is right for the engagement and wrong for the OWASP whole-product benchmark, where the
+# same 465-endpoint scale costs minutes rather than days.
+#
+# A wall-clock budget is the bound that is correct for both, because it is denominated in the thing
+# that actually ran out. At the measured costs, 4 h buys ~40 endpoints on the slow target and all
+# 2524 candidates on the lab, where it never fires at all.
+#
+# 0 disables it. It is a SECOND bound, not a replacement: `SWEEP_TARGET_CAP` still binds first on a
+# fast target, and exhausting either one is REPORTED, never silent.
+SWEEP_WALL_BUDGET_S = max(0, int(os.getenv("BBH_SWEEP_BUDGET_S", "14400") or 0))
+#: Indirection so the deadline is testable with a fake clock instead of a four-hour test.
+_sweep_clock = time.monotonic
 # targets that additionally get the browser-backed confirmers, taken off the FRONT of the shape-spread
 # order so they are representatives of the whole site rather than the first N of one directory.
 SWEEP_BROWSER_CAP = max(0, int(os.getenv("BBH_SWEEP_BROWSER_TARGETS", "30") or 30))
@@ -4223,7 +4242,25 @@ class BBHAgent:
         # the sweep 20x more expensive than its evidence justified, which is what forced the cap to 20.
         # Every selected target still gets the full deterministic HTTP battery; the browser-backed pair
         # runs on the leading SWEEP_BROWSER_CAP shape-representatives.
+        # Q-113 · THE WALL-CLOCK BOUND. Checked BETWEEN endpoints, never mid-endpoint: a half-probed
+        # endpoint is the same "failed attempt reported as a clean result" that Q-093 forbids, so the
+        # sweep finishes the target it is on and then stops.
+        _sweep_started = _sweep_clock()
         for _i, u in enumerate(targets):
+            if SWEEP_WALL_BUDGET_S and _i and (_sweep_clock() - _sweep_started) > SWEEP_WALL_BUDGET_S:
+                _left = len(targets) - _i
+                self._sweep_budget["timed_out"] = _left
+                self._sweep_budget["declined"] += _left
+                self._sweep_budget["selected"] = _i
+                # DEGRADED, NOT DONE. The remaining endpoints were never probed and their absence
+                # from the findings is a fact about this run's clock, not about the target.
+                yield {"type": "degraded", "reason": "sweep_wall_budget_exhausted",
+                       "content": "DEGRADED: injection sweep wall-clock budget of %d s exhausted "
+                                  "after %d of %d selected endpoint(s); %d further endpoint(s) "
+                                  "DECLINED and NOT tested. A clean result covers the %d probed "
+                                  "only (raise BBH_SWEEP_BUDGET_S, or 0 to disable)."
+                                  % (SWEEP_WALL_BUDGET_S, _i, len(targets), _left, _i)}
+                break
             for tool in (_SWEEP_HTTP_ENGINES + (_SWEEP_BROWSER_ENGINES if _i < SWEEP_BROWSER_CAP else ())):
                 if self.stop_event.is_set():
                     return

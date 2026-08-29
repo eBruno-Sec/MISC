@@ -148,6 +148,41 @@ the first execution test counted 477 "swept endpoints" on a 465-endpoint surface
 `run_xpath`/`run_ldap`/`run_ssi` are ALSO dispatched by the later HTML-page pass, which this budget
 does not govern. The marker is now `run_sqli`, which only the parameterized sweep dispatches.
 
+## The SECOND bound - a count is only a time bound if every endpoint costs the same
+
+A count cap alone is why this ticket collides with the benchmark at all, and the collision is not a
+bookkeeping problem, it is a real property of the fix:
+
+    MEASURED, local lab      : 1.1 s per URL for the eight HTTP engines (agent.py:4240 comment)
+    MEASURED, operator's target: ~6 min per endpoint (Shopify, Cloudflare-fronted)
+                               -> a 300x spread
+
+Any single count is simultaneously too small for the fast target and too large for the slow one.
+`SWEEP_WALL_BUDGET_S` (env `BBH_SWEEP_BUDGET_S`, default 14400 = 4 h, 0 disables) is denominated in
+the thing that actually ran out. At the measured costs 4 h buys ~40 endpoints on the slow target and
+never fires at all on the lab. It is checked BETWEEN endpoints, never mid-endpoint - a half-probed
+endpoint is the "failed attempt reported as a clean result" Q-093 forbids - and exhausting it emits
+a `degraded` event with `reason: "sweep_wall_budget_exhausted"`, adds the untested remainder to
+`_sweep_budget["declined"]` and records `_sweep_budget["timed_out"]`.
+
+`_sweep_clock = time.monotonic` is a module-level indirection purely so the deadline is testable
+with a fake clock instead of a four-hour test.
+
+**This is the lever that lets the operator resolve the benchmark collision without a code change**:
+`BBH_SWEEP_TARGETS=700 BBH_SWEEP_BUDGET_S=14400` gives wp3's count on a fast lab while still being
+unable to run for two days on a slow target.
+
+## Mutants killed - the deadline
+
+| mutant | change | killed by |
+| --- | --- | --- |
+| M6 no-deadline | the wall-clock check replaced by `if False:` | `test_a_slow_target_stops_at_the_wall_clock_budget_and_says_DEGRADED` |
+| M7 silent-deadline | deadline fires, the `degraded` event is not yielded | same |
+| M8 always-fires | deadline fires after 3 endpoints regardless of the clock | `test_a_fast_target_never_trips_the_wall_clock` + both bounded/negative-control tests |
+
+M8 is the one that matters: it is the shape of "a bound that quietly shrinks an ordinary
+engagement", and it is caught by the negative controls rather than by the bound's own test.
+
 ## THE ONE RED I AM LEAVING, deliberately, in a file I do not own
 
     $ docker run ... pytest tests/test_sweep_targets.py ... -rfE

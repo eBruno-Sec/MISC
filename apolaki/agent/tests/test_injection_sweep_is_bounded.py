@@ -179,7 +179,7 @@ class _Scope:
         return {"t.test": "https://t.test"}
 
 
-def _drive_sweep(urls):
+def _drive_sweep(urls, events_out=None):
     """Run the REAL `_inject_sweep_surface` with a recording `_run_tool`. Returns
     (info lines, [(tool, url), ...])."""
     scan = object.__new__(agent_mod.BBHAgent)
@@ -200,6 +200,9 @@ def _drive_sweep(urls):
         return [ev async for ev in scan._inject_sweep_surface("q113")]
 
     events = asyncio.run(_go())
+    if events_out is not None:
+        events_out.extend(events)
+        events_out.append(scan)
     return [e.get("content", "") for e in events if e.get("type") == "info"], dispatched
 
 
@@ -266,6 +269,50 @@ def test_the_declined_count_is_durable_on_the_mission_and_not_only_in_a_log_line
 
 async def _collect(scan):
     return [ev async for ev in scan._inject_sweep_surface("q113")]
+
+
+# ── the SECOND bound: a count is only a time bound if every endpoint costs the same ───────────────
+#
+# MEASURED spread: 1.1 s per URL for the eight HTTP engines on a local lab, ~6 min per endpoint on
+# the operator's Cloudflare-fronted target. A count cap that is right for one is wrong for the other.
+
+def test_a_slow_target_stops_at_the_wall_clock_budget_and_says_DEGRADED(monkeypatch):
+    """The bound the ticket is named after. Driven with a FAKE CLOCK - a real four-hour test is not
+    a test - advancing 6 minutes per endpoint, which is the operator's measured cost."""
+    monkeypatch.setattr(agent_mod, "SWEEP_WALL_BUDGET_S", 3600)          # one hour
+    ticks = iter(range(0, 10 ** 6, 360))                                  # 6 min per call
+    monkeypatch.setattr(agent_mod, "_sweep_clock", lambda: next(ticks))
+
+    events = []
+    _drive_sweep(_surface_465(), events_out=events)
+    scan = events.pop()
+    degraded = [e for e in events if e.get("type") == "degraded"]
+    assert degraded, "the sweep ran past its wall-clock budget without saying so"
+    line = degraded[0]["content"]
+    assert degraded[0]["reason"] == "sweep_wall_budget_exhausted"
+    assert "DECLINED" in line and "DEGRADED" in line, line
+    # ~1 h at 6 min/endpoint is ~10 endpoints, and it must be FEWER than the count cap allowed,
+    # or the deadline is decoration sitting behind a bound that already fired.
+    assert scan._sweep_budget["timed_out"] >= 20, scan._sweep_budget
+    assert scan._sweep_budget["selected"] <= 20, scan._sweep_budget
+    assert scan._sweep_budget["declined"] == 465 - scan._sweep_budget["selected"], scan._sweep_budget
+
+
+def test_a_fast_target_never_trips_the_wall_clock(monkeypatch):
+    """NEGATIVE CONTROL, and the reason this bound exists at all: the SAME budget that stops a slow
+    engagement must be invisible on a lab where the identical endpoint count costs seconds. A
+    deadline that fires on a fast target is a new defect."""
+    monkeypatch.setattr(agent_mod, "SWEEP_WALL_BUDGET_S", 3600)
+    ticks = iter(range(0, 10 ** 6))                                       # 1 s per call
+    monkeypatch.setattr(agent_mod, "_sweep_clock", lambda: next(ticks))
+
+    events = []
+    _, dispatched = _drive_sweep(_surface_465(), events_out=events)
+    scan = events.pop()
+    assert not [e for e in events if e.get("type") == "degraded"], "the deadline fired on a fast target"
+    assert "timed_out" not in scan._sweep_budget, scan._sweep_budget
+    swept = {url for tool, url in dispatched if tool == _PARAM_SWEEP_MARKER}
+    assert len(swept) == scan._sweep_budget["selected"] <= 60
 
 
 def test_the_one_step_wrapper_is_the_composition_the_mission_actually_runs():
