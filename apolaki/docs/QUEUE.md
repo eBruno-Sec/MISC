@@ -1767,7 +1767,25 @@ pushed as `b1d56eb`.
   reachability gate after the handoff had already claimed the wiring was done.
 - **Q-017 CLOSED**, **Q-045/Q-046 CLOSED**, **Q-015/Q-016 CLOSED**, **Q-013/Q-014 CLOSED**.
 
-### Q-053 · Four findings-plumbing gaps the Q-048 lane refused to paper over · **MEDIUM** · `ready` · **GAP-1 CLOSED** `fb6f457` `c03e1e9`
+### Q-053 · Four findings-plumbing gaps the Q-048 lane refused to paper over · **MEDIUM** · **CLOSED** — all four gaps
+
+**QUEUE-ROT CORRECTION, 2026-08-29 (autocontinue).** Header still read the not-yet-closed marker with only GAP-1 marked
+closed, but all four are done, RE-MEASURED against current code rather than trusted from the ticket
+body:
+- **GAP-1** (takeover undetected as a family) — closed as the header already said (`fb6f457`/`c03e1e9`).
+- **GAP-2** (dalfox unfalsifiable-from-data) — closed by **Q-091** (`f9a8815`), which names this gap
+  explicitly: "This closes Q-053 GAP-2, which was unfalsifiable as posed." The JSONL-parser-reading-
+  JSON-array root cause is fixed; a parse failure now returns an error, never a silent `0 findings`.
+- **GAP-3** (sqli auth_bypass family) — the ticket's own text already says "CLOSED, and it was closed
+  before I read the ticket," verified live against `sqli_tool.auth_bypass_finding` and its pinning
+  test, and explicitly records a wrong re-open that was caught and reverted by the full suite.
+- **GAP-4** (`transport_posture`/`security_misconfig` share one family) — `asvs_model.py:250` (CONF-02)
+  now keys ONE deliberate umbrella objective on both families, with the "why not split three ways"
+  reasoning recorded inline (splitting belongs at the producer, tag-keyed matching here was rejected
+  as a second copy of the classification rule, Q-015's exact defect shape).
+
+RE-MEASURED: `tests/test_finding_provenance.py` + `tests/test_asvs_model.py` (filtered to
+CONF-02/dalfox/transport_posture/security_misconfig/takeover) — 9 passed, 0 failed.
 
 #### GAP-1 CLOSED, and it was a both-halves defect rather than the gap the ticket described
 
