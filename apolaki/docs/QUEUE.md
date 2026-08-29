@@ -1,5 +1,80 @@
 # QUEUE — the one canonical, dependency-ordered work queue
 
+## CYCLE 15 — 2026-08-29 — the Shopify-engagement remainder. OWNERSHIP TABLE, authoritative.
+
+Three lanes, disjoint write sets, declared before spawn. The Coordinator owns this file and
+`docs/STATUS.md` and writes no product code this cycle.
+
+| Lane | Shape | Ticket(s) | WRITES (exclusive) | Handoff |
+|---|---|---|---|---|
+| A | Builder | Q-113 sweep cap + value ranking | `agent/agent.py`, `agent/tests/test_injection_sweep_is_bounded.py` | `docs/handoff/q113_sweep_cap.md` |
+| B | Builder | Q-112 middlebox differential, then Q-114 host-header grading | `agent/tools.py`, `agent/web_security.py`, `agent/middlebox.py`, `agent/tests/test_middlebox_is_not_a_clean_result.py`, `agent/tests/test_host_header_grade_needs_a_sink.py` | `docs/handoff/q112_middlebox.md` |
+| C | Breaker (READ-ONLY) | Q-109 hostless endpoint nodes -- find the PRODUCER | no product code; diagnosis + exact patch only | `docs/handoff/q109_hostless_producer.md` |
+
+Lane C is read-only deliberately: the producer is unknown, and every plausible home for it
+(`agent.py`, `planner.py`, `intel.py`) is either owned by another lane this cycle or shared. A
+diagnosis with a measured reproduction is the completable result; the patch lands next cycle.
+
+### Q-114 · Host-header injection is graded MEDIUM with no check for a sink · **READY** · **MEDIUM**
+
+**Filed from the field.** The Shopify run raised 8 host-header injection findings on `linkpop.com`.
+Eight of nine survived the structural oracle (Q-106b) and the operator reproduced one by hand:
+
+```
+curl -is https://linkpop.com/054470-ee -H 'Host: bbh-evil.example'
+HTTP/1.1 301 Moved Permanently
+Location: https://bbh-evil.example/054470-ee/index.html?s=1
+Server: UploadServer
+```
+
+**The behaviour is REAL. The grade is not earned.** Host-header injection is only exploitable
+through a sink, and the operator probed both:
+
+- **Shared cache** -- absent. No `Age`, no `X-Cache`, no `CF-Cache-Status`, no `Via` on any
+  response. Nothing stores the poisoned redirect, so no second visitor ever receives it.
+- **`X-Forwarded-Host`** -- ignored. Supplying it returned a `Location` pointing at the legitimate
+  host, so the reverse-proxy route into the same primitive does not exist either.
+
+`Server: UploadServer` is a Google Cloud Storage bucket website, where building the redirect from
+the supplied Host is stock platform behaviour rather than an application defect.
+
+**So the correct output was INFORMATIONAL, and Apolaki said MEDIUM unconditionally.** That is the
+Q-106 lesson at the grading layer rather than the oracle layer: the detection was sound and the
+severity was asserted, not measured. A MEDIUM sent to a mature program on this evidence is closed
+N/A, and N/A closures cost the reporter signal.
+
+**FIX.** Before grading, probe for the sink the severity claims: re-request with the spoofed Host and
+look for cache indicators (`Age` / `X-Cache` / `CF-Cache-Status` / `Via` / a `Cache-Control` that
+permits shared storage), and separately test `X-Forwarded-Host`. Grade MEDIUM only when at least one
+sink answers; otherwise INFORMATIONAL with the detail saying which probes came back empty.
+
+**GATE:** the linkpop response shape above, with no cache headers and `X-Forwarded-Host` ignored,
+grades INFORMATIONAL. Negative control, and it is the half that keeps this an oracle: the same
+redirect **plus** `Age: 0` and `X-Cache: HIT` still grades MEDIUM, so the fix cannot be satisfied by
+downgrading everything.
+
+### Q-115 · The Assessment Coverage summary disagrees with the ledger and the heartbeat · **READY** · **MEDIUM**
+
+Every Shopify snapshot carries three counts of the same quantity and no two agree:
+
+```
+Assessment Coverage:  Tools Invoked 848 | Distinct Tools 8
+Execution ledger:     31 rows, 2181 calls
+mission_heartbeat:    dispatches 2181
+```
+
+The ledger and the heartbeat agree at 2181 (Q-105 and Q-107 made both cumulative). The report's own
+summary header does not, and `Distinct Tools: 8` against 31 ledger rows is the louder half -- the
+header is counting a narrower population than it labels.
+
+**Whichever number is right, a report that states the same fact three times with two different
+answers is not evidence.** This is the reporting-layer instance of the week's class: a value
+measured correctly somewhere and re-derived wrongly at the edge that the reader actually sees.
+
+**NOT INVESTIGATED.** The producer of the header counts has not been located; start from the
+`Assessment Coverage` renderer in `agent/report.py` and compare its population to
+`db.execution_ledger`.
+
 ## STATE SWEEP — 2026-08-17 night, THE TAIL, verified against code. Authoritative; supersedes every marker below.
 
 The tail is no longer UNKNOWN. Two lanes verified every remaining ticket against code rather than its
