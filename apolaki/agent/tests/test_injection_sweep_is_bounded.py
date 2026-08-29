@@ -179,9 +179,12 @@ class _Scope:
         return {"t.test": "https://t.test"}
 
 
-def _drive_sweep(urls, events_out=None):
-    """Run the REAL `_inject_sweep_surface` with a recording `_run_tool`. Returns
-    (info lines, [(tool, url), ...])."""
+def _drive_sweep(urls):
+    """Run the REAL `_inject_sweep_surface` with a recording `_run_tool`.
+
+    Returns a namespace of everything a caller might assert on: `.infos` (info-event text),
+    `.events` (every event, so the `degraded` ones are reachable), `.dispatched` [(tool, url)] and
+    `.scan` (the agent, for `_sweep_budget`)."""
     scan = object.__new__(agent_mod.BBHAgent)
     scan.tools = _Tools(urls)
     scan.scope = _Scope()
@@ -200,10 +203,9 @@ def _drive_sweep(urls, events_out=None):
         return [ev async for ev in scan._inject_sweep_surface("q113")]
 
     events = asyncio.run(_go())
-    if events_out is not None:
-        events_out.extend(events)
-        events_out.append(scan)
-    return [e.get("content", "") for e in events if e.get("type") == "info"], dispatched
+    return SimpleNamespace(
+        events=events, dispatched=dispatched, scan=scan,
+        infos=[e.get("content", "") for e in events if e.get("type") == "info"])
 
 
 def _sweep_line(infos):
@@ -215,15 +217,15 @@ def _sweep_line(infos):
 def test_the_capped_sweep_dispatches_bounded_work_and_reports_what_it_declined():
     """GATE 1, as EXECUTION. `len(sweep_targets(...))` is a declaration; this counts what the mission
     actually hands to the engines, through the real `_inject_sweep_surface`."""
-    infos, dispatched = _drive_sweep(_surface_465())
-    swept = {url for tool, url in dispatched if tool == _PARAM_SWEEP_MARKER}
+    run = _drive_sweep(_surface_465())
+    swept = {url for tool, url in run.dispatched if tool == _PARAM_SWEEP_MARKER}
     assert len(swept) <= 60, "the sweep probed %d distinct endpoint(s)" % len(swept)
 
-    injection = [d for d in dispatched
+    injection = [d for d in run.dispatched
                  if d[0] in agent_mod._SWEEP_HTTP_ENGINES + agent_mod._SWEEP_BROWSER_ENGINES]
     assert len(injection) <= 600, "%d injection dispatches is not a bound" % len(injection)
 
-    line = _sweep_line(infos)
+    line = _sweep_line(run.infos)
     assert "DECLINED" in line, "the sweep did not report a declined count: %r" % line
     assert "465" in line, "the sweep did not state the surface it declined FROM: %r" % line
     declined = 465 - len(swept)
@@ -235,12 +237,12 @@ def test_an_ordinary_engagement_is_not_silently_shrunk():
     """GATE 2, the NEGATIVE CONTROL, and the one that matters. A cap that quietly trims a 10-endpoint
     engagement is a new defect, not a fix - and a "0 declined" claim must be printed, not inferred
     from the absence of a warning."""
-    infos, dispatched = _drive_sweep(_surface_10())
-    swept = {url for tool, url in dispatched if tool == _PARAM_SWEEP_MARKER}
+    run = _drive_sweep(_surface_10())
+    swept = {url for tool, url in run.dispatched if tool == _PARAM_SWEEP_MARKER}
     assert len(swept) == 10, "an ordinary engagement lost %d endpoint(s)" % (10 - len(swept))
     assert swept == set(_surface_10())
 
-    line = _sweep_line(infos)
+    line = _sweep_line(run.infos)
     assert "DECLINED" not in line, "nothing was declined and the mission said it was: %r" % line
     assert "0 declined" in line, "a full sweep must SAY it declined nothing: %r" % line
 
@@ -283,19 +285,18 @@ def test_a_slow_target_stops_at_the_wall_clock_budget_and_says_DEGRADED(monkeypa
     ticks = iter(range(0, 10 ** 6, 360))                                  # 6 min per call
     monkeypatch.setattr(agent_mod, "_sweep_clock", lambda: next(ticks))
 
-    events = []
-    _drive_sweep(_surface_465(), events_out=events)
-    scan = events.pop()
-    degraded = [e for e in events if e.get("type") == "degraded"]
+    run = _drive_sweep(_surface_465())
+    degraded = [e for e in run.events if e.get("type") == "degraded"]
     assert degraded, "the sweep ran past its wall-clock budget without saying so"
     line = degraded[0]["content"]
     assert degraded[0]["reason"] == "sweep_wall_budget_exhausted"
     assert "DECLINED" in line and "DEGRADED" in line, line
     # ~1 h at 6 min/endpoint is ~10 endpoints, and it must be FEWER than the count cap allowed,
     # or the deadline is decoration sitting behind a bound that already fired.
-    assert scan._sweep_budget["timed_out"] >= 20, scan._sweep_budget
-    assert scan._sweep_budget["selected"] <= 20, scan._sweep_budget
-    assert scan._sweep_budget["declined"] == 465 - scan._sweep_budget["selected"], scan._sweep_budget
+    budget = run.scan._sweep_budget
+    assert budget["timed_out"] >= 20, budget
+    assert budget["selected"] <= 20, budget
+    assert budget["declined"] == 465 - budget["selected"], budget
 
 
 def test_a_fast_target_never_trips_the_wall_clock(monkeypatch):
@@ -306,13 +307,11 @@ def test_a_fast_target_never_trips_the_wall_clock(monkeypatch):
     ticks = iter(range(0, 10 ** 6))                                       # 1 s per call
     monkeypatch.setattr(agent_mod, "_sweep_clock", lambda: next(ticks))
 
-    events = []
-    _, dispatched = _drive_sweep(_surface_465(), events_out=events)
-    scan = events.pop()
-    assert not [e for e in events if e.get("type") == "degraded"], "the deadline fired on a fast target"
-    assert "timed_out" not in scan._sweep_budget, scan._sweep_budget
-    swept = {url for tool, url in dispatched if tool == _PARAM_SWEEP_MARKER}
-    assert len(swept) == scan._sweep_budget["selected"] <= 60
+    run = _drive_sweep(_surface_465())
+    assert not [e for e in run.events if e.get("type") == "degraded"], "the deadline fired on a fast target"
+    assert "timed_out" not in run.scan._sweep_budget, run.scan._sweep_budget
+    swept = {url for tool, url in run.dispatched if tool == _PARAM_SWEEP_MARKER}
+    assert len(swept) == run.scan._sweep_budget["selected"] <= 60
 
 
 def test_the_one_step_wrapper_is_the_composition_the_mission_actually_runs():
