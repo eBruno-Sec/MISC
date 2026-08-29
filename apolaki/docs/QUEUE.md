@@ -52,6 +52,83 @@ Still open from this cycle, filed by Lane C during the Q-109 hunt and NOT worked
   (`graph_primary_state x14 -> ingest_intel x1`, hostless swallows recorded during the run: 0). The
   producer finding does not depend on that ordering; the ledger row's exact provenance does.
 
+### Q-122 · Q-111b did NOT close the phantom parameters -- MY fix, and the field says otherwise · **READY** · **HIGH**
+
+**Measured on the operator's overnight VPN run (`Shopify_28Aug2026@2004`), which HAS both Q-111 and
+Q-111b.** Three findings on parameters that do not exist are still there:
+
+```
+Finding 11: Reflected DOM data manipulation in 'amp;language'
+Finding 12: Reflected DOM data manipulation in 'amp;signup_page'
+Finding 13: Reflected DOM data manipulation in 'amp;signup_types[]'
+```
+
+**I told the operator this was fixed. It is not, and the URL says exactly why:**
+
+```
+https://admin.shopify.com/signup?locale=en&amp%3Blanguage=domtrb64c84db&amp%3Bsignup_page=...
+```
+
+Look at `amp%3Blanguage`. The semicolon is **percent-encoded**. `html.unescape` cannot help: there is
+no `&amp;` left to decode. The split into a literal `amp;language` token already happened, and then
+the URL was REBUILT -- `urlencode` over a `parse_qsl` result percent-encodes the `;` -- so the damage
+is baked into a well-formed URL that both Q-111 (the `_add_ref` producer) and Q-111b (the `_add_urls`
+intake) look at and correctly find nothing wrong with.
+
+**MY ERROR IN REASONING, recorded because it is the reusable part.** Q-111b was written for "a
+producer fix cannot clean history" and I fixed the URL intake. But the poisoned artifact that
+survives is not only a URL -- it is a PARAMETER NAME, and a param name never passes through
+`_add_urls`. I fixed the road I had already been looking at.
+
+**TWO CANDIDATE PRODUCERS, both testable, neither yet proven -- do not pick one on plausibility:**
+
+1. A stored `param` row in `memory_assets` literally named `amp;language`, harvested before Q-111 and
+   replayed straight into probe construction, never passing any intake.
+2. **Q-118's bypass.** `agent.py:1625` appends to `tools.urls` PAST `_add_urls`, so a raw `&amp;`
+   href entering by that road skips the unescape as well as `clean_url` and `scope.validate`.
+
+**GATE:** a stored param row named `amp;language` never reaches a probe, AND a URL arriving by the
+`agent.py:1625` road is unescaped. Negative control: `language` and `signup_page` -- the REAL
+parameters behind the entity -- must still be probed, or this trades a false positive for a blind
+spot, which is the failure Q-111's own gate was written against.
+
+### Q-123 · The ledger's "Findings" column does not contain findings · **READY** · **MEDIUM**
+
+From the same run, in one table, against a report whose total is **23**:
+
+```
+| run_subfinder | executed | 25 | 37725 | 1 subdomains found      |
+| http_probe    | executed | 280 | 279  | 403 403 Forbidden ...   |
+| run_dom_trace | executed | 39  | 25   | 1 DOM source-to-sink finding(s) |
+```
+
+`run_subfinder` did not produce 37725 findings; `http_probe` did not produce 279. The column counts
+something else -- items, results, rows -- under a header that says Findings, and the note beside it
+contradicts it on the same line (`25` vs "1 subdomains found", `25` vs "1 DOM source-to-sink").
+
+**A number that disagrees with the sentence next to it is not evidence**, and this is the third
+instance this week of a value being re-derived wrongly at the edge the reader sees (Q-115 the
+coverage header, Q-105 the ledger window). Either rename the column to what it counts or count
+findings. **GATE:** the sum of the findings column over all engines is reconcilable with the report's
+total, or the column is renamed and a test pins the new meaning.
+
+### Q-124 · The FAILED banner asserts a cause it never measured · **READY** · **MEDIUM**
+
+Every failed run prints:
+
+> "This assessment did not complete (**commonly a provider quota/rate-limit or network error**, not a
+> target result)."
+
+This run used **`AI calls used: 0`, execution strategy deterministic.** There is no provider and no
+quota. The banner guesses, and it guesses wrong in a way that sends the operator to look at his API
+billing instead of at `run_zap`'s daemon error and `run_wayback`'s 25 failed connections -- both of
+which the ledger names correctly three sections further down.
+
+Same disease as Q-114, at the top of the report instead of in a severity: **stated with confidence,
+never measured.** The mission knows why it stopped; the banner should say that or say nothing.
+**GATE:** a deterministic run's failure banner never mentions a provider quota. Negative control: a
+run that genuinely died on a provider error still says so.
+
 ### Q-117 · `codereview_graph` mints a fabricated host that REACHES THE PROBE SURFACE · **READY** · **HIGH**
 
 Found by Lane C while hunting Q-109, and it is **worse than Q-109**. `codereview_graph.py:68` keys
