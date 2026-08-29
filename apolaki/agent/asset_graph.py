@@ -326,8 +326,41 @@ class AssetGraph:
                          label="exposed-credential", source=source)
         for cp in cands.get("coupon", []) or []:
             self.observe("coupon", str(cp)[:24], label="coupon-code", source=source)
+        # Q-109. A harvested route is a PATH, never an ADDRESS. `intel` stores these as bare paths by
+        # construction (intel.py:269/327/365 each prepend "/"), so keying an `endpoint` node on the
+        # candidate minted a node with no host. `_endpoint_url` then correctly refused to resolve it
+        # and `_graph_primary_state` dropped it and RECORDED the drop -- the reporter was right, and
+        # this line was the producer. MEASURED on a full juice-shop mission: 113 hostless endpoint
+        # nodes, 113 of 113 carrying `source='harvest'`, which is this function's own default.
+        #
+        # NOT "absolutize it onto the mission base". MEASURED on the same run, the candidates include
+        # server-side FILESYSTEM paths lifted out of a stack trace
+        # (/juice-shop/node_modules/express/lib/router/index.js), an SPA hash-route
+        # (/#/forgot-password) and a fragment of a minified Angular expression the `_PATH` regex
+        # matched. Pinning those to the base would manufacture an address nobody ever observed --
+        # the same defect as `https:///path`, one step further from the evidence.
+        #
+        # So the FACT is kept and its CLAIM is corrected: a candidate that carries a host stays an
+        # `endpoint` keyed netloc+path (the convention `_graph_add_url` already uses), and a bare
+        # path becomes a `route` node -- known, provenance-tagged, never promoted to probe surface.
+        # `to_observations` reads both kinds, so no observation is lost.
+        from urllib.parse import urlparse as _up
         for r in (cands.get("route", []) or []) + (cands.get("endpoint", []) or []):
-            self.observe("endpoint", str(r), label=str(r), source=source)
+            s = str(r).strip()
+            if not s:
+                continue
+            if "://" in s:
+                p = _up(s)
+                if p.netloc:
+                    self.observe("endpoint", p.netloc + (p.path or "/"), label=(p.path or "/"),
+                                 source=source)
+                elif p.path:
+                    # `https:///x` -- a scheme with an EMPTY netloc. It is a path, so it is recorded
+                    # as one; it is not an address, so it is never faked into a node the planner
+                    # would probe.
+                    self.observe("route", p.path, label=p.path, source=source)
+                continue
+            self.observe("route", s, label=s, source=source)
         return len(self._nodes) - n0
 
     def to_observations(self) -> set:
@@ -368,7 +401,12 @@ class AssetGraph:
             # means a param written before locations existed, which was always a query param.
             if (props.get("location") or "query") == "body":
                 obs.add("has_body_params")
-        for e in self.nodes("endpoint"):
+        # Q-109, the OTHER half. A `route` node is the same knowledge as an endpoint minus an
+        # address, so these keyword observations have to read it too. Without this line the ingest
+        # fix above would trade a false probe target for a REAL blind spot: a harvested
+        # /rest/user/login would stop contributing has_login/has_api at all. Two existing tests fail
+        # without it, which is what makes them the positive control for this half.
+        for e in self.nodes("endpoint") + self.nodes("route"):
             low = (e.get("label") or e.get("key") or "").lower()
             if any(k in low for k in ("/login", "/signin", "/sign-in", "/auth", "/session")):
                 obs.add("has_login")
