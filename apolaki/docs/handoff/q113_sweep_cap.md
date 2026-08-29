@@ -309,3 +309,35 @@ re-aim it):
     +    # budget the size of a real app's surface is a run that cannot finish. The floor stays only as
     +    # a guard against the ORIGINAL bug, a cap of 20.
     +    assert 25 <= agent_mod.SWEEP_TARGET_CAP <= 60, "the sweep budget is no longer an engagement bound"
+
+## Open items I did NOT do
+
+1. **The two reds above.** Both are in files this lane cannot write. Both patches are written out
+   verbatim; neither is a judgement call I can make unilaterally, because both re-aim an assertion
+   that a previous lane put there on purpose.
+2. **`docs/QUEUE.md` and `docs/benchmarks/wp3_precondition.md`** need the
+   `BBH_SWEEP_TARGETS=700`-for-whole-product note. Not my files.
+3. **`main.py` reading `_sweep_budget`** into the report context - three-line patch above.
+4. **UNVERIFIED: whether `BBH_SWEEP_TARGETS=700 APOLAKI_LIVE_LAB=1` restores the reach floor green.**
+   The mechanism is the same env override that produced the 700 default, but I did not run it.
+5. **UNVERIFIED: the real-world value of 40 specifically.** 40 is inside the ticket's stated 25-50
+   band and above `planner.CAP_ENDPOINTS`; the operator's evidence that it is enough is that his
+   findings at 5% of 465 (23 endpoints) were his findings at 15% (69). That is one engagement, and
+   it is an argument about a single target, not a measured optimum. The wall-clock bound is the part
+   that does not depend on guessing this number right.
+6. **Not attempted: making the count cap itself cost-adaptive** (e.g. widening it while the measured
+   per-endpoint cost stays low). That would collapse both bounds into one and remove the benchmark
+   collision entirely. It is a bigger change than this ticket and needs its own pre-registered
+   revert conditions.
+
+## Disproved hypotheses, recorded because a disproved hypothesis is a result
+
+- **"The ranking is the missing work."** It was already built (`target_security_value`,
+  `rank_targets_for_budget`, `_spread_by_shape`, all called in that order before truncation). The
+  missing work was a cap that binds, a denominator, and operator-asset ranking.
+- **"A count cap is a time bound."** It is not, and this is the sharpest thing measured here: the
+  same 465-endpoint scale costs seconds per endpoint on the lab and ~6 minutes on the operator's
+  target. A count cap large enough for one is a two-day run on the other, which is why the ticket's
+  cap and wp3's cap cannot be the same number and why the second bound had to exist.
+- **"Value ranking will visibly improve the OWASP whole-product selection."** MEASURED false: every
+  OWASP candidate scores 1, so the ranking is a no-op there and the selection is pure shape spread.
