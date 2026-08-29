@@ -4819,7 +4819,25 @@ established the root cause. Its state is whatever that header says.
 - **Files**: `agent/techniques.py`, `agent/engine_descriptor.py`, `agent/technique_planner.py`,
   `agent/tests/test_engine_reachability.py`. **Blocks**: Q-007, Q-011, Q-012.
 
-### Q-011 · `mass_assignment` is the SECOND phantom — same shape, same backfill · **HIGH** · `proposed`
+### Q-011 · `mass_assignment` is the SECOND phantom — same shape, same backfill · **HIGH** · **HALF CLOSED** `68220af` `39b41b9` — the liveness proof is still open
+
+**QUEUE-ROT RE-MEASUREMENT, 2026-08-29 (autocontinue).** Header still read the not-yet-closed marker.
+The engine now genuinely EXISTS and is wired: `agent/mass_assign_tool.py`, dispatched as
+`run_mass_assign` (`tools.py`, `TOOL_PERMISSIONS`), `test_mass_assign_tool.py` +
+`test_asvs_model.py` + `test_engine_reachability.py` — 96 passed, 0 failed, fresh. But TWO of the
+ticket's own DoD items are still unmet, checked directly rather than inferred:
+
+- **"engine live in a real mission"** — FALSE. Read the LIVE db (read-only, `docker exec
+  apolaki-agent-1`): `run_mass_assign` `tool_call` rows across all history = **0**.
+- **"liveness check added"** — FALSE. `grep mass_assign agent/liveness.py agent/liveness_run.py
+  agent/tests/liveness_baseline.json` = no hits.
+
+Not marking CLOSED — that would repeat the exact mistake Q-021B sat under for weeks (DoD not fully
+met despite the code shipping). Same shape as Q-021B/Q-126: needs a `liveness.py` CHECK (the `kind:
+"tool"` pattern already exists, since this DOES produce a confirmed finding, unlike Q-021B) wired
+against a lab with a real mass-assignment surface (crAPI is the standard fixture for this class;
+confirm which local lab actually exposes one before wiring it), driven end to end at least once.
+
 - **MEASURED**: no mass-assignment executor exists anywhere. `def .*assign` in `tools.py` -> nothing;
   the only code that ever over-posts a privileged attribute is `juiceshop_solvers.py:67`
   (`_register(c, ..., role="admin")  # Admin Registration`) — the **lab solver**, exactly as with
@@ -4846,7 +4864,17 @@ established the root cause. Its state is whatever that header says.
   mission, liveness check added, ATHZ-04 reaches `verified` on a clean paired lab, WSTG-INPV-20's
   `FULL` claim becomes true rather than aspirational.
 
-### Q-012 · Six ASVS engine names resolve to nothing; two objectives can never be verified · **MEDIUM** · `proposed`
+### Q-012 · Six ASVS engine names resolve to nothing; two objectives can never be verified · **MEDIUM** · **CLOSED**
+
+**QUEUE-ROT CORRECTION, 2026-08-29 (autocontinue).** Header still read the not-yet-closed marker.
+RE-MEASURED against `agent/asvs_model.py`: all six phantom names corrected, each with an inline
+comment citing this ticket — `authz_matrix` -> `run_authz_matrix`, the `header_analysis`/`run_deser`
+phantoms dropped, `dependency_intel`/`bizlogic_graph` re-pointed to the real dispatching engine
+(`run_js_review`) rather than the bare module name, and `run_mass_assignment` corrected to the
+shipped name `run_mass_assign` (Q-011's engine — see the HALF CLOSED note above; Q-012's own DoD,
+name resolution, does not depend on that engine's liveness proof). `test_asvs_model.py` passes
+fresh as part of the 96/96 measured above.
+
 - **MEASURED** (cross-check of `asvs_model.OBJECTIVES` against `tools.TOOL_PERMISSIONS` (111 keys) +
   `CLAUDE_TOOLS` (77 names) + 201 methods):
   ```
@@ -4958,7 +4986,16 @@ Two defects in the same handler. The second is not in the Q-009 list; I found it
   `lid` that exists in no mission must still 404.
 - **Files**: `agent/main.py`, `agent/db.py`, `agent/proof_schema.py` (all owned elsewhere — sequence).
 
-### Q-015 · `risk_signals` is the unfiltered twin of `risk_score` · **MEDIUM** · `proposed`
+### Q-015 · `risk_signals` is the unfiltered twin of `risk_score` · **MEDIUM** · **CLOSED** `b87dc73`
+
+**QUEUE-ROT CORRECTION, 2026-08-29 (autocontinue).** Header still read the not-yet-closed marker even
+though `dc24a81` ("two of the four audit defects are already fixed and still marked proposed")
+already flagged this exact rot once and only fixed the code, not the header. RE-MEASURED:
+`report.risk_signals` (`report.py:1806`) now filters to `confirmed = [f for f in findings if
+_confirmed(f)]` before computing `conf_load`, with an inline comment quoting this ticket's own
+contradiction verbatim. `tests/test_risk_signals_agrees_with_risk_score.py` — fresh run, all green
+(part of the 9/9 below).
+
 - **Root cause**: `report.risk_score` was fixed to filter demoted rows ("THE FILTER IS THE CONTRACT,
   and it was missing"). `report.risk_signals` computes the same quantity 40 lines later and did not
   get the filter: `conf_load = min(100, sum(_SEV_WEIGHT... for f in findings))` — no confidence test —
@@ -4981,7 +5018,16 @@ Two defects in the same handler. The second is not in the Q-009 list; I found it
   signal. Mutation: re-remove the filter and the assertion must fail.
 - **Files**: `agent/report.py` (owned elsewhere this cycle — sequence it).
 
-### Q-016 · `bie._read_controls` returns `[]` on failure — BIE phase 2 cannot report that it went dark · **MEDIUM** · `proposed`
+### Q-016 · `bie._read_controls` returns `[]` on failure — BIE phase 2 cannot report that it went dark · **MEDIUM** · **CLOSED** `b87dc73`
+
+**QUEUE-ROT CORRECTION, 2026-08-29 (autocontinue).** Same stale header as Q-015 above, same closing
+commit (`b87dc73`, "a report that contradicted itself, and a crash that read as 'no controls'").
+RE-MEASURED: `bie._read_controls` (`bie.py:1504`) no longer bare-`except: return []`s — it records
+the failure so the caller can tell a crash from a genuinely empty control surface, docstring citing
+Q-016 by name and "fourth instance of this shape" (DOM_SCAN_JS / traversal import / service sweep).
+`tests/test_bie_control_read_is_not_silent.py` + `test_risk_signals_agrees_with_risk_score.py` — 9
+passed, 0 failed, fresh.
+
 - **Root cause** (`bie.py:1475`): `except Exception: return []`. Every caller path then reads a clean
   empty result — `classify_controls([])` -> `counts.total = 0` -> `probe_targets` returns nothing ->
   phase 2 (CWE-602 client-side authz) emits **zero probes and zero findings**, and the report prints
@@ -5033,7 +5079,16 @@ the UI check this ticket explicitly declined to run — not resolved here, not c
 - **Negative control**: a mission with < 500 rows returns byte-identical output to today.
 - **Files**: `agent/db.py`, `agent/main.py` (owned elsewhere — sequence it).
 
-### Q-018 · Retest scope guard — DISPROVED as a live defect; hardening only · **LOW** · `proposed`
+### Q-018 · Retest scope guard — DISPROVED as a live defect; hardening only · **LOW** · **CLOSED** `3c47bdf` `b2b5051`
+
+**QUEUE-ROT CORRECTION, 2026-08-29 (autocontinue).** Header still read the not-yet-closed marker.
+RE-MEASURED: `main.py:~3199` now fails CLOSED exactly per the ticket's fix contract — a scope that
+cannot be parsed into an enforceable boundary refuses the WHOLE retest with a logged `tool_error`
+(`SCOPE GUARD UNAVAILABLE`), not a per-finding partial allow, with the ticket's own MEASURED
+before/after (`bases=[{'nested':'dict'}] -> 1 request` before, `0 requests` after) quoted inline.
+`tests/test_retest_scope_guard.py` + `tests/test_scope_gate_fails_closed.py` — 18 passed, 0 failed,
+fresh.
+
 Filed so it is not re-raised as a CRITICAL. **Do not treat the audit's framing as fact.**
 - **MEASURED**: replayed `main.py:2578-2602` verbatim against the real `scope` dict of **all 151**
   stored missions.
@@ -5791,7 +5846,18 @@ a client can tell Apolaki's technology intelligence from a scanner's version-tab
 
 ## Rank 3d — new tickets from today's measurements (Distillation, 2026-08-10). All `proposed`.
 
-### Q-022 · "How this was confirmed" is a template, not a record — 626 of 660 findings · **CRITICAL** · `proposed`
+### Q-022 · "How this was confirmed" is a template, not a record — 626 of 660 findings · **CRITICAL** · **CLOSED** `bd912f4`..`ece4e39`
+
+**QUEUE-ROT CORRECTION, 2026-08-29 (autocontinue).** Header still read the not-yet-closed marker
+after a three-commit chain (`git log --grep=Q-022`) closed it, titled at the end "Q-022 DISPROVED:
+the fabricated confirmation narrative is gone, measured end to end" (`ece4e39`). RE-MEASURED:
+`report.proof_and_retest` (`report.py:1714`) no longer synthesizes a canned per-family string —
+`negative_control_claim` is now `control_ran`-aware (a real recorded artifact prints a quote of it;
+its absence prints the prescription as a prescription, not a past-tense claim), with a documented
+third layer for source-derived findings (Q-082) so the two composed claims cannot drift apart again.
+The docstring cites this ticket's own 660/34/626 (94.8%) measurement inline. RE-MEASURED just now:
+`test_proof_claim_matches_artifact.py` + `test_recorded_control_is_quoted.py` +
+`test_nested_negative_control.py` + `test_evidence_contract_by_proof_kind.py` — 47 passed, 0 failed.
 
 *The platform's differentiator is that its proofs are real. This is the one place the report says a
 proof happened without checking that it did.*
