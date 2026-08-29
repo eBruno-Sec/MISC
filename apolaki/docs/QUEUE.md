@@ -53,7 +53,7 @@ grades INFORMATIONAL. Negative control, and it is the half that keeps this an or
 redirect **plus** `Age: 0` and `X-Cache: HIT` still grades MEDIUM, so the fix cannot be satisfied by
 downgrading everything.
 
-### Q-115 · The Assessment Coverage summary disagrees with the ledger and the heartbeat · **READY** · **MEDIUM**
+### Q-115 · The Assessment Coverage summary disagrees with the ledger and the heartbeat · **CLOSED** · **MEDIUM**
 
 Every Shopify snapshot carries three counts of the same quantity and no two agree:
 
@@ -71,9 +71,30 @@ header is counting a narrower population than it labels.
 answers is not evidence.** This is the reporting-layer instance of the week's class: a value
 measured correctly somewhere and re-derived wrongly at the edge that the reader actually sees.
 
-**NOT INVESTIGATED.** The producer of the header counts has not been located; start from the
-`Assessment Coverage` renderer in `agent/report.py` and compare its population to
-`db.execution_ledger`.
+**FOUND AND FIXED, same file, ninety lines apart.** `main.py:_coverage` folded
+`db.get_logs(session_id, limit=2000)`. `main.py:_tool_ledger` folded the same population and was
+moved to the cumulative `db.iter_logs` by **Q-105** -- and the sibling consumer was left behind.
+`get_logs` keeps the NEWEST rows when the limit bites, deliberately (Q-017: a truncated tail must
+not make a live mission look stopped). Correct for a log view, wrong for an aggregate.
+
+That also explains the louder half. On a 2181-dispatch mission the 2000-row window sat entirely
+inside the injection sweep, where the run was hammering the same handful of engines, so every engine
+that had run EARLIER aged out and `distinct_tools` collapsed to 8 against 31 ledger rows.
+
+The population was aligned too: a `tool_call` row with no tool name is now skipped rather than
+bucketed under a `None` key, matching `_tool_ledger`'s `if not t: continue`. Two aggregates over one
+population must not disagree about which rows are in it.
+
+**GATE** (13 passed with `test_ledger_is_cumulative`, 37 across the report/ledger path):
+`test_coverage_and_the_ledger_agree_on_a_mission_longer_than_the_window` compares the two renderers
+directly -- the field symptom itself -- and asserts LITERALS on both sides, because an equality
+between two expressions that share a bug passes happily while both are wrong.
+
+**MUTATION, 2 of 2 killed.** Reverting the loop to `get_logs(session_id, limit=2000)` fails
+`test_an_engine_that_ran_early_is_still_counted_after_a_long_tail` and the agreement test; dropping
+the empty-tool guard fails `test_a_tool_call_row_with_no_tool_name_is_not_a_distinct_tool`. Negative
+control passes: a three-call mission still reports 3 and 2, so the fix is invisible to the ordinary
+run.
 
 ## STATE SWEEP — 2026-08-17 night, THE TAIL, verified against code. Authoritative; supersedes every marker below.
 

@@ -978,11 +978,31 @@ def _attack_surface(session_id: str) -> dict:
 
 
 def _coverage(session_id: str) -> dict:
-    logs = db.get_logs(session_id, limit=2000)
     tools_run = {}
-    for l in logs:
-        if l.get("type") == "tool_call":
-            tools_run[l.get("tool")] = tools_run.get(l.get("tool"), 0) + 1
+    # Q-115: EVERY row, not the newest 2000. This is the same defect Q-105 fixed in `_tool_ledger`
+    # ninety lines below, left behind in the sibling consumer -- so ONE report stated the same
+    # quantity three times and no two agreed. MEASURED on the operator's Shopify mission:
+    #
+    #     Assessment Coverage:  Tools Invoked 848   | Distinct Tools 8
+    #     Execution ledger:     2181 calls          | 31 rows
+    #     mission_heartbeat:    2181 dispatches
+    #
+    # The ledger and the heartbeat agree because both are cumulative. `get_logs` deliberately keeps
+    # the NEWEST rows when the limit bites (Q-017, so a truncated tail cannot make a live mission
+    # look stopped) -- correct for a log view, wrong for an aggregate. The window landed inside the
+    # injection sweep, where the mission was hammering the same handful of engines, which is exactly
+    # why `distinct_tools` collapsed to 8: every engine that ran EARLIER had aged out.
+    #
+    # `l.get("tool")` is skipped when absent rather than counted under a None key, matching
+    # `_tool_ledger`'s `if not t: continue`. Two aggregates over one population must not disagree on
+    # which rows are in it.
+    for l in db.iter_logs(session_id):
+        if l.get("type") != "tool_call":
+            continue
+        t = l.get("tool")
+        if not t:
+            continue
+        tools_run[t] = tools_run.get(t, 0) + 1
     return {"tools_invoked": sum(tools_run.values()), "distinct_tools": len(tools_run),
             "surface_urls": len(sessions.get(session_id, {}).get("tools").urls) if session_id in sessions else "n/a",
             # GATED: rendered as "Assessment Coverage -> Findings" beside a proof-gated Total Findings,
