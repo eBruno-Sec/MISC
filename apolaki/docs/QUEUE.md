@@ -934,7 +934,15 @@ rebuild** — that is now the gate's most valuable output, not an aside.
 
 
 
-### Q-078 · Triage the entries Q-077 made visible · **HIGH** · `ready` · **51 -> 44**, and the island was FAIL-OPEN `643a5ca`
+### Q-078 · Triage the entries Q-077 made visible · **HIGH** · **CLOSED** `643a5ca` · **51 -> 44**, and the island was FAIL-OPEN
+
+**QUEUE-ROT CORRECTION, 2026-08-29 (autocontinue).** Header still read the not-yet-closed marker despite the ticket's
+own title citing the closing commit. RE-MEASURED: `agent/ics_fingerprint.py` no longer exists
+(`git log -- agent/ics_fingerprint.py` shows it deleted in `643a5ca`, "the dead ICS safety check was
+FAIL-OPEN, so the module is gone"); `PROTO_PORTS` survived, re-homed to `service_router.py` as
+`_ICS_PROTO_PORTS` (`service_router.py:90`, docstring at `:73` names exactly this ticket's DoD:
+"keep `PROTO_PORTS`, prove the tests are testing the dead copy... before deleting them"). The "STILL
+OPEN" paragraph below is stale — the deletion it withheld pending a decision has already shipped.
 
 #### Coordinator, 2026-08-20 — the structural cut nobody had taken
 
@@ -1101,7 +1109,19 @@ distrusted gate gets silenced -- the same fate this project has already reasoned
 DoD: the failure message prints the true set difference. Negative control: introduce a deliberate
 island and confirm the message names THAT function and no other.
 
-### Q-074 · The negative-effects model is now EMPTY, which is honest but not informative · **MEDIUM** · `ready`
+### Q-074 · The negative-effects model is now EMPTY, which is honest but not informative · **MEDIUM** · **CLOSED** `7cd424e` + prior chain
+
+**QUEUE-ROT CORRECTION, 2026-08-29 (autocontinue).** Header still read the not-yet-closed marker after an eight-commit
+chain (`55ba4d9`..`7cd424e`, `git log --grep=Q-074`) DoD'd this to a final, honest answer. The ticket
+named the wrong engine (`session_lifecycle` measured clean — see the `Q-074` note at
+`engine_descriptor.py:225`); the real invalidation is `race_condition` -> `invalidates:
+["authenticated"]` (`engine_descriptor.py:354`), driven live against a real mission session and
+re-measured after Q-080 closed the door it depended on. Final verdict, stated in `7cd424e`: the
+negative-effects model has exactly ONE production reader (`main.py`'s POST /orchestration/audit) and
+zero scheduling consumers — "decoration", and pinned as such by
+`test_negative_effects_reach.py`, which fails in BOTH directions (delete the row, or wire it into
+the planner). RE-MEASURED just now: `test_negative_effects_reach.py` + `test_effects_engine_fact.py`
++ `test_effects_negative_half.py` — 27 passed, 0 failed.
 
 Successor to Q-007, and stated plainly so nobody reads that close as "the planner now knows about
 conflicts". Coordinator-verified after the fix: `conflicts()` returns **0 rows** (was 6), `EFFECTS`
@@ -4168,14 +4188,33 @@ been making in its own documentation without keeping.
 Each is a real defect with a written reason, held by a strict xfail so it becomes a regression test
 the moment it is fixed. Removing a marker without fixing the defect is forbidden.
 
-### Q-040 · `analyze_boolean` has no baseline-stability control · **CRITICAL** · `ready`
+### Q-040 · `analyze_boolean` has no baseline-stability control · **CRITICAL** · **CLOSED** `32d0586` `cbcba79`
+
+**QUEUE-ROT CORRECTION, 2026-08-29 (autocontinue).** Header still read the not-yet-closed marker; `git log -S
+baseline_repeat -- agent/sqli_tool.py` shows it shipped as `cbcba79` ("Q-040 FIXED -- the reference
+must REPRODUCE, not merely resemble"). RE-MEASURED just now, not assumed:
+`tests/test_sqli_oracle_negative_controls.py` — 13 passed, 0 failed, 0 xfail, including
+`test_an_unstable_page_must_not_confirm_blind_sqli` (the exact ticket assertion) and
+`test_the_two_recorded_bodies_really_do_straddle_the_threshold` (pins the 0.9091 measurement the fix
+was built against) as live passing assertions, not markers.
+
 `tests/test_sqli_oracle_negative_controls.py::test_an_unstable_page_must_not_confirm_blind_sqli`.
 **An unstable page confirms blind SQLi.** This is a false-positive path in our strongest category —
 sqli is 21 of the 22 whole-product true positives, and FPR is currently 0.0% on every category of
 both suites, which is the platform's single best property. Fix: the oracle must re-sample the
 baseline and prove stability before crediting a boolean differential. Remove the marker only then.
 
-### Q-041 · aliased module imports are invisible to the source lane · **HIGH** · `ready`
+### Q-041 · aliased module imports are invisible to the source lane · **HIGH** · **CLOSED** `9f8707a`
+
+**QUEUE-ROT CORRECTION, 2026-08-29 (autocontinue).** Header still read the not-yet-closed marker; `git log -S
+_py_module_aliases -- agent/codereview.py` shows it shipped as `9f8707a` ("Q-041 and Q-042 -- resolve
+the binding, and judge the name by its head noun"), same commit as Q-042 below. RE-MEASURED:
+`_py_module_aliases`/`_py_binds_module` now resolve the binding instead of discarding it, and both
+`scan_python_hash` and `scan_python_random` iterate the resolved alias set (`codereview.py:997,1143`).
+`tests/test_source_lane_breaker.py` — `test_an_aliased_random_module_import_is_still_the_stdlib_
+generator`, `test_an_aliased_hashlib_import_is_still_the_stdlib_digest`, and the paired negative
+control (`import numpy.random as r` stays clean) all pass live, no xfail.
+
 `import random as r` / `import hashlib as hl`. `_py_imports()` computes `modules['r'] = 'random'` and
 then **throws the binding away** — `_py_binds_module` can only SUPPRESS a name, never resolve one, and
 `_PY_RANDOM_CALL` / `_PY_HASHLIB_CALL` hard-code the literal receivers. The `from X import Y as Z`
@@ -4183,7 +4222,16 @@ half is handled correctly, so this is a half-implemented mechanism, not a missin
 benchmark **0 cases** (no aliased imports in the suite) — it is a pure generality hole, and generality
 is the whole claim of the code-assisted lane.
 
-### Q-042 · `_PY_CLOCK_TOKEN` fires on a name that merely CONTAINS a security word · **HIGH** · `ready`
+### Q-042 · `_PY_CLOCK_TOKEN` fires on a name that merely CONTAINS a security word · **HIGH** · **CLOSED** `9f8707a`
+
+**QUEUE-ROT CORRECTION, 2026-08-29 (autocontinue).** Header still read the not-yet-closed marker; same commit as Q-041
+above (`9f8707a`). RE-MEASURED: `_identifier_head`/`_SECURITY_HEADS`/`_paren_depth`/
+`_clock_token_hits` (`codereview.py:1077-1112`) now require the HEAD NOUN of the identifier to be a
+security word and exclude keyword-argument position — exactly the `token_expiry`/`session_start`
+false positives and the `token=` keyword-arg case the ticket names, verbatim in the code comment.
+14 tests across `test_source_lane_breaker.py` + `test_source_lane_js.py` pass live for the `q041`/
+`q042`/alias/clock/token selection, 0 failed, 0 xfail.
+
 Any identifier containing a security word within 90 characters of a clock read is reported as CWE-337
 "a security value derived from the clock" — so an audit or expiry timestamp is a false positive.
 **Confirmed in the wild**: the single CWE-337 across 5139 files of the container's stdlib is this bug
