@@ -1516,6 +1516,63 @@ confirmed" after stopping partway are different facts about the target, and only
 **GATE** (11 passed): a mutant that drops the deadline from **only `_run_cmdi`** is killed by both
 parametrised tests for that engine -- which is precisely the fixed-one-route-missed-another failure.
 
+### Q-112 · A middlebox eating our own payloads is indistinguishable from a clean target · **READY** · **HIGH**
+
+**Reported by the operator from his ISP router's app, mid-scan.** His own gateway IPS was dropping
+Apolaki's probes OUTBOUND, before they ever left his network:
+
+```
+16:50  HTTP URI Comment Characters SQL Injection was blocked
+16:50  HTTP URI 1=1 SQL Injection was blocked
+16:50  HTTP URI Equal To SQL Injection was blocked
+16:54  HTTP URI Union Select SQL Injection was blocked
+17:08  (same three again)          17:12  Union Select again
+```
+
+Those are `sqli_tool`'s payloads. Meanwhile the report read:
+
+```
+run_sqli            | executed | 70 | 0 | tested 3 param(s), 0 confirmed SQLi
+run_sqli_structural | executed | 69 | 0 | 0 structural SQLi finding(s)
+run_xpath / run_ldap / run_ssi / run_css_injection | 69 each | 0
+```
+
+**Every one of those zeros is a blocked request, not a tested parameter.** The engines reported a
+clean result for a probe that never reached the target.
+
+**THIS IS THE WHOLE WEEK'S DEFECT CLASS, ONE LAYER OUT.** Q-092 was `_cmd` discarding an exit code,
+Q-093 `_http` discarding a transport outcome, Q-097 an empty header dict from a dead socket. Each
+time the fix was: **a failed attempt must not be reported as a clean result.** Here the failure
+happens on the operator's OWN path, so nothing inside the process sees an error at all -- the request
+is answered, or times out, and the engine records a legitimate-looking zero.
+
+It also silently costs time: a dropped request sits until timeout, which is part of why the sweep was
+running at ~6 minutes per endpoint.
+
+**WHAT DETECTION LOOKS LIKE.** Do not try to fingerprint IPS vendors. The general, target-agnostic
+signal is a DIFFERENTIAL the engines already have the pieces for:
+
+- a benign request to the same endpoint succeeds, AND
+- every payload-bearing request to it fails in the same way (reset / timeout / a block page that is
+  not the app's own 4xx), AND
+- the pattern holds across UNRELATED hosts
+
+One host behaving that way is a WAF on the target, which is a finding about the target. **The same
+behaviour across unrelated hosts is a middlebox on OUR side**, which is a fact about the run and
+invalidates every injection result in it.
+
+**REPORT IT AS DEGRADED, NEVER AS CLEAN.** The mission must say "injection testing was intercepted
+upstream; these results are void" and the affected engines must return `ran=False`. A run whose
+payloads never left the building is not evidence of a secure target.
+
+**GATE:** with every payload-bearing request failing and the benign control succeeding across two
+unrelated hosts, the injection engines report DEGRADED and NOT "0 confirmed". Negative control, and
+it is the one that matters: a genuinely clean target -- benign AND payload requests both answered
+normally -- must still report a plain zero, or the check turns every quiet scan into a false alarm.
+
+**OPERATOR WORKAROUND until this lands:** disable the gateway IPS for the scan window, or run from a
+VPS. Any run where the router logs blocked probes has void injection results.
+
 ### Q-111 · Phantom parameters: `&amp;` never decoded, so a HIGH was raised on a parameter that does not exist · **CLOSED** · **HIGH**
 
 `intel._add_ref` mined hrefs straight out of markup with no HTML unescaping. An attribute in real
