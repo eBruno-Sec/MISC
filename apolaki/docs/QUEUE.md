@@ -52,6 +52,51 @@ Still open from this cycle, filed by Lane C during the Q-109 hunt and NOT worked
   (`graph_primary_state x14 -> ingest_intel x1`, hostless swallows recorded during the run: 0). The
   producer finding does not depend on that ordering; the ledger row's exact provenance does.
 
+### Q-126 · Q-021B's own Definition of Done requires a `liveness.py` CHECKS entry, and it was never added · **READY** · **MEDIUM**
+
+**Queue-rot correction, found while sweeping the pre-Cycle-15 backlog for genuinely open work
+(`docs/QUEUE.md:5191`, Q-021B).** Its header still read the not-yet-started marker, but `git log --grep=Q-021B`
+shows it shipped: `82538c4`, `883d879`, `8b002aa`, `1f342c9`, `cf63cf1`, `88b95ed` ("Q-021B is
+shipped and wired"). MEASURED just now, not assumed:
+
+- All 3 oracle assertions and all 3 mandatory negative controls the ticket specifies are present
+  and green (`test_tech_fact.py`, `test_tech_producer.py`, `test_tech_graph.py`,
+  `test_tech_memory.py`, `test_techintel_chain.py` -- 86 tests, 0 failed).
+- No new module was created (`dependency_intel.make_component` was extended, per the ticket's own
+  instruction), and `agent/liveness.py`'s `CHECKS` tuple has **zero** entries mentioning
+  `technology`/`tech_fact`/`Q-021B` (confirmed by direct grep, not inference).
+
+**So Q-021B is functionally done but not `CLOSED` by its own Definition of Done**, which explicitly
+requires "a `liveness.py` CHECKS entry ... that fails when `recon['technology']` is empty on a
+target with a known banner."
+
+**Why this is not a two-line addition (checked before filing, not guessed).** Every existing
+`kind: "tool"` check in `liveness.py` routes through `_match()`, which requires
+`confidence in ("confirmed", "high")` on the finding. `tools._run_fingerprint`'s version-disclosure
+finding is deliberately `"confidence": "candidate"` -- correct, because Q-021B's whole design
+principle is "detection is NEVER a confirmed vulnerability." The existing check mechanism therefore
+CANNOT prove this engine live; it needs a new `kind` (e.g. `"recon"`) that reads
+`tools.recon["technology"]` directly rather than requiring a confirmed finding.
+
+**A candidate live target, verified reachable and correctly shaped just now:** `dvwa` serves
+`Server: Apache/2.4.25 (Debian)` (`docker run --rm --network apolaki_default curlimages/curl -skI
+http://dvwa/`), which `fingerprint._SERVER_VER` parses to `name=Apache, version=2.4.25`. Note this
+source (`"Server header"`) is `LOW` confidence by design (`dependency_intel._CONTENT_PROVEN`/
+`_PATH_PROVEN` deliberately exclude it -- spoofable, per `test_spoofable_server_banner_stays_low_
+and_is_never_cve_eligible`), so it proves the WIRING is live, not CVE-eligibility; a
+`CVE_ELIGIBLE`-grade proof needs a `script src`/path-proven or content-proven source (e.g. a served
+`jquery-X.Y.Z.min.js`), which no currently-running lab was found to serve in a quick check
+(`juice-shop`, `dvwa`, `mutillidae`, `bwapp` sampled; none had a version-bearing filename in body).
+
+**GATE for whoever takes this:** a new `liveness.py` `kind: "recon"` check (runner support in
+`liveness_run.py::_run_one`) that calls a tool, reads a named key out of `tools.recon` afterward
+(not the tool's `findings`), and confirms iff that collection is non-empty with an evidence string —
+DEAD otherwise, SKIPPED only if the lab does not answer. Negative control: the same check against a
+target with no fingerprintable bytes must report DEAD, not a false CONFIRMED from a stale/empty
+list. Wire it against `dvwa` (add to `liveness_run._LAB_ADDR`) for the WIRING proof; leave a
+follow-up note (do not block this ticket on it) for a CVE_ELIGIBLE-grade target once one is found or
+built into a lab fixture.
+
 ### Q-125 · `html.unescape` on a URL destroys real parameters -- the fix WAS the defect · **CLOSED** · **HIGH**
 
 **Found while fixing Q-122, and it is worse than Q-122.** `html.unescape` implements the HTML5 rule
@@ -5188,7 +5233,19 @@ paired **producer-side** assertion, not extend this one.
 
 ---
 
-### Q-021B · Stop discarding the version — persist a canonical TechnologyFact · **HIGH** · `proposed`
+### Q-021B · Stop discarding the version — persist a canonical TechnologyFact · **HIGH** · **HALF CLOSED** `82538c4` `883d879` `8b002aa` `1f342c9` `cf63cf1` `88b95ed` — the liveness proof is Q-126
+
+**QUEUE-ROT CORRECTION, 2026-08-29.** This header sat unmarked-as-started for weeks after the work shipped
+(commits below). MEASURED before touching the marker: all 3 oracle assertions and all 3 mandatory
+negative controls this ticket specifies are covered by passing tests (`test_tech_fact.py`,
+`test_tech_producer.py`, `test_tech_graph.py`, `test_tech_memory.py`, `test_techintel_chain.py` — 86
+tests, 0 failed); no new module was created, matching the instruction to extend
+`dependency_intel.make_component`. The one Definition-of-Done item NOT met is the `liveness.py`
+CHECKS entry — genuinely missing, not merely unmarked, and it needs new runner support (a `kind:
+"recon"`) because the existing `kind: "tool"` mechanism requires a `confirmed`/`high`-confidence
+finding, which a TechnologyFact deliberately never is. Filed as **Q-126** with the specifics
+(candidate target, exact gap, why it is not a two-line fix) rather than either closing this
+prematurely or leaving it silently rotting.
 
 **Repository-proven gap.** The version is computed and thrown away one line later, in three separate
 producers, and the one place it is persisted is polluted with English prose.
