@@ -2621,6 +2621,19 @@ def _record_memory(session_id: str) -> None:
                                       personas=personas, capabilities=caps, scope_asset=tkey).save()
         except Exception:
             pass
+        # Q-121: the LIVE graph -- `tools.graph`, the one `_seed_and_project_graph` /
+        # `_graph_primary_state` actually read and wrote to DURING the run -- is a separate object
+        # from the report-time reconstruction above, and until now was discarded at process exit.
+        # Persisted under its own suffix so it never collides with the report-time file: a future
+        # live-graph defect (the shape Q-109 needed a bespoke harness to catch) is postmortem-able
+        # from `/app/data/graph/<session_id>_live.json` without re-running the mission. Best-effort,
+        # same as the block above — never breaks teardown.
+        try:
+            live_graph = getattr(tools, "graph", None)
+            if live_graph is not None:
+                live_graph.save(suffix="_live")
+        except Exception:
+            pass
         ctx = dict(m["context"])
         ctx["graph_data"] = {
             "recon": {"live_hosts": tools.recon.get("live_hosts", []),

@@ -46,18 +46,17 @@ a neighbouring function -- and additionally forbids the raw `db.get_findings(` t
 ## Still open, filed and NOT worked
 
 From Lane C's Q-109 hunt (`docs/handoff/q109_hostless_producer.md` section 8), ranked by how badly
-each one lies to the operator:
+each one lies to the operator. **1-3 and 5 CLOSED** (Q-117, Q-118, Q-119, Q-121); **4 (Q-120) in
+flight** as of this update.
 
-1. **`codereview_graph.py:68` mints `src:/api/foo`**, which `_endpoint_url` resolves to
-   `https://src:/api/foo`. A fabricated host that REACHES THE PROBE SURFACE and that no ledger row
-   ever names, precisely because it resolves. Worse than Q-109, which at least got caught.
-2. **`agent.py:1625` appends past `_add_urls`** -- no `clean_url`, no `scope.validate`, no
-   session-kill quarantine. A scope gate that a producer can walk around.
-3. **`_swallow`'s 160-char cap eats the evidence of 5 sites, 3 of them entirely.** The ticket premise
-   that it "carries the first three offenders verbatim" is false; only the first ever survives.
-4. `ingest_intel` is wired one phase too late to steer the mission that feeds it.
-5. **The live `tools.graph` is never persisted** -- only the report-time rebuild is, so every
-   live-graph defect is un-postmortem-able.
+1. ~~`codereview_graph.py:68` mints `src:/api/foo`~~ -- **CLOSED (Q-117)**, `5bf1f7a`.
+2. ~~`agent.py:1625` appends past `_add_urls`~~ -- **CLOSED (Q-118)**, `78b9b77`.
+3. ~~`_swallow`'s 160-char cap eats the evidence of 5 sites~~ -- **CLOSED (Q-119)**, `d0b2c0f`.
+4. `ingest_intel` is wired one phase too late to steer the mission that feeds it -- **Q-120, IN
+   FLIGHT**.
+5. ~~The live `tools.graph` is never persisted~~ -- **CLOSED (Q-121)**: `AssetGraph.save`/`load`
+   take an additive `suffix`; `main._record_memory` now also saves `tools.graph` under `_live`,
+   landing at `/app/data/graph/<session_id>_live.json` alongside the report-time reconstruction.
 
 **UNRECONCILED and flagged rather than smoothed over:** on HEAD and on the build the operator's runs
 used, `ingest_intel` fires AFTER the last `_graph_primary_state` (`graph_primary_state x14 ->

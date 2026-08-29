@@ -552,12 +552,20 @@ class AssetGraph:
                 "needs_validation": needs_val,
                 "needs_validation_count": len(needs_val)}
 
-    def save(self, base_dir: str = None) -> str:
+    def save(self, base_dir: str = None, suffix: str = "") -> str:
+        # Q-121: `suffix` is additive and defaults to "" — every existing caller (the report-time
+        # `build_from_engagement` graph, keyed on the bare mission id) is byte-for-byte unaffected.
+        # It exists so the LIVE graph a mission actually reasoned over -- `ToolRegistry.graph`,
+        # accumulated call-by-call during the run -- can be persisted ALONGSIDE the report-time
+        # reconstruction under its own filename instead of being silently overwritten by it. Before
+        # this, only the rebuilt graph ever reached `/app/data/graph`, so a live-graph defect (Q-109
+        # needed a bespoke harness to catch one) was un-postmortem-able: nothing on disk carried the
+        # state the mission actually built.
         base = base_dir or os.path.join(os.environ.get("BBH_DATA_DIR", "/app/data"), "graph")
         try:
             os.makedirs(base, exist_ok=True)
             safe = "".join(c for c in str(self.mission_id) if c.isalnum() or c in "-_") or "default"
-            path = os.path.join(base, f"{safe}.json")
+            path = os.path.join(base, f"{safe}{suffix}.json")
             tmp = path + ".tmp"
             with open(tmp, "w", encoding="utf-8") as f:
                 json.dump(self.to_dict(), f)
@@ -567,11 +575,11 @@ class AssetGraph:
             return ""
 
     @classmethod
-    def load(cls, mission_id: str, base_dir: str = None) -> "AssetGraph":
+    def load(cls, mission_id: str, base_dir: str = None, suffix: str = "") -> "AssetGraph":
         base = base_dir or os.path.join(os.environ.get("BBH_DATA_DIR", "/app/data"), "graph")
         safe = "".join(c for c in str(mission_id) if c.isalnum() or c in "-_") or "default"
         try:
-            with open(os.path.join(base, f"{safe}.json"), "r", encoding="utf-8") as f:
+            with open(os.path.join(base, f"{safe}{suffix}.json"), "r", encoding="utf-8") as f:
                 return cls.from_dict(json.load(f))
         except Exception:
             return cls(mission_id)

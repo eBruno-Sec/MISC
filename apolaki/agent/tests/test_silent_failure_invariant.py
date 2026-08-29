@@ -198,7 +198,11 @@ def test_partition_is_non_vacuous_and_matches_the_measured_rebased_tree():
     # every possible dalfox output).  Ratcheted rather than left slack, so the seat that
     # handler occupied cannot be silently refilled.
     assert counts["optional"] <= 387
-    assert counts["control-plane"] <= 77
+    # 77 -> 78: Q-121 adds one guarded persistence handler in `main.py` (`_record_memory`), the
+    # same best-effort shape as the report-time graph save right beside it -- `tools.graph.save`
+    # writing the LIVE graph must not abort mission teardown if persistence fails. `main.py` is
+    # already in `_CONTROL_PLANE`, so this is not a release blocker; the ceiling moves with it.
+    assert counts["control-plane"] <= 78
     assert counts["load-bearing"] == 0, [
         "%s:%d:%s" % (r["module"], r["line"], r["function"])
         for r in rows if r["category"] == "load-bearing"

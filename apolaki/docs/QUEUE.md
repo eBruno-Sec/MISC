@@ -392,6 +392,16 @@ the library function) is exercised end-to-end and asserted to write `<session_id
 the live file is never written, so both the collision test and the end-to-end teardown test fail.
 Restoring the fix turns all 4 green.
 
+**One ratchet needed raising, and is recorded rather than papered over:** the new best-effort
+`try/except Exception: pass` around `live_graph.save(suffix="_live")` -- the same shape as the
+report-time graph save right beside it, never a release blocker since `main.py` is in
+`test_silent_failure_invariant._CONTROL_PLANE` -- pushed the swallow census's control-plane count
+from 77 to 78. `test_partition_is_non_vacuous_and_matches_the_measured_rebased_tree`'s ceiling is
+raised to 78 with that justification, matching how the same test already documents every prior
+addition (Q-112's `agent/middlebox.py`, the 1c357c8 durable observer). Confirmed the categorisation
+is `control-plane` by construction, not `load-bearing` slipping through: `_partition()` checks
+`module in _CONTROL_PLANE` before it ever looks at whether the protected call is load-shaped.
+
 ### Q-114 · Host-header injection is graded MEDIUM with no check for a sink · **CLOSED** · **MEDIUM**
 
 **Filed from the field.** The Shopify run raised 8 host-header injection findings on `linkpop.com`.
