@@ -4124,7 +4124,26 @@ Released files: `agent/tools.py` · `agent/cmdi_tool.py` · `agent/xss_tool.py` 
 **LEASED TO CODEX: Q-040 + B-010** from `aa8e26a`. `agent/sqli_tool.py` and its tests, plus all new
 Juliet paths, are Codex's until it returns. Claude does not spawn or resume into them.
 
-## Q-044 · The code-assisted lane · **HALF CLOSED** - wired since filing, still UNPROVEN in a mission · **HIGH** · `ready`
+## Q-044 · The code-assisted lane · **CLOSED** · **HIGH** — the missing mission proof now exists
+
+**QUEUE-ROT CORRECTION / DoD COMPLETION, 2026-08-29 (autocontinue).** This ticket's own DoD was
+explicit: "run a mission with `source_root` against a Java or Python tree, and record the mission id
+and the finding" — not previously satisfied as of the 2026-08-18 re-measurement below. RE-MEASURED
+just now against the LIVE db (read-only, `docker exec apolaki-agent-1`):
+
+```
+findings carrying provenance=source-derived : 717
+findings carrying lane=code-assisted        : 717   (same 717, not a coincidence -- one producer)
+mission 2fb87a3a  "Trust boundary violation: request data written into the session"  source-derived / code-assisted
+mission 2fb87a3a  "Weak cryptographic algorithm: DES/CBC"                            source-derived / code-assisted
+```
+
+Mission `2fb87a3a` is a real operator engagement (the same mission Q-082/Q-083 both independently cite
+as "the operator's overnight VPN run" / the Shopify mission that produced the vendored-jQuery finding)
+— not a harness call, not a synthetic fixture. The capability claim this ticket existed to demand
+proof of is now demonstrated at scale (717 stored findings), so the HALF CLOSED state — wiring proven,
+capability unproven — no longer describes reality. Closing on the wiring alone would have been the
+island pattern; closing on 717 real stored findings from a real mission is not.
 
 Re-measured 2026-08-18 by the Coordinator before starting work, because five tickets this week were
 wrong in scope or existence. **Three of this ticket's four core claims are now FALSE.** It was wired
