@@ -485,3 +485,149 @@ below it, which produces the ADVISORY next-best-action list. The executor never 
 separate ticket and I am not folding it into the Q-109 patch, but it should be filed: the
 graph-as-brain feed is real and it is wired one phase too late to steer anything.
 
+---
+
+## 6. THE PATCH
+
+One file, two hunks. Applied and validated in an isolated snapshot of `899e768`; the diff below is
+`diff -u` of that snapshot against HEAD, so it applies cleanly as-is.
+
+### Hunk 1 - `agent/asset_graph.py`, replacing lines 329-330
+
+```diff
+@@ -326,8 +326,39 @@
+                          label="exposed-credential", source=source)
+         for cp in cands.get("coupon", []) or []:
+             self.observe("coupon", str(cp)[:24], label="coupon-code", source=source)
++        # Q-109. A harvested route is a PATH, never an ADDRESS. `intel` stores these as bare paths by
++        # construction (intel.py:269/327/365 each prepend "/"), so keying an `endpoint` node on the
++        # candidate minted a node with no host. `_endpoint_url` (agent.py:3490) then correctly refused
++        # to resolve it and `_graph_primary_state` dropped it and RECORDED the drop -- the reporter was
++        # right, and this line was the producer.
++        #
++        # NOT "absolutize it onto the mission base". MEASURED on juice-shop, two of the three
++        # candidates a real run produced are server-side FILESYSTEM paths lifted out of a stack trace
++        # (/juice-shop/node_modules/express/lib/router/index.js). Pinning those to the base would
++        # manufacture an address nobody ever observed -- the same defect as `https:///path`, one step
++        # further from the evidence.
++        #
++        # So the FACT is kept and its CLAIM is corrected: a candidate that carries a host stays an
++        # `endpoint` keyed netloc+path (the convention `_graph_add_url` and `_project_body_params`
++        # already use), and a bare path becomes a `route` node -- known, provenance-tagged, and never
++        # promoted to probe surface. `to_observations` reads both kinds, so no observation is lost.
++        from urllib.parse import urlparse as _up
+         for r in (cands.get("route", []) or []) + (cands.get("endpoint", []) or []):
+-            self.observe("endpoint", str(r), label=str(r), source=source)
++            s = str(r).strip()
++            if not s:
++                continue
++            if "://" in s:
++                p = _up(s)
++                if p.netloc:
++                    self.observe("endpoint", p.netloc + (p.path or "/"), label=(p.path or "/"),
++                                 source=source)
++                elif p.path:
++                    # `https:///x` -- a scheme with an EMPTY netloc, the exact string Q-019 was filed
++                    # for. It is a path, so it is recorded as one; it is not an address, so it is
++                    # never faked into a node the planner would probe.
++                    self.observe("route", p.path, label=p.path, source=source)
++                continue
++            self.observe("route", s, label=s, source=source)
+         return len(self._nodes) - n0
+```
+
+### Hunk 2 - `agent/asset_graph.py`, line 371 - THE OTHER HALF
+
+```diff
+@@ -368,7 +399,13 @@
+             # means a param written before locations existed, which was always a query param.
+             if (props.get("location") or "query") == "body":
+                 obs.add("has_body_params")
+-        for e in self.nodes("endpoint"):
++        # Q-109, the OTHER half. A `route` node is the same knowledge as an endpoint minus an
++        # address, so these keyword observations have to read it too. Without this line the ingest
++        # fix above would trade a false probe target for a REAL blind spot: a harvested
++        # /rest/user/login would stop contributing has_login/has_api at all. Both existing tests
++        # (test_asset_graph.py:106, test_technique_planner.py:100) fail without it, which is what
++        # makes them the positive control for this half rather than a formality.
++        for e in self.nodes("endpoint") + self.nodes("route"):
+             low = (e.get("label") or e.get("key") or "").lower()
+             if any(k in low for k in ("/login", "/signin", "/sign-in", "/auth", "/session")):
+                 obs.add("has_login")
+```
+
+### Why NOT the two obvious alternatives
+
+- **Absolutize onto the mission base.** Rejected on measurement: 113 of 113 candidates on a real
+  juice-shop run include `/#/forgot-password` (an SPA hash-route, not a server path) and
+  `/${this.snapshot.routeConfig&&this.snapshot.routeConfig.path||` (a fragment of a minified Angular
+  expression the `_PATH` regex matched). Pinning those to the base manufactures addresses and spends
+  probe budget on 404s. The caller does have a base available (`_close_autonomy_loop` computes
+  `self._primary_base()` and returns early when it is empty, `agent.py:1726`), so this alternative is
+  cheap to write - which is exactly why it needs the explicit refusal.
+- **A new `route`-only node with no `to_observations` change.** That is hunk 1 without hunk 2, and it
+  fails four existing assertions (measured below). It would make the ledger row disappear by making
+  the knowledge disappear, which is the failure mode this project keeps filing tickets about.
+
+### Blast radius
+
+- `route` is a NEW node kind. `asset_graph.py`'s own docstring calls the kind list an "open set", the
+  node store is generic, and `graph_export._ns` falls back to `str(kind).title()` for an unknown kind
+  (`graph_export.py:51`), so it exports as `Apolaki_Route` rather than raising.
+- No existing code reads `nodes("route")`:
+  `grep -rn 'nodes("route")' --include=*.py agent/` returns nothing outside this patch.
+- `ingest_intel`'s only production caller is `agent.py:1769`; the signature is unchanged, so no call
+  site needs editing.
+
+---
+
+## 7. THE GATE (new test file, ready to drop in)
+
+`agent/tests/test_q109_hostless_producer.py` - six tests. Written to FAIL on HEAD, and written so
+that both halves are load-bearing.
+
+MEASURED against HEAD (unpatched snapshot):
+
+```
+$ docker run --rm --network apolaki_default -v "<SNAP-HEAD>/agent:/app" -w /app \
+    apolaki-agent python -m pytest tests/test_q109_hostless_producer.py -p no:cacheprovider -q
+FAILED tests/test_q109_hostless_producer.py::test_ingest_intel_mints_no_hostless_endpoint_node
+FAILED tests/test_q109_hostless_producer.py::test_the_knowledge_is_kept_as_a_route_never_discarded
+FAILED tests/test_q109_hostless_producer.py::test_an_addressable_candidate_is_still_an_endpoint_keyed_netloc_path
+FAILED tests/test_q109_hostless_producer.py::test_a_scheme_with_no_host_is_recorded_as_a_path_never_as_an_address
+```
+
+MEASURED against the patched snapshot, together with the whole Q-019 guard file it must not break:
+
+```
+$ docker run --rm --network apolaki_default -v "<SNAP-PATCHED>/agent:/app" -w /app \
+    apolaki-agent python -m pytest tests/test_q109_hostless_producer.py \
+    tests/test_hostless_target_guard.py -p no:cacheprovider -q
+.....................                                                    [100%]
+```
+
+The two tests that pass on HEAD are deliberate: `test_the_planner_observations_survive_the_
+reclassification` and `test_the_reporter_still_fires_when_a_hostless_node_reaches_the_graph_some_
+other_way` are controls on the FIX, not on the defect - they catch a fix that silences the row by
+throwing the knowledge away, or by disabling Q-019's recorder.
+
+### Mutation evidence for hunk 2
+
+Hunk 2 is not decoration. With hunk 1 applied and hunk 2 omitted, the EXISTING suite breaks:
+
+```
+$ docker run --rm --network apolaki_default -v "<SNAP-HUNK1-ONLY>/agent:/app" -w /app \
+    apolaki-agent python -m pytest \
+    tests/test_asset_graph.py::test_ingest_intel_gives_graph_the_full_planner_vocabulary \
+    tests/test_technique_planner.py::test_planner_is_graph_authoritative_flat_recon_cannot_drive_it \
+    -p no:cacheprovider -rfE
+E       AssertionError: assert {'has_login',...search_param'} <= {'has_object_...search_param'}
+E         Extra items in the left set:
+E         'has_login'
+FAILED tests/test_asset_graph.py::test_ingest_intel_gives_graph_the_full_planner_vocabulary
+FAILED tests/test_technique_planner.py::test_planner_is_graph_authoritative_flat_recon_cannot_drive_it
+2 failed in 4.54s
+```
+
+The full test file body is in section 9.
+
