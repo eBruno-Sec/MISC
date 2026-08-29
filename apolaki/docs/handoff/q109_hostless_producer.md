@@ -686,9 +686,25 @@ The full test file body is in section 9.
 
 **Separate tickets this investigation turned up. None belongs in the Q-109 patch:**
 
-- **`_swallow` truncates the offender list.** `str(exc)[:160]` against a 145-character message leaves
-  15 characters, so only the first offender survives and only in the `target` field. Any swallow that
-  puts evidence at the END of its message loses it. (Section 1b.)
+- **`_swallow` truncates the offender list, and it is not just this one call site.** `str(exc)[:160]`
+  against a 145-character message leaves 15 characters (section 1b). An AST census of every
+  `_swallow` call whose exception message is built from string literals shows FIVE sites whose
+  literal text alone exceeds 120 characters, three of which exceed the 160-char cap outright - so
+  their runtime evidence is discarded entirely, not merely trimmed:
+
+  ```
+  $ ... apolaki-agent python -c "<ast walk over agent/*.py for _swallow calls>"
+  ./agent.py    :3567   literal_len=258  (cap is 160)
+  ./agent.py    :3870   literal_len=257  (cap is 160)
+  ./agent.py    :1619   literal_len=175  (cap is 160)
+  ./agent.py    :3578   literal_len=149  (cap is 160)   <- the Q-109 reporter
+  ./agent.py    :3837   literal_len=136  (cap is 160)
+  sites whose swallow message literal exceeds 120 chars: 5
+  ```
+
+  Every one of these is a swallow that explains itself carefully and then appends the evidence,
+  which is the half the cap eats. The `target` field (cap 200) is the only one that survives, and it
+  holds a single item.
 - **`ingest_intel` is wired one phase too late to steer the mission that feeds it.** (Section 5c.)
 - **`agent.py:1625` appends past `_add_urls`.** A code-intelligence endpoint that does not start with
   `/` enters `tools.urls` with no `clean_url`, no `scope.validate`, and no session-kill quarantine,
