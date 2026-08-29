@@ -5,6 +5,34 @@ MEASURED (command + real output shown) or explicitly UNVERIFIED.
 
 Repo: `C:\Users\voice\Desktop\GitHub\MISC\apolaki`. Git root is the PARENT `MISC`.
 
+## TL;DR
+
+**PRODUCER FOUND: `AssetGraph.ingest_intel`, `agent/asset_graph.py:329-330`.** It keys an `endpoint`
+node on a harvested intel candidate, and every `route`/`endpoint` candidate `intel.py` writes is a
+bare path by construction. MEASURED on a full juice-shop mission: **113 hostless endpoint nodes,
+113 of 113 carrying `source='harvest'`** - `ingest_intel`'s own default `source`, used by no other
+endpoint writer in the tree. Isolated with a before/after on the same graph: 0 -> 3 across exactly
+one `ingest_intel` call, nothing else changed.
+
+**Nine rival producers enumerated and eliminated** (section 4), six of them with a measurement.
+
+**History replay is NOT implicated** (Q-111b precedent checked and disproved, section 4/H6): the live
+graph is rebuilt fresh every mission and `memory_assets` endpoints are re-validated on intake. A
+producer-only fix is sufficient here.
+
+**Patch: two hunks in one file** (section 6), applied and validated in an isolated snapshot, plus a
+six-test gate (section 7) that fails 4/6 on HEAD.
+
+**One thing did not reconcile, and I am flagging it rather than smoothing it over** (section 5b): on
+HEAD *and* on the build the operator's Shopify runs used, `ingest_intel` fires AFTER the last
+`_graph_primary_state` (measured: `graph_primary_state x14 -> ingest_intel x1`, `hostless swallows
+recorded during the run: 0`). So I could not reproduce the ledger row itself in a single mission.
+The producer finding does not depend on that; the row's exact provenance does.
+
+**Offender keys: UNVERIFIED** (section 1). They are not recoverable from any store on this machine,
+and separately, `_swallow`'s 160-character cap means only the FIRST of the three ever survives
+anywhere - the ticket's premise that all three are carried verbatim is wrong.
+
 ---
 
 ## 0. The symptom, restated only to fix the vocabulary
