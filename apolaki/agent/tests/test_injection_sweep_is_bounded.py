@@ -18,13 +18,50 @@ a failed attempt is never reported as a clean result.
 EVERY BOUND ASSERTED HERE IS A LITERAL INTEGER, never `agent.SWEEP_TARGET_CAP`. A cap gate that
 asserts `len(selected) <= THE_CAP` is self-referential and passes for any value of the thing it
 exists to bound - that exact mistake killed 0 of 4 mutants earlier this month.
+
+WHICH BOUND IS THE ENGAGEMENT BOUND - COORDINATOR REVISION, and the reason the cap tests below pass
+an EXPLICIT limit instead of leaning on the shipped default.
+
+This lane first shipped `SWEEP_TARGET_CAP = 40`, and that turned `test_whole_product_reach.py` red on
+its `MIN_TARGETS = 100` floor. That floor is not a goalpost to drag: its own docstring sets it "far
+above the broken numbers and far below the measured post-fix ones (250 / 400), so they catch a
+collapse without becoming a moving goalpost". Selecting 40 of 2524 on the lab IS the collapse it
+exists to catch, and the proposed workaround - run that capability test under `BBH_SWEEP_TARGETS=700`
+- means running the oracle against a configuration the product does not ship. Q-019's
+`SWEEP_TARGET_CAP >= 200` says the same thing from the other side.
+
+So the COUNT is a volume ceiling (700, shipped) and the WALL CLOCK is the engagement bound. On the
+operator's target 4 h at ~6 min each stops at ~40 endpoints - the number the cap of 40 was reaching
+for, arrived at by measuring the constraint rather than guessing it - and on a fast target nothing is
+discarded.
+
+The cap MECHANISM is still fully under test; it is just no longer coupled to the policy value. A test
+of "does truncation keep the valuable endpoints" that only works while the shipped default happens to
+be smaller than the fixture is a test of the constant, not of the code.
 """
 from __future__ import annotations
 
 import asyncio
+from contextlib import contextmanager
 from types import SimpleNamespace
 
 import agent as agent_mod
+
+#: The cap value the truncation tests drive. A LITERAL, deliberately unrelated to the shipped
+#: default: these tests must keep working whatever policy the product ships.
+_TEST_CAP = 40
+
+
+@contextmanager
+def _cap(value):
+    """Drive `_inject_sweep_surface` at a chosen volume ceiling. `SWEEP_TARGET_CAP` is read as a
+    module global at call time, so patching the attribute is what the real call site sees."""
+    old = agent_mod.SWEEP_TARGET_CAP
+    agent_mod.SWEEP_TARGET_CAP = value
+    try:
+        yield
+    finally:
+        agent_mod.SWEEP_TARGET_CAP = old
 
 
 # ── the surface, built to discriminate ────────────────────────────────────────────────────────────
@@ -101,13 +138,31 @@ def test_the_fixture_actually_discriminates():
 # ── GATE 1 · the bound, asserted against a LITERAL ────────────────────────────────────────────────
 
 def test_a_465_endpoint_surface_selects_a_bounded_number_of_targets():
-    """The number the operator's seven hours bought was 69 of 465. A bound means the whole sweep is
-    smaller than the 15% he could afford to sit through."""
-    selected = agent_mod.sweep_targets(_surface_465(), [], lambda _u: True)
+    """The truncation MECHANISM: given a ceiling, the selection honours it exactly.
+
+    The limit is passed explicitly. Leaning on the shipped default made this test a test of the
+    constant - it passed while the default was 40 and would silently stop bounding anything the
+    moment the default moved, which is precisely what happened."""
+    selected = agent_mod.sweep_targets(_surface_465(), [], lambda _u: True, limit=_TEST_CAP)
     assert len(selected) <= 60, (
-        "the sweep selected %d endpoint(s); a 465-endpoint engagement at the measured ~6 min each "
-        "cannot finish" % len(selected))
+        "the sweep selected %d endpoint(s) against a ceiling of %d" % (len(selected), _TEST_CAP))
     assert len(selected) >= 25, "a budget this small stops being a scan (%d)" % len(selected)
+
+
+def test_the_shipped_ceiling_does_not_truncate_a_lab_scale_surface():
+    """THE COORDINATOR REVISION, pinned. The shipped count is a VOLUME ceiling, not the engagement
+    bound - a 465-endpoint surface must come through whole, because on a fast target those 465 cost
+    minutes and discarding 425 of them is the collapse `test_whole_product_reach.py` guards.
+
+    Asserted against a LITERAL 465, never against `SWEEP_TARGET_CAP`."""
+    assert len(agent_mod.sweep_targets(_surface_465(), [], lambda _u: True)) == 465
+
+
+def test_the_shipped_ceiling_still_satisfies_the_Q019_floor():
+    """Q-019's floor is not repealed by this ticket, it is honoured by moving the engagement bound to
+    the clock. Stated as a LITERAL on both sides so it cannot track the thing it bounds."""
+    assert agent_mod.SWEEP_TARGET_CAP >= 200, agent_mod.SWEEP_TARGET_CAP
+    assert agent_mod.SWEEP_WALL_BUDGET_S > 0, "the engagement bound is disabled by default"
 
 
 # ── the ordering, i.e. what the bound actually buys ───────────────────────────────────────────────
@@ -122,7 +177,8 @@ def test_the_bounded_selection_keeps_the_high_value_endpoints():
                                                   for 40 slots, so the 9 high-value shapes (appended
                                                   last) never reach a slot
     """
-    selected = set(agent_mod.sweep_targets(_surface_465(), [], lambda _u: True))
+    selected = set(agent_mod.sweep_targets(_surface_465(), [], lambda _u: True, limit=_TEST_CAP))
+    assert len(selected) < 465, "the ceiling did not bite, so the ordering is not under test"
     missed = [u for u in _HIGH_VALUE if u not in selected]
     assert not missed, "the budget was spent before reaching the attack surface: %s" % missed
 
@@ -217,7 +273,8 @@ def _sweep_line(infos):
 def test_the_capped_sweep_dispatches_bounded_work_and_reports_what_it_declined():
     """GATE 1, as EXECUTION. `len(sweep_targets(...))` is a declaration; this counts what the mission
     actually hands to the engines, through the real `_inject_sweep_surface`."""
-    run = _drive_sweep(_surface_465())
+    with _cap(_TEST_CAP):
+        run = _drive_sweep(_surface_465())
     swept = {url for tool, url in run.dispatched if tool == _PARAM_SWEEP_MARKER}
     assert len(swept) <= 60, "the sweep probed %d distinct endpoint(s)" % len(swept)
 
@@ -261,7 +318,8 @@ def test_the_declined_count_is_durable_on_the_mission_and_not_only_in_a_log_line
         yield {}                                  # pragma: no cover
 
     scan._run_tool = _record
-    asyncio.run(_collect(scan))
+    with _cap(_TEST_CAP):
+        asyncio.run(_collect(scan))
     budget = getattr(scan, "_sweep_budget", None)
     assert isinstance(budget, dict), "the sweep budget was not recorded on the mission"
     assert budget["candidates"] == 465
@@ -302,7 +360,12 @@ def test_a_slow_target_stops_at_the_wall_clock_budget_and_says_DEGRADED(monkeypa
 def test_a_fast_target_never_trips_the_wall_clock(monkeypatch):
     """NEGATIVE CONTROL, and the reason this bound exists at all: the SAME budget that stops a slow
     engagement must be invisible on a lab where the identical endpoint count costs seconds. A
-    deadline that fires on a fast target is a new defect."""
+    deadline that fires on a fast target is a new defect.
+
+    Run at the SHIPPED ceiling, and the count is now the whole 465. That is the Coordinator revision
+    stated as behaviour rather than as a constant: a fast target loses nothing. Under the lane's
+    original `SWEEP_TARGET_CAP = 40` this same run discarded 425 endpoints it had time to test, which
+    is the collapse `test_whole_product_reach.py` fails on."""
     monkeypatch.setattr(agent_mod, "SWEEP_WALL_BUDGET_S", 3600)
     ticks = iter(range(0, 10 ** 6))                                       # 1 s per call
     monkeypatch.setattr(agent_mod, "_sweep_clock", lambda: next(ticks))
@@ -311,7 +374,28 @@ def test_a_fast_target_never_trips_the_wall_clock(monkeypatch):
     assert not [e for e in run.events if e.get("type") == "degraded"], "the deadline fired on a fast target"
     assert "timed_out" not in run.scan._sweep_budget, run.scan._sweep_budget
     swept = {url for tool, url in run.dispatched if tool == _PARAM_SWEEP_MARKER}
-    assert len(swept) == run.scan._sweep_budget["selected"] <= 60
+    assert len(swept) == 465, "a fast target lost %d endpoint(s) it had time to test" % (465 - len(swept))
+    assert run.scan._sweep_budget["declined"] == 0, run.scan._sweep_budget
+
+
+def test_the_wall_clock_is_what_bounds_a_slow_target_at_the_SHIPPED_ceiling(monkeypatch):
+    """THE LOAD-BEARING TEST FOR THE REVISION. Every other slow-target test above drives a reduced
+    ceiling, so none of them proves the SHIPPED configuration bounds the operator's engagement.
+
+    Same fixture, same 6 min/endpoint the operator measured, shipped ceiling. If the wall clock did
+    not bind, this run would probe all 465 - the 46-hour run the ticket was filed about."""
+    monkeypatch.setattr(agent_mod, "SWEEP_WALL_BUDGET_S", 14400)          # the shipped 4 h
+    ticks = iter(range(0, 10 ** 7, 360))                                  # 6 min per call
+    monkeypatch.setattr(agent_mod, "_sweep_clock", lambda: next(ticks))
+
+    run = _drive_sweep(_surface_465())
+    swept = {url for tool, url in run.dispatched if tool == _PARAM_SWEEP_MARKER}
+    assert len(swept) <= 60, (
+        "the shipped configuration probed %d endpoint(s) at ~6 min each: that is the 46-hour run "
+        "this ticket exists to prevent" % len(swept))
+    degraded = [e for e in run.events if e.get("type") == "degraded"]
+    assert degraded and degraded[0]["reason"] == "sweep_wall_budget_exhausted", run.events
+    assert run.scan._sweep_budget["declined"] == 465 - run.scan._sweep_budget["selected"]
 
 
 def test_the_one_step_wrapper_is_the_composition_the_mission_actually_runs():

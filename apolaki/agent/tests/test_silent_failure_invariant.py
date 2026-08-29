@@ -184,7 +184,10 @@ def test_partition_is_non_vacuous_and_matches_the_measured_rebased_tree():
     all_handlers = sum(isinstance(node, ast.ExceptHandler)
                        for path in trees
                        for node in ast.walk(ast.parse(path.read_text(encoding="utf8"))))
-    assert len(trees) == 178
+    # 178 -> 179: Q-112 adds `agent/middlebox.py`, a new production module. This equality exists so
+    # the census cannot quietly stop parsing part of the tree; a module ADDED is a legitimate move
+    # and the number moves with it, while a module that vanishes still trips it.
+    assert len(trees) == 179
     # 917 at 1c357c8; the durable observer adds one guarded persistence handler.
     # This is a floor so deleting production modules cannot make the census quietly shrink.
     assert all_handlers >= 917

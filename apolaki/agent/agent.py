@@ -280,12 +280,28 @@ def _is_generic_objective(objective: str) -> bool:
 # and operator-declared assets BEFORE it truncates: Q-104b bounded phase A correctly and then spent
 # the whole budget on wildcard-DNS junk because the order underneath the cap was lexical.
 #
+# Q-113, COORDINATOR DECISION, and it reverses the lane's own first answer. Lane A shipped this at
+# 40 to bound the operator's engagement, and the collision that produced was not a nuisance: at 40,
+# `test_whole_product_reach.py` fails its `MIN_TARGETS = 100` floor. That floor is not a goalpost —
+# its own docstring calls it "far above the broken numbers and far below the measured post-fix ones
+# (250 / 400), so they catch a collapse without becoming a moving goalpost". Selecting 40 of 2524 on
+# the lab IS the collapse that test exists to catch, and the proposed workaround — run the capability
+# test with `BBH_SWEEP_TARGETS=700` — means running the oracle against a configuration the product
+# does not ship. Q-019's `SWEEP_TARGET_CAP >= 200` says the same thing from the other side.
+#
+# So the COUNT stays a volume ceiling and the WALL CLOCK below is the engagement bound. The lane's own
+# comment already argued this: a wall-clock budget "is the bound that is correct for both, because it
+# is denominated in the thing that actually ran out". On the operator's target 4 h at ~6 min each
+# stops at ~40 endpoints, which is the number the cap of 40 was reaching for anyway — reached by
+# measuring the constraint instead of guessing it. On a fast target nothing is thrown away.
+#
+# The ranking Lane A built matters MORE under this arrangement, not less: with the count no longer
+# truncating, ordering is the only thing deciding which endpoints get tested before the clock stops.
+#
 # COST, STATED PLAINLY: `docs/benchmarks/wp3_precondition.md` raised this to 700 on a pre-registered
 # OWASP whole-product experiment (the dominant class draws 38 slots at cap 400 and 59 at 605, and
-# nine sqli true positives sit at class indices 38-58). Those runs must now set
-# `BBH_SWEEP_TARGETS=700` in the environment. The env override is unchanged and is the whole
-# mechanism — see docs/handoff/q113_sweep_cap.md, which also records the one test this collides with.
-SWEEP_TARGET_CAP = max(1, int(os.getenv("BBH_SWEEP_TARGETS", "40") or 40))
+# nine sqli true positives sit at class indices 38-58), and 700 is what ships.
+SWEEP_TARGET_CAP = max(1, int(os.getenv("BBH_SWEEP_TARGETS", "700") or 700))
 # Q-113, THE SECOND BOUND, AND THE ONE THE TICKET IS ACTUALLY NAMED AFTER.
 #
 # A COUNT IS ONLY A TIME BOUND IF EVERY ENDPOINT COSTS THE SAME, AND THEY DO NOT. MEASURED: the eight
@@ -299,8 +315,9 @@ SWEEP_TARGET_CAP = max(1, int(os.getenv("BBH_SWEEP_TARGETS", "40") or 40))
 # that actually ran out. At the measured costs, 4 h buys ~40 endpoints on the slow target and all
 # 2524 candidates on the lab, where it never fires at all.
 #
-# 0 disables it. It is a SECOND bound, not a replacement: `SWEEP_TARGET_CAP` still binds first on a
-# fast target, and exhausting either one is REPORTED, never silent.
+# 0 disables it. THIS IS THE ENGAGEMENT BOUND. `SWEEP_TARGET_CAP` above is a volume ceiling that a
+# real surface rarely reaches; this is what stops a run that cannot finish. Exhausting either one is
+# REPORTED, never silent.
 SWEEP_WALL_BUDGET_S = max(0, int(os.getenv("BBH_SWEEP_BUDGET_S", "14400") or 0))
 #: Indirection so the deadline is testable with a fake clock instead of a four-hour test.
 _sweep_clock = time.monotonic
@@ -416,12 +433,21 @@ def operator_roots(scope) -> list:
 
     Q-113. This derivation already existed inline at the planner-state call site; naming it once is
     what lets the injection sweep rank by the same fact the recon phase does, instead of restating
-    it and drifting."""
-    try:
-        return [str(e.value).lower().lstrip("*.") for e in (getattr(scope, "in_scope", None) or [])
-                if getattr(e, "value", None)]
-    except Exception:
-        return []
+    it and drifting.
+
+    NO HANDLER, deliberately. This shipped with `except Exception: return []` and pushed the
+    `test_silent_failure_invariant` optional-swallow census from 61 to 62 -- a ratchet, so that is a
+    regression rather than a budget item. Returning `[]` would also be the worst possible failure
+    here: an empty root set silently disables operator-asset ranking, so the sweep would quietly
+    stop preferring the hosts the operator actually declared and nothing would say so. That is the
+    `x or DEFAULT` failure mode this codebase has already been bitten by twice.
+
+    The two realistic shapes are both handled without a handler: a scope with no `in_scope` yields
+    `[]` through the `getattr` default, and an entry that is a plain string rather than a value
+    object is filtered by `getattr(e, "value", None)`. Anything else is a broken scope object, which
+    is a real error and belongs on the caller's floor, not swallowed here."""
+    return [str(e.value).lower().lstrip("*.") for e in (getattr(scope, "in_scope", None) or [])
+            if getattr(e, "value", None)]
 
 
 def _is_operator_asset(url: str, roots: set) -> bool:
@@ -4309,8 +4335,19 @@ class BBHAgent:
             yield {"type": "info", "content": "HTML-page sweep: POST-form-XSS + source-to-sink on %d distinct "
                    "app page(s); CSTI/proto DOM audit on the ones with discoverable params (reaches unlinked "
                    "params like /catalog?category + form fields like /login username)." % len(pages)}
-            for u in pages:
+            for _pi, u in enumerate(pages):
                 if self.stop_event.is_set():
+                    return
+                # Q-113. THE DEADLINE GOVERNS THE WHOLE PHASE, not just the parameterized half. On a
+                # target where an endpoint costs ~6 min these twelve pages are hours of their own, so
+                # a bound that stopped at the loop above would leave the phase still unable to finish.
+                if SWEEP_WALL_BUDGET_S and _pi and (_sweep_clock() - _sweep_started) > SWEEP_WALL_BUDGET_S:
+                    self._sweep_budget["html_pages_declined"] = len(pages) - _pi
+                    yield {"type": "degraded", "reason": "sweep_wall_budget_exhausted",
+                           "content": "DEGRADED: injection sweep wall-clock budget of %d s exhausted "
+                                      "during the HTML-page pass; %d of %d app page(s) DECLINED and "
+                                      "NOT tested for form-XSS / source-to-sink / CSTI."
+                                      % (SWEEP_WALL_BUDGET_S, len(pages) - _pi, len(pages))}
                     return
                 # form-XSS + XPath-injection run on every app page (both self-skip pages with no form; an
                 # XML-backed login form is the classic XPath surface). DOM source-to-sink trace runs only
