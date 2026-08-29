@@ -96,6 +96,47 @@ the empty-tool guard fails `test_a_tool_call_row_with_no_tool_name_is_not_a_dist
 control passes: a three-call mission still reports 3 and 2, so the fix is invisible to the ordinary
 run.
 
+### Q-116 · The census behind Q-115: two more aggregates folding a log window · **CLOSED** · **HIGH**
+
+Q-105 fixed one consumer. Q-115 found its sibling ninety lines away. Fixing two instances of a
+defect without asking how many exist is how it comes back, so this is the whole population of
+`get_logs` call sites outside tests:
+
+```
+main.py:835   "logs": db.get_logs(session_id, limit=500)     LOG VIEW    correct, left windowed
+main.py:4180  "logs": db.get_logs(session_id, limit=500)     LOG VIEW    correct, left windowed
+main.py:1733  ASVS attempted_engines, limit=4000             AGGREGATE   FIXED
+main.py:2942  _missing_zap_invocation, limit=100000          GUARD       FIXED
+```
+
+**The split is the point, and it is why `get_logs` itself was not changed.** Q-017 made it keep the
+NEWEST rows on purpose so a truncated tail cannot make a live mission look stopped. Right for a view
+of a log; wrong for every total computed over one.
+
+**ASVS.** `attempted_engines` is how a clean run VERIFIES a property -- an engine that ran and found
+nothing is the evidence that the objective holds. Aged out of the window, that engine's objective
+silently reverts to "not tested", so the report claims a property was never checked when it was.
+Q-105 already recorded this symptom (`ASVS "engine ran clean" 7 -> 4`) and repaired the ledger; this
+endpoint is a **second, independent** path to the same number and was left windowed. DERIVED rather
+than directly observed: the operator's mission logged 2181 dispatches and each persists at least a
+`tool_call` and a `tool_result`, so that run was already past 4000 rows.
+
+**ZAP.** `_missing_zap_invocation` is a FAIL-CLOSED integrity guard -- it refuses to let a mission
+claim ZAP ran when no dispatch was persisted. `run_zap` dispatches EARLY. Under a window the guard
+would accuse the run of skipping ZAP **precisely because ZAP ran first and the mission then got
+long**. A guard that fires on the mission's own length is worse than no guard: same shape as the
+three repaired Codex guards, scoped to its author's attention rather than to the fact. `iter_logs`
+streams, so `any()` still short-circuits on the first match; the 100000 was buying memory pressure,
+not safety.
+
+**GATE** (7 passed). **MUTATION, 2 of 2 killed** -- and the ZAP half caught me first. My initial
+test built 4000 rows, which cannot kill a mutant that restores a **100000**-row window, so the
+mutant SURVIVED. The test now bulk-inserts 100100 filler rows in one statement and the mutant dies.
+A gate that does not exercise the bound it exists to check is the failure I shipped once already
+this month. Negative controls: a short mission reports the same engines as before, the guard still
+fires when ZAP genuinely never ran, it stays silent when ZAP was not enabled, and
+`test_a_log_view_is_still_a_window` pins Q-017 so this census cannot undo it.
+
 ## STATE SWEEP — 2026-08-17 night, THE TAIL, verified against code. Authoritative; supersedes every marker below.
 
 The tail is no longer UNKNOWN. Two lanes verified every remaining ticket against code rather than its

@@ -1730,7 +1730,13 @@ async def asvs_coverage(session: str = None):
             # `confidence`. MEASURED 0/63, with the positive control that demoting EVERY row still
             # changes nothing in `assess` — the zero is a property of the consumer, not of the probe.
             findings = db.get_findings(session) or []
-            for l in db.get_logs(session, limit=4000):
+            # Q-116: `attempted_engines` is an AGGREGATE over the whole mission, so it takes the
+            # cumulative accessor. Under `get_logs(limit=4000)` an engine that ran EARLY aged out of
+            # the window and its ASVS objective flipped from "verified" back to "not tested" -- the
+            # report claiming a property was never checked when it was. Q-105 recorded that exact
+            # symptom (`ASVS "engine ran clean" 7 -> 4`) and fixed `_tool_ledger`; this is a SECOND,
+            # independent consumer feeding the same number, and it was left windowed.
+            for l in db.iter_logs(session):
                 if l.get("type") == "tool_call" and l.get("tool"):
                     ran.add(l.get("tool"))
         return am.assess(findings, attempted_engines=ran)
@@ -2937,9 +2943,15 @@ def _missing_zap_invocation(session_id: str) -> dict | None:
     context = mission.get("context") or {}
     if not context.get("enable_zap"):
         return None
+    # Q-116. A FAIL-CLOSED integrity guard may not be built on a window. `run_zap` dispatches EARLY,
+    # and `get_logs` keeps the NEWEST rows when the limit bites -- so on a mission long enough to
+    # exceed the cap this guard would accuse the run of never invoking ZAP precisely because ZAP ran
+    # first. A guard that fires on the mission's own length is worse than no guard.
+    # `iter_logs` streams, so `any()` still short-circuits on the first match and nothing is
+    # materialised; the 100000 was buying memory pressure, not safety.
     ran = any(
         row.get("type") == "tool_call" and row.get("tool") == "run_zap"
-        for row in db.get_logs(session_id, limit=100000)
+        for row in db.iter_logs(session_id)
     )
     if ran:
         return None
