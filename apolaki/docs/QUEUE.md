@@ -4999,7 +4999,22 @@ Two defects in the same handler. The second is not in the Q-009 list; I found it
 - **Files**: `agent/bie.py` (owned elsewhere this cycle — sequence it). Composes with `#54`: the
   `tools._swallow` ledger is the natural sink.
 
-### Q-017 · `get_logs` is oldest-first with a LIMIT, so the mission view and the backup export drop the newest events · **LOW** · `proposed`
+### Q-017 · `get_logs` is oldest-first with a LIMIT, so the mission view and the backup export drop the newest events · **LOW** · **CLOSED** `d0d7fa5`
+
+**QUEUE-ROT CORRECTION, 2026-08-29 (autocontinue).** Header still read the not-yet-closed marker;
+`git log --grep=Q-017` shows the core defect shipped as `d0d7fa5` ("the log kept the OLDEST rows, so
+a truncated tail looked like a dead mission"). RE-MEASURED: `db.get_logs` (`db.py:469`) now runs
+`ORDER BY id DESC LIMIT ?` and flips the result back to chronological order, keeping the NEWEST rows
+when the limit bites, docstring citing this ticket's own measurement (`54155d4b`, 22:31:01 vs true
+22:35:20). `main.py`'s mission-detail handler (`:833`) additionally now calls `get_findings_gated`
+(a Q-017-labelled comment there too). `tests/test_get_logs_keeps_the_newest.py` +
+`tests/test_findings_gate_split.py` — 15 passed, 0 failed.
+
+**Left genuinely open, as the ticket itself flagged it UNVERIFIED rather than DoD:** `/backup/{sid}`
+(`main.py:~4225`) still calls `db.get_findings` RAW rather than the gated accessor. Whether that is
+correct (a backup is a full-fidelity dump for re-import, not a "reader" surface) or a defect needs
+the UI check this ticket explicitly declined to run — not resolved here, not claimed either way.
+
 - **MEASURED**, all 151 stored missions. The claimed consequence is **half disproved**:
   - `db.get_logs`: `ORDER BY id LIMIT ?` keeps the **oldest** n rows. Confirmed on mission `54155d4b`
     (1287 rows): `get_logs(limit=500)[-1].ts = 22:31:01` vs the true last event `22:35:20`.
@@ -5898,7 +5913,27 @@ improving for real.
 
 ---
 
-### Q-023 · ZAP has never executed in any mission, and three flags do not explain it · **HIGH** · `proposed`
+### Q-023 · ZAP has never executed in any mission, and three flags do not explain it · **HIGH** · **CLOSED** `e321d36` + a 17-commit chain
+
+**QUEUE-ROT CORRECTION, 2026-08-29 (autocontinue).** Header still read the not-yet-closed marker
+after the largest single-ticket chain found in this sweep (`git log --grep=Q-023`, 17 commits,
+`223ae54`..`e321d36`, spanning 2026-08-20). RE-MEASURED, not assumed:
+
+- Read the LIVE db directly (`docker exec apolaki-agent-1`, read-only connection): `run_zap`
+  `tool_call` rows are no longer zero — 2 confirmed executions (`b226bc05` against `domsource`,
+  `0c3a2aa4` against `clientauthz`, both `permission: active`).
+- `tools.py:572` now declares `run_zap` `PermissionLevel.ACTIVE` — the ticket's own "outside the
+  active/passive tiers" gate is gone; that tier change is presumably part of the fix, not
+  independent drift.
+- `tests/test_zap_harness_contract.py` + `test_zap_invocation.py` + `test_zap_live_acceptance.py` +
+  `test_zap_rate_policy.py`, driven fresh against the live lab network — 29 passed, 2 skipped
+  (live-acceptance skips, not hidden failures), 0 failed.
+
+The residue this ticket was actually filed on — the fifth, unidentified cause behind four specific
+2026-07-26 missions with `enable_zap` truthy still firing zero `run_zap` calls — is NOT
+independently re-diagnosed here; the commit chain's own title (`e321d36`: "ZAP's alerts land as
+LEADS -- my fourth near-miss") reads as a full close, but whoever next touches ZAP should skim the
+chain before assuming every historical near-miss is explained.
 
 **MEASURED, whole corpus.** `run_zap` tool calls across 151 missions and **29,109** `tool_call` rows:
 **0**. (`run_fingerprint` 2,641 · `http_probe` 4,542 over the same corpus, so the counter works.)
