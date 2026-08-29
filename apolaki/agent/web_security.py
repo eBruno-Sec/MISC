@@ -754,6 +754,27 @@ _CACHE_EVIDENCE = ("age", "x-cache", "cf-cache-status", "via", "x-served-by", "x
                    "x-varnish", "fastly-debug-digest")
 
 
+def _host_of(url: str) -> str:
+    """The URL's host, lowercased, or "" when it has none.
+
+    ONE handler for both callers, and the reason it exists is a mistake this ratchet caught. Q-114
+    first wrote a SECOND `try/except` around the same `urlparse(...).hostname` call, which pushed
+    `test_silent_failure_invariant`'s all-handler census 387 -> 388. The guard fired on the fix for a
+    grading defect, which is exactly what a ratchet is for. Consolidating leaves the census AT 387
+    rather than merely under it.
+
+    The handler is narrow on purpose: `.hostname` raises `ValueError` on a malformed port, and both
+    inputs here (a `Location` and an `X-Forwarded-Host`-driven `Location`) come from a response we do
+    not control. It catches that and nothing else.
+    """
+    host = ""
+    try:
+        host = (urlparse(url or "").hostname or "").lower()
+    except ValueError:
+        host = ""
+    return host
+
+
 def host_header_sinks(resp_headers=None, xfh_location=None) -> list:
     """Which sink, if any, could turn a Host-reflecting redirect into an actual attack.
 
@@ -769,12 +790,8 @@ def host_header_sinks(resp_headers=None, xfh_location=None) -> list:
     cc = hdrs.get("cache-control", "").lower()
     if "s-maxage" in cc or ("public" in cc and "no-store" not in cc):
         sinks.append("Cache-Control permits shared storage (%s)" % cc[:60])
-    if xfh_location:
-        try:
-            if (urlparse(xfh_location).hostname or "").lower() == _EVIL_HOST:
-                sinks.append("X-Forwarded-Host is honoured (reverse-proxy route into the same primitive)")
-        except Exception:
-            pass
+    if xfh_location and _host_of(xfh_location) == _EVIL_HOST:
+        sinks.append("X-Forwarded-Host is honoured (reverse-proxy route into the same primitive)")
     return sinks
 
 
@@ -825,11 +842,7 @@ def analyze_host_header(body: str, location: str, resp_headers=None, xfh_locatio
     """
     loc = (location or "").strip()
     if loc:
-        try:
-            host = (urlparse(loc).hostname or "").lower()
-        except Exception:
-            host = ""
-        if host == _EVIL_HOST:
+        if _host_of(loc) == _EVIL_HOST:
             probed = resp_headers is not None or xfh_location is not None
             sinks = host_header_sinks(resp_headers, xfh_location) if probed else []
             if not probed:
