@@ -183,6 +183,28 @@ unable to run for two days on a slow target.
 M8 is the one that matters: it is the shape of "a bound that quietly shrinks an ordinary
 engagement", and it is caught by the negative controls rather than by the bound's own test.
 
+## The operator-roots wiring is a FACT, not a declaration - MEASURED
+
+`operator_roots(self.scope)` is only worth anything if a REAL `ScopeEngine` actually yields roots
+there. A synthetic fixture proves nothing about that (my own test builds `_Scope.in_scope` by hand),
+so this was checked against the real class:
+
+    $ docker run ... python /sp/roots.py
+    operator_roots = ['owaspbench', 'example.test']
+    asset(owaspbench)       = True
+    asset(sub.example.test) = True
+    asset(evil.test)        = False
+
+with `sc.load_manual(["https://owaspbench:8443/benchmark/", "*.example.test"], [], ...)`. Scheme,
+port and path are stripped by `scope._split_scope_entry` before storage (Q-060), the wildcard is
+de-starred, subdomains match, and an undeclared host does not.
+
+Also checked, because a signature change is where a silent break hides: the only NON-test caller of
+`sweep_targets` outside `agent.py` is `owasp_bench.py:191`,
+`agent_mod.sweep_targets([url], forms, lambda u: host in u)` - three positional args, so inserting
+`scope_roots` before `limit` cannot reach it, and its candidate count is one page's worth, far under
+any cap.
+
 ## Honest island check on `_sweep_budget`
 
 The operator-facing half is NOT an island: the declined count is on a `{"type": "info"}` event and
