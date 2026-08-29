@@ -3617,7 +3617,18 @@ make the numerator true.
 **Owner: unassigned.** Do not fix this by deleting the line -- the coverage view is genuinely useful
 and a competitor-inspired feature. Fix what it claims.
 
-### Q-083 · The code-assisted lane confirms a MEDIUM inside a vendored minified bundle · **HIGH** · `ready`
+### Q-083 · The code-assisted lane confirms a MEDIUM inside a vendored minified bundle · **HIGH** · **CLOSED** `48d92b2`..`14502bb`
+
+**QUEUE-ROT CORRECTION, 2026-08-29 (autocontinue).** Header still read the not-yet-closed marker
+after a nine-commit chain (`git log --grep=Q-083`, `48d92b2`..`14502bb`) shipped exactly the DoD
+below. RE-MEASURED just now: `codeintel.py` now carries `_VENDOR_PATH_SEG` (vendor/vendors/
+third_party/... path segments, `:367`) and a minifier-name heuristic (`x.min.js`/`x-min.js`/
+`x_min.js`, `:345`), both documented inline against the exact jQuery mission this ticket names
+(`codeintel.py:315-345`). `tests/test_vendor_scope.py` — 24 passed, 0 failed, including the
+negative control the DoD required (`test_negative_control_first_party_weak_randomness_is_still_
+confirmed` — first-party code containing the same call is still reported) and the two adversarial
+fixtures (a first-party `/*!`-banner file, and a scored OWASP Benchmark weakrand case that must
+stay `confirmed`).
 
 Same mission. A **confirmed medium** against a minified third-party library the operator does not
 maintain, reported at "line 2" because the whole bundle is line 2.
