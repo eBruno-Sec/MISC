@@ -168,10 +168,14 @@ semantic variant before calling a fix general. See `benchmark-score`.
 - RUN TESTS IN YOUR OWN THROWAWAY CONTAINER. Never `docker cp` into `apolaki-agent-1` and never
   restart it — it is shared, and two lanes doing that overwrote each other's files mid-run (one died
   holding a half-finished restore of the other's work). Use:
-    MSYS_NO_PATHCONV=1 docker run --rm -v "<ABS-WINDOWS-PATH>/agent:/app" -w /app \
-      apolaki-agent python -m pytest tests/ -p no:cacheprovider
+    MSYS_NO_PATHCONV=1 docker run --rm --network apolaki_default -v "<ABS-WINDOWS-PATH>/agent:/app" \
+      -w /app apolaki-agent python -m pytest tests/ -p no:cacheprovider
   This is the pattern five Codex lanes used with zero collisions. It also means /app is your working
   tree rather than a baked image, so there is nothing to deploy and nothing to forget to deploy.
+  **`--network apolaki_default` is NOT optional** (Q-094): without it, tests that reach the live lab
+  by compose DNS name (`juice-shop:3000`) silently convert from real assertions into skips instead of
+  failing, so the run reports a smaller, quieter suite as green. A missing-network run is caught by
+  `tests/conftest.py`'s session gate, which turns those specific skips into a hard failure.
 - `curl -s http://localhost:8000/missions` before `docker compose build agent` — a build SIGKILLs a
   running mission (three have died that way). You should not need to build at all.
 - Git Bash: MSYS_NO_PATHCONV=1 for docker exec with absolute paths; -w /app absolute. pytest already

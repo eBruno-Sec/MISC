@@ -2639,7 +2639,7 @@ result, reported as a clean scan). Q-093 is the transport never opening; **Q-095
 opening and carrying input incapable of proving anything.** Both end in "0 findings" that reads as a
 clean bill of health.
 
-### Q-094 · The documented test command omits `--network`, and 10 tests answer by SKIPPING · **READY** · **HIGH**
+### Q-094 · The documented test command omits `--network`, and 10 tests answer by SKIPPING · **CLOSED** · **HIGH**
 
 MEASURED by the I-11 lane, same tree, same commit, only the docker flag differs:
 
@@ -2673,6 +2673,38 @@ current HEAD with the lane's commits passes 56/56 networked.
 
 **GATE:** assert the skip count does not exceed the networked figure. The negative control is a run
 without the network, which must go red rather than quietly reporting a smaller suite as green.
+
+**CLOSED, both parts.**
+
+1. `--network apolaki_default` added to the `docker run` command documented in `avengers-assemble`
+   `SKILL.md`, the one file every lane actually copies the command from (the ticket's own measurement
+   was already made against that exact line).
+2. **The skips are loud now.** `tests/conftest.py` gained a session-scoped autouse fixture,
+   `_q094_lab_reachability_gate`, backed by a pure predicate (`_report_is_lab_unreachable`) that
+   matches only the DNS/connection-failure skip shape (`"lab unreachable"`, the literal substring all
+   three real call sites use) -- never the "lab answered, this fixture is not there" shape (wrong
+   HTTP status, no JPEG at a path), which stays a legitimate skip on any machine. At session end, if
+   any test hit that shape, the fixture's teardown calls `pytest.fail()` naming every affected nodeid,
+   which turns the whole run red instead of a quietly smaller green suite.
+
+**MEASURED, both directions, on `tests/test_truthful_metadata.py` + `test_island_soundness.py` +
+`test_observed_param_value_delivery.py`:**
+
+```
+without --network apolaki_default:  pytest_exit=1, "Q-094: 9 test(s) skipped because the lab was
+                                     unreachable ... Affected: [9 nodeids]"
+with    --network apolaki_default:  pytest_exit=0, gate silent
+```
+
+**5 new unit tests** (`test_q094_lab_reachability_gate.py`) exercise the pure predicate directly
+rather than the fixture -- mutating the real session-level tracking list from inside a test would
+poison this very run's own end-of-session gate. Positive control (the exact wording all three real
+sites use) and three negative controls: a content-gap skip, an unrelated tool-missing skip, and a
+non-skip report whose message text would otherwise match.
+
+Full suite MEASURED green on an isolated `git archive HEAD` snapshot via `--junit-xml`:
+`tests="3862" errors="0" failures="0" skipped="23"`, 892.9s -- +5 over the Q-117 baseline, exactly the
+new gate tests, nothing else moved.
 
 ### Q-093 - `_http` drops the transport outcome the same way `_cmd` drops the exit code, and 3241 dispatches never reached a target - **CLOSED** `1d85fe3` `c08db26` `8df4535` `86c8dfb` - **CRITICAL**
 
