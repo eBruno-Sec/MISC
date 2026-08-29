@@ -748,7 +748,37 @@ def analyze_open_redirect(status: int, location: str, final_url: str) -> dict | 
     return None
 
 
-def analyze_host_header(body: str, location: str) -> dict | None:
+#: Response headers that prove a SHARED cache handled this response. A poisoned redirect is only
+#: dangerous if something stores it and serves it to somebody else.
+_CACHE_EVIDENCE = ("age", "x-cache", "cf-cache-status", "via", "x-served-by", "x-cache-hits",
+                   "x-varnish", "fastly-debug-digest")
+
+
+def host_header_sinks(resp_headers=None, xfh_location=None) -> list:
+    """Which sink, if any, could turn a Host-reflecting redirect into an actual attack.
+
+    Q-114. Returns the sinks found, `[]` when the caller probed and found none. Callers that did NOT
+    probe pass nothing and must not read `[]` as evidence of absence -- `analyze_host_header` keeps
+    that distinction, following Q-103's rule that "not supplied" and "supplied and empty" are
+    different facts.
+    """
+    sinks = []
+    hdrs = {str(k).lower(): str(v) for k, v in (resp_headers or {}).items()}
+    if any(h in hdrs for h in _CACHE_EVIDENCE):
+        sinks.append("shared cache (%s)" % ", ".join(sorted(h for h in _CACHE_EVIDENCE if h in hdrs)))
+    cc = hdrs.get("cache-control", "").lower()
+    if "s-maxage" in cc or ("public" in cc and "no-store" not in cc):
+        sinks.append("Cache-Control permits shared storage (%s)" % cc[:60])
+    if xfh_location:
+        try:
+            if (urlparse(xfh_location).hostname or "").lower() == _EVIL_HOST:
+                sinks.append("X-Forwarded-Host is honoured (reverse-proxy route into the same primitive)")
+        except Exception:
+            pass
+    return sinks
+
+
+def analyze_host_header(body: str, location: str, resp_headers=None, xfh_location=None) -> dict | None:
     """Flag host-header injection: the spoofed Host BECAME the redirect target's host.
 
     Q-106b -- the same defect shape as the CRLF oracle, found by auditing its neighbours after that
@@ -769,6 +799,29 @@ def analyze_host_header(body: str, location: str) -> dict | None:
 
     The BODY branch stays a substring test on purpose. It is already LOW, it claims only reflection
     rather than a redirect primitive, and a host string in HTML has no structure to parse.
+
+    Q-114 -- THE GRADE IS NOW MEASURED, NOT ASSERTED. The Shopify engagement raised 8 of these on
+    linkpop.com and the operator reproduced one by hand:
+
+        curl -is https://linkpop.com/054470-ee -H 'Host: bbh-evil.example'
+        HTTP/1.1 301 Moved Permanently
+        Location: https://bbh-evil.example/054470-ee/index.html?s=1
+        Server: UploadServer
+
+    The behaviour is REAL and this oracle was right to fire. The MEDIUM was not earned: he probed
+    both sinks and neither existed -- no cache headers at all (no Age / X-Cache / CF-Cache-Status /
+    Via) so nothing stores the poisoned redirect for a second visitor, and X-Forwarded-Host was
+    ignored so the reverse-proxy route into the same primitive is absent too. `Server: UploadServer`
+    is a Google Cloud Storage bucket website, where building the redirect from the supplied Host is
+    stock platform behaviour rather than an application defect. The right output was INFORMATIONAL.
+
+    That is the Q-106 lesson moved one layer, from the oracle to the grade: detection was sound and
+    severity was asserted. A MEDIUM sent to a mature program on this evidence is closed N/A, and N/A
+    closures cost the reporter signal.
+
+    `resp_headers`/`xfh_location` OMITTED means the caller did not probe, and the grade is unchanged
+    -- absence of evidence is not evidence of absence, and a caller that cannot probe must not be
+    silently credited with a negative result.
     """
     loc = (location or "").strip()
     if loc:
@@ -777,8 +830,21 @@ def analyze_host_header(body: str, location: str) -> dict | None:
         except Exception:
             host = ""
         if host == _EVIL_HOST:
-            return {"severity": "MEDIUM",
-                    "detail": f"spoofed Host became the redirect target: {loc[:120]}"}
+            probed = resp_headers is not None or xfh_location is not None
+            sinks = host_header_sinks(resp_headers, xfh_location) if probed else []
+            if not probed:
+                return {"severity": "MEDIUM",
+                        "detail": f"spoofed Host became the redirect target: {loc[:120]}"}
+            if sinks:
+                return {"severity": "MEDIUM", "sinks": sinks,
+                        "detail": f"spoofed Host became the redirect target: {loc[:120]} "
+                                  f"-- exploitable through {'; '.join(sinks)}"}
+            return {"severity": "INFORMATIONAL", "sinks": [],
+                    "detail": f"spoofed Host became the redirect target: {loc[:120]} -- but NO sink "
+                              "was found: the response carries no shared-cache indicator "
+                              "(Age/X-Cache/CF-Cache-Status/Via) and X-Forwarded-Host is not "
+                              "honoured, so the poisoned redirect reaches nobody but the requester. "
+                              "Reportable only if a cache or a proxy route is demonstrated"}
     if _EVIL_HOST in (body or "").lower():
         return {"severity": "LOW", "detail": "spoofed Host reflected in response body"}
     return None

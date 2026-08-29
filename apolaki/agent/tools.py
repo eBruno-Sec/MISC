@@ -7800,7 +7800,19 @@ class ToolRegistry:
                 try:
                     hh = await c.get(url, headers={"Host": ws._EVIL_HOST, "X-Forwarded-Host": ws._EVIL_HOST},
                                      follow_redirects=False)
-                    v = ws.analyze_host_header(hh.text, hh.headers.get("location", ""))
+                    # Q-114. THE SINK PROBE, and it only runs when the detector has already fired, so
+                    # an ordinary scan pays nothing for it. The combined request above cannot say
+                    # WHICH header the app honoured, and that distinction is the difference between
+                    # MEDIUM and INFORMATIONAL: a reverse proxy that trusts X-Forwarded-Host is a
+                    # route into the primitive, while a Host-only reflection with no cache in front
+                    # of it reaches nobody but the requester. So re-ask with XFH ALONE.
+                    _xfh_loc = None
+                    if ws.analyze_host_header(hh.text, hh.headers.get("location", "")):
+                        _xfh = await c.get(url, headers={"X-Forwarded-Host": ws._EVIL_HOST},
+                                           follow_redirects=False)
+                        _xfh_loc = _xfh.headers.get("location", "") or ""
+                    v = ws.analyze_host_header(hh.text, hh.headers.get("location", ""),
+                                               resp_headers=dict(hh.headers), xfh_location=_xfh_loc)
                     if v:
                         findings.append({"title": "Host header injection", "severity": v["severity"].lower(),
                                          "target": url, "description": v["detail"],
