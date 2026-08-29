@@ -147,7 +147,7 @@ closes both roads and the third one found on the way:
 Recording the ambiguity rather than picking the likelier story: a mechanism reproduced is not a
 cause proven, and three roads are closed either way.
 
-### Q-123 · The ledger's "Findings" column does not contain findings · **READY** · **MEDIUM**
+### Q-123 · The ledger's "Findings" column does not contain findings · **CLOSED** · **MEDIUM**
 
 From the same run, in one table, against a report whose total is **23**:
 
@@ -166,6 +166,22 @@ instance this week of a value being re-derived wrongly at the edge the reader se
 coverage header, Q-105 the ledger window). Either rename the column to what it counts or count
 findings. **GATE:** the sum of the findings column over all engines is reconcilable with the report's
 total, or the column is renamed and a test pins the new meaning.
+
+**CLOSED.** Reconciling the sum to the report total was not viable: the number is a per-call sum of
+raw `ToolResult.findings` length (`main._tool_ledger`, `cnt = int(l.get("count") or 0)`) -- recon
+items for `run_subfinder`/`http_probe`, candidate sinks for `run_dom_trace`, even a no-confirmation
+sqlmap log-tail carrier -- and most of what it counts never reaches the confirmation/gating pipeline
+that produces a report finding, so there is no honest transform from one number to the other. Took
+the ticket's own escape hatch: renamed the header to **Items** in both the markdown (`report.
+_ledger_md`) and HTML (`report.generate_html_report`) renderers, with a caption in each explaining
+what it counts and pointing at Confirmed Findings for the number that matters. The underlying
+per-tool count is UNCHANGED -- `arsenal_gap`, `ledger_finding_disagreement` and the JSON export all
+still read the same `t["findings"]` field; this is a display fix, not a data fix.
+
+**GATE** (`agent/tests/test_q123_ledger_items_column.py`, 5 tests). **MUTATION-VERIFIED**: reverting
+`report.py` alone (keeping the new tests) reproduces the old header in both renderers and fails 4 of
+5 tests; the 5th (the raw count itself reaching the row unchanged) still passes on the revert, which
+is correct -- it is the negative control proving the rename did not also silently change the data.
 
 ### Q-124 · The FAILED banner asserts a cause it never measured · **READY** · **MEDIUM**
 
@@ -256,7 +272,7 @@ both recorded because each is a guard doing its job:
   quarantine list. That is a stronger claim -- refused AND retained AND usable, rather than
   dropped-and-logged.
 
-### Q-119 · `_swallow`'s 160-char cap eats the evidence of 5 sites, 3 of them entirely · **READY** · **MEDIUM**
+### Q-119 · `_swallow`'s 160-char cap eats the evidence of 5 sites, 3 of them entirely · **CLOSED** · **MEDIUM**
 
 MEASURED by AST census over every `_swallow` call whose message is built from string literals:
 
@@ -282,6 +298,22 @@ inventing them.
 separate field. **GATE:** a swallow whose explanation is 250 characters still records its exception
 text. Negative control: the total record stays bounded, because an unbounded ledger row is the defect
 this cap was added for.
+
+**CLOSED.** `ToolRegistry._swallow` (`tools.py`) raises the exception-text cap from 160 to 500 chars
+-- covers every measured site (max 258) with headroom, while a 10000-char pathological message is
+still truncated, not unbounded. The record COUNT (500 rows) stays the actual bound against an
+unbounded ledger, unchanged. `where` and `target` caps untouched -- the census only implicated the
+exception-text field.
+
+**MUTATION-VERIFIED:** reverting only the cap to 160 (keeping the new tests) reproduces the defect --
+3 of 4 new tests fail, one showing the exact real shape (`graph_primary_state.session_kill_quarantine`
+losing all three quarantined URLs, byte-for-byte the agent.py call site). Restoring 500 turns all 4
+green. Negative control included: a 10000-char message still caps at <600 chars, proving the fix
+raised the bound rather than removed it.
+
+Full suite MEASURED green on an isolated `git archive HEAD` snapshot via `--junit-xml`:
+`tests="3865" errors="0" failures="0" skipped="23"`, 937.4s -- +3 over the Q-094 baseline, exactly the
+new tests.
 
 ### Q-120 · `ingest_intel` is wired one phase too late to steer the mission that feeds it · **READY** · **MEDIUM**
 

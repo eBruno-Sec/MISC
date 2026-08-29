@@ -4326,10 +4326,16 @@ class ToolRegistry:
         target produce byte-identical output, which is how DOM_SCAN_JS silently disabled three families
         and how an unimported name nearly shipped a traversal pass that always reported clean.
 
-        Bounded so a pathological target cannot grow this without limit.
+        Bounded so a pathological target cannot grow this without limit. Q-119: the bound belongs on
+        the RECORD COUNT (below, 500) and on this field's own ceiling, not on a number so tight it eats
+        the evidence half of a self-explaining swallow. An AST census found 5 call sites building a
+        message that explains itself in prose and then appends "First: <the actual offenders>" --
+        at the old 160-char cap, 3 of those 5 lost the evidence entirely (>160 chars of prose alone)
+        and the other 2 kept only the first offender, truncated mid-word. 500 covers every measured
+        site (max 258 chars) with headroom, while still refusing a truly pathological message.
         """
         rec = {"where": str(where or "unknown")[:160], "target": str(target or "")[:200],
-               "error": "%s: %s" % (type(exc).__name__, str(exc)[:160])}
+               "error": "%s: %s" % (type(exc).__name__, str(exc)[:500])}
         self._swallowed_total = getattr(self, "_swallowed_total", len(self.swallowed)) + 1
         self._latest_swallowed = rec
         if len(self.swallowed) < 500:
