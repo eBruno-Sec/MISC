@@ -6595,3 +6595,15 @@ disjoint files from Q-021D and no dependency on it.
 `agent/techniques.py` is also touched by the just-recovered Q-011 commit (mass_assignment
 `validated_on`) -- that lands BEFORE Lane B spawns, so Lane B starts from a clean HEAD, not a moving
 target.
+
+**UPDATE, same day.** Lanes A and B both CLOSED (Q-021D `7e4fe79`/`607de78`; Q-088 HALF CLOSED
+`32adfa5`/`cdf8157`/`47ac8d2` -- see their headers). Q-021D closing unblocks Q-021E. Opening Lane C:
+
+| Lane | Shape | Ticket | WRITES (exclusive) | Handoff |
+|---|---|---|---|---|
+| C | Builder | Q-021E -- product-conditioned observations + the tech-probe engine | `agent/dependency_intel.py`, `agent/asset_graph.py`, `agent/engine_descriptor.py`, `agent/technique_planner.py`, `agent/candidate_pipeline.py`, `agent/agent.py`, their tests | `docs/handoff/q021e_tech_probe.md` |
+
+**`agent/tools.py` is peer-owned this cycle** (session `apolaki-c1`, live in this same tree, holding
+`dom_trace.py`/`tools.py`/`web_security.py`/`exposure_tool.py`). Q-021E's `tools._run_tech_probe`
+piece is written as an exact patch into the handoff file, not landed directly -- same pattern the
+ticket itself already specifies for a Builder-owned `tools.py`.
