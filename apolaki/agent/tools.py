@@ -6288,7 +6288,8 @@ class ToolRegistry:
             (it reaches the post-login surface); the caller retries anonymously when the app navigates
             away from the page that was asked for."""
             sig = {"executed": False, "redirect": "", "req_override": "", "in_href": "", "in_src": "",
-                   "in_attr": "", "in_text": False, "final_url": "", "server_reflected": False}
+                   "in_attr": "", "in_text": False, "final_url": "", "server_reflected": False,
+                   "navigated": False}
             ctx = await browser.new_context(ignore_https_errors=True)
             try:
                 if self.session_headers and not anon:
@@ -6323,6 +6324,18 @@ class ToolRegistry:
                     # raw HTML was put there by the APPLICATION, not by client-side code -- that is
                     # server-side reflection, and calling it "DOM-based" is a false claim about the
                     # mechanism. Free: the navigation response is already in hand, no extra request.
+                    # Q-129: DID WE ACTUALLY LOAD THE PAGE. A navigation that never connected still
+                    # leaves a rendered document -- the BROWSER'S OWN ERROR PAGE -- and Chrome puts
+                    # the requested URL in it. The canary is in that URL, so the DOM scan finds it
+                    # and reports a sink on a host that answered nothing. MEASURED on the lab: three
+                    # `https://wpreach/...` findings where the lab has no TLS listener at all
+                    # (curl: 000, no connection).
+                    # `goto` RAISING is the signal, not a null response. Playwright returns None for a
+                    # same-document navigation that genuinely succeeded, and a stubbed page returns
+                    # None too -- keying off that suppressed real findings in
+                    # `test_dom_trace_concurrency`. A connection refusal RAISES, which is the case
+                    # this exists for, so reaching this line at all means the page loaded.
+                    sig["navigated"] = True
                     if _resp is not None:
                         try:
                             sig["server_reflected"] = canary in (await _resp.text() or "")

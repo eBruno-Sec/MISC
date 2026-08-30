@@ -169,7 +169,18 @@ def classify(url: str, param: str, canary: str, sig: dict, source: str = "query"
     # are BEHAVIOURS the browser performed -- a dialog fired, a navigation happened, a fetch went to
     # the attacker host. Server-side reflection that also executes is still DOM XSS, and suppressing
     # it here would trade a false-positive flood for a missed real bug, which is the wrong trade.
-    if not s.get("server_reflected"):
+    # Q-129, the second half of the same rule and found by the same lab. A navigation that never
+    # CONNECTED still leaves a rendered document: the browser's own error page, which displays the
+    # requested URL -- and the canary is in that URL. MEASURED: three findings against
+    # `https://wpreach/...` where the lab has no TLS listener (curl reports 000, no connection).
+    # `server_reflected` was False because there was no server response to reflect anything, so the
+    # gate above passed it. No page means no sink and no verdict, the same rule as Q-126's "an
+    # oracle that cannot say what it sent cannot say what came back".
+    #
+    # `navigated` absent is treated as TRUE so every existing caller and fixture is unchanged; only
+    # a producer that explicitly reports a failed navigation suppresses these.
+    _loaded = s.get("navigated", True)
+    if _loaded and not s.get("server_reflected"):
         if s.get("in_href") or s.get("in_src"):
             sink = s.get("in_href") or s.get("in_src")
             hits.append({"family": "dom_link_manipulation", "param": param, "source": source, "target": here,

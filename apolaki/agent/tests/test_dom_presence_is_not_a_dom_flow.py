@@ -110,3 +110,48 @@ def test_the_same_signals_differ_only_by_where_the_canary_came_from():
 def test_a_clean_render_reports_nothing():
     assert _fams({}) == set()
     assert _fams({"server_reflected": True}) == set()
+
+
+# -- Q-129: a page that never loaded is not a page ------------------------------
+#
+# The confirming run cut 322 findings to 10, and three of the survivors were this. Their targets
+# were `https://wpreach/...` and the lab has NO TLS LISTENER -- curl reports 000, no connection. The
+# navigation failed, the browser rendered ITS OWN ERROR PAGE, and Chrome puts the requested URL in
+# that page. The canary is in the URL, so `DOM_SCAN_JS` found it in the document text and reported a
+# sink on a host that answered nothing.
+#
+# `server_reflected` could not save it: there was no server response to reflect anything, so the
+# Q-128 gate saw False and passed it through. Two different ways to have no evidence, and only one
+# was covered.
+
+def test_a_navigation_that_never_connected_yields_no_presence_finding():
+    """THE FIELD CASE. No response at all, and the canary is in the browser's error page."""
+    assert _fams({"in_text": True, "navigated": False}) == set()
+    assert _fams({"in_href": "a[href]", "navigated": False}) == set()
+
+
+def test_the_full_error_page_signal_shape_yields_nothing():
+    """Chrome's error page carries the URL in text and in no other sink; assert the whole shape so
+    a future scanner change that also sets in_attr cannot slip through."""
+    assert _fams({"in_href": "a[href]", "in_attr": "title", "in_text": True,
+                  "navigated": False, "server_reflected": False}) == set()
+
+
+def test_a_successful_navigation_still_reports():
+    """NON-VACUITY. Gating on `navigated` must not disable the engine for pages that DID load."""
+    assert _fams({"in_text": True, "navigated": True}) == {"dom_data_manipulation"}
+
+
+def test_an_absent_navigated_flag_is_treated_as_loaded():
+    """Every existing caller and fixture omits the key, and the two other producers of `sig` do not
+    set it. Absent must mean "no evidence of failure", or this silently disables the engine
+    everywhere it was not threaded through."""
+    assert _fams({"in_text": True}) == {"dom_data_manipulation"}
+
+
+def test_the_two_no_evidence_cases_are_independent():
+    """`server_reflected` and `navigated` are different facts: the server sent it, versus there was
+    no server. Either one alone must suppress, so neither can be reached only through the other."""
+    assert _fams({"in_text": True, "navigated": True, "server_reflected": True}) == set()
+    assert _fams({"in_text": True, "navigated": False, "server_reflected": False}) == set()
+    assert _fams({"in_text": True, "navigated": True, "server_reflected": False}) == {"dom_data_manipulation"}
