@@ -5835,7 +5835,29 @@ and is the only thing standing between Q-021D and a report full of theoretical C
 
 ---
 
-### Q-021D · Connect governed feeds to components — and ship the missing promotion path · **MEDIUM** · `proposed`
+### Q-021D · Connect governed feeds to components — and ship the missing promotion path · **MEDIUM** · **CLOSED** `7e4fe79` `607de78` (+ `b72604d` for Gap 2, shipped earlier)
+
+**CYCLE 16 (autocontinue) Lane A, 2026-08-30.** Gap 2 (the promotion path -- `intel_registry.advance()`
+gaining a real caller, `/intel/registry` showing non-zero `by_state`) was already shipped by an
+earlier session (`b72604d`). This lane closed Gap 1: `advisories_for(fact) -> [advisory]` resolves a
+product to advisories via the local feed snapshot then the governed connectors (KEV + already-parsed
+nvd/ghsa/cve_v5), always recording `source` and `snapshot_at`; the anti-spam consumer collapses N
+matching CVEs at LOW confidence to exactly 1 row. Reachable from a real engine
+(`tools.py::_run_fingerprint`) with zero edits outside this lane's ownership.
+
+**Full DoD checklist, all measured green**: all 3 oracle assertions, all 3 negative controls, all 4
+named mutation tests (killed), regression suite (`exploits_for_finding`/`exploitdb_for_product`/
+KEV-exact-CVE-only/`/intel/audit` unchanged). One real gate-record drift found on the isolated-
+snapshot full run (`test_deadcode_gate.py` -- the new test file legitimately calls
+`intel_registry.reset()` and the `TESTS_ONLY` record didn't know it yet); a one-line fix to
+`agent/deadcode_gate.py` (outside this lane's ownership, landed by direction since the file had no
+concurrent edits) closed it, re-verified green in `607de78`.
+
+**Deliberately NOT done, and why**: no OSV.dev/WPScan connector (the oracle only requires >=1
+advisory from a known-CVE product, which KEV+nvd/ghsa/cve_v5 already satisfy); no `_STORE`
+persistence across restart (the ticket's own contract offers the documented-per-process alternative,
+already true and already tolerant of a cold empty store without failing open). Full reasoning and
+every measured number in `docs/handoff/q021d_promotion.md`.
 
 **Repository-proven gap, and it is two gaps, not one.**
 
