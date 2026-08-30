@@ -32,6 +32,8 @@ _LAB_ADDR = {
     "owaspbench": ("owaspbench", 8443),
     # Q-126: a plain Server-header banner for the technology-detection recon check.
     "dvwa": ("dvwa", 80),
+    # Q-011: the mass-assignment liveness check's fixture.
+    "vampi": ("vampi", 5000),
 }
 
 

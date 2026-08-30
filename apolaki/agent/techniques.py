@@ -636,7 +636,13 @@ TECHNIQUES: dict[str, dict] = {t["id"]: t for t in [
        summary="Mass assignment / over-posting a protected attribute (e.g. role).",
        detect="Object create/update accepts fields beyond the documented contract.",
        exploit="Add a privileged attribute (role, isAdmin, deluxeToken) to a write body.",
-       oracle="Server persists the injected attribute (readback shows elevated state)."),
+       oracle="Server persists the injected attribute (readback shows elevated state).",
+       # Q-011 liveness proof, not a hand-typed guess: `agent/liveness.py`'s `mass_assignment` check
+       # drives the shipped `run_mass_assign` engine against VAmPI's `/users/v1/register` and gets a
+       # CONFIRMED `admin` binding, baseline + ignored-field controls both run
+       # (`liveness_baseline.json` ratcheted 18 -> 19). This is the ONE claim in this file the
+       # liveness ledger can re-earn on every run rather than a backfill nobody re-checks.
+       validated_on=["vampi"]),
 
     _t(id="unrestricted_file_upload", vuln_class="upload", cwe="CWE-434", owasp="A04:2021",
        permission=ACTIVE, transferable=True,

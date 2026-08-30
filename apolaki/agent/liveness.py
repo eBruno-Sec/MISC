@@ -113,6 +113,22 @@ CHECKS = (
     {"technique": "technology_detection", "lab": "dvwa", "kind": "recon",
      "tool": "_run_fingerprint", "input": {"url": "http://dvwa/"},
      "recon_key": "technology", "min_facts": 1},
+    # Q-011: mass_assignment was declared live in three catalogs (engine_descriptor, asvs_model
+    # ATHZ-04, wstg_catalog WSTG-INPV-20) with the engine, oracle and 96 unit tests all shipped, but
+    # zero `run_mass_assign` tool_call rows had ever appeared in the live database and this table had
+    # no entry -- exactly the island shape the ticket was filed to fix, just moved one layer down.
+    # VAmPI's `/users/v1/register` is the standard fixture for this class: it binds the request body
+    # straight onto the user model, and `/users/v1/_debug` is VAmPI's OWN declared endpoint that
+    # re-exposes the privileged `admin` field a normal read never shows. The seed body's `username`/
+    # `email` are personalized to a fresh unique marker by `mass_assign_tool.personalize()` on every
+    # write (baseline, ignored-field control, and each injected attempt all get their own), so this
+    # fixed seed is safe to reuse across repeated liveness runs without a collision.
+    {"technique": "mass_assignment", "lab": "vampi", "kind": "tool", "tool": "_run_mass_assign",
+     "input": {"url": "http://vampi:5000/users/v1/register", "method": "POST",
+               "body": {"username": "apolaki_liveness_seed", "email": "apolaki_liveness_seed@apolaki.test",
+                        "password": "Apolaki-Liveness-1!"},
+               "read_paths": ["/users/v1/_debug"]},
+     "family": "mass_assignment", "cwe": "CWE-915"},
 )
 
 # Verdicts a check can produce.
