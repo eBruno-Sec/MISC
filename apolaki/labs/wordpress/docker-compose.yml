@@ -1,0 +1,96 @@
+# WordPress reach lab -- a SELF-CONTAINED compose file, deliberately NOT part of the root
+# docker-compose.yml.
+#
+# WHY IT IS SEPARATE. The root compose file currently carries an uncommitted `sessionlife` block from
+# another lane. Editing it here would drag that work into this commit, which is the mistake that once
+# stole four files from a live lane. A standalone file also means this lab can be brought up and torn
+# down without touching a running mission.
+#
+#   docker compose -f labs/wordpress/docker-compose.yml up -d
+#   docker compose -f labs/wordpress/docker-compose.yml down -v      # -v also drops the DB
+#
+# It joins `apolaki_default` as an EXTERNAL network, so the agent container reaches it by hostname at
+# http://wpreach  (the root stack must already be up). On the host it is bound to 127.0.0.1 only.
+#
+# WHAT THIS LAB IS FOR, and it is not what the other labs are for. Every existing lab answers "does
+# the oracle fire correctly?" and has an answer key. This one answers a question the Shopify
+# engagement raised and no lab can currently answer:
+#
+#     run_katana | executed | 30 | 30 | 1 crawled URLs [insane: depth 5]
+#     run_sqli   | executed | 84 | 0  | tested 3 param(s), 0 confirmed SQLi
+#
+# One crawled URL and three tested parameters against a 1432-URL surface. That is a REACH failure,
+# and it is invisible behind "0 confirmed" -- which reads as a clean target and is really an empty
+# sweep. Reach is measurable WITHOUT ground truth: how many endpoints did the crawl find, how many
+# parameters did the injection engines actually test, did the persona/BOLA matrix ever run.
+#
+# WordPress is the right shape for that question and the wrong shape for the Shopify one: server-
+# rendered PHP with real <form> elements and query-string endpoints, no Cloudflare, no SPA, no rate
+# limit. If the sweep cannot reach parameters HERE, the problem is Apolaki, not the target.
+#
+# TWO SUBSCRIBER ACCOUNTS ARE CREATED ON PURPOSE (see setup.sh). The Browser Intelligence Engine's
+# two-user authorization matrix is the most differentiated thing this platform has and it has never
+# had a real target -- Shopify's signup needs a captcha, so `run_session_lifecycle` reported
+# "no sacrificial account can be minted" on every run.
+
+services:
+  wpreach-db:
+    image: mariadb:11
+    environment:
+      MARIADB_DATABASE: wordpress
+      MARIADB_USER: wordpress
+      MARIADB_PASSWORD: wordpress
+      MARIADB_ROOT_PASSWORD: wordpress
+    healthcheck:
+      test: ["CMD", "healthcheck.sh", "--connect", "--innodb_initialized"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    networks: [apolaki]
+    restart: unless-stopped
+
+  wpreach:
+    image: wordpress:6-apache
+    depends_on:
+      wpreach-db:
+        condition: service_healthy
+    environment:
+      WORDPRESS_DB_HOST: wpreach-db
+      WORDPRESS_DB_NAME: wordpress
+      WORDPRESS_DB_USER: wordpress
+      WORDPRESS_DB_PASSWORD: wordpress
+      # A lab, not a deployment. Debug OFF on purpose: full path disclosure and PHP notices would
+      # hand the scanner findings the real target would never give it, and a lab that flatters the
+      # tool is worse than no lab.
+      WORDPRESS_DEBUG: 0
+    volumes:
+      - wpreach_html:/var/www/html
+    ports:
+      - "127.0.0.1:42101:80"
+    networks: [apolaki]
+    restart: unless-stopped
+
+  # One-shot installer. Runs to completion and exits; re-running is idempotent.
+  wpreach-setup:
+    image: wordpress:cli
+    depends_on: [wpreach]
+    user: "33:33"                       # www-data, so it can write the mounted webroot
+    environment:
+      WORDPRESS_DB_HOST: wpreach-db
+      WORDPRESS_DB_NAME: wordpress
+      WORDPRESS_DB_USER: wordpress
+      WORDPRESS_DB_PASSWORD: wordpress
+    volumes:
+      - wpreach_html:/var/www/html
+      - ./setup.sh:/setup.sh:ro
+    entrypoint: ["/bin/sh", "/setup.sh"]
+    networks: [apolaki]
+    restart: "no"
+
+volumes:
+  wpreach_html:
+
+networks:
+  apolaki:
+    external: true
+    name: apolaki_default
