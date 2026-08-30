@@ -131,6 +131,64 @@ the reverted table no longer declares). Restoring the fix turns all green again.
 
 Q-021B's Definition of Done is now fully met; its header is upgraded from HALF CLOSED to CLOSED.
 
+### Q-129 · The browser's OWN ERROR PAGE contains the URL, so a dead host produced findings · **CLOSED** · **HIGH**
+
+**COORDINATOR NOTE, autocontinue, 2026-08-30.** Caught a regression against an earlier snapshot of
+this fix (5 failures in `tests/test_dom_trace_concurrency.py`) and flagged it to the owning session
+(peer `apolaki-c1`). Their diagnosis was better than mine: the bug was not the test mock, it was
+`navigated` being keyed off `_resp is not None`, which Playwright also returns `None` for on a
+same-document navigation that genuinely succeeded -- my proposed mock fix would have gone green over
+a live production defect. Corrected to key off whether `goto` raised instead (`navigated = True`
+unconditionally after `rate_limited_goto` returns; only the outer exception path leaves it False,
+which is exactly the Q-129 case). MEASURED by them: the two related test files 32 passed, 0 failed;
+full-suite run confirmed clean before commit. `test_dom_trace_concurrency.py` is now itself a
+negative control for this fix. See their commit for the hash.
+
+**Found by the run that confirmed Q-128.** 322 findings became 10, and three of the ten were this.
+
+Their targets were `https://wpreach/account/`, `https://wpreach/api/v1/admin/` and
+`https://wpreach/books/v1/admin/`. **The lab has no TLS listener at all** -- `curl` reports `000`,
+no connection. So:
+
+1. the navigation never connected;
+2. the browser still rendered a document -- **its own network-error page**;
+3. Chrome puts the REQUESTED URL in that page, and the canary is in the URL;
+4. `DOM_SCAN_JS` found the canary in the document text and reported a DOM sink,
+5. on a host that answered nothing.
+
+**Q-128's gate could not catch it.** `server_reflected` was False because there was no server
+response to reflect anything. Two different ways to have no evidence, and the fix only covered one.
+
+**FIXED** with `navigated`, set only when the navigation returned a response. A page that never
+loaded is not a page, so the presence families give no verdict -- the same rule as Q-126's "an
+oracle that cannot say what it sent cannot say what came back".
+
+**Absent means LOADED**, deliberately: two other producers of `sig` do not set the key, and
+defaulting the other way would silently disable the engine everywhere it was not threaded through.
+Pinned by `test_an_absent_navigated_flag_is_treated_as_loaded`, and
+`test_the_two_no_evidence_cases_are_independent` proves neither condition is reachable only through
+the other.
+
+### Q-130 · A host with no observed base is probed as `https://`, and the lab is HTTP-only · **READY** · **MEDIUM**
+
+Surfaced alongside Q-129 and deliberately NOT fixed with it.
+
+`planner.py:642` and `agent.py:3546` both resolve a host through `bases.get(h) or f"https://{h}"`.
+When a host has no observed base -- a guessed API path, a subdomain nothing probed yet -- the
+fallback is https. For the reach lab, whose scope was given as `http://wpreach`, the guessed paths
+were probed over https and every one failed to connect.
+
+**This is a COVERAGE defect, not a correctness one, and only since Q-129.** Before Q-129 a failed
+navigation manufactured findings; now it produces silence. What remains is wasted probes and a blind
+spot on an HTTP-only host.
+
+Deliberately left open rather than "fixed" by preferring http: https-first is correct for the
+internet and flipping the default would be a security regression for the sake of a lab. The right
+shape is to REMEMBER the scheme that answered for a host and reuse it, which is a change to the base
+map rather than to the fallback. **GATE when it is taken:** a mission scoped `http://h` never probes
+`https://h` for a host whose only observed base is http. Negative control: a host observed on https
+is still probed on https.
+
 ### Q-128 · 314 of 322 findings on stock WordPress were "DOM manipulation" that never touched JS · **CLOSED** · **CRITICAL**
 
 **The reach lab's first result, and it is not the result it was built to measure.** A stock
@@ -911,9 +969,9 @@ declaration-vs-fact defect the code keeps producing, and it is the one artifact 
   engines were reported to the reader as "available but not selected". Reader half had landed; the
   producer half never did. Fixed with a 5-test negative control, all 5 verified failing against a
   mutant.
-- **Q-058** four defects the description gate surfaced, all in `tools.py` — `ready`, blocked only on
-  the truthful lane releasing that file. Two are docstrings declaring the wrong permission tier; one
-  is an advertised parameter (`hash_type`) the code never reads.
+- ~~Q-058~~ **CLOSED** `6e16197` `ea7f0cb` `2b6e3ec` `552215e` (stale `ready` here corrected
+  2026-08-30 autocontinue — see the canonical header for this ticket for the full record;
+  `KNOWN_OPEN` in `test_description_gate.py` is empty, confirming no contradiction remains open).
 - **Q-052** tier semantics — BOTH proposals measured and REJECTED (narrowing `active` costs 49.5% of
   the sweep; defaulting to `full` would enable state-changing writes and lab-mode traversal semantics
   against production). Evidence points at loosening `planner._ALLOWED`, which needs a decision, not a
@@ -1988,7 +2046,38 @@ DoD: a finding whose `analysis` is `static-call-site` renders its file and line,
 replay. **Negative control:** a genuine DAST finding must KEEP its curl - a fix that strips
 reproduction from everything trades a false claim for a useless report.
 
-### Q-088 · `validated_on` — MY FRAMING WAS WRONG; the four markers do NOT share a closing condition · **MEDIUM** · `ready` · owner: unassigned
+### Q-088 · `validated_on` — MY FRAMING WAS WRONG; the four markers do NOT share a closing condition · **MEDIUM** · **HALF CLOSED** `32adfa5` `cdf8157` `47ac8d2`
+
+**CYCLE 16 (autocontinue), 2026-08-30.** Re-verified the 2026-08-21 correction against current HEAD
+before trusting it, per its own instruction, and found it had drifted further in the fixed
+direction: `techniques.known_labs()`, `is_proven()`, and `main.py:/packs` were already fully
+correct. The two real remaining gaps were `technique_model.py:from_registry` and
+`technique_planner.py:registry_seed`, both still deriving "proven" from bare `validated_on`
+truthiness instead of the shared predicate.
+
+**Landed.** `32adfa5` -- both call sites now defer to `techniques.technique_status()`/`is_proven()`;
+`from_registry`'s evidence list filters to labs `known_labs()` actually resolves;
+`test_validated_on.py`'s own `_known_lab_ids()` helper pointed at the real `known_labs()` (the real
+gap is 2 ids -- `natas`, `sessionlife` -- not 4); `test_technique_pipeline.py:17`'s old-rule pin
+fixed via a liveness-ledger monkeypatch rather than weakened. Two strict xfails XPASSed and were
+retired. `cdf8157` -- retired the miswritten `test_packs_and_techniques_report_the_same_proven_
+number` marker (reimplemented the old rule inline, could never XPASS by construction); its correct
+replacement already existed and passes. `47ac8d2` -- handoff finalized.
+
+**MEASURED**: targeted slice 49 passed; 15-file sweep 320 passed; full suite on an isolated
+`git archive` snapshot, exit 0, zero failures.
+
+**HALF CLOSED, not CLOSED -- two of the four original xfails remain genuinely red, honestly, and are
+out of this lane's file ownership to fix:**
+- `test_every_validated_on_lab_id_names_a_target_the_agent_can_resolve` -- `natas` (external
+  OverTheWire target, no test/liveness behind `header_trust_authz`'s claim) and `sessionlife`
+  (untracked `labs/sessionlife/`, no compose service/registry/liveness) remain unresolved. Needs new
+  registered targets -- `labs/`, `docker-compose.yml`, benchmark registries.
+- `test_every_validated_on_claim_is_backed_by_a_recorded_artifact` -- 34/48 unasserted claims,
+  unchanged. Per the ticket's own DoD note this needs ~30 recorded artifacts and is a separate,
+  larger follow-on.
+
+Full reasoning and numbers in `docs/handoff/q088_validated_on.md`.
 
 #### CORRECTED 2026-08-21 by the claim-integrity lane, which measured before building and did not build
 
@@ -3985,7 +4074,17 @@ are the answer, not the problem.
 
 ---
 
-### Q-050 · **32 of 92 engines have NEVER EXECUTED** — RE-MEASURED, and the answer is 6, not 32 · **HIGH** · `ready`
+### Q-050 · **32 of 92 engines have NEVER EXECUTED** — RE-MEASURED, and the answer is 6, not 32 · **HIGH** · **CLOSED** `a35be46` `5d72aa3` `727c960` `11c9067` `ad7c2d8` `2a6c29c` `7b79c29`
+
+**QUEUE-ROT CORRECTION, autocontinue, 2026-08-30.** Header still read `ready`; git log shows the DoD
+was met on `7b79c29` (2026-08-20): all six LLM-only engines taken to a verdict —
+`run_mass_assign`/`run_hash_id` wired deterministically (`5d72aa3`, `11c9067`), `run_nosqlmap`
+deleted (`727c960`), `run_ws_hijack` held back on purpose with the measurement recorded (`ad7c2d8`),
+`run_hash_crack`/`run_external_surface` explicitly NOT wired with a measured reason each and
+confirmed absent from every control catalogue (`7b79c29`). Final census: "Real detection engines a
+deterministic mission cannot select: 5 -> 2, and neither of the two is cited by any control
+catalogue, so no coverage claim anywhere is now backed by an unreachable engine. That was the
+definition of done." Marker corrected to match; no new work found.
 
 #### RE-MEASUREMENT, Coordinator, 2026-08-20 — the count is worse and the finding is much narrower
 
@@ -5662,7 +5761,18 @@ retires the 6 garbage rows currently poisoning cross-mission memory.
 
 ---
 
-### Q-021C · Canonical identity, version ranges, and applicability · **HIGH** · `proposed`
+### Q-021C · Canonical identity, version ranges, and applicability · **HIGH** · **CLOSED** `2480c75` (+ `4d9aeba` `388f699` `824e870`)
+
+**QUEUE-ROT CORRECTION, autocontinue, 2026-08-30.** Header still read `proposed`; `2480c75` ("the
+techintel lane closed Q-021C with ONE chain proven end to end") plus the recent-closures summary at
+line 885 ("Q-021C -- one technology-intelligence chain closed end to end (version selects the probe
+set)") both record closure: a served artifact yields a library+version, advisory ranges derive from
+`KNOWN_VULN` by CVE id, and the version selects which probes run (jQuery 3.6.0 asked nothing; 3.4.1
+asked exactly the probe its CVE range covers). Also fixed a measured FP in the same commit (a
+Bootstrap error string misread as jQuery 1.9.1). Isolated-snapshot suite at close time: 2641 passed,
+0 failed. Marker corrected to match; no new work found. Not re-verified against current HEAD this
+cycle beyond the git-history check -- if picked up again, re-run the oracle before trusting the
+number.
 
 **Repository-proven gap.** Nothing in `agent/` computes a CPE or a PURL, and nothing evaluates a
 version *range*. `dependency_intel._ver_tuple` / `_vlt` (`:187-203`) implement a numeric-tuple
@@ -6445,3 +6555,21 @@ hands over any `main.py` patch rather than taking it.
 starts it - read its handoff first), the re-scoped Q-030/Q-036, Q-035, and Q-044.
 
 **Q-052 remains Erwin's.**
+
+## CYCLE 16 -- 2026-08-30 (autocontinue) -- two disjoint Builder lanes, OWNERSHIP TABLE, authoritative
+
+Recovered Q-011's uncommitted mass_assignment liveness proof from the working tree first (full
+history already in the header above), then queue-sweep-corrected three stale markers (Q-050, Q-021C
+CLOSED-but-marked-open; the stray Q-058 bullet). Real remaining work: Q-021D/E/F form a strict
+dependency chain (E depends on D, F depends on E) so only D is startable this cycle; Q-021 base is
+the umbrella ticket for B-F and closes by construction as they do, not a standalone lane. Q-088 has
+disjoint files from Q-021D and no dependency on it.
+
+| Lane | Shape | Ticket | WRITES (exclusive) | Handoff |
+|---|---|---|---|---|
+| A | Builder | Q-021D -- governed feeds -> promotion path | `agent/intel_feeds.py`, `agent/intel_connectors.py`, `agent/intel_registry.py`, `agent/intel_sources.py`, `agent/dependency_intel.py`, their tests | `docs/handoff/q021d_promotion.md` |
+| B | Builder | Q-088 -- `validated_on` vocabulary + invented-id rejection | `agent/techniques.py`, `agent/technique_model.py`, `agent/technique_planner.py`, `agent/main.py`, `agent/tests/test_validated_on.py` | `docs/handoff/q088_validated_on.md` |
+
+`agent/techniques.py` is also touched by the just-recovered Q-011 commit (mass_assignment
+`validated_on`) -- that lands BEFORE Lane B spawns, so Lane B starts from a clean HEAD, not a moving
+target.
