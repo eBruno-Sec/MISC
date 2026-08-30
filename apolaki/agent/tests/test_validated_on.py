@@ -232,18 +232,16 @@ def test_one_rule_for_proven_across_every_module():
     assert disagree == [], "%d modules-vs-truth disagreements, e.g. %s" % (len(disagree), disagree[:4])
 
 
-@pytest.mark.xfail(strict=True, reason=(
-    "Q-088 (owner: unassigned). MEASURED: /packs sums 'proven' as len(validated_on)>0 = 48; /techniques reports the "
-    "liveness-earned 16. The same product publishes two 'proven' numbers differing by 32."))
-def test_packs_and_techniques_report_the_same_proven_number():
-    """Reproduces agent/main.py:2129 arithmetic exactly, without needing the HTTP app up."""
-    by_class = {}
-    for t in T.TECHNIQUES.values():
-        by_class.setdefault(t["vuln_class"], []).append(t)
-    packs_proven = sum(sum(1 for t in ts if t.get("validated_on")) for ts in by_class.values())
-    assert packs_proven == T.taxonomy_view("owasp")["proven"], (packs_proven,)
-
-
+# RETIRED (Q-088, 2026-08-21 correction). Was a strict xfail:
+# `test_packs_and_techniques_report_the_same_proven_number`, comparing a LOCAL re-implementation of
+# the OLD "proven if validated_on" rule (`sum(... if t.get("validated_on") ...)`) against
+# `T.taxonomy_view("owasp")["proven"]` (which already uses the corrected rule). That comparison is
+# miswritten, not a measurement of a live defect: it re-derives the bug inline instead of calling
+# `/packs`, so it can never XPASS however the product changes -- the two sides it compares can never
+# agree by construction, since one side is deliberately still wrong. `test_packs_and_techniques_now_
+# report_the_SAME_proven_number` below is the real replacement: it calls the shared predicate
+# (`T.is_proven`) on both sides and asserts the OLD rule still over-counts relative to it, which is
+# an assertion that can actually go stale and fail if the defect it names is no longer true.
 @pytest.mark.xfail(strict=True, reason=(
     "Q-088 (owner: unassigned). MEASURED: 34 of 48 claims are named by no test assertion at all; widening 'backed' to include the "
     "liveness ledger still leaves 30 of 48 with nothing behind them - all 24 juiceshop claims and both "
