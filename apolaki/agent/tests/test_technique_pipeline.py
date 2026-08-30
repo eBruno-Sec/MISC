@@ -8,7 +8,20 @@ import technique_advisor as ADV
 
 
 # ---------------------------------------------------------------------------- model
-def test_from_registry_projects_canonical_shape():
+def test_from_registry_projects_canonical_shape(monkeypatch):
+    """Q-088: `status` used to be `"proven" if validated_on else "catalogued"` -- true for ANY
+    non-empty validated_on, which is the exact bug test_validated_on.py's negative control pins
+    (two invented lab ids used to earn "proven" the same way). `from_registry` now defers to
+    techniques.technique_status(), the shared predicate, which only says "proven" once a liveness
+    RUN has confirmed the id -- "sqli_auth_bypass" (this test's id) is a real registry entry but is
+    not in the current liveness ledger, so it is honestly "unverified" today, same as most of the
+    registry (see test_technique_status_is_the_fixed_rule_and_still_holds in test_validated_on.py).
+    Pinning this unit test to whatever the live liveness_baseline.json happens to contain would make
+    it flake against future liveness runs, so instead it monkeypatches
+    techniques._liveness_verified() to deterministically vouch for this one id -- exercising the
+    real from_registry -> techniques.technique_status wiring, not a mock of it."""
+    import techniques as T
+    monkeypatch.setattr(T, "_liveness_verified", lambda: {"sqli_auth_bypass"})
     rec = {"id": "sqli_auth_bypass", "vuln_class": "sqli", "cwe": "CWE-89", "owasp": "A03:2021",
            "mitre": "T1190", "detect": "error-based probe", "oracle": "boolean diff",
            "summary": "auth bypass via SQLi", "validated_on": ["juiceshop", "dvwa"],

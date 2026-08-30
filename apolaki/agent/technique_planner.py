@@ -196,8 +196,16 @@ def registry_seed(enrich=None):
         cwe = r.get("cwe")
         cwes = [cwe] if cwe else []
         cwes += [c for c in (enrich.get(r["id"], {}).get("kev_cwes") or []) if c not in cwes]
+        # ONE RULE FOR "PROVEN" (Q-088): status defers to techniques.is_proven(), the same predicate
+        # main.py's /packs and technique_model.from_registry now use, instead of re-deriving it from
+        # bare validated_on truthiness (which let a hand-typed claim call itself "proven" and, in
+        # this module specifically, outrank plan entries by 10 points for a claim nothing ran). The
+        # CONFIDENCE SCORE formula above stays keyed on raw lab COUNT on purpose -- that coupling is
+        # pinned by test_planner_confidence_is_a_function_of_lab_COUNT and is a deliberate ranking
+        # signal ("more claimed transferability ranks higher"), a different question from "has this
+        # actually been run".
         out.append({"id": r["id"], "name": r["id"], "vuln_class": r.get("vuln_class", ""),
-                    "cwe": cwes, "status": "proven" if vo else "catalogued",
+                    "cwe": cwes, "status": "proven" if T.is_proven(r) else "catalogued",
                     "confidence": {"score": score}, "try_it": r.get("detect", ""),
                     "payloads": [], "detection_logic": [r.get("oracle", "")]})
     return out

@@ -241,6 +241,19 @@ def from_registry(rec, try_it=None, known_exploited=False, kev_cves=None, capec=
     The proven registry is the authoritative seed; this projects it into the first-class shape."""
     t = blank(rec.get("id", ""), _humanize(rec.get("id", "")))
     validated = rec.get("validated_on") or []
+    # ONE RULE FOR "PROVEN" (Q-088). This used to be `"proven" if validated else "catalogued"` --
+    # true for ANY non-empty validated_on, including two invented lab ids nothing ever ran. That is
+    # the exact defect that let /packs report 48 "proven" while /techniques reported the
+    # liveness-earned 16 about the same registry (see techniques.is_proven's docstring). Every
+    # module that wants to say "proven" defers to techniques.technique_status() now, so this one
+    # cannot quietly drift from the others again. Lazy import: techniques.py's own _t() imports this
+    # module inside a function for the same reason -- techniques.py is still mid-construction of
+    # TECHNIQUES the first time _t() runs, so importing techniques.py at THIS module's top level
+    # would be a circular import at load time.
+    import techniques as _T
+    proven = _T.technique_status(rec) == "proven"
+    known_labs = _T.known_labs()
+    resolved_labs = [lab for lab in validated if lab in known_labs]
     t.update({
         "summary": rec.get("summary", ""),
         "vuln_class": rec.get("vuln_class", ""),
@@ -253,7 +266,7 @@ def from_registry(rec, try_it=None, known_exploited=False, kev_cves=None, capec=
         "detection_logic": _as_list(rec.get("oracle")),
         "payloads": ([{"name": "reference", "payload": try_it}] if try_it else []),
         "preconditions": _as_list(rec.get("preconditions")),
-        "status": "proven" if validated else "catalogued",
+        "status": "proven" if proven else "catalogued",
         "transferable": bool(rec.get("transferable", True)),
         "permission": rec.get("permission", rec.get("execution", "auto")),
         "try_it": try_it,
@@ -261,9 +274,11 @@ def from_registry(rec, try_it=None, known_exploited=False, kev_cves=None, capec=
     # executable-knowledge proof contract (FP-safety differential + evidence obligations) — from the
     # record if it declares them, else derived deterministically from class + oracle.
     t.update(proof_contract(rec))
-    # evidence: which labs/challenges proved it
+    # evidence: which labs/challenges proved it. A lab id known_labs() cannot resolve is not evidence
+    # of anything -- it is exactly the fabricated-claim shape the negative control pins (two invented
+    # lab ids used to become two evidence entries and score 90/100 in the "high" confidence tier).
     maps = rec.get("maps_to") or {}
-    for lab in validated:
+    for lab in resolved_labs:
         t["evidence"].append({"lab": lab, "challenges": maps.get(lab, [])})
     # provenance: internal, authoritative, carrying the real-world KEV signal for confidence
     prov = {"source": "apolaki-registry", "tier": "internal", "ref": rec.get("id", "")}

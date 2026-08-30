@@ -56,11 +56,17 @@ def _claims():
 
 
 def _known_lab_ids():
-    """Every lab id the agent's own registries can resolve to a real target definition."""
-    import bench_all as BA
-    import benchmark as B
-    import labs as L
-    return set(BA.LAB_URLS) | set(B.MANIFESTS) | set(L.LABS)
+    """Every lab id the agent's own registries can resolve to a real target definition.
+
+    Q-088: this used to reimplement a SUBSET of the real vocabulary (just the three target
+    registries), so it disagreed with the product's own `techniques.known_labs()`, which also
+    counts a lab as legal once a liveness RUN has actually confirmed a technique against it
+    (domsource, openfmb) -- a lab nobody wired into benchmark.py/bench_all.py/labs.py but that a
+    real run demonstrably reached. Re-implementing a stale copy of the rule instead of calling the
+    real one is the exact shape this file's own `test_packs_and_techniques_now_report_the_SAME_
+    proven_number` docstring warns about ("a test that reads prose tests prose"). Call the product
+    function directly so this test measures what the product actually accepts, not a stand-in."""
+    return set(T.known_labs())
 
 
 # ══════════════════════════════════════════════════════════════════════════════════════════
@@ -176,32 +182,32 @@ def test_the_existing_per_lab_guards_only_fail_on_REMOVAL():
 # STRICT XFAILS - the measured defects. Each XPASSes the moment it is fixed.
 # ══════════════════════════════════════════════════════════════════════════════════════════
 
-_Q_VOCAB = ("Q-088 (owner: unassigned). MEASURED: validated_on has no vocabulary. techniques.all_labs() derives the set of valid "
-            "lab ids FROM the field itself, so 'is this a real lab?' answers 'yes, you typed it'. "
-            "4 of 13 ids (domsource, natas, openfmb, sessionlife) resolve to no target definition the "
-            "agent owns; sessionlife has no compose service and no tracked source at HEAD.")
+_Q_VOCAB = ("Q-088 (owner: unassigned). RE-MEASURED 2026-08-29: techniques.known_labs() now derives the vocabulary "
+            "honestly (target registries + liveness-vouched labs), so domsource and openfmb (both named by a "
+            "liveness-confirmed technique) now resolve. 2 of 14 claimed ids still do not: natas (an external "
+            "OverTheWire target header_trust_authz claims Level 4 on, with no test/liveness check behind the "
+            "claim) and sessionlife (an untracked labs/sessionlife/ dir with no compose service, no registry "
+            "entry, no liveness check at HEAD). Both are genuinely fabricated-in-effect claims -- typed, never "
+            "earned -- until someone actually proves them.")
 
 
 @pytest.mark.xfail(strict=True, reason=_Q_VOCAB)
 def test_every_validated_on_lab_id_names_a_target_the_agent_can_resolve():
-    """A capability claim must name something that exists. Fails today on 4 ids."""
+    """A capability claim must name something that exists. Fails today on 2 ids (natas, sessionlife)."""
     known = _known_lab_ids()
     unknown = sorted({lab for labs in _claims().values() for lab in labs} - known)
     assert unknown == [], "validated_on names targets no lab registry knows: %s" % unknown
 
 
-@pytest.mark.xfail(strict=True, reason=_Q_VOCAB)
+# FIXED (Q-088). Was a strict xfail: two invented lab ids used to yield status='proven', confidence
+# 90/100 in the HIGH tier, a two-entry evidence list, generalized=True, and a clean schema validation.
+# technique_model.from_registry now defers "proven" to techniques.technique_status() (the shared
+# predicate) and filters `evidence` to labs techniques.known_labs() actually resolves, so a fabricated
+# id can no longer buy either. The marker is gone rather than weakened -- STRICT is what made the fix
+# visible: it XPASSed, the suite went red, and this comment is the deliberate removal that follows.
 def test_a_fabricated_validated_on_is_rejected_by_the_canonical_model():
-    """THE NEGATIVE CONTROL. Two invented lab ids currently yield status='proven', confidence 90/100
-    in the HIGH tier, a two-entry evidence list, generalized=True, and a CLEAN schema validation.
-
-    Measured:
-        is_generalized       -> True
-        from_registry status -> proven
-        confidence           -> 90 high
-        evidence             -> [{'lab': 'fabricated_lab_9000', ...}, {'lab': 'fabricated_lab_9001', ...}]
-        TM.validate(t)       -> []
-    """
+    """THE NEGATIVE CONTROL. Two invented lab ids must not buy 'proven', a high-tier confidence score,
+    an evidence entry, or 'generalized'."""
     t = TM.from_registry(FABRICATED)
     assert t["status"] != "proven", "a technique nothing ever ran is not 'proven'"
     assert t["confidence"]["tier"] != "high", t["confidence"]
@@ -209,10 +215,10 @@ def test_a_fabricated_validated_on_is_rejected_by_the_canonical_model():
     assert not T.is_generalized(FABRICATED), "two invented strings should not confer 'generalized'"
 
 
-@pytest.mark.xfail(strict=True, reason=(
-    "MEASURED: the Q-012 fix was never propagated. techniques.technique_status() reads the liveness "
-    "ledger, but technique_model.from_registry:256, technique_planner.registry_seed:172 and "
-    "main.py:/packs:2129 all still run the old 'proven if validated_on' rule."))
+# FIXED (Q-088). Was a strict xfail: technique_model.from_registry and technique_planner.registry_seed
+# both still ran the old 'proven if validated_on' rule (main.py:/packs already agreed with
+# techniques.technique_status() at the time this was written). Both non-chokepoint modules now defer
+# to the same shared predicate instead of re-deriving the word locally.
 def test_one_rule_for_proven_across_every_module():
     """Three modules must not disagree with techniques.technique_status() about the same technique."""
     seed = {s["id"]: s for s in TP.registry_seed()}
