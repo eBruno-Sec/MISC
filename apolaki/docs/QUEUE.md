@@ -131,6 +131,113 @@ the reverted table no longer declares). Restoring the fix turns all green again.
 
 Q-021B's Definition of Done is now fully met; its header is upgraded from HALF CLOSED to CLOSED.
 
+### Q-128 · 314 of 322 findings on stock WordPress were "DOM manipulation" that never touched JS · **CLOSED** · **CRITICAL**
+
+**The reach lab's first result, and it is not the result it was built to measure.** A stock
+`wordpress:6-apache` with five LATEST plugins and nothing planted produced **322 findings**:
+
+```
+162  Reflected DOM data manipulation in 'X'
+152  Reflected DOM link manipulation in 'X'
+  8  everything else
+```
+
+**MEASURED, and it is one line of the target's own HTML.** `curl` -- no browser, no JavaScript --
+already returns the canary:
+
+```
+<a rel="nofollow" id="cancel-comment-reply-link"
+   href="/?p=1&#038;ref=nav&#038;lang=domtr7168079a#respond">
+```
+
+WordPress echoes the request URI into its comment-reply link. The SERVER put the canary in an
+`href`. The oracle then rendered the page, found the canary in an `href`, and reported CWE-79 at
+MEDIUM/CVSS 5.4. **314 times, on an application with no vulnerability.**
+
+**PRESENCE IN THE DOM IS NOT A DOM FLOW.** `in_href`/`in_src`/`in_attr`/`in_text` are evidence of a
+client-side sink only if CLIENT-SIDE CODE put the value there. When it arrived in the HTML, the
+browser is showing us the application's own markup and nothing was traced.
+
+**FIXED** by capturing what the server sent -- free, because `rate_limited_goto` already returns the
+navigation response -- and gating the two PRESENCE families on it.
+
+**THE HALF THAT KEEPS IT AN ORACLE:** `dom_xss`, `open_redirect` and `request_url_override` are
+deliberately NOT gated. Those are BEHAVIOURS the browser performed: a dialog fired, a navigation
+happened, a fetch reached the attacker host. Reflected input that also EXECUTES is still XSS, and
+suppressing it because the server echoed it would trade a false-positive flood for a missed real
+bug. **GATE** (13 tests) pins both halves, including `test_a_behaviour_and_a_presence_signal_together
+_keep_only_the_behaviour`.
+
+**WHY SHOPIFY HID THIS.** That engagement raised 8 of these families and they read as plausible.
+The defect is proportional to how much of its own URL an app echoes, and a hardened SPA echoes
+little. A lab with checkable ground truth found in one run what three real engagements did not.
+
+### Q-127 · A CRITICAL "Exposed .env file" against a site with no .env · **CLOSED** · **CRITICAL**
+
+Same lab run, finding number one. TWO INDEPENDENT DEFECTS, either sufficient.
+
+**1. The catch-all guard was EXACT EQUALITY.** MEASURED:
+
+```
+/.env body                82506 chars
+randomised 404 baseline   82534 chars
+body == baseline_body     False      <- the guard passed
+_body_similarity          1.0        <- the same page
+```
+
+Twenty-eight bytes: the requested path echoed into the `<title>` and the search form. A nonce, a
+timestamp, a CSRF token or the path itself defeats `==` on any dynamic application.
+`web_security.validate_sensitive_body` already used `_body_similarity >= 0.92` for this exact job --
+**the right tool was in the codebase and this call site used the wrong one.**
+
+**2. `re.I` was applied to EVERY signature, and that is what actually fired.** The dotenv pattern
+`^[A-Z][A-Z0-9_]{2,}\s*=` reads as "an uppercase KEY starting a line", which is what a dotenv line
+is. Under IGNORECASE it means "any word followed by `=`" -- and every tab-indented HTML attribute is
+that. It matched `class=` in WordPress's own markup.
+
+A third rode along: `\s` matches newlines, so `^` bought nothing. Now `[^\S\n]*`, and a VALUE is
+required after the `=` because a dotenv line is `KEY=value`, never a bare `KEY=`.
+
+Case sensitivity is now the DEFAULT; a signature that wants folding says so with an inline `(?i)`,
+next to the pattern whose author knows whether case carries meaning.
+
+**GATE** (12 tests, 24 with the existing exposure suite). The load-bearing one is
+`test_the_signature_alone_rejects_the_page_with_no_baseline_at_all`: fixing only the baseline guard
+would leave the tool one missing baseline away from the same CRITICAL, and a host whose not-found
+probe failed is exactly when the baseline is missing. Every other check family has a positive
+control, because the `re.I` removal touched all of them.
+
+### Q-126 · The SSTI oracle raised CVSS 9.8 on two digits · **CLOSED** · **CRITICAL**
+
+From the operator's rerun against Shopify:
+
+```
+Finding 1: Server-side template injection on 'locale'    HIGH   CVSS 9.8
+Target: https://admin.shopify.com/signup?locale={{7*7}}${7*7}...
+False-positive safety: NOT ESTABLISHED. NO NEGATIVE CONTROL WAS RECORDED.
+```
+
+The oracle was `_SSTI_MARKER = "49"`, matched as a substring, with the baseline as the only control.
+A signup page carries a nonce, a build hash, asset URLs and pixel dimensions; baseline and probe are
+two separate requests, so any per-request variance flips it.
+
+**THE THIRD NEIGHBOUR OF ONE DEFECT.** Q-106 was CRLF matching a substring where the claim was
+structural; Q-106b was the host-header oracle; this is SSTI. The audit after Q-106 checked its
+neighbours and stopped one short.
+
+**AND MY OWN FIX IS WHY IT SURFACED.** Before Q-122 this fired on the phantom `amp;language`.
+Repairing the phantom parameters simply moved the false accusation onto a real one. It was always
+broken.
+
+**FIXED with RANDOM OPERANDS, and the length is not the point -- the ARITHMETIC is.** `4831*7219`
+yields `34874989`, which is **not a substring of the payload**, so an echo of the literal expression
+cannot produce it. The number can only appear if something performed the multiplication. Same device
+the XSS canary and `run_dom_trace`'s marker have used all along. The payload is now REQUIRED: an
+oracle that cannot say what it sent cannot say what came back.
+
+**GATE** (11 tests). **MUTATION 4 of 4 killed.** Two assertions in `test_bbh.py` that pinned the
+DEFECT as correct behaviour were rewritten, not deleted.
+
 ### Q-125 · `html.unescape` on a URL destroys real parameters -- the fix WAS the defect · **CLOSED** · **HIGH**
 
 **Found while fixing Q-122, and it is worse than Q-122.** `html.unescape` implements the HTML5 rule
@@ -4856,24 +4963,43 @@ established the root cause. Its state is whatever that header says.
 - **Files**: `agent/techniques.py`, `agent/engine_descriptor.py`, `agent/technique_planner.py`,
   `agent/tests/test_engine_reachability.py`. **Blocks**: Q-007, Q-011, Q-012.
 
-### Q-011 · `mass_assignment` is the SECOND phantom — same shape, same backfill · **HIGH** · **HALF CLOSED** `68220af` `39b41b9` — the liveness proof is still open
+### Q-011 · `mass_assignment` is the SECOND phantom — same shape, same backfill · **HIGH** · **CLOSED** `68220af` `39b41b9` + liveness proof this cycle
 
-**QUEUE-ROT RE-MEASUREMENT, 2026-08-29 (autocontinue).** Header still read the not-yet-closed marker.
-The engine now genuinely EXISTS and is wired: `agent/mass_assign_tool.py`, dispatched as
-`run_mass_assign` (`tools.py`, `TOOL_PERMISSIONS`), `test_mass_assign_tool.py` +
-`test_asvs_model.py` + `test_engine_reachability.py` — 96 passed, 0 failed, fresh. But TWO of the
-ticket's own DoD items are still unmet, checked directly rather than inferred:
+**QUEUE-ROT RE-MEASUREMENT, then CLOSED same session, 2026-08-29 (autocontinue).** First pass found
+the engine genuinely wired (`agent/mass_assign_tool.py`, `run_mass_assign`, 96/96 passing) but the
+ticket's DoD required an actual mission proof, which did not exist: 0 `run_mass_assign` tool_call
+rows ever, and no `liveness.py` entry — held at HALF CLOSED rather than repeating the Q-021B mistake.
 
-- **"engine live in a real mission"** — FALSE. Read the LIVE db (read-only, `docker exec
-  apolaki-agent-1`): `run_mass_assign` `tool_call` rows across all history = **0**.
-- **"liveness check added"** — FALSE. `grep mass_assign agent/liveness.py agent/liveness_run.py
-  agent/tests/liveness_baseline.json` = no hits.
+**Closed the gap directly.** Manually confirmed the live vulnerability first (disposable probe
+accounts, `docker exec apolaki-agent-1`, no product code touched): VAmPI's `/users/v1/register`
+binds `admin` straight onto the model — a baseline account read back `admin: false`, an account
+registered with `"admin": true` injected read back `admin: true` via VAmPI's own `/users/v1/_debug`
+endpoint. Then drove the SHIPPED `_run_mass_assign` engine (not a reimplementation) against the same
+target and got a full CONFIRMED finding with both controls firing (ignored-field control did not
+reflect; baseline read `admin: false`).
 
-Not marking CLOSED — that would repeat the exact mistake Q-021B sat under for weeks (DoD not fully
-met despite the code shipping). Same shape as Q-021B/Q-126: needs a `liveness.py` CHECK (the `kind:
-"tool"` pattern already exists, since this DOES produce a confirmed finding, unlike Q-021B) wired
-against a lab with a real mass-assignment surface (crAPI is the standard fixture for this class;
-confirm which local lab actually exposes one before wiring it), driven end to end at least once.
+Wired as a permanent `liveness.py` `kind: "tool"` CHECK (`vampi` added to `liveness_run._LAB_ADDR`).
+**MEASURED END-TO-END, not simulated:**
+```
+[confirmed] mass_assignment    Mass assignment -- the request body binds the privileged attribute 'admin'
+engine liveness: 19 checked, 19 confirmed, 0 dead, 0 skipped, 0 error
+  newly live    mass_assignment
+```
+Baseline ratcheted 18 -> 19 (`liveness_run.py --update`).
+
+**NEGATIVE CONTROL, run for real:** pointed the identical check at a nonexistent VAmPI path —
+`{"ran": false, "note": "the endpoint rejected the UN-injected baseline body (HTTP 405)..."}`,
+verdict `dead` ("engine ran but produced no confirmed CWE-915 finding"), not a false confirm.
+
+**Fallout the liveness run itself caught, fixed in the same commit:** `mass_assignment` had NO
+`validated_on` claim at all (`techniques.py`), so `test_the_liveness_ledger_is_the_only_run_derived_
+record` failed the moment the technique became liveness-proven — the ledger's own honesty check
+working as designed. Added `validated_on=["vampi"]`, the one claim in that file earned by a re-
+checkable liveness run rather than a hand-typed backfill nobody re-verifies.
+
+The seed body's `username`/`email` are personalized to a fresh unique marker by
+`mass_assign_tool.personalize()` on every write, so the fixed CHECK entry is safe to re-run
+indefinitely without a registration collision.
 
 - **MEASURED**: no mass-assignment executor exists anywhere. `def .*assign` in `tools.py` -> nothing;
   the only code that ever over-posts a privileged attribute is `juiceshop_solvers.py:67`

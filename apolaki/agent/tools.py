@@ -6288,7 +6288,7 @@ class ToolRegistry:
             (it reaches the post-login surface); the caller retries anonymously when the app navigates
             away from the page that was asked for."""
             sig = {"executed": False, "redirect": "", "req_override": "", "in_href": "", "in_src": "",
-                   "in_attr": "", "in_text": False, "final_url": ""}
+                   "in_attr": "", "in_text": False, "final_url": "", "server_reflected": False}
             ctx = await browser.new_context(ignore_https_errors=True)
             try:
                 if self.session_headers and not anon:
@@ -6317,8 +6317,17 @@ class ToolRegistry:
                         pass
                 page.on("request", _on_req)
                 try:
-                    await _browser_engine.rate_limited_goto(
+                    _resp = await _browser_engine.rate_limited_goto(
                         page, u, wait_until="domcontentloaded", timeout=12000)
+                    # Q-128: WHAT DID THE SERVER SEND, before any script ran. A canary already in the
+                    # raw HTML was put there by the APPLICATION, not by client-side code -- that is
+                    # server-side reflection, and calling it "DOM-based" is a false claim about the
+                    # mechanism. Free: the navigation response is already in hand, no extra request.
+                    if _resp is not None:
+                        try:
+                            sig["server_reflected"] = canary in (await _resp.text() or "")
+                        except Exception as _apolaki_swallowed_raw:
+                            self._swallow(_apolaki_swallowed_raw, 'tools:_render:raw_body', u)
                     await page.wait_for_timeout(600)
                 except Exception as _apolaki_swallowed_5663:
                     self._swallow(_apolaki_swallowed_5663, 'tools:_render:5663', "")
@@ -7913,7 +7922,10 @@ class ToolRegistry:
                         continue
                     try:
                         sr = await c.get(probe.url)
-                        v = ws.analyze_ssti(base_body, sr.text)
+                        # Q-126: the oracle needs the probe's OWN payload to know what product to
+                        # look for. Passing it is what makes the marker structural instead of a
+                        # fixed "49" that any dynamic page produces by accident.
+                        v = ws.analyze_ssti(base_body, sr.text, probe.payload)
                         if v:
                             findings.append({"title": f"Server-side template injection on '{probe.parameter}'",
                                              "severity": v["severity"].lower(), "target": probe.url,

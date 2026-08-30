@@ -151,14 +151,33 @@ def classify(url: str, param: str, canary: str, sig: dict, source: str = "query"
         hits.append({"family": "request_url_override", "param": param, "source": source,
                      "target": s.get("reqov_target") or here,
                      "canary": canary, "evidence": "%s overrides a client-side fetch/XHR request target at runtime: %s" % (where_from, str(s["req_override"])[:120])})
-    if s.get("in_href") or s.get("in_src"):
-        sink = s.get("in_href") or s.get("in_src")
-        hits.append({"family": "dom_link_manipulation", "param": param, "source": source, "target": here,
-                     "canary": canary, "evidence": "%s controls a link/resource URL at runtime (%s)" % (where_from, str(sink)[:120])})
-    if s.get("in_attr") or s.get("in_text"):
-        where = s.get("in_attr") or "DOM text"
-        hits.append({"family": "dom_data_manipulation", "param": param, "source": source, "target": here,
-                     "canary": canary, "evidence": "%s reflects into rendered DOM content at runtime (%s)" % (where_from, where)})
+    # ── Q-128: PRESENCE IN THE DOM IS NOT A DOM FLOW ──────────────────────────────────────────────
+    #
+    # The two families below fire on the canary merely BEING somewhere in the rendered page. That is
+    # only evidence of a client-side sink if client-side code put it there. When the SERVER already
+    # emitted it, the browser is showing us the application's own HTML and nothing was traced.
+    #
+    # MEASURED on a stock WordPress lab: 314 of 322 findings were these two families, and the canary
+    # was in the RAW response every time -- WordPress echoes the request URI into its comment-reply
+    # link:
+    #
+    #     <a id="cancel-comment-reply-link" href="/?p=1&#038;lang=domtr7168079a#respond">
+    #
+    # No JavaScript was involved. Every one of those 314 claimed CWE-79 at MEDIUM.
+    #
+    # THE THREE FAMILIES ABOVE ARE DELIBERATELY NOT GATED. `executed`, `redirect` and `req_override`
+    # are BEHAVIOURS the browser performed -- a dialog fired, a navigation happened, a fetch went to
+    # the attacker host. Server-side reflection that also executes is still DOM XSS, and suppressing
+    # it here would trade a false-positive flood for a missed real bug, which is the wrong trade.
+    if not s.get("server_reflected"):
+        if s.get("in_href") or s.get("in_src"):
+            sink = s.get("in_href") or s.get("in_src")
+            hits.append({"family": "dom_link_manipulation", "param": param, "source": source, "target": here,
+                         "canary": canary, "evidence": "%s controls a link/resource URL at runtime (%s)" % (where_from, str(sink)[:120])})
+        if s.get("in_attr") or s.get("in_text"):
+            where = s.get("in_attr") or "DOM text"
+            hits.append({"family": "dom_data_manipulation", "param": param, "source": source, "target": here,
+                         "canary": canary, "evidence": "%s reflects into rendered DOM content at runtime (%s)" % (where_from, where)})
     return hits
 
 

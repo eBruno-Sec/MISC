@@ -38,21 +38,32 @@ EXPOSURE_CHECKS = [
     {"path": ".svn/entries", "name": "Exposed .svn/entries", "severity": "high", "family": "git_exposure",
      "sig": [r"svn://", r"has-props", r"^\d+\s*\ndir"]},
     {"path": ".env", "name": "Exposed .env file", "severity": "critical", "family": "config_exposure",
-     "sig": [r"(?m)^\s*[A-Z][A-Z0-9_]{2,}\s*=", r"APP_KEY\s*=", r"DB_PASSWORD\s*=", r"SECRET"]},
+     # Q-127, the SECOND defect in the same finding. This was
+     #   r"(?m)^\s*[A-Z][A-Z0-9_]{2,}\s*="
+     # and `\s` MATCHES NEWLINES, so `^` bought nothing: the match could begin at any line start,
+     # consume every following newline and tab, and land on an uppercase token deep inside indented
+     # HTML. MEASURED against WordPress's own tab-indented markup -- it matched.
+     #
+     # `[^\S\n]*` is horizontal whitespace only, so the KEY must genuinely start its own line, and a
+     # value is now required after the `=`: a dotenv line is `KEY=value`, never a bare `KEY=`. Bare
+     # `SECRET` is gone for the same reason -- it matched the word anywhere on any page.
+     "sig": [r"(?m)^[^\S\n]*[A-Z][A-Z0-9_]{2,}[^\S\n]*=[^\S\n]*\S",
+             r"(?m)^[^\S\n]*APP_KEY[^\S\n]*=", r"(?m)^[^\S\n]*DB_PASSWORD[^\S\n]*=",
+             r"(?m)^[^\S\n]*[A-Z_]*SECRET[A-Z_]*[^\S\n]*=[^\S\n]*\S"]},
     {"path": "wp-config.php.bak", "name": "Exposed wp-config backup", "severity": "critical", "family": "backup_exposure",
      "sig": [r"DB_PASSWORD", r"DB_NAME", r"AUTH_KEY", r"\$table_prefix"]},
     {"path": "config.php.bak", "name": "Exposed PHP config backup", "severity": "high", "family": "backup_exposure",
      "sig": [r"<\?php", r"password", r"mysqli?_connect"]},
     {"path": ".aws/credentials", "name": "Exposed AWS credentials", "severity": "critical", "family": "credential_exposure",
-     "sig": [r"aws_access_key_id", r"aws_secret_access_key"]},
+     "sig": [r"(?i)aws_access_key_id", r"(?i)aws_secret_access_key"]},
     {"path": ".htpasswd", "name": "Exposed .htpasswd", "severity": "high", "family": "credential_exposure",
      "sig": [r":\$apr1\$", r":\$2[aby]\$", r":\{SHA\}", r":\$6\$"]},
     {"path": "phpinfo.php", "name": "Exposed phpinfo()", "severity": "medium", "family": "info_disclosure",
      "sig": [r"phpinfo\(\)", r">PHP Version\s*<", r"php\.ini"]},
     {"path": "server-status", "name": "Exposed Apache server-status", "severity": "medium", "family": "info_disclosure",
-     "sig": [r"Apache Server Status", r"Server uptime", r"requests/sec"]},
+     "sig": [r"(?i)Apache Server Status", r"(?i)Server uptime", r"(?i)requests/sec"]},
     {"path": "backup.sql", "name": "Exposed SQL dump", "severity": "high", "family": "backup_exposure",
-     "sig": [r"INSERT INTO", r"CREATE TABLE", r"-- MySQL dump", r"DROP TABLE IF EXISTS"]},
+     "sig": [r"(?i)INSERT INTO", r"(?i)CREATE TABLE", r"(?i)-- MySQL dump", r"(?i)DROP TABLE IF EXISTS"]},
     {"path": ".DS_Store", "name": "Exposed .DS_Store", "severity": "low", "family": "info_disclosure",
      "sig": [r"Bud1"]},
     {"path": "docker-compose.yml", "name": "Exposed docker-compose.yml", "severity": "low", "family": "info_disclosure",
@@ -63,8 +74,23 @@ EXPOSURE_CHECKS = [
 
 
 def _matches(sigs: list, body: str) -> str:
+    r"""First signature that matches, or "".
+
+    Q-127. `re.I` USED TO BE APPLIED TO EVERY SIGNATURE, and that is what actually broke the dotenv
+    check. `^[A-Z][A-Z0-9_]{2,}\s*=` reads as "an uppercase KEY at the start of a line" -- which is
+    what a dotenv line is -- but under IGNORECASE it means "any word followed by `=`", and every
+    tab-indented HTML attribute in existence is exactly that. MEASURED: it matched `class=` in
+    WordPress's own markup, which is how a CRITICAL "Exposed .env file" was raised against a site
+    that has no .env.
+
+    Case sensitivity is now the DEFAULT and a signature that genuinely wants folding says so with an
+    inline `(?i)`. That keeps the decision next to the pattern whose author knows whether case
+    carries meaning: `DIRC`, `Bud1`, `ref: refs/`, `$apr1$` and an uppercase dotenv KEY are all
+    case-BEARING, and folding them was never intended -- it was inherited from one flag at the call
+    site.
+    """
     for s in sigs:
-        if re.search(s, body or "", re.I | re.M):
+        if re.search(s, body or "", re.M):
             return s
     return ""
 
@@ -78,7 +104,27 @@ def classify(check: dict, status: int, body: str, content_type: str = "",
     baseline."""
     if not (200 <= (status or 0) < 300):
         return None
-    if baseline_body and (body or "") == baseline_body:
+    # Q-127. THE CATCH-ALL GUARD WAS EXACT EQUALITY, AND EXACT EQUALITY IS NOT "THE SAME PAGE".
+    # MEASURED on a stock WordPress lab -- `/.env` and a randomised not-found path:
+    #
+    #     /.env body                 82506 chars
+    #     randomised 404 baseline    82534 chars
+    #     body == baseline_body      False        <- the guard passed
+    #     _body_similarity           1.0          <- they are the same page
+    #
+    # 28 bytes of difference: the requested path echoed into the title and the search form. Any
+    # dynamic byte -- a nonce, a timestamp, a CSRF token, the path itself -- defeats `==`, and an
+    # application that answers 200 to everything then matches a signature somewhere in its own
+    # markup. That produced a **CRITICAL "Exposed .env file"** against a WordPress install that has
+    # no .env at all.
+    #
+    # `validate_sensitive_body` in web_security.py already had this right, at the same threshold.
+    # The correct tool existed in the codebase and this call site used the wrong one.
+    if baseline_body and len(baseline_body) > 40:
+        from web_security import _body_similarity
+        if _body_similarity(body or "", baseline_body) >= 0.92:
+            return None
+    elif baseline_body and (body or "") == baseline_body:
         return None
     matched = _matches(check["sig"], body or "")
     if not matched:

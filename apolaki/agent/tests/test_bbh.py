@@ -1076,15 +1076,30 @@ def test_open_redirect_and_host_header_and_ssti():
     assert ws.analyze_open_redirect(200, "", "https://legit.com") is None
     assert ws.analyze_host_header("", "https://bbh-evil.example/reset")["severity"] == "MEDIUM"
     assert ws.analyze_host_header("clean body", "") is None
-    assert ws.analyze_ssti("result is ", "result is 49")["severity"] == "HIGH"
-    assert ws.analyze_ssti("has 49 already", "has 49 already") is None   # not introduced by us
+    # Q-126: these two asserted the DEFECT. `analyze_ssti("result is ", "result is 49")` returning
+    # HIGH is exactly what raised a CVSS 9.8 server-side template injection against
+    # admin.shopify.com because a live page happened to contain the digits `49`. The oracle now
+    # needs the probe's OWN payload and looks for ITS product, so a stray number proves nothing.
+    _pl = ws._ssti_payload()
+    _expect = ws.ssti_expected(_pl)
+    assert ws.analyze_ssti("result is ", "result is " + _expect, _pl)["severity"] == "HIGH"
+    assert ws.analyze_ssti("result is ", "result is 49", _pl) is None      # the old false positive
+    assert ws.analyze_ssti("has %s already" % _expect,
+                           "has %s already" % _expect, _pl) is None        # not introduced by us
+    assert ws.analyze_ssti("", _expect, "") is None                        # no payload, no verdict
 
 
 def test_redirect_and_ssti_probe_builders():
     rp = ws.build_redirect_probes("https://t/go?next=/home&id=1")
     assert rp and all(p.parameter == "next" for p in rp)
     sp = ws.build_ssti_probes("https://t/hello?name=bob")
-    assert sp and any("7*7" in p.payload for p in sp)
+    # Q-126: the operands are RANDOM per probe, so `7*7` is no longer the payload. What must hold is
+    # the property the oracle rests on -- the expression is arithmetic, and its product is NOT a
+    # substring of the payload, so an echo of the literal cannot be mistaken for an evaluation.
+    assert sp
+    for p in sp:
+        assert re.search(r"\{\{\d{4}\*\d{4}\}\}", p.payload), p.payload
+        assert ws.ssti_expected(p.payload) not in p.payload, p.payload
 
 
 def test_guidance_email_caa_takeover_now_fire():

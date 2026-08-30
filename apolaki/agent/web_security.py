@@ -718,8 +718,21 @@ _REDIRECT_PAYLOADS = (
     "/%2f%2fbbh-evil.example",           # encoded scheme-relative
     "https://bbh-evil.example/%2e%2e",   # path-normalization noise
 )
-_SSTI_PAYLOAD = "{{7*7}}${7*7}"     # detect 49 from either engine
-_SSTI_MARKER = "49"
+# Q-126. The operands are RANDOM PER PROBE and the marker is their PRODUCT, not a fixed literal.
+# `{{7*7}}` -> "49" was the old pair, and two digits on a dynamic page is a coincidence detector: it
+# raised a CVSS 9.8 server-side template injection against admin.shopify.com because the probe
+# response happened to contain "49" and the baseline happened not to. A four-digit pair yields a
+# seven- or eight-digit product that is NOT a substring of the payload, so it can only appear if
+# something actually multiplied. Same shape as the XSS canary and `run_dom_trace`'s marker, which
+# have used per-probe randomness for exactly this reason.
+_SSTI_OPERANDS = re.compile(r"\{\{\s*(\d+)\s*\*\s*(\d+)\s*\}\}")
+
+
+def _ssti_payload() -> str:
+    """One probe's expression. Both engines get the same operands so either can evaluate it."""
+    a = 1000 + int.from_bytes(os.urandom(2), "big") % 9000
+    b = 1000 + int.from_bytes(os.urandom(2), "big") % 9000
+    return "{{%d*%d}}${%d*%d}" % (a, b, a, b)
 
 
 def analyze_cors(origin: str, resp_headers: dict) -> dict | None:
@@ -863,11 +876,55 @@ def analyze_host_header(body: str, location: str, resp_headers=None, xfh_locatio
     return None
 
 
-def analyze_ssti(baseline_body: str, probe_body: str) -> dict | None:
-    """Flag SSTI/CSTI: the arithmetic marker 49 appears only after injection."""
-    if _SSTI_MARKER in (probe_body or "") and _SSTI_MARKER not in (baseline_body or ""):
-        return {"severity": "HIGH", "detail": "template expression {{7*7}}/${7*7} evaluated to 49"}
-    return None
+def ssti_expected(payload: str) -> str:
+    """The product a genuine template evaluation would print, derived from the probe's own payload.
+
+    Returns "" when the payload carries no parsable `A*B`, so a caller that cannot say what it sent
+    gets NO verdict rather than a default one.
+    """
+    m = _SSTI_OPERANDS.search(str(payload or ""))
+    if not m:
+        return ""
+    return str(int(m.group(1)) * int(m.group(2)))
+
+
+def analyze_ssti(baseline_body: str, probe_body: str, payload: str = "") -> dict | None:
+    r"""Flag SSTI/CSTI: the probe's OWN arithmetic result appears only after injection.
+
+    Q-126. THIS ORACLE SHIPPED A CVSS 9.8 FALSE ACCUSATION AGAINST A LIVE BUG-BOUNTY TARGET. It was:
+
+        _SSTI_MARKER = "49"
+        if _SSTI_MARKER in probe_body and _SSTI_MARKER not in baseline_body: -> HIGH
+
+    A bare two-character substring. `admin.shopify.com/signup` reported "Server-side template
+    injection on 'locale'" at CVSS 9.8 because the probe response contained the digits `49`
+    somewhere and the baseline response did not -- a nonce, a build hash, an asset URL, a pixel
+    dimension, a timestamp. Any per-request variance on a dynamic page flips it.
+
+    This is the THIRD neighbour of one defect. Q-106 was CRLF matching a substring where the claim
+    was structural; Q-106b was host-header doing the same; this is SSTI, audited only because the
+    operator's rerun surfaced it. The lesson each time: the evidence must have the SHAPE of the claim.
+
+    THE FIX IS RANDOM OPERANDS, and it is what makes the marker structural rather than merely longer.
+    `7*7` yields `49`, which occurs by chance constantly. `4831*7219` yields `34874989`, which occurs
+    only if something PERFORMED THE MULTIPLICATION -- the product is not a substring of the payload,
+    so an echo of the literal expression cannot produce it. That single change converts a coincidence
+    detector into an oracle.
+
+    The baseline comparison is KEPT as the negative control, and the payload is now required: an
+    oracle that cannot say what it sent cannot say what came back.
+    """
+    expected = ssti_expected(payload)
+    if not expected:
+        return None
+    if expected in (baseline_body or ""):
+        return None                       # present before we touched anything -- not ours
+    if expected not in (probe_body or ""):
+        return None
+    return {"severity": "HIGH", "expected": expected,
+            "detail": "template expression evaluated: the probe sent %s and the response contains "
+                      "its product %s, which appears nowhere in the payload and nowhere in the "
+                      "baseline response" % (str(payload)[:40], expected)}
 
 
 # ── CRLF / response-header injection ─────────────────────────────
@@ -941,8 +998,11 @@ def build_ssti_probes(url: str, max_probes: int = 6) -> list:
     probes = []
     for name, value in parse_qsl(urlparse(url).query, keep_blank_values=True):
         if name.lower() in SSTI_PARAM_HINTS or (value and value.isalpha()):
-            probes.append(WebProbe(url=_replace_query_value(url, name, _SSTI_PAYLOAD),
-                                   parameter=name, original_value=value, payload=_SSTI_PAYLOAD,
+            # Q-126: a fresh expression PER PROBE. Two parameters on one page must not share a
+            # product, or a single stray number in the response convicts both.
+            _pl = _ssti_payload()
+            probes.append(WebProbe(url=_replace_query_value(url, name, _pl),
+                                   parameter=name, original_value=value, payload=_pl,
                                    family="ssti"))
             if len(probes) >= max_probes:
                 return probes
