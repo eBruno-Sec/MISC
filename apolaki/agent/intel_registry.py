@@ -221,6 +221,89 @@ def production() -> list:
     return trusted("production")
 
 
+# ── Q-021D Gap 1: the missing product -> advisory resolver ───────────────────────────────────
+#
+# `intel_feeds.py` matches by exact CVE or an exact product-version key only, so a plain
+# "nginx 1.18.0" could not be turned into a CVE list at all. This is the resolver that closes
+# that gap. It is a PRODUCER only -- it never decides applicability (that is
+# `dependency_intel.advisory_rows_for`, the consumer) -- and it performs ZERO network I/O: it
+# reads the local CISA KEV snapshot (`intel_feeds.load()`, already on disk, refreshed by the
+# sidecar) and this process's own `_STORE` (populated only by an explicit governed fetch elsewhere
+# -- `main.intel_fetch` -- never by this function). Every advisory it returns names `source` and
+# `snapshot_at`, because a match with no evidence of WHEN it was true is not a fact, it is a guess
+# with a citation.
+#
+# Only `trusted("validated")` records are consulted, never `by_state("candidate")` -- that is the
+# same trust-ladder rule `trusted()` already enforces, restated here because a resolver that read
+# raw candidates would make every governed-connector record visible to a consumer the moment it
+# landed, defeating the entire promotion path built above.
+def advisories_for(fact: dict, snapshots=None) -> dict:
+    """Resolve a TechnologyFact-shaped dict ({"product"|"name": ..., "version": ...}) to
+    advisories. Returns {"status": "ok"|"disabled"|"empty"|"no_product", "advisories": [...]}.
+
+    Matching is a case-insensitive substring on the product name -- deliberately a LEAD-grade
+    match (same caveat as `intel_feeds.product_version_key`), never a proof of applicability.
+    Products shorter than 3 characters are refused (`no_product`) rather than matched against
+    everything, mirroring `intel_feeds.product_version_key`'s own floor.
+    """
+    product = str((fact or {}).get("product") or (fact or {}).get("name") or "").strip().lower()
+    if len(product) < 3:
+        return {"status": "no_product", "advisories": []}
+    if snapshots is None:
+        import intel_feeds as _feeds
+        snapshots = _feeds.load()
+    out = []
+    # (a) the local CISA KEV snapshot -- exact CVE, a real product string, a real snapshot stamp.
+    # Not gated by intel_sources at all, same as `_kev_witness()` above: this is an offline file the
+    # sidecar refreshes on its own schedule, not a governed-connector fetch.
+    kev = (snapshots or {}).get("kev") or {}
+    man = (snapshots or {}).get("manifest") or {}
+    kev_stamp = man.get("refreshed_at")
+    for cve, meta in (kev.get("cves_meta") or {}).items():
+        p = str((meta or {}).get("product") or "").strip().lower()
+        if p and (product in p or p in product):
+            out.append({"cve": cve, "source": "cisa_kev", "snapshot_at": kev_stamp,
+                       "affected_product": meta.get("product"), "confidence": _CONF["production"],
+                       "known_exploited": True,
+                       # KEV is a directly-loaded tier-A catalogue, never a candidate that entered
+                       # through `ingest()` -- it is not on the `_STORE` ladder, so it gets its own
+                       # label rather than borrowing one of VALIDATION_STATES.
+                       "validation_state": "authoritative_catalog"})
+    # (b) the governed-connector store -- validated-and-above ONLY. A record still at `candidate`
+    # or `validating` must never reach here; that is control (b)'s exact assertion.
+    for rec in trusted("validated"):
+        rp = str(rec.get("affected_product") or (rec.get("witness") or {}).get("product") or "")
+        rp = rp.strip().lower()
+        cve = rec.get("cve")
+        if not rp or not cve or not (product in rp or rp in product):
+            continue
+        out.append({"cve": cve, "source": rec.get("source"),
+                   "snapshot_at": (rec.get("witness") or {}).get("snapshot_at") or rec.get("retrieved_at"),
+                   "affected_product": rec.get("affected_product") or (rec.get("witness") or {}).get("product"),
+                   "affected_versions": rec.get("affected_versions"),
+                   "fixed_versions": rec.get("fixed_versions"),
+                   "confidence": rec.get("confidence"),
+                   "validation_state": rec.get("validation_state")})
+    if out:
+        seen, dedup = set(), []
+        for a in out:
+            k = (a["source"], a["cve"])
+            if k in seen:
+                continue
+            seen.add(k)
+            dedup.append(a)
+        return {"status": "ok", "advisories": dedup}
+    # NON-VACUOUS emptiness: distinguish "nothing was ever fetched because every source is off"
+    # (the default) from "fetched/loaded and genuinely found nothing" -- the same labelled-empty
+    # contract `stats()` already documents, extended to this entry point (negative control (a)).
+    if not _src.enabled_sources() and not _STORE:
+        return {"status": "disabled", "advisories": [],
+               "note": "every intel source is disabled and nothing has been ingested; this "
+                       "resolver performed zero network I/O and this is a configuration state, "
+                       "not a clean 'no advisories' result"}
+    return {"status": "empty", "advisories": []}
+
+
 def stats() -> dict:
     """Registry census, and WHY it reads the way it does. Served by `GET /intel/registry`.
 

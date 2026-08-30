@@ -244,6 +244,76 @@ def make_tech_fact(product, *, version="", source="", detector="", vendor=None, 
     }
     fact["proof_state"] = tech_proof_state(fact)
     fact["component_status"] = tech_component_status(fact)
+    return attach_advisories(fact)
+
+
+# ── Q-021D Gap 1: connect the governed feeds to this fact ───────────────────────────────────────
+# The resolver (`intel_registry.advisories_for`) is a PRODUCER only -- it never decides
+# applicability. This is the CONSUMER: it turns a raw advisory list into report-ready rows and
+# enforces the ticket's hard anti-spam requirement. Called from `make_tech_fact` (below), which is
+# the live construction path `fingerprint.py:304` already calls on every mission -- so this is
+# reachable from product code without touching a file outside this module's ownership.
+def advisory_rows_for(fact: dict, resolved: dict = None) -> list:
+    """Report-ready rows for a fact's resolved advisories.
+
+    ANTI-SPAM, hard requirement: an unknown or LOW-confidence version (anything NOT in
+    `CVE_ELIGIBLE`) yields AT MOST ONE `POTENTIALLY_AFFECTED` row per product -- never one per CVE.
+    That row NAMES the count; it does not enumerate the advisories into the findings list. Only a
+    CONFIRMED/HIGH-confidence version -- the same gate `cve_eligible` already enforces everywhere
+    else in this module -- may enumerate one row per advisory, because only then is the version
+    itself trustworthy enough to make a per-CVE claim meaningful.
+
+    Returns [] when the resolver found nothing. `resolved` may be pre-computed (a
+    `intel_registry.advisories_for` result) to avoid a second lookup when the caller already has
+    one; otherwise this calls it itself.
+    """
+    import intel_registry as _reg
+    resolved = resolved if resolved is not None else _reg.advisories_for(fact)
+    advisories = resolved.get("advisories") or []
+    if not advisories:
+        return []
+    product = str((fact or {}).get("label") or (fact or {}).get("product")
+                 or (fact or {}).get("name") or "").strip()
+    version = str((fact or {}).get("version") or "").strip()
+    if not cve_eligible(fact):
+        sources = sorted({a.get("source") for a in advisories if a.get("source")})
+        return [{
+            "product": product, "version": version, "status": POTENTIALLY_AFFECTED,
+            "row_type": "collapsed", "count": len(advisories),
+            "summary": "%s %s -- %d advisories match this version range, none "
+                      "applicability-verified" % (product, version or "(version unknown)",
+                                                  len(advisories)),
+            "sources": sources,
+        }]
+    return [{
+        "product": product, "version": version, "status": POTENTIALLY_AFFECTED,
+        "row_type": "advisory", "cve": a.get("cve"), "source": a.get("source"),
+        "snapshot_at": a.get("snapshot_at"), "confidence": a.get("confidence"),
+        "validation_state": a.get("validation_state"),
+    } for a in advisories]
+
+
+def attach_advisories(fact: dict, snapshots=None) -> dict:
+    """Resolve + attach this fact's advisories in place, upgrading `proof_state` to
+    `ADVISORY_MATCHED` when the version is trustworthy enough for that claim to be honest.
+
+    A no-op for a fact with no version (nothing for a range to apply to -- matching by product
+    name alone would be pure noise) and a no-op whenever the resolver finds nothing, which is
+    EVERY existing test's environment (no local feed snapshot on disk, empty registry store) --
+    so this is additive and must not change any fact that does not carry real feed data.
+    """
+    if not str((fact or {}).get("version") or "").strip():
+        return fact
+    import intel_registry as _reg
+    resolved = _reg.advisories_for(fact, snapshots)
+    rows = advisory_rows_for(fact, resolved)
+    if not rows:
+        return fact
+    fact["advisory_rows"] = rows
+    if cve_eligible(fact):
+        # only a trustworthy version gets to claim "matched a published range" -- a LOW-confidence
+        # collapsed lead stays at whatever rung it already reached (VERSION_SUSPECTED).
+        fact["proof_state"] = ADVISORY_MATCHED
     return fact
 
 
