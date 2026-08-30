@@ -838,7 +838,7 @@ TESTS_ONLY = {
     "graph_model.related_findings": ("test_bbh.py",),
     "ics_dnp3_s7.is_read_only": ("test_ics_dnp3_s7.py", "test_ics_real_stack.py"),
     "intel_connectors.reset": ("test_intel_connectors.py", "test_intel_registry.py"),
-    "intel_registry.reset": ("test_intel_promotion.py", "test_intel_registry.py"),
+    "intel_registry.reset": ("test_intel_promotion.py", "test_intel_registry.py", "test_intel_advisories.py"),
     "mission_export.summary": ("test_mission_export.py",),
     "ot_context.declare_protocol_safety": ("test_ot_context.py",),
     "race_tool.best_round": ("test_bbh.py",),
