@@ -1,5 +1,197 @@
 # QUEUE — the one canonical, dependency-ordered work queue
 
+## CODEX BRIEF TRIAGE — 2026-08-31 — mission `861c22ac` / `Shopify_30Aug2026@1700`
+
+Filed from an external review (Codex) of a completed Shopify run plus runtime monitoring. **Read-only
+pass; nothing fixed.** Every claim below is marked VERIFIED (I checked it against this tree),
+DISPUTED (my own measurement contradicts the stated root cause), ALREADY-CLOSED (the ticket exists
+and the build matters), or NON-DEFECT.
+
+**The headline is correct and it is the most valuable thing in the brief.** The run did not fail
+because of the operator's laptop, ISP, firewall or VPN. It failed on Apolaki's own runtime: the agent
+saturated CPU, **614 zombie browser subprocesses** accumulated under PID 1, and `/health` went from
+0.23s to timing out at 20s while `/missions` took 27.6s. That is a process-lifecycle defect and it
+outranks everything else in the queue.
+
+### VERIFIED against this tree
+
+| claim | evidence I checked |
+|---|---|
+| No init/reaper in the container | `grep -nE "init:|tini" docker-compose.yml Dockerfile agent/Dockerfile` returns NOTHING. Nothing reaps PID-1 orphans. |
+| Wayback timeout too tight | `agent/tools.py:4497` `rows = await self._get_json(api, timeout=40)`. Measured path 47-71s. |
+| `tier3/` missing from the image | `agent/Dockerfile` copies `*.py`, `tests`, `pytest.ini` -- no `tier3`. Documented in-container tests cannot import it. |
+
+### DISPUTED -- the root cause is wrong, and it matters
+
+**Codex attributes shallow crawl and shallow parameter testing to wall-clock budget exhaustion.**
+`run_katana: 1 crawled URL`, `run_sqli: 3 params tested`. It reads as a budget problem because the
+budget also fired.
+
+**It is not.** MEASURED on the local WordPress reach lab, where the sweep completed
+**55 of 55 parameterized endpoints, 0 declined, no budget pressure of any kind**: `run_sqli` still
+tested **1 parameter**. The lab is server-rendered, no WAF, no Cloudflare, no rate limit.
+
+So the depth ceiling is Apolaki's, not the target's and not the clock's. Raising the budget will not
+move it. Filed separately as **Q-134**, and it should not be bundled with the budget work.
+
+### ALREADY-CLOSED -- confirm which build produced the artifact before working these
+
+- **Host-header "NO sink was found"** is **Q-114 WORKING**, not a defect. That sentence is the fix's
+  own text, and the severities in the report bear it out: those 7 rows are `Informational`, not
+  `Medium`. Codex's framing ("repeated confirmed findings") is wrong on severity. What survives is a
+  real but smaller complaint -- 7 rows for ONE behaviour on ONE host is undeduplicated noise. Filed
+  narrowly as **Q-137**.
+- **`run_subfinder` 39230 items vs "1 subdomains found"** is **Q-123**, CLOSED at `ddc0750`. If the
+  run predates that commit the row is expected; if it postdates it, Q-123 did not hold and needs
+  reopening. Check the build before touching it.
+- **Injection sweep `49 of 554 ... 505 declined`** is **Q-113 WORKING**. The cap and the disclosure
+  are the fix. Codex's actual complaint is different and valid: the budget is invisible while it
+  runs and leaves no resumable queue. That is **Q-133**, not a defect in Q-113.
+- **`graph_primary_state.hostless_endpoint`, 30 nodes** is **Q-109**, CLOSED. But the build that
+  produced this report also contained Q-114 (same push), so the symptom PERSISTS AFTER THE FIX.
+  Lane C flagged exactly this risk as unreconciled. Filed as **Q-138**.
+
+### NON-DEFECT / needs the operator, not code
+
+- **"No new `.md` appeared in the Shopify report folder."** Apolaki does not write to
+  `C:\Users\Zabre\Desktop\HackerOne\Targets\Shopify`; that is a manual export location. Not a
+  persistence defect unless someone intended an auto-export that was never built.
+- **Product-security items (SAST-01/02/03)** are correctly deferred and stay deferred.
+
+---
+
+### Q-131 · 614 zombie browser processes and an API that starves under its own scan · **READY** · **CRITICAL**
+
+**The strongest finding in the Codex brief, and the highest-priority item in this queue.** Measured
+timeline over one Shopify run:
+
+```
+00:40  recon      agent CPU ~17%    /health ok
+01:11  running    agent CPU ~100%   /health + /missions TIMED OUT   ~510 zombies
+02:20  probe      agent CPU ~105%   /health + /missions timing out  ~558 zombies
+03:23  probe      /health timed out at 20s, /missions 27.6s         ~606 zombies
+05:27  failed     agent healthy, CPU idle, /health 0.23s            ~614 zombies persisted
+```
+
+Final snapshot: **616 processes, 614 browser-related zombies** -- 338 `chrome`, 246
+`chrome_crashpad`, 30 `leakless`. Docker had no CPU/memory/PID cap and the container saw 8 CPUs with
+~1.2 GiB of 15.45 GiB used, so the host was never the constraint.
+
+**VERIFIED CAUSE, PARTIAL:** there is no init/reaper anywhere -- no `init: true` in
+`docker-compose.yml`, no `tini` in any Dockerfile. PID 1 is the app, and PID 1 does not reap orphans.
+That explains ACCUMULATION. It does not by itself explain why browsers are being orphaned at that
+rate; the launch/close discipline in the Playwright paths has to be audited too.
+
+**FIX:** `init: true` (or tini) AND a `finally`-scoped close on every browser/context/page AND a
+bounded browser pool rather than a tree per check. Keep the API responsive: scan work must not
+monopolise the event loop.
+
+**GATE:** a browser-heavy scan fixture exits with ZERO zombie `chrome`/`chrome_crashpad`/`leakless`;
+`/health` answers within 2s and `/missions` within 5s while that scan is active. Negative control:
+the same assertions must FAIL against the current tree, or the gate proves nothing.
+
+### Q-132 · ZAP was enabled and healthy and never ran · **READY** · **HIGH**
+
+`run_zap | failed | 0 calls | "ZAP was enabled but no run_zap tool_call was persisted; the mission
+cannot claim ZAP execution."`
+
+**THE REPORTING IS ALREADY CORRECT -- that sentence is Q-116's guard doing its job**, and it must not
+be "fixed". The defect is upstream: a healthy ZAP daemon and an opted-in mission produced no
+dispatch, and nothing records WHY.
+
+**FIX:** capture the reason ZAP was not dispatched -- planner never selected it, scope refused it,
+daemon unreachable, budget exhausted, prerequisite crawl/session absent -- and surface it. Then fix
+whichever of those is actually happening. **GATE:** ZAP healthy + enabled + no dispatch renders "not
+executed" WITH a cause; a successful run shows target, URLs scanned, alerts, elapsed.
+
+### Q-133 · The sweep budget is invisible while it runs and leaves no resumable queue · **READY** · **HIGH**
+
+Q-113's cap is correct and its disclosure is correct. What is missing is everything around it.
+
+The operator selected "full mode", and Apolaki silently entered a 4-hour bounded sweep, spent it on
+49 of 554 endpoints, cut the HTML pass after 1 of 12 pages, and only said so at the end. Nothing
+showed budget remaining during the run, and nothing preserved what was skipped.
+
+**FIX:** `BBH_SWEEP_BUDGET_S` configurable from the UI/API rather than an env var buried in the
+container; a launch-time budget panel naming every cap including `run_sqli`'s 240s; a live budget
+meter; and on exhaustion a persisted skipped-work artifact (untested endpoints, untested pages,
+engines not run, reason, resume settings). Also fix the opening line -- "554 selected; 0 declined"
+reads as full coverage when the clock is already running.
+
+**GATE:** a fake scan with a 10s sweep budget shows budget state BEFORE exhaustion and produces a
+resumable skipped-work queue. Per-call truncation (`run_sqli` 240s) is counted separately from the
+mission wall budget.
+
+### Q-134 · Crawl and parameter depth are NOT budget-bound -- measured on a lab with budget to spare · **READY** · **HIGH**
+
+```
+Shopify   run_katana 1 crawled URL   run_sqli 3 params tested   (budget exhausted)
+WP lab    55 of 55 endpoints probed, 0 declined, no budget pressure
+          run_sqli STILL tested 1 param
+```
+
+The lab is server-rendered, no WAF, no Cloudflare, no rate limit, and the sweep ran to completion.
+**The ceiling is ours.** This is the single biggest capability gap in the platform and it is
+invisible behind "0 confirmed", which reads as a clean target and is really an empty sweep.
+
+**Do not bundle this with Q-133.** Raising the budget will not move these numbers, and treating it as
+a budget symptom is how it stays unfixed. Start from why `run_sqli` derives 1-3 parameters from a
+surface with thousands, and why katana returns 1 URL at depth 5.
+
+### Q-135 · Wayback times out at 40s on a path measured at 47-71s · **READY** · **MEDIUM**
+
+VERIFIED: `agent/tools.py:4497` `timeout=40`. The CDX endpoint needs no API key; the path simply is
+slow, and with a VPN it got worse (connection refused / host timeouts).
+
+**FIX:** raise to >=90s or make it configurable, add backoff retries, cache per domain, set a real
+User-Agent, and classify the failure -- connect refused / TLS timeout / 403 / 429 / empty result /
+parse error are five different facts. **GATE:** a simulated 70s response succeeds; a timeout renders
+"Wayback degraded" without failing unrelated checks; an EMPTY result is distinct from a network
+failure.
+
+### Q-136 · The built image omits `tier3/`, so documented in-container tests cannot run · **READY** · **MEDIUM**
+
+VERIFIED: `agent/Dockerfile` copies `*.py`, `tests`, `pytest.ini` and never `tier3`. The documented
+command fails with `ModuleNotFoundError: No module named 'tier3'`. Either ship it or correct the
+docs, and add a packaging smoke test so the two cannot drift again.
+
+### Q-137 · Seven identical host-header rows for one behaviour on one host · **READY** · **MEDIUM**
+
+Narrowed deliberately from the Codex brief. The SEVERITY is already right -- Q-114 grades these
+`Informational` and prints why. What is wrong is that one behaviour on `linkpop.com` produces seven
+report rows. Deduplicate by (host, effect) and emit one observation carrying its instance count.
+
+### Q-138 · Q-109 is CLOSED and the 30 hostless nodes are still there · **READY** · **MEDIUM**
+
+The reviewed run shows `graph_primary_state.hostless_endpoint` failing with 30 nodes, and that build
+also contained Q-114 -- same push as Q-109 -- so the fix was present and the symptom persisted.
+
+Lane C predicted exactly this and recorded it as unreconciled: `ingest_intel` fires AFTER the last
+`_graph_primary_state`, so it could never reproduce the ledger row in a single mission and its
+producer finding did not depend on that ordering. **There is a second producer.** Start from the
+recorded offenders and from Q-120 (`ingest_intel` wired one phase too late).
+
+**Do NOT relax the drop or silence the row.** That row is the only reason anyone knows 30 endpoints
+go unprobed.
+
+### Q-139 · Live-run events carry no timestamp, though the database stores one · **READY** · **MEDIUM**
+
+`agent/db.py` writes `created_at` and returns it as `ts`. `agent/main.py` `/stream` sends raw
+buffered `sess["events"]`, unenriched, so 3913 lines of pasted live log carry no absolute time, no
+elapsed time and no sequence number. Mission-detail and backup still use `get_logs(..., limit=500)`,
+which is a display window, not a diagnostic export.
+
+**FIX:** one event envelope -- `seq`, `created_at`, `elapsed_ms`, `phase`, `tool`, `target`,
+`event_type`, `status` -- applied before storage/SSE/UI, plus a heartbeat event every 30-60s during
+long phases, plus a full-log export path. **GATE:** reconnecting to `/stream` past 500 events keeps
+timing and final-cause context.
+
+### Q-140 · Scope entries are duplicated in the mission objective and report · **READY** · **LOW**
+
+The Shopify scope prints each root three times (plain, bare, anchored-regex). Cosmetic, but it makes
+the report header unreadable and inflates every scope comparison. Deduplicate before mission creation
+and rendering.
+
 ## CYCLE 15 — 2026-08-29 — the Shopify-engagement remainder. OWNERSHIP TABLE, authoritative.
 
 Three lanes, disjoint write sets, declared before spawn. The Coordinator owns this file and
