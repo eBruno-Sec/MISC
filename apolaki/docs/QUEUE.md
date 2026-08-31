@@ -13,6 +13,32 @@ saturated CPU, **614 zombie browser subprocesses** accumulated under PID 1, and 
 0.23s to timing out at 20s while `/missions` took 27.6s. That is a process-lifecycle defect and it
 outranks everything else in the queue.
 
+### BUILD PROVENANCE -- READ THIS BEFORE WORKING ANY TICKET BELOW
+
+**The mission Codex deep-analysed ran a staler image than the run before it.** Established from the
+failure banner, which Q-124 rewrote:
+
+```
+2026-08-29 07:06   "commonly a provider quota/rate-limit or network error"   OLD
+2026-08-29 16:23   "commonly a provider quota/rate-limit or network error"   OLD
+2026-08-30 06:50   "See the Tool Ledger below for which engine(s) stopped"   NEW  <- Q-124 landed
+2026-08-31 00:05   "commonly a provider quota/rate-limit or network error"   OLD  <- 861c22ac
+```
+
+A mission created on the 31st carrying a banner replaced before the 30th means the container was not
+rebuilt. Corroborated independently: the 2026-08-30 report has **zero** occurrences of "hostless"
+while carrying Q-114, and `861c22ac` reports 30 hostless nodes.
+
+**UNAFFECTED -- verified in the CURRENT tree or by my own measurement, not from `861c22ac`:**
+Q-131 (no `init:`/tini anywhere), Q-135 (`tools.py:4497 timeout=40`), Q-136 (`Dockerfile` never
+copies `tier3`), Q-139 (`/stream` sends unenriched events), Q-133 (design gap), Q-134 (measured on
+the WordPress lab, independent of any Shopify run). Q-132, Q-137 and Q-140 are all present in the
+NEW-banner 2026-08-30 report too, so they are current.
+
+**NEEDS RE-MEASUREMENT ON A CURRENT BUILD before anyone works it:** Q-138, and any other
+`861c22ac`-only symptom. The general rule this establishes: **date the build from an artifact
+fingerprint before treating a field report as evidence about current code.**
+
 ### VERIFIED against this tree
 
 | claim | evidence I checked |
@@ -161,18 +187,55 @@ Narrowed deliberately from the Codex brief. The SEVERITY is already right -- Q-1
 `Informational` and prints why. What is wrong is that one behaviour on `linkpop.com` produces seven
 report rows. Deduplicate by (host, effect) and emit one observation carrying its instance count.
 
-### Q-138 · Q-109 is CLOSED and the 30 hostless nodes are still there · **READY** · **MEDIUM**
+### Q-138 · Hostless nodes: CORRECTED -- my first reasoning was wrong, the ticket may still stand · **READY** · **MEDIUM**
 
-The reviewed run shows `graph_primary_state.hostless_endpoint` failing with 30 nodes, and that build
-also contained Q-114 -- same push as Q-109 -- so the fix was present and the symptom persisted.
+**I FILED THIS ON AN INFERENCE AND THE ARTIFACT CONTRADICTS IT.** I wrote that the build behind
+`861c22ac` "also contained Q-114 -- same push as Q-109 -- so the fix was present and the symptom
+persisted." I had not read that report; I reasoned from the brief's summary. Then the operator sent
+the three underlying reports and the newest one settles it:
 
-Lane C predicted exactly this and recorded it as unreconciled: `ingest_intel` fires AFTER the last
-`_graph_primary_state`, so it could never reproduce the ledger row in a single mission and its
-producer finding did not depend on that ordering. **There is a second producer.** Start from the
-recorded offenders and from Q-120 (`ingest_intel` wired one phase too late).
+```
+shopify_fulldet_20260830@0650   Q-114 present (7 host-header rows, all INFORMATIONAL,
+                                14x "NO sink was found")
+                                occurrences of "hostless" in the whole report:  0
+```
 
-**Do NOT relax the drop or silence the row.** That row is the only reason anyone knows 30 endpoints
-go unprobed.
+**Q-109's fix worked.** In a build that demonstrably carries Q-114, the hostless row is gone.
+
+**AND THE SAME COMPARISON DATES THE BUILD CODEX ANALYSED.** The failure banner was rewritten by
+Q-124. Across the four artifacts:
+
+```
+2026-08-29 07:06   "commonly a provider quota/rate-limit or network error"   OLD
+2026-08-29 16:23   "commonly a provider quota/rate-limit or network error"   OLD
+2026-08-30 06:50   "See the Tool Ledger below for which engine(s) stopped"   NEW  <- Q-124 landed
+2026-08-31 00:05   "commonly a provider quota/rate-limit or network error"   OLD  <- 861c22ac
+```
+
+**A mission created 2026-08-31 carries a banner that was replaced before the 2026-08-30 report.
+`861c22ac` ran a STALER IMAGE than the run before it -- the container was not rebuilt.** Every
+`861c22ac`-only observation therefore describes a pre-fix build and must be re-measured before
+anyone works it. See the BUILD PROVENANCE block at the top of this triage for which tickets that
+touches and which are unaffected.
+
+**THE TICKET IS NOT WITHDRAWN, because a sharper hypothesis survives.** The two runs differ enormously
+in scale:
+
+```
+2026-08-30 06:50    1441 surface URLs     84 parameterized endpoints    no hostless row
+861c22ac            6679 surface URLs    554 parameterized endpoints    30 hostless nodes
+```
+
+If a SECOND producer exists that only fires once the crawl is large enough to harvest intel routes at
+volume, both observations are true at once. That is consistent with Lane C's unreconciled note --
+`ingest_intel` fires AFTER the last `_graph_primary_state`, so it could never reproduce the row in a
+single mission -- and with Q-120 (`ingest_intel` wired one phase too late).
+
+**FIRST STEP IS A MEASUREMENT, NOT A FIX:** re-run at 861c22ac's scale on a CURRENT build. If the row
+returns, hunt the second producer starting from the recorded offenders. If it does not, close this.
+
+**Do NOT relax the drop or silence the row** either way. That row is the only reason anyone knows
+endpoints go unprobed.
 
 ### Q-139 · Live-run events carry no timestamp, though the database stores one · **READY** · **MEDIUM**
 
