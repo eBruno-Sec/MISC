@@ -267,3 +267,87 @@ def test_the_guard_stays_silent_when_zap_was_never_enabled(tmp_path):
     import main as mainmod
     mid = _zap_mission(tmp_path, "zap_off", [("tool_call", {"tool": "run_dns"})], enable=False)
     assert mainmod._missing_zap_invocation(mid) is None
+
+
+# ── Q-132 (second half): ZAP was starved, not broken ─────────────────────────
+#
+# `next_batch` is a priority ladder -- it returns the FIRST phase that produces steps. ZAP lived at
+# phase F2, AFTER the surface probes, and phase E emits a step per endpoint per engine. On a large
+# surface E never drains inside a mission's budget, so F2 was unreachable. MEASURED across every
+# Shopify and Airbnb field run: `run_zap | failed | 0 calls`, with a HEALTHY daemon every time.
+
+def _zap_state(n_endpoints, **over):
+    """The state shape `next_batch` actually consumes -- copied from test_planner_param_delivery,
+    not invented. `live_hosts` are dicts and `bases` maps root -> base URL; a hand-rolled
+    approximation failed with AttributeError before the ladder was even reached."""
+    urls = ["http://t.local:3000/s%d/leaf.html?ref=%d" % (i, i) for i in range(n_endpoints)]
+    st = {"mode": "full", "roots": ["t.local"], "done": set(),
+          "zap": True, "zap_policy": "thorough_active", "zap_speed": "turtle",
+          "zap_aggression": "demon",
+          "recon": {"subdomains": ["t.local"],
+                    "live_hosts": [{"url": "http://t.local:3000"}]},
+          "urls": urls, "bases": {"t.local": "http://t.local:3000"},
+          "intensity": "standard"}
+    st.update(over)
+    return st
+
+
+def _tools_in(batch):
+    return {s.get("tool") for s in (batch or [])}
+
+
+def _drive_ladder(state, want="run_zap", limit=60):
+    """Walk the REAL priority ladder, marking each batch attempted, exactly as a mission does.
+
+    Asserting on a single next_batch() call would only ever see phase A -- the ladder returns the
+    FIRST phase with work, and passive recon is always first on a fresh state. The field question is
+    whether the ladder ever REACHES ZAP, so the test has to walk it."""
+    import planner
+    seen = []
+    for _ in range(limit):
+        batch = planner.next_batch(state)
+        if not batch:
+            break
+        tools_ = _tools_in(batch)
+        seen.append(tools_)
+        if want in tools_:
+            return True, seen
+        state["done"] = set(state.get("done") or ()) | {s["key"] for s in batch}
+    return False, seen
+
+
+def test_zap_is_reachable_on_a_surface_that_keeps_the_probe_phase_busy():
+    """THE FIELD FAILURE. Hundreds of parameterized endpoints -- exactly the shape that starved it."""
+    import planner
+    reached, seen = _drive_ladder(_zap_state(400))
+    assert reached, "the ladder never reached ZAP in %d batches: %s" % (len(seen), seen[-1] if seen else None)
+
+
+def test_zap_is_not_scheduled_when_the_operator_did_not_enable_it():
+    """NON-VACUITY, and the control that matters: hoisting must not make ZAP run uninvited. It is
+    slow, it is intrusive, and it is opt-in."""
+    import planner
+    reached, _ = _drive_ladder(_zap_state(400, zap=False))
+    assert not reached, "ZAP ran without being enabled"
+
+
+def test_zap_is_still_full_mode_only():
+    """`_HEAVY_FULL_ONLY` holds it to full mode through fresh()/_allowed(). Moving WHERE it is
+    scheduled must not change WHETHER it is allowed."""
+    import planner
+    reached, _ = _drive_ladder(_zap_state(400, mode="active"))
+    assert not reached, "ZAP escaped the full-mode gate"
+
+
+def test_zap_runs_once_per_root_not_every_batch():
+    """`fresh()` filters already-attempted steps. Without that the hoist would return ZAP forever
+    and nothing else would ever run -- a starvation defect pointing the other way."""
+    import planner
+    st = _zap_state(400)
+    reached, _ = _drive_ladder(st)
+    assert reached
+    zb = planner.next_batch(st)
+    st["done"] = set(st["done"]) | {s["key"] for s in zb}
+    after = planner.next_batch(st)
+    assert "run_zap" not in _tools_in(after), sorted(_tools_in(after))
+    assert after, "the ladder produced nothing after ZAP; the surface probes must still follow"

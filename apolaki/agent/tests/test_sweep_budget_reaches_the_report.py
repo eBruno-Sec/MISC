@@ -122,3 +122,44 @@ def test_the_mission_context_is_where_the_report_reads_it_from():
     src = inspect.getsource(mainmod)
     assert 'ctx["sweep_budget"] = swb' in src, "nothing persists the sweep budget"
     assert '.get("sweep_budget")' in src, "nothing reads the persisted sweep budget"
+
+
+# -- Q-133: a bounded scan that cannot be resumed ------------------------------
+#
+# The operator's Shopify run declined 505 of 554 endpoints and 11 of 12 HTML pages. The report said
+# HOW MANY and never WHICH, so the only way to cover them was to re-run the whole mission and spend
+# the same four hours on the same first 49 endpoints. The untested targets are in hand at the moment
+# the budget fires; not persisting them was the whole difference between a bounded scan and a
+# resumable one.
+
+def test_the_pending_endpoints_are_rendered_for_resume(mission, monkeypatch):
+    monkeypatch.setitem(mainmod.sessions, mission,
+                        {"tools": _Tools(), "agent": _Agent({
+                            "candidates": 554, "selected": 49, "declined": 505, "timed_out": 505,
+                            "pending": ["https://t.test/a?x=1", "https://t.test/b?y=2"],
+                            "pending_pages": ["https://t.test/p"],
+                            "resume": "re-run with BBH_SWEEP_BUDGET_S raised"})})
+    line = mainmod._coverage(mission)["pending_work"]
+    assert "2 endpoint(s)" in line and "1 app page(s)" in line, line
+    assert "BBH_SWEEP_BUDGET_S" in line, line
+
+
+def test_the_unrecorded_overflow_is_stated_not_hidden(mission, monkeypatch):
+    """The queue is capped so a 10k surface cannot bloat the mission row. A cap that truncates
+    SILENTLY would make the pending list itself a false claim about coverage."""
+    monkeypatch.setitem(mainmod.sessions, mission,
+                        {"tools": _Tools(), "agent": _Agent({
+                            "candidates": 9000, "selected": 10, "declined": 8990, "timed_out": 8990,
+                            "pending": ["https://t.test/%d" % i for i in range(200)],
+                            "pending_truncated": 8790})})
+    line = mainmod._coverage(mission)["pending_work"]
+    assert "+8790 not recorded" in line, line
+
+
+def test_a_completed_sweep_records_no_pending_work(mission, monkeypatch):
+    """NEGATIVE CONTROL. Nothing was declined, so a resume line would be noise -- and worse, it
+    would imply coverage was missed when it was not."""
+    monkeypatch.setitem(mainmod.sessions, mission,
+                        {"tools": _Tools(), "agent": _Agent(
+                            {"candidates": 10, "selected": 10, "declined": 0})})
+    assert "pending_work" not in mainmod._coverage(mission)

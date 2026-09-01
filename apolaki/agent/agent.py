@@ -319,6 +319,9 @@ SWEEP_TARGET_CAP = max(1, int(os.getenv("BBH_SWEEP_TARGETS", "700") or 700))
 # real surface rarely reaches; this is what stops a run that cannot finish. Exhausting either one is
 # REPORTED, never silent.
 SWEEP_WALL_BUDGET_S = max(0, int(os.getenv("BBH_SWEEP_BUDGET_S", "14400") or 0))
+#: Q-133. How many untested endpoints the mission RECORDS when a budget fires. Bounded so a huge
+#: surface cannot bloat the mission row, and the overflow is reported rather than silently dropped.
+_PENDING_KEEP = max(1, int(os.getenv("BBH_PENDING_KEEP", "200") or 200))
 #: Indirection so the deadline is testable with a fake clock instead of a four-hour test.
 _sweep_clock = time.monotonic
 # targets that additionally get the browser-backed confirmers, taken off the FRONT of the shape-spread
@@ -4281,6 +4284,17 @@ class BBHAgent:
                 self._sweep_budget["timed_out"] = _left
                 self._sweep_budget["declined"] += _left
                 self._sweep_budget["selected"] = _i
+                # Q-133 · THE PENDING QUEUE. "505 declined" tells the operator how much was skipped
+                # and nothing about WHICH, so the only way to cover it was to re-run the whole scan
+                # and spend the same budget on the same first 49 endpoints. The untested targets are
+                # in hand right here; not persisting them was the difference between a bounded scan
+                # and a resumable one. Capped so a 10k-endpoint surface cannot bloat the mission
+                # record, and the cap is REPORTED rather than silently truncating.
+                self._sweep_budget["pending"] = list(targets[_i:_i + _PENDING_KEEP])
+                self._sweep_budget["pending_truncated"] = max(0, _left - _PENDING_KEEP)
+                self._sweep_budget["resume"] = (
+                    "re-run with BBH_SWEEP_BUDGET_S raised (0 disables the bound), or scope the "
+                    "next mission to the %d pending endpoint(s) recorded on this one" % _left)
                 # DEGRADED, NOT DONE. The remaining endpoints were never probed and their absence
                 # from the findings is a fact about this run's clock, not about the target.
                 yield {"type": "degraded", "reason": "sweep_wall_budget_exhausted",
@@ -4346,6 +4360,9 @@ class BBHAgent:
                 # a bound that stopped at the loop above would leave the phase still unable to finish.
                 if SWEEP_WALL_BUDGET_S and _pi and (_sweep_clock() - _sweep_started) > SWEEP_WALL_BUDGET_S:
                     self._sweep_budget["html_pages_declined"] = len(pages) - _pi
+                    # Q-133: the HTML pass has a pending queue too. 11 of 12 pages went untested on
+                    # the operator's run and the report named none of them.
+                    self._sweep_budget["pending_pages"] = list(pages[_pi:_pi + _PENDING_KEEP])
                     yield {"type": "degraded", "reason": "sweep_wall_budget_exhausted",
                            "content": "DEGRADED: injection sweep wall-clock budget of %d s exhausted "
                                       "during the HTML-page pass; %d of %d app page(s) DECLINED and "

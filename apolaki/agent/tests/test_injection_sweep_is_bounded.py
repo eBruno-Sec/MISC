@@ -409,3 +409,49 @@ def test_the_one_step_wrapper_is_the_composition_the_mission_actually_runs():
             agent_mod.sweep_candidates(urls, forms, lambda _u: True), cap, ["t.test"])
         assert agent_mod.sweep_targets(urls, forms, lambda _u: True,
                                        scope_roots=["t.test"], limit=cap) == composed, cap
+
+
+# ── Q-133: the pending queue, at the PRODUCER ────────────────────────────────
+#
+# `test_sweep_budget_reaches_the_report` proves the renderer shows a pending queue. This proves the
+# sweep actually BUILDS one -- two halves of the same disclosure, and testing only the renderer
+# would pass against a producer that records nothing.
+
+def test_the_wall_clock_cut_records_which_endpoints_went_untested(monkeypatch):
+    """"505 declined" says HOW MANY and never WHICH, so the only way to cover them was to re-run the
+    whole mission and spend the same budget on the same first 49."""
+    monkeypatch.setattr(agent_mod, "SWEEP_WALL_BUDGET_S", 3600)
+    ticks = iter(range(0, 10 ** 6, 360))                                  # 6 min per endpoint
+    monkeypatch.setattr(agent_mod, "_sweep_clock", lambda: next(ticks))
+
+    run = _drive_sweep(_surface_465())
+    budget = run.scan._sweep_budget
+    pending = budget.get("pending") or []
+    assert pending, "the sweep cut 400+ endpoints and recorded none of them"
+    assert budget["resume"], "no resume instruction was recorded"
+    swept = {url for tool, url in run.dispatched if tool == _PARAM_SWEEP_MARKER}
+    assert not (set(pending) & swept), "an endpoint that WAS probed is queued as pending"
+
+
+def test_the_pending_queue_is_bounded_and_says_when_it_truncated(monkeypatch):
+    """A 465-endpoint surface fits; a 10k one must not bloat the mission row. Silent truncation
+    would make the pending list itself a false claim about what is recoverable."""
+    monkeypatch.setattr(agent_mod, "SWEEP_WALL_BUDGET_S", 3600)
+    monkeypatch.setattr(agent_mod, "_PENDING_KEEP", 5)
+    ticks = iter(range(0, 10 ** 6, 360))
+    monkeypatch.setattr(agent_mod, "_sweep_clock", lambda: next(ticks))
+
+    budget = _drive_sweep(_surface_465()).scan._sweep_budget
+    assert len(budget["pending"]) == 5, len(budget["pending"])
+    assert budget["pending_truncated"] == budget["timed_out"] - 5, budget
+
+
+def test_a_completed_sweep_queues_nothing(monkeypatch):
+    """NEGATIVE CONTROL. Nothing was declined, so a pending queue would imply missed coverage that
+    did not happen."""
+    monkeypatch.setattr(agent_mod, "SWEEP_WALL_BUDGET_S", 3600)
+    ticks = iter(range(0, 10 ** 6))                                       # 1 s per endpoint
+    monkeypatch.setattr(agent_mod, "_sweep_clock", lambda: next(ticks))
+
+    budget = _drive_sweep(_surface_465()).scan._sweep_budget
+    assert not budget.get("pending"), budget.get("pending")

@@ -881,6 +881,33 @@ def next_batch(state: dict) -> list:
     inv = surface_mod.build_inventory(urls, cap=max(1000, len(urls)))
     param_eps = _rank_endpoints([e for e in inv if e.get("parameterized")])[:CAP_ENDPOINTS]
     host_bases = _rank_host_names({e["host"] for e in inv}, roots)[:CAP_HOSTS]
+
+    # ── ZAP DAST, HOISTED OUT OF PHASE F2 (Q-132) ────────────────────────────────────────────────
+    #
+    # `next_batch` is a priority ladder: it returns the FIRST phase that produces steps. ZAP used to
+    # live at phase F2, AFTER the surface probes below. Phase E produces a step per endpoint per
+    # engine, so on a large surface it never drains inside a mission's budget -- and F2 was therefore
+    # unreachable. MEASURED across every Shopify and Airbnb field run: `run_zap | failed | 0 calls`,
+    # with a HEALTHY daemon every time. The engine was not broken; it was starved.
+    #
+    # It is placed HERE and not earlier because it needs `host_bases`, which the inventory above is
+    # what computes. That is the earliest point at which a ZAP step can be built at all.
+    #
+    # THE COST IS BOUNDED THREE WAYS, which is what makes hoisting safe rather than a new way to eat
+    # a mission: `CAP_ZAP` = 3 roots, `fresh()` means once per root per mission, and Q-142 gives each
+    # dispatch a 5400 s whole-dispatch deadline. An opted-in DAST pass that runs late is a pass that
+    # never runs; the surface sweep it now precedes is itself wall-clock bounded (Q-113) and degrades
+    # by REPORTING what it declined, where ZAP degraded to nothing at all.
+    if zap_on:
+        _zpol = state.get("zap_policy", "safe_active")
+        _zsp = state.get("zap_speed", "normal")
+        _zag = state.get("zap_aggression", "normal")
+        z_steps = fresh([_step("run_zap", {"url": _b(h), "policy": _zpol, "speed": _zsp,
+                                           "aggression": _zag}, f"run_zap:{h}")
+                         for h in host_bases[:CAP_ZAP]])
+        if z_steps:
+            return z_steps
+
     e_steps = []
     # DOM audit (headless browser, client-side confirmation) — bounded because it
     # is slow: the live-host roots + a few HTML pages, skipping static assets.
@@ -1186,26 +1213,9 @@ def next_batch(state: dict) -> list:
     if f_steps:
         return f_steps
 
-    # ── phase F2: ZAP DAST (only when a ZAP daemon is configured) ──
-    # A full scope-fenced ZAP pass (spider + AJAX spider + active scan) on the
-    # primary in-scope host roots, seeded with the discovered surface (incl.
-    # katana's crawl — see _run_zap). run_zap is ACTIVE (a DAST pass sends payloads
-    # and reads responses), and it is held to FULL mode by `_HEAVY_FULL_ONLY` through
-    # fresh()/_allowed() on COST — plus, independently, by `POST /engage`, which rejects
-    # `enable_zap` unless mode == "full". Here it is also gated on ZAP actually being
-    # configured. It runs LATE (after the fast tools) and is capped to CAP_ZAP
-    # roots because a ZAP active scan is very slow. This is what makes Full mode
-    # reliably run ZAP when configured + authorized, instead of leaving it to the
-    # agentic model's discretion.
-    if zap_on:
-        _zpol = state.get("zap_policy", "safe_active")
-        _zsp = state.get("zap_speed", "normal")
-        _zag = state.get("zap_aggression", "normal")
-        z_steps = [_step("run_zap", {"url": _b(h), "policy": _zpol, "speed": _zsp, "aggression": _zag},
-                         f"run_zap:{h}") for h in host_bases[:CAP_ZAP]]
-        z_steps = fresh(z_steps)
-        if z_steps:
-            return z_steps
+    # ── phase F2: ZAP DAST -- HOISTED to just after host_bases in phase E (Q-132).
+    # It was unreachable here: next_batch returns the first phase with steps, and phase E never
+    # drains on a large surface, so a healthy ZAP daemon reported 0 calls on every field run.
 
     # ── phase F3: heavyweight nmap NSE vuln scan (opt-in) ──
     # The full `vuln` NSE category (minus DoS) on the primary in-scope host roots.

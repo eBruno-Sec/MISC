@@ -1016,6 +1016,18 @@ def _coverage(session_id: str) -> dict:
         _sweep_line["injection_sweep"] = "%d of %d parameterized endpoint(s) probed, %d declined%s" % (
             _swb.get("selected", 0), _swb["candidates"], _swb.get("declined", 0),
             " (wall-clock budget exhausted)" if _swb.get("timed_out") else "")
+        # Q-133. THE PENDING QUEUE, RENDERED. A resumable artifact nothing displays is an island --
+        # the operator's run declined 505 endpoints and 11 of 12 HTML pages, and the report named
+        # none of them, so the only way to cover them was to re-run and spend the same budget on the
+        # same first 49. Counts here; the endpoints themselves ride in the mission record for a
+        # resume to consume.
+        _pending = list(_swb.get("pending") or [])
+        _pages = list(_swb.get("pending_pages") or [])
+        if _pending or _pages:
+            _over = int(_swb.get("pending_truncated") or 0)
+            _sweep_line["pending_work"] = "%d endpoint(s)%s and %d app page(s) recorded for resume%s" % (
+                len(_pending), (" (+%d not recorded)" % _over) if _over else "", len(_pages),
+                ("; " + _swb["resume"]) if _swb.get("resume") else "")
     return {"tools_invoked": sum(tools_run.values()), "distinct_tools": len(tools_run),
             **_sweep_line,
             "surface_urls": len(sessions.get(session_id, {}).get("tools").urls) if session_id in sessions else "n/a",

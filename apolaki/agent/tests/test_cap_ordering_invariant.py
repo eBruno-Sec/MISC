@@ -199,6 +199,16 @@ def test_raw_production_work_caps_have_an_explicit_ordering_contract():
     contracted = {
         ("agent.py", "_do_transport_posture", "origins", "3"):
             "ScopeEngine.base_urls preserves the operator-authorized origin order",
+        # Q-133. The pending queue is a slice of `targets`, which `select_sweep_targets` already
+        # ranked by security value with operator assets first and shape-spread underneath (Q-113).
+        # So the endpoints RECORDED for resume are the most valuable of the untested remainder, not
+        # an arbitrary prefix -- and the overflow count is reported (`pending_truncated`) so a cap
+        # that bites is never a silent claim about what is recoverable. That reported overflow is
+        # what makes this a display bound rather than a coverage decision.
+        ("agent.py", "_inject_sweep_surface", "targets", "_i + _PENDING_KEEP"):
+            "targets is ranked by select_sweep_targets (operator assets, then security value, then "
+            "shape spread) before the sweep begins, so the pending slice keeps the most valuable "
+            "untested endpoints; pending_truncated reports anything the cap dropped",
         ("hashid_tool.py", "summarize", "cands", "3"):
             "display-only summary; identify emits specific signatures before ambiguous raw hashes",
         ("planner.py", "next_batch", "host_roots", "CAP_HOSTS"):

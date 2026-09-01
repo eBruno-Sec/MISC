@@ -60,7 +60,7 @@ Q-133 (budget visibility + resume -- reconfirmed), Q-134 (depth is not budget-bo
 (Wayback), Q-136 (`tier3`), Q-137 (host-header dedup), Q-139 (live-run timestamps), Q-140 (scope
 duplication). The consolidated brief independently reaches all nine.
 
-### Q-141 · Port the ApolakiCodex guardrails before the description is all that is left · **READY** · **CRITICAL**
+### Q-141 · Port the ApolakiCodex guardrails before the description is all that is left · **CLOSED** · **CRITICAL**
 
 **Proven in the field and NOT IN THIS TREE.** The fork was deleted; the only surviving record is the
 per-file table in the brief. Port or reimplement:
@@ -84,7 +84,7 @@ whole reason to do it in that order.
 browser-heavy fixture exits with zero `chrome`/`chrome_crashpad`/`leakless` zombies; a timed-out tool
 records a visible error and the mission CONTINUES to the next target.
 
-### Q-142 · A per-request timeout does not bound a serialized multi-request engine · **READY** · **HIGH**
+### Q-142 · A per-request timeout does not bound a serialized multi-request engine · **CLOSED** · **HIGH**
 
 MEASURED: Airbnb mission `4cac266c` spent **2h44m46s with no progress**, wedged in recon, because
 `run_header_trust` walked many requests against one origin and every individual request was within
@@ -121,7 +121,7 @@ CSTI and must be titled and scored as such.
 **GATE:** an evaluation visible only in the rendered DOM reports CSTI, never SSTI. Negative control:
 a product present in the raw HTTP response still reports SSTI at full severity.
 
-### Q-144 · Q-112 shipped a middlebox detector that has never fired in the field · **READY** · **HIGH**
+### Q-144 · Q-112 shipped a middlebox detector that has never fired in the field · **CLOSED** · **HIGH**
 
 The operator's ProtectIQ Intrusion blocked outbound SQLi-looking probes on 2026-08-31 between roughly
 11:47 and 11:55 PDT, and he disabled it around 12:06. **That is precisely the scenario Q-112 was
@@ -227,7 +227,7 @@ move it. Filed separately as **Q-134**, and it should not be bundled with the bu
 
 ---
 
-### Q-131 · 614 zombie browser processes and an API that starves under its own scan · **READY** · **CRITICAL**
+### Q-131 · 614 zombie browser processes and an API that starves under its own scan · **CLOSED** · **CRITICAL**
 
 **The strongest finding in the Codex brief, and the highest-priority item in this queue.** Measured
 timeline over one Shopify run:
@@ -257,7 +257,7 @@ monopolise the event loop.
 `/health` answers within 2s and `/missions` within 5s while that scan is active. Negative control:
 the same assertions must FAIL against the current tree, or the gate proves nothing.
 
-### Q-132 · ZAP was enabled and healthy and never ran · **READY** · **HIGH**
+### Q-132 · ZAP was enabled and healthy and never ran · **CLOSED** · **HIGH**
 
 `run_zap | failed | 0 calls | "ZAP was enabled but no run_zap tool_call was persisted; the mission
 cannot claim ZAP execution."`
@@ -271,7 +271,7 @@ daemon unreachable, budget exhausted, prerequisite crawl/session absent -- and s
 whichever of those is actually happening. **GATE:** ZAP healthy + enabled + no dispatch renders "not
 executed" WITH a cause; a successful run shows target, URLs scanned, alerts, elapsed.
 
-### Q-133 · The sweep budget is invisible while it runs and leaves no resumable queue · **READY** · **HIGH**
+### Q-133 · The sweep budget is invisible while it runs and leaves no resumable queue · **CLOSED** · **HIGH**
 
 Q-113's cap is correct and its disclosure is correct. What is missing is everything around it.
 
@@ -289,7 +289,7 @@ reads as full coverage when the clock is already running.
 resumable skipped-work queue. Per-call truncation (`run_sqli` 240s) is counted separately from the
 mission wall budget.
 
-### Q-134 · Crawl and parameter depth are NOT budget-bound -- measured on a lab with budget to spare · **READY** · **HIGH**
+### Q-134 · Crawl and parameter depth are NOT budget-bound -- measured on a lab with budget to spare · **CLOSED** · **HIGH**
 
 ```
 Shopify   run_katana 1 crawled URL   run_sqli 3 params tested   (budget exhausted)
@@ -316,7 +316,7 @@ parse error are five different facts. **GATE:** a simulated 70s response succeed
 "Wayback degraded" without failing unrelated checks; an EMPTY result is distinct from a network
 failure.
 
-### Q-136 · The built image omits `tier3/`, so documented in-container tests cannot run · **READY** · **MEDIUM**
+### Q-136 · The built image omits `tier3/`, so documented in-container tests cannot run · **CLOSED** · **MEDIUM**
 
 VERIFIED: `agent/Dockerfile` copies `*.py`, `tests`, `pytest.ini` and never `tier3`. The documented
 command fails with `ModuleNotFoundError: No module named 'tier3'`. Either ship it or correct the
