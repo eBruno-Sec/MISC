@@ -84,7 +84,20 @@ services:
   # want DAST: `docker compose --profile dast up -d zap`; the agent then auto-detects it.
   zap:
     image: ghcr.io/zaproxy/zaproxy@sha256:8d387b1a63e3425beef4846e39719f5af2a787753af2d8b6558c6257d7a577a2
-    profiles: ["dast"]              # ~1GB idle; opt-in. Enable with: docker compose --profile dast up -d zap
+    # NO PROFILE, deliberately (operator request, 2026-09-01). ZAP now starts with the default
+    # `docker compose up --build -d` instead of needing `--profile dast`.
+    #
+    # THE REASON IS AN INTEGRITY ONE, not convenience. `ZAP_ADDR` is set unconditionally at line 39
+    # (`${ZAP_ADDR:-http://zap:8090}`), so `_zap_configured()` answers TRUE whether or not the daemon
+    # is running. Behind a profile, the default `up` produced an agent that BELIEVED ZAP was
+    # configured while nothing listened on that address -- the planner opens phase F2, and the
+    # dispatch meets a dead socket. Config claiming a capability the deployment does not provide is
+    # the same defect class as Q-132, one layer down.
+    #
+    # The cost is real and was the original reason for the profile: ~1 GB idle, and MEASURED at
+    # 7.34 GiB after one OWASP Benchmark scan, which is why `mem_limit` and `-Xmx` below exist. To
+    # go back to opt-in, restore `profiles: ["dast"]` here AND make ZAP_ADDR conditional, or the
+    # agent is lying about its own configuration again.
     # MEASURED 2026-08-10: after ONE scan of the OWASP Benchmark, ZAP held 7.34 GiB. Unbounded, it will
     # take the whole WSL VM and starve the agent, the target labs and the host -- the comment above
     # ("~1GB idle") describes an idle daemon, not a working one. The JVM heap is capped BELOW the
