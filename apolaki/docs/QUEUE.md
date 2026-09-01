@@ -1,5 +1,146 @@
 # QUEUE — the one canonical, dependency-ordered work queue
 
+## CODEX CONSOLIDATED BRIEF — 2026-08-31 — the ApolakiCodex experiment + Airbnb field runs
+
+Second, stronger brief. It carries something the first one did not: **a controlled before/after with a
+patch that was built, proven, and then deleted.** Read-only pass; nothing fixed.
+
+### THE RESULT THAT MATTERS MOST
+
+A temporary fork (`ApolakiCodex`) patched the runtime guardrails, rebuilt, and re-ran the SAME Airbnb
+configuration:
+
+```
+BEFORE  mission 4cac266c   wedged in recon 2h44m   /health,/missions,/report TIMED OUT
+                           agent CPU 177%   622 PIDs   614 browser zombies   6 findings
+AFTER   mission 2d915f2c   API healthy   containers healthy   ZERO zombies
+                           1294 dispatches   9816 surface URLs   6 findings
+```
+
+**Q-131 is no longer a diagnosis, it is a port.** The runtime failure mode was reproduced, fixed, and
+the fix demonstrated in the field on the same config. That de-risks the single highest-priority item
+in this queue enormously.
+
+**AND THE PROOF IS PERISHABLE.** The `ApolakiCodex` folder was deleted after the brief was written.
+The patches exist ONLY as the per-file description in that document. Nothing was ported to this tree.
+That makes Q-141 time-sensitive in a way nothing else here is.
+
+### THE SECOND RESULT, AND IT IS THE SOBERING ONE
+
+`2d915f2c` still ended **`failed` / `report`**: 114 of 480 endpoints probed, 366 declined to the
+wall clock, 11 of 12 HTML pages untested, ZAP enabled and never dispatched, and 6 findings that are
+all posture headers. **Fixing the runtime did not make the assessment good.** The orchestration and
+report-truth layer is the real ceiling, exactly as the brief argues.
+
+This is the correct reading and it matches my own lab result: reach was fine on the WordPress lab
+(55/55 endpoints, 0 declined) and `run_sqli` still tested 1 parameter. Runtime health and assessment
+depth are independent problems.
+
+### VERIFIED against this tree
+
+| claim | evidence I checked |
+|---|---|
+| `run_header_trust` has no whole-dispatch deadline | Read `_run_header_trust` in `agent/tools.py` -- no deadline, budget, or elapsed check anywhere in its body. Codex's 2h44m wedge is unbounded by construction. |
+| Q-112's middlebox machinery IS wired | `import middlebox as _mbx` at `tools.py:30`, `_mb_ledger`/`_mb_observe`/`_middlebox_note` live, verdict ANDs into `ToolResult.success`. Whether it FIRES on a real block is untested -- see Q-144. |
+
+### BUILD PROVENANCE — STILL UNRESOLVED, AND IT APPLIES HERE TOO
+
+`ApolakiCodex` was forked from `apolaki` at an unrecorded commit. **It is not known whether
+`2d915f2c` carried Q-126/Q-127/Q-128/Q-129.** One weak signal: its report shows zero DOM-manipulation
+findings across 9816 surface URLs, which is consistent with Q-128 being present -- but Airbnb is an
+SPA that echoes little of its own URL, so that is not decisive.
+
+**Fingerprint the build before treating any `2d915f2c` observation as evidence about current code.**
+Same rule the last triage established, same reason.
+
+### CROSS-REFERENCE — already filed, do not re-file
+
+Q-131 (zombies/API, now PROVEN FIXABLE), Q-132 (ZAP never dispatched -- reconfirmed on Airbnb),
+Q-133 (budget visibility + resume -- reconfirmed), Q-134 (depth is not budget-bound), Q-135
+(Wayback), Q-136 (`tier3`), Q-137 (host-header dedup), Q-139 (live-run timestamps), Q-140 (scope
+duplication). The consolidated brief independently reaches all nine.
+
+### Q-141 · Port the ApolakiCodex guardrails before the description is all that is left · **READY** · **CRITICAL**
+
+**Proven in the field and NOT IN THIS TREE.** The fork was deleted; the only surviving record is the
+per-file table in the brief. Port or reimplement:
+
+| file | change |
+|---|---|
+| `agent/tools.py` | central per-tool dispatch deadlines; async subprocess kill after timeout; PID1 orphan reaping helper; browser launch profile suppressing crashpad churn; bounded header-trust request/body/elapsed caps; GraphQL non-JSON treated as a clean negative |
+| `agent/bie.py` | browser launch/cleanup helpers for the persona paths |
+| `agent/main.py` | mission driver OFF the FastAPI event loop by default; thread-safe stop event; heartbeat/watchdog/activity exposed through status |
+| `ui/index.html` | live log timestamps, heartbeat, stalled/activity state |
+| `docker-compose.yml` | `init: true` |
+| `agent/planner.py` | static/media extensions incl. `.vtt .srt .m3u8 .mp3 .wav .webmanifest .wasm` |
+| `agent/agent.py` | path-SQLi skips static/media paths |
+| `agent/tests/test_airbnb_functional_guardrails.py` | 12 regression tests pinning all of the above |
+
+**PORT THE TESTS FIRST AND WATCH THEM FAIL.** Twelve tests that pass on arrival prove nothing about
+this tree; a red-then-green transition is the only evidence the port actually landed. That is the
+whole reason to do it in that order.
+
+**GATE:** all 12 pass here; `/health` under 2s and `/missions` under 5s during a hung-tool fixture; a
+browser-heavy fixture exits with zero `chrome`/`chrome_crashpad`/`leakless` zombies; a timed-out tool
+records a visible error and the mission CONTINUES to the next target.
+
+### Q-142 · A per-request timeout does not bound a serialized multi-request engine · **READY** · **HIGH**
+
+MEASURED: Airbnb mission `4cac266c` spent **2h44m46s with no progress**, wedged in recon, because
+`run_header_trust` walked many requests against one origin and every individual request was within
+its timeout. VERIFIED in this tree: `_run_header_trust` has no deadline, no budget and no elapsed
+check.
+
+**THE TICKET IS THE CLASS, NOT THE ENGINE.** Any engine that loops over headers, parameters,
+payloads or hosts inside ONE dispatch has this shape. Q-110 already established the pattern for
+`_run_sqli`/`_run_nosqli`/`_run_cmdi` with `_PROBE_CALL_BUDGET_S`; the correct fix is to make a
+whole-dispatch deadline the default for every engine rather than retrofitting it one wedge at a time.
+
+**GATE:** a fixture whose per-request latency is inside the timeout but whose loop is long still
+terminates, reports DEGRADED, and names what it did not test. Negative control: a fast engine is
+unaffected and does not report degradation. Census: enumerate every engine with a loop inside one
+dispatch and assert each carries a deadline -- one route fixed and two left open is how Q-110 nearly
+came back.
+
+### Q-143 · Client-side template evaluation must not be reported as SERVER-side injection · **READY** · **MEDIUM**
+
+Codex raises this separately from the marker problem I fixed in Q-126, and it is a different defect.
+Q-126 made the SSTI oracle structural (random operands, product not a substring of the payload). It
+did NOT establish WHERE the evaluation happened.
+
+`{{7*7}}` evaluating in a client-side framework (Angular, Vue) is **CSTI** -- CWE-1336 in the browser,
+materially different impact from server-side code execution. Reporting it as "Server-side template
+injection" at CVSS 9.8 is a false claim about the mechanism, which is the same family as Q-128
+(presence in the DOM is not a DOM flow).
+
+**FIX:** the product must appear in the SERVER'S RESPONSE BODY, not merely in the rendered DOM.
+Q-128 already added exactly that signal (`server_reflected`) and Q-129 added `navigated`; this is the
+same discriminator applied to the SSTI oracle. If the product appears only after rendering, it is
+CSTI and must be titled and scored as such.
+
+**GATE:** an evaluation visible only in the rendered DOM reports CSTI, never SSTI. Negative control:
+a product present in the raw HTTP response still reports SSTI at full severity.
+
+### Q-144 · Q-112 shipped a middlebox detector that has never fired in the field · **READY** · **HIGH**
+
+The operator's ProtectIQ Intrusion blocked outbound SQLi-looking probes on 2026-08-31 between roughly
+11:47 and 11:55 PDT, and he disabled it around 12:06. **That is precisely the scenario Q-112 was
+built for**, and the brief does not report Apolaki noticing.
+
+VERIFIED present in this tree: `middlebox.py`, the ledger, `_middlebox_note`, and the verdict ANDing
+into `ToolResult.success`. VERIFIED not false-firing: the liveness run confirmed 17/17 engines with
+no spurious DEGRADED. **Never verified TRUE-firing**, because no run has been observed while a
+middlebox was actually dropping payloads.
+
+**A guard that has only ever been observed staying silent is a declaration, not a fact** -- the
+recorded lesson from all three repaired Codex guards. This is a MEASUREMENT ticket, not a fix:
+re-enable ProtectIQ deliberately, run an injection sweep against an authorized lab, and confirm the
+engines report DEGRADED rather than "0 confirmed". If they do not, Q-112 is an island and reopens.
+
+**GATE:** with a real middlebox dropping payload-bearing requests across two unrelated hosts, the
+injection engines report DEGRADED and the mission says results are void. Negative control: with the
+middlebox off, the same sweep reports a plain zero.
+
 ## CODEX BRIEF TRIAGE — 2026-08-31 — mission `861c22ac` / `Shopify_30Aug2026@1700`
 
 Filed from an external review (Codex) of a completed Shopify run plus runtime monitoring. **Read-only
