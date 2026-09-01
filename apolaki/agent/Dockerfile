@@ -50,6 +50,16 @@ RUN apt-get update -o Acquire::Retries=3 -q && \
       || echo "[WARN] apt security tools skipped; native equivalents will be used"; \
     rm -rf /var/lib/apt/lists/*
 
+# Q-131. `tini` is NOT optional and deliberately has no `|| echo` fallback: the ENTRYPOINT below
+# depends on it, so a silent skip would ship an image that cannot start. The security tools above
+# fall back to native equivalents; a missing reaper has no equivalent, and shipping one that fails
+# open is the exact defect class this repo keeps filing tickets about. Verified in the same layer so
+# the build fails here rather than at runtime.
+RUN apt-get update -o Acquire::Retries=3 -q && \
+    apt-get install -y --no-install-recommends -q tini && \
+    rm -rf /var/lib/apt/lists/* && \
+    test -x /usr/bin/tini
+
 # Copy every binary that built (whichever succeeded above). The trailing slash
 # copies the directory contents; tools that were skipped simply aren't present.
 COPY --from=go-builder /go/bin/ /usr/local/bin/
@@ -74,5 +84,21 @@ COPY *.py .
 COPY pytest.ini .
 COPY tests ./tests
 
+# Q-131/Q-136: ship `tier3/` so the DOCUMENTED in-container tests can import it. Without this the
+# published command fails with `ModuleNotFoundError: No module named 'tier3'` -- a documented test
+# path that cannot run is a gate nobody is enforcing.
+COPY tier3 ./tier3
+
 EXPOSE 8000
+
+# Q-131. PID 1 MUST REAP. Measured on two field runs: 614 browser-related zombies accumulated under
+# PID 1 (338 chrome, 246 chrome_crashpad, 30 leakless) while the API went from 0.23 s to timing out
+# at 20 s. uvicorn as PID 1 does not reap orphans, so every Chrome helper that outlived its parent
+# stayed a zombie for the life of the container.
+#
+# `tini -g` is in ENTRYPOINT rather than compose `init: true` deliberately: it travels with the
+# image, so it protects `docker run` and CI exactly as it protects `docker compose`, and it does not
+# require editing a compose file another lane currently holds uncommitted. `-g` forwards signals to
+# the whole process group, so a stop reaches the browsers too instead of orphaning them again.
+ENTRYPOINT ["/usr/bin/tini", "-g", "--"]
 CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000"]

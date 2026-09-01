@@ -27,6 +27,7 @@ import authz_tool as authz
 import db
 import dns_recon
 import guidance as guidance_mod
+import deadline as _deadline
 import middlebox as _mbx
 import surface as surface_mod
 import web_security as ws
@@ -1802,7 +1803,21 @@ class ToolRegistry:
         # side of this would bill one engine for a concurrent engine's wait.
         try:
             with _browser_engine.rate_wait_scope() as rate_wait:
-                res = await self._dispatch_engine(tool_name, tool_input, session_id)
+                # Q-142: THE WHOLE-DISPATCH DEADLINE, at the one boundary every engine crosses.
+                # A per-request timeout does not bound an engine that loops -- `run_header_trust`
+                # sat on one origin for 2h44m46s with every individual request inside its timeout.
+                # Bounding it here rather than per-engine is the difference between fixing the
+                # class and retrofitting a fourth engine while the fifth stays open.
+                _budget = _deadline.budget_for(tool_name)
+                res, _timed_out = await _deadline.run_bounded(
+                    self._dispatch_engine(tool_name, tool_input, session_id), _budget)
+                if _timed_out:
+                    # DEGRADED, never clean (Q-093/Q-110/Q-112). The mission continues to the next
+                    # target; one wedged engine must not end it.
+                    _tgt = str(tool_input.get("url") or tool_input.get("base_url")
+                               or tool_input.get("target") or "")
+                    res = ToolResult(tool_name, _tgt, False, "",
+                                     [], _deadline.timeout_note(tool_name, _budget))
         finally:
             _ACTIVE_TOOL_DISPATCH.reset(active_token)
             _ACTIVE_REGISTRY.reset(registry_token)

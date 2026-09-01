@@ -20,7 +20,7 @@ import scope as scope_mod
 import surface as surface_mod
 import tools as tools_mod
 import wordlists as wl
-from agent import BBHAgent, ai_status
+from agent import BBHAgent, ai_status, _zap_configured
 from scope import ScopeEngine
 from tools import ToolRegistry
 
@@ -1205,6 +1205,18 @@ def _tool_ledger(session_id: str) -> dict:
             status, note = "skipped", (a["scope_note"] or "every target was out of scope — nothing tested")
         else:
             status, note = "executed", a["note"]
+            # Q-134. THE NOTE IS ONE CALL'S OUTPUT IN A COLUMN THAT READS AS A RUN TOTAL, and that
+            # misreading produced two wrong external analyses of the same run. `run_sqli | 49 calls |
+            # "tested 3 param(s)"` was read by both as "Apolaki only tested three parameters", and a
+            # work order was written to fix crawl depth. MEASURED on the lab: five calls said
+            # "tested 1 param" and one said "tested 3" -- the note is a single call's exemplar,
+            # selected above as the first benign note or a confirming call's.
+            #
+            # Labelled rather than summed: totalling would mean regex over engine prose, and parsing
+            # a number back out of a sentence is exactly how a ledger starts disagreeing with itself.
+            # One call's note is honest evidence AS LONG AS it says it is one call's note.
+            if note and a["calls"] > 1:
+                note = "[1 of %d calls] %s" % (a["calls"], note)
             extra = []
             if a["negatives"] and not a["note"]:
                 # The operator gets the verdict itself; the token is machinery, not prose.
@@ -2984,17 +2996,45 @@ def _missing_zap_invocation(session_id: str) -> dict | None:
     # first. A guard that fires on the mission's own length is worse than no guard.
     # `iter_logs` streams, so `any()` still short-circuits on the first match and nothing is
     # materialised; the 100000 was buying memory pressure, not safety.
-    ran = any(
-        row.get("type") == "tool_call" and row.get("tool") == "run_zap"
-        for row in db.iter_logs(session_id)
-    )
+    # Q-132: one pass over the log answers BOTH questions -- did ZAP dispatch, and if not, which
+    # precondition was missing. Streaming twice would double the cost of a guard that runs on every
+    # mission end.
+    ran = False
+    live_hosts = zap_blocked = False
+    dispatches = 0
+    for row in db.iter_logs(session_id):
+        _t = row.get("tool")
+        if row.get("type") == "tool_call":
+            dispatches += 1
+            if _t == "run_zap":
+                ran = True
+                break
+        elif _t == "run_zap" and row.get("type") in ("tool_error", "scope_block"):
+            zap_blocked = True
+        elif _t in ("run_httpx", "http_probe") and row.get("type") == "tool_result":
+            live_hosts = live_hosts or bool(row.get("count"))
     if ran:
         return None
+    # Q-132. WHICH PRECONDITION FAILED. `run_zap` is planned in planner phase F2, which runs LATE --
+    # after the fast tools -- and it needs `host_bases` to build a step at all. So an opted-in
+    # mission reaches the end without ZAP for one of a small number of reasons, and reporting "no
+    # dispatch" without naming which one leaves the operator guessing between reconfiguring the
+    # daemon and reordering the scan. A healthy daemon is not coverage, and neither is a silence.
+    if zap_blocked:
+        _why = "a run_zap step was refused (scope block or engine error) before any dispatch landed"
+    elif not _zap_configured():
+        _why = "ZAP_ADDR is not configured, so the planner's phase-F2 gate could never open"
+    elif not live_hosts:
+        _why = ("no live host base was ever discovered, and phase F2 builds its steps from "
+                "host_bases -- with none, it produces no step and falls through silently")
+    else:
+        _why = ("the mission ended before planner phase F2 was reached; F2 runs AFTER the fast "
+                "tools, so an earlier phase consuming the run starves ZAP (%d dispatches)" % dispatches)
     return {
         "type": "tool_error",
         "tool": "run_zap",
         "error": ("ZAP was enabled but no run_zap tool_call was persisted; "
-                  "the mission cannot claim ZAP execution."),
+                  "the mission cannot claim ZAP execution. Cause: " + _why + "."),
     }
 
 
