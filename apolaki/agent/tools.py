@@ -636,6 +636,12 @@ TOOL_PERMISSIONS = {
 # healthy host -- the whole probe set finishes in seconds -- and decisive against one that
 # is stalling. Deliberately NOT scaled by intensity: a deeper scan means more endpoints, not
 # permission for any single one to run unbounded.
+#: Q-135. MEASURED 47-71 s on the operator path; the old 40 s cap turned a slow endpoint into
+#: "All connection attempts failed". Env-tunable because the right value is a property of the
+#: network, not of the code.
+_CDX_TIMEOUT_S = max(10, int(os.getenv("BBH_CDX_TIMEOUT_S", "90") or 90))
+_CDX_ATTEMPTS = max(1, int(os.getenv("BBH_CDX_ATTEMPTS", "3") or 3))
+
 _PROBE_CALL_BUDGET_S = 240
 _UA = "Mozilla/5.0 (compatible; Apolaki/2.0; +authorized-testing)"
 # Session-destroying endpoints. Crawling or probing these on an AUTHENTICATED scan
@@ -4476,6 +4482,61 @@ class ToolRegistry:
         self.recon["subdomains"].extend(s["subdomain"] for s in subs)
         return ToolResult("subfinder", domain, True, f"{len(subs)} subdomains found", subs)
 
+    async def _cdx_fetch(self, api: str):
+        """Q-135. Fetch archive.org CDX with a real timeout, backoff, and an ERROR TAXONOMY.
+
+        Returns `(rows, why)`. `why` is "" on success -- INCLUDING a legitimately empty archive,
+        which is a fact about the target -- and a specific reason otherwise, which is a fact about
+        our network. Five outcomes the old single `except` collapsed into one:
+
+            connect refused / DNS   the archive is unreachable from here
+            timeout                 it answered too slowly (MEASURED 47-71 s against a 40 s cap)
+            429 / 403               rate-limited or refused
+            empty                   reachable, no archived URLs -- NOT an error
+            parse                   answered with something that is not CDX JSON
+
+        Cached per API URL for the mission: recon re-asks for the same domain across cycles, and
+        paying 90 s again to learn the same thing is the cost that made this look broken.
+        """
+        import httpx
+        cache = getattr(self, "_cdx_cache", None)
+        if cache is None:
+            cache = self._cdx_cache = {}
+        if api in cache:
+            return cache[api]
+        last = "no attempt was made"
+        for attempt in range(_CDX_ATTEMPTS):
+            if attempt:
+                await asyncio.sleep(2 ** attempt)          # 2 s, 4 s -- the endpoint is slow, not hostile
+            try:
+                async with _target_client(verify=False, follow_redirects=True,
+                                          timeout=_CDX_TIMEOUT_S,
+                                          headers={"User-Agent": _UA}) as c:
+                    r = await c.get(api)
+                if r.status_code in (403, 429):
+                    last = "archive.org answered HTTP %d (rate-limited or refused)" % r.status_code
+                    continue
+                if r.status_code != 200:
+                    last = "archive.org answered HTTP %d" % r.status_code
+                    continue
+                try:
+                    rows = json.loads(r.text)
+                except ValueError:
+                    last = "archive.org answered %d bytes that are not CDX JSON" % len(r.text or "")
+                    continue
+                out = (rows, "")
+                cache[api] = out
+                return out
+            except httpx.TimeoutException:
+                last = ("archive.org did not answer within %ds (the CDX path is slow; raise "
+                        "BBH_CDX_TIMEOUT_S)" % _CDX_TIMEOUT_S)
+            except httpx.HTTPError as exc:
+                last = "archive.org unreachable: %s: %s" % (type(exc).__name__, str(exc)[:120])
+        out = (None, "%s after %d attempt(s) -- this is a fact about OUR network, not the target"
+               % (last, _CDX_ATTEMPTS))
+        cache[api] = out
+        return out
+
     async def _get_json(self, url: str, timeout: int = 30):
         """GET a URL and parse JSON regardless of content-type (crt.sh / archive.org)."""
         import httpx
@@ -4506,11 +4567,22 @@ class ToolRegistry:
     async def _run_wayback(self, inp: dict) -> ToolResult:
         domain = inp["domain"].lstrip("*.")
         urls = []
+        # Q-135. THE TIMEOUT WAS 40s ON A PATH MEASURED AT 47-71s, so `run_wayback` reported
+        # "All connection attempts failed (25 calls, same error)" on runs where the endpoint was
+        # simply slow. The CDX API needs no key; it is just not fast, and it got worse over a VPN.
+        #
+        # AN EMPTY ARCHIVE AND AN UNREACHABLE ARCHIVE ARE DIFFERENT FACTS, and the old code could
+        # not tell them apart: `_get_json` returns None for a non-200 exactly as it does for no
+        # rows, so a 429 read as "this target has no archived URLs" -- target silence standing in
+        # for tool failure, the Q-093 shape in a recon engine.
+        rows, why = await self._cdx_fetch(
+            f"https://web.archive.org/cdx/search/cdx?url={domain}/*"
+            "&output=json&fl=original&collapse=urlkey&limit=1500")
+        if why:
+            # DEGRADED, not a clean zero: this says nothing about the target.
+            return ToolResult("wayback", domain, False, "", [], "DEGRADED: " + why)
         try:
-            api = (f"https://web.archive.org/cdx/search/cdx?url={domain}/*"
-                   "&output=json&fl=original&collapse=urlkey&limit=1500")
-            rows = await self._get_json(api, timeout=40) or []
-            for row in rows[1:]:  # skip header row
+            for row in (rows or [])[1:]:  # skip header row
                 u = row[0] if isinstance(row, list) else row
                 if u and self.scope.validate(u)[0]:
                     urls.append(u)

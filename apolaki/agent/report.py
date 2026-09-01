@@ -417,6 +417,7 @@ def generate_report(program: str, findings: list, scope: dict,
                      orchestration: dict = None, heartbeat: dict = None) -> str:
     now = _now()
     findings = sanitize_finding_urls(findings)   # collapse any duplicated-host URL from prior-scan memory
+    findings = collapse_repeated_observations(findings)   # Q-137
     findings = _with_capec(findings)
     delta_block = "\n".join(_delta_lines(delta, findings))
     ledger_block = "\n".join(_ledger_md(tool_ledger) + _arsenal_md(tool_ledger, findings) + _technique_md())
@@ -452,7 +453,7 @@ def generate_report(program: str, findings: list, scope: dict,
             + (f"**Last activity:** {heartbeat['last_dispatch']} "
                f"({heartbeat.get('dispatches', 0)} tool dispatches)\n"
                if (heartbeat or {}).get("last_dispatch") else "")
-            + f"**Scope:** {', '.join(scope.get('in_scope', []))}\n\n"
+            + f"**Scope:** {', '.join(dict.fromkeys(scope.get('in_scope', []) or []))}\n\n"
             + ai_block
             + "No confirmed vulnerabilities were recorded" + tail + "\n"
             + leads_md
@@ -492,7 +493,7 @@ def generate_report(program: str, findings: list, scope: dict,
         lines.append(f"**Last activity:** {heartbeat['last_dispatch']} "
                      f"({heartbeat.get('dispatches', 0)} tool dispatches)")
     lines += [
-        f"**Scope:** {', '.join(scope.get('in_scope', []))}",
+        f"**Scope:** {', '.join(dict.fromkeys(scope.get('in_scope', []) or []))}",
         f"**Total Findings:** {len(findings)}", "",
     ]
     # Operator scoping (#34) goes NEAR THE TOP, not in an appendix. A reader who skims the summary and
@@ -2468,6 +2469,64 @@ def _canon_url(url: str) -> str:
         return loc
 
 
+#: Severities at which repetition is noise rather than evidence. A confirmed MEDIUM+ on ten URLs is
+#: ten things to fix; ten INFORMATIONAL rows for one behaviour on one host is one thing said ten
+#: times. Deliberately excludes medium/high/critical -- collapsing those would hide real work.
+_COLLAPSIBLE_SEVERITIES = frozenset({"informational", "info", "low"})
+
+
+def collapse_repeated_observations(findings: list) -> list:
+    """Q-137. One behaviour on one host is ONE row, carrying how many URLs showed it.
+
+    MEASURED on the operator's Shopify runs: SEVEN `Host header injection` rows, every one
+    `linkpop.com`, every one INFORMATIONAL, every one saying "NO sink was found". The severity was
+    already right (Q-114); the repetition was not. Seven identical rows crowd a report whose whole
+    job is to show a reader what matters.
+
+    Grouped by (family, title, severity, HOST) -- host, not URL, because the URL is exactly what
+    varies and the host is what the operator would act on. The first row survives and gains an
+    instance count plus the extra targets, so nothing is discarded: a reader can still see every
+    affected URL, in one place, instead of scrolling seven near-identical blocks.
+
+    MEDIUM AND ABOVE ARE NEVER COLLAPSED. A confirmed injection on ten endpoints is ten pieces of
+    work, and merging them would be this tool hiding findings from its own operator.
+    """
+    out, seen = [], {}
+    for f in (findings or []):
+        if not isinstance(f, dict):
+            out.append(f)
+            continue
+        sev = str(f.get("severity") or "").lower()
+        if sev not in _COLLAPSIBLE_SEVERITIES:
+            out.append(f)
+            continue
+        tgt = str(f.get("target") or "")
+        # Split rather than `urlparse`, which raises ValueError on a malformed port and would need a
+        # handler -- one more row in the silent-failure census for a case string ops settle. Same
+        # extraction `agent._is_operator_asset` already uses, so there is one idiom for this in the
+        # tree rather than two.
+        host = ""
+        if "://" in tgt:
+            host = tgt.split("://", 1)[-1].split("/", 1)[0].split("@")[-1].split(":")[0].lower()
+        key = (f.get("family"), f.get("title"), sev, host)
+        first = seen.get(key)
+        if first is None:
+            seen[key] = f
+            out.append(f)
+            continue
+        first.setdefault("_instances", [first.get("target", "")])
+        if tgt not in first["_instances"]:
+            first["_instances"].append(tgt)
+        n = len(first["_instances"])
+        base = str(first.get("description") or "").split("\n\nAlso observed on ")[0]
+        extra = ", ".join(first["_instances"][1:8])
+        first["description"] = (
+            "%s\n\nAlso observed on %d further URL(s) on the same host (%s%s). Collapsed into one "
+            "row because the behaviour, host and severity are identical; the URLs differ only in "
+            "path." % (base, n - 1, extra, ", ..." if n > 9 else ""))
+    return out
+
+
 def sanitize_finding_urls(findings: list) -> list:
     """Render-time guard: rewrite any duplicated-host URL in a finding's URL-bearing string fields
     (target/surface/location/curl and inline http(s) URLs in evidence/description). Fixes a finding
@@ -3605,7 +3664,7 @@ def generate_html_report(program: str, findings: list, scope: dict,
         delta_html = "".join(parts)
 
     # header meta / banners
-    scope_str = e(", ".join(scope.get("in_scope", [])))
+    scope_str = e(", ".join(dict.fromkeys(scope.get("in_scope", []) or [])))
     _sn = _status_note(status, execution)
     status_html = (f'<div class="statusbar">{e(_sn.lstrip("> ").replace("**",""))}</div>' if _sn else "")
     _en = _exec_note(execution)

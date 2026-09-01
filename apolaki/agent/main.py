@@ -1,7 +1,9 @@
 import asyncio
+import datetime
 import json
 import os
 import re
+import time
 import uuid
 from typing import Optional
 
@@ -725,12 +727,28 @@ async def stream(session_id: str):
         # tail live. Client disconnect (CancelledError) just stops this consumer —
         # the background task keeps running and owns the final status.
         idx = 0
+        # Q-139. THE ENVELOPE. `sess["events"]` are raw engine dicts with no time on them, so a
+        # 3913-line pasted live log carried no absolute timestamp, no elapsed time and no ordering
+        # -- the operator could not tell a wedged run from a slow one, and neither could a reviewer
+        # reading the paste afterwards. The database has had `created_at` all along (`db.add_log`
+        # writes it, `get_logs` returns it as `ts`); the stream simply never carried it.
+        #
+        # Stamped HERE, at the one place events reach a viewer, rather than at each of the ~110
+        # producers. `seq` is the stream's own counter: wall-clock alone cannot order two events in
+        # the same millisecond, and a reconnecting client needs to know whether it missed any.
+        _t0 = time.time()
         try:
             while True:
                 events = sess["events"]
                 while idx < len(events):
                     ev = events[idx]
                     idx += 1
+                    if isinstance(ev, dict):
+                        _now = time.time()
+                        ev = {"seq": idx,
+                              "ts": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+                              "elapsed_ms": int((_now - _t0) * 1000),
+                              **ev}
                     yield f"data: {json.dumps(ev)}\n\n"
                 if sess.get("done") and idx >= len(sess["events"]):
                     break

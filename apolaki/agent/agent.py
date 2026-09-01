@@ -2858,6 +2858,33 @@ class BBHAgent:
             self._auth_artery = {"ran": True, "note": "artery ran; evidence capture degraded"}
         return events
 
+    def _observed_bases(self) -> dict:
+        """host -> base URL, preferring the scheme we MEASURED over the one we assumed.
+
+        Q-130. `ScopeEngine.base_map` falls back to `https://{host}` for any host the operator did
+        not declare with a scheme. For an HTTP-only host that is a guess, and it is wrong: on the
+        WordPress reach lab every guessed API path was probed over `https://` against a port with no
+        TLS listener, so the navigations could not connect. Before Q-129 that manufactured findings
+        from the browser's own error page; now it just wastes the budget silently.
+
+        THE PRECEDENCE IS THE POINT, and it is three-tier rather than "prefer http":
+          1. an operator-DECLARED base wins outright -- they said so, and flipping the default to
+             http for everyone would be a security regression for the sake of a lab;
+          2. otherwise a base we OBSERVED answering, because a measurement beats an assumption;
+          3. otherwise the https default, which is correct for the internet.
+        """
+        from urllib.parse import urlparse          # module-local, as elsewhere in this file
+        bases = dict(self.scope.base_map() or {})
+        declared = {e.value for e in self.scope._addressable() if getattr(e, "base", None)}
+        for row in (self.tools.recon.get("live_hosts") or []):
+            u = row.get("url") if isinstance(row, dict) else str(row or "")
+            if not u or "://" not in u:
+                continue
+            host = urlparse(u).hostname or ""
+            if host and host not in declared and host in bases:
+                bases[host] = u.rstrip("/")
+        return bases
+
     def _scope_origins(self) -> list:
         """The in-scope origins to audit, CARRYING the scheme and port the operator authorised.
 
@@ -3967,7 +3994,7 @@ class BBHAgent:
                          # operator actually put in scope.
                          "scope_roots": base_roots,
                          "recon": g_recon, "urls": g_urls,
-                         "bases": self.scope.base_map(),
+                         "bases": self._observed_bases(),
                          # Q-065, second cause. `planner.py:641` gates run_jwt on
                          # `state["auth_headers"]` and this dict never carried that key, so the JWT
                          # blob was always `{}` plus recon cookies: only a COOKIE-borne JWT could

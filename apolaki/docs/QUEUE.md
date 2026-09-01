@@ -102,7 +102,7 @@ unaffected and does not report degradation. Census: enumerate every engine with 
 dispatch and assert each carries a deadline -- one route fixed and two left open is how Q-110 nearly
 came back.
 
-### Q-143 · Client-side template evaluation must not be reported as SERVER-side injection · **READY** · **MEDIUM**
+### Q-143 · Client-side template evaluation must not be reported as SERVER-side injection · **CLOSED** · **MEDIUM**
 
 Codex raises this separately from the marker problem I fixed in Q-126, and it is a different defect.
 Q-126 made the SSTI oracle structural (random operands, product not a substring of the payload). It
@@ -305,7 +305,7 @@ invisible behind "0 confirmed", which reads as a clean target and is really an e
 a budget symptom is how it stays unfixed. Start from why `run_sqli` derives 1-3 parameters from a
 surface with thousands, and why katana returns 1 URL at depth 5.
 
-### Q-135 · Wayback times out at 40s on a path measured at 47-71s · **READY** · **MEDIUM**
+### Q-135 · Wayback times out at 40s on a path measured at 47-71s · **CLOSED** · **MEDIUM**
 
 VERIFIED: `agent/tools.py:4497` `timeout=40`. The CDX endpoint needs no API key; the path simply is
 slow, and with a VPN it got worse (connection refused / host timeouts).
@@ -322,7 +322,7 @@ VERIFIED: `agent/Dockerfile` copies `*.py`, `tests`, `pytest.ini` and never `tie
 command fails with `ModuleNotFoundError: No module named 'tier3'`. Either ship it or correct the
 docs, and add a packaging smoke test so the two cannot drift again.
 
-### Q-137 · Seven identical host-header rows for one behaviour on one host · **READY** · **MEDIUM**
+### Q-137 · Seven identical host-header rows for one behaviour on one host · **CLOSED** · **MEDIUM**
 
 Narrowed deliberately from the Codex brief. The SEVERITY is already right -- Q-114 grades these
 `Informational` and prints why. What is wrong is that one behaviour on `linkpop.com` produces seven
@@ -378,7 +378,7 @@ returns, hunt the second producer starting from the recorded offenders. If it do
 **Do NOT relax the drop or silence the row** either way. That row is the only reason anyone knows
 endpoints go unprobed.
 
-### Q-139 · Live-run events carry no timestamp, though the database stores one · **READY** · **MEDIUM**
+### Q-139 · Live-run events carry no timestamp, though the database stores one · **CLOSED** · **MEDIUM**
 
 `agent/db.py` writes `created_at` and returns it as `ts`. `agent/main.py` `/stream` sends raw
 buffered `sess["events"]`, unenriched, so 3913 lines of pasted live log carry no absolute time, no
@@ -390,7 +390,7 @@ which is a display window, not a diagnostic export.
 long phases, plus a full-log export path. **GATE:** reconnecting to `/stream` past 500 events keeps
 timing and final-cause context.
 
-### Q-140 · Scope entries are duplicated in the mission objective and report · **READY** · **LOW**
+### Q-140 · Scope entries are duplicated in the mission objective and report · **CLOSED** · **LOW**
 
 The Shopify scope prints each root three times (plain, bare, anchored-regex). Cosmetic, but it makes
 the report header unreadable and inflates every scope comparison. Deduplicate before mission creation
@@ -565,7 +565,7 @@ Pinned by `test_an_absent_navigated_flag_is_treated_as_loaded`, and
 `test_the_two_no_evidence_cases_are_independent` proves neither condition is reachable only through
 the other.
 
-### Q-130 · A host with no observed base is probed as `https://`, and the lab is HTTP-only · **READY** · **MEDIUM**
+### Q-130 · A host with no observed base is probed as `https://`, and the lab is HTTP-only · **CLOSED** · **MEDIUM**
 
 Surfaced alongside Q-129 and deliberately NOT fixed with it.
 

@@ -510,9 +510,18 @@ class ScopeEngine:
         # `memory.target_key`) is byte-identical to before.
         d = {
             "program": self.program_name,
-            "in_scope": [e.value for e in self.in_scope] + [e.value for e in self.in_scope_patterns],
-            "out_of_scope": ([e.value for e in self.out_of_scope]
-                             + [e.value for e in self.out_of_scope_patterns]),
+            # Q-140: DEDUPED, ORDER PRESERVED. The operator's Shopify scope printed each root FOUR
+            # times -- the literal, the bare form and the anchored regex all resolve to the same
+            # `value`, and re-importing the Burp JSON appended another copy. `dict.fromkeys` keeps
+            # first-seen order, so the operator's own ordering is untouched.
+            #
+            # Deduped HERE rather than at the three render sites because `to_dict` is also what
+            # `memory.target_key` hashes and what the model reads: a scope that lists one host four
+            # times is not just ugly, it is a different key and a different prompt.
+            "in_scope": list(dict.fromkeys([e.value for e in self.in_scope]
+                                           + [e.value for e in self.in_scope_patterns])),
+            "out_of_scope": list(dict.fromkeys([e.value for e in self.out_of_scope]
+                                               + [e.value for e in self.out_of_scope_patterns])),
             # base URLs carry scheme+port for concrete hosts; consumers like the
             # cross-session memory key use these so apps on the same host but
             # different ports don't collide. Additive — in_scope stays bare hosts.
