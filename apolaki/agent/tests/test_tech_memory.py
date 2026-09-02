@@ -274,3 +274,29 @@ def test_the_scheme_is_not_hardcoded_anywhere_in_the_seeding_path():
     assert 'f"https://{a[' not in src, "warm-start hardcodes an https host URL again"
     assert '"https://" + v' not in src, "warm-start hardcodes an https endpoint URL again"
     assert "_seed_url(" in src, "warm-start no longer routes through the scope-aware helper"
+
+
+def test_warm_start_drops_stored_dns_artifacts():
+    """Q-162. MEMORY IS A RECORD, NOT A PROMISE.
+
+    `memory.snapshot` filters SOA-RNAME artifacts on the WRITE path, but rows stored before that
+    filter existed are replayed verbatim. MEASURED: hostmaster.juice-shop,
+    hostmaster.hostmaster.juice-shop and hostmaster.hostmaster.hostmaster.juice-shop were seeded
+    into recon on a target whose live recon found ZERO subdomains, and katana was scheduled against
+    all three for nothing but scope blocks.
+
+    A filter on write does not clean what is already stored, so the READER applies it too."""
+    import dns_recon as dnsr
+    stored = ["hostmaster.juice-shop", "hostmaster.hostmaster.juice-shop",
+              "hostmaster.hostmaster.hostmaster.juice-shop", "api.juice-shop"]
+    kept = [v for v in stored if not dnsr.is_junk_host(v)]
+    assert kept == ["api.juice-shop"], kept
+
+
+def test_the_artifact_filter_keeps_ordinary_subdomains():
+    """NEGATIVE CONTROL. A filter that drops real subdomains would silently shrink the surface,
+    which is a worse failure than the scope blocks it was added to prevent."""
+    import dns_recon as dnsr
+    for good in ("www.example.com", "api.example.com", "mail.example.com", "mx1.example.com",
+                 "admin.example.com", "juice-shop"):
+        assert not dnsr.is_junk_host(good), good

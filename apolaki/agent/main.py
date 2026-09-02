@@ -332,7 +332,16 @@ def _warm_start(scope: ScopeEngine, tools: ToolRegistry, agent) -> dict:
             return {"seeded": False}
         return {"seeded": True, "technology": seeded_tech}
 
-    subs = [a["value"] for a in assets.get("subdomains", []) if scope.validate(a["value"])[0]]
+    # Q-162. MEMORY IS A RECORD, NOT A PROMISE. `memory.snapshot` drops SOA-RNAME artifacts on the
+    # WRITE path, but anything already stored predates that filter and is replayed verbatim every
+    # mission. MEASURED: three rows -- hostmaster.juice-shop, hostmaster.hostmaster.juice-shop and
+    # hostmaster.hostmaster.hostmaster.juice-shop -- were seeded into recon on a target whose live
+    # recon found ZERO subdomains, and katana was then scheduled against all three, producing only
+    # scope blocks. A filter applied on write does not clean what is already in the store, so the
+    # consumer applies it too.
+    import dns_recon as _dnsr
+    subs = [a["value"] for a in assets.get("subdomains", [])
+            if scope.validate(a["value"])[0] and not _dnsr.is_junk_host(a["value"])]
     for s in subs:
         if s not in tools.recon["subdomains"]:
             tools.recon["subdomains"].append(s)
