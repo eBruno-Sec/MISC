@@ -5180,6 +5180,35 @@ O(surface discovered); and a `depth(2) × frontier(30)` = 60-visit cap standing 
    it, and forms only exist for fetched pages. The 2740 cases are plain `.html`. Coverage is
    O(pages fetched) = 12, and everything downstream is arithmetic on that 12.
 
+## BACKLOG VERIFICATION — 2026-09-02 — checked against the CODE, not against these headers
+
+The tickets in this section predate the `**CLOSED**` convention and carry no status marker, so
+"is the queue done?" could not be answered by reading them. Twice already a header here said
+something false while the work had shipped (Q-021B, caught by Q-126; Q-021, retired above), so
+each was re-checked by grep against `agent/` rather than by inference.
+
+| ticket | verdict | evidence |
+|---|---|---|
+| Q-001 session lifecycle | SHIPPED | `session_lifecycle` is a live technique with an executor |
+| Q-002 WebSocket CSWSH / frame injection | SHIPPED | `ws_tool.py` exists and is wired |
+| Q-003 postMessage as a DOM-XSS source | SHIPPED | `_run_dom_audit`'s web-message harness: real bound foreign origin, targeted-origin control. A SECOND implementation of this was built and deleted in cycle 18 for being a duplicate producer |
+| Q-004 unrestricted resource consumption | SHIPPED | amplification-multiplier engine present |
+| Q-006 request smuggling / desync | SHIPPED | detection-tier engine present |
+| Q-007 `weak_password_reset` is a phantom | RESOLVED, deliberately | `engine_descriptor.py:230` excludes it BY NAME with the reason; it is not claimed anywhere. The phantom was the finding, and it is recorded |
+| Q-008 `run_mass_assignment` does not exist | CLOSED by Q-011 | the tool is `run_mass_assign`, sole producer `mass_assign_tool`; `asvs_model.py:170` records the correction. The ticket named a symbol that never existed under that spelling |
+| Q-010 | ANSWERED by Q-019 | as already marked |
+
+**GENUINELY OPEN, and the only one in this section:**
+
+* **Q-005 · server-side prototype pollution (CWE-1321)** — no engine, no partial. `sspp` and
+  `server_side_prototype` appear nowhere in `agent/`. Client-side prototype pollution IS covered
+  (`run_dom_audit` gadget scan); the server-side variant is not, and the two are different bugs
+  with different oracles.
+
+Also open and correctly tracked elsewhere: **Q-021E** (`proposed`) and **Q-021F** (`proposed`).
+
+Everything else in this file is CLOSED or SUPERSEDED.
+
 ### Q-010 · Why does a whole-product mission find 2 things on a 1415-vuln target? — **ANSWERED by Q-019**
 **MEASURED**: mission `90cee81c`, 3720s, 2 findings, neither a benchmark case, count static from
 t=50s. Harness on the same target: 41.3%. Five orchestration fixes did not move it.
@@ -5249,7 +5278,29 @@ funnel stage it repairs and show the before/after count for that stage.
   accounting), `agent/api_inventory.py`, `agent/tools.py`
 - **Effort**: low-medium; the multiplier variant needs no concurrency at all.
 
-### Q-021 · Technology Intelligence Engine — detected tech must drive targeted testing · **HIGH** · `ready`
+### Q-021 · Technology Intelligence Engine · **SUPERSEDED by Q-021B..F** · **HIGH**
+
+**STATUS CORRECTED 2026-09-02.** This header still read `ready` while the ticket had long
+since been decomposed and most of it delivered. Q-021B's header had the same rot and Q-126
+caught it -- twice is a pattern, so the parent is being retired rather than left to say
+something false a third time.
+
+| sub-ticket | state | evidence (hashes VERIFIED to exist, not copied from a note) |
+|---|---|---|
+| Q-021B persist a canonical TechnologyFact | CLOSED | `82538c4` + 5, liveness proof via Q-126 |
+| Q-021C canonical identity, version ranges, applicability | CLOSED | `2480c75` |
+| Q-021D governed feeds -> components, promotion path | CLOSED | `7e4fe79` `607de78` |
+| Q-021E technology drives safe orchestration | `proposed` | not started |
+| Q-021F expose the technology lifecycle honestly | `proposed` | not started |
+
+The remaining work is E and F and is tracked THERE. Nothing is lost by retiring the parent;
+leaving it `ready` invites someone to start an integration that three closed tickets already
+did. The original body is kept below because its "four of five pieces already exist and are
+disconnected" audit is what made the decomposition correct.
+
+#### ORIGINAL TICKET
+
+### Q-021 (as filed) · Technology Intelligence Engine — detected tech must drive targeted testing
 *Erwin, 2026-08-10. An overlooked capability: recon fingerprints a technology and then nothing
 happens to it. Detection must feed vulnerability intelligence, which must feed targeted probes.*
 
