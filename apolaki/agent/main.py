@@ -3045,21 +3045,30 @@ def _missing_zap_invocation(session_id: str) -> dict | None:
             live_hosts = live_hosts or bool(row.get("count"))
     if ran:
         return None
-    # Q-132. WHICH PRECONDITION FAILED. `run_zap` is planned in planner phase F2, which runs LATE --
-    # after the fast tools -- and it needs `host_bases` to build a step at all. So an opted-in
-    # mission reaches the end without ZAP for one of a small number of reasons, and reporting "no
-    # dispatch" without naming which one leaves the operator guessing between reconfiguring the
-    # daemon and reordering the scan. A healthy daemon is not coverage, and neither is a silence.
+    # Q-132. WHICH PRECONDITION FAILED -- and Q-150, which is that this text went stale the moment
+    # the thing it describes moved. Every branch here said "phase F2"; `run_zap` was HOISTED OUT of
+    # F2 into phase E in this same cycle, so the diagnosis named a phase that no longer plans ZAP.
+    #
+    # Worse, the final branch was a RESIDUAL BUCKET asserting a specific mechanism it never checked:
+    # "the mission ended before phase F2 was reached". On mission 9e8653b8 that sent the next reader
+    # (me) hunting a stale container image, which did not exist -- the container's planner matched
+    # the repo line for line. An unverified cause stated as a determined one is worse than "unknown",
+    # because "unknown" does not send anyone anywhere.
     if zap_blocked:
         _why = "a run_zap step was refused (scope block or engine error) before any dispatch landed"
     elif not _zap_configured():
-        _why = "ZAP_ADDR is not configured, so the planner's phase-F2 gate could never open"
+        _why = "ZAP_ADDR is not configured, so the planner's ZAP gate could never open"
     elif not live_hosts:
-        _why = ("no live host base was ever discovered, and phase F2 builds its steps from "
+        _why = ("no live host base was ever discovered, and the ZAP phase builds its steps from "
                 "host_bases -- with none, it produces no step and falls through silently")
     else:
-        _why = ("the mission ended before planner phase F2 was reached; F2 runs AFTER the fast "
-                "tools, so an earlier phase consuming the run starves ZAP (%d dispatches)" % dispatches)
+        _why = ("NOT DETERMINED. Ruled out: the step was not refused, ZAP_ADDR is configured, and "
+                "at least one live host base was discovered, so a step was buildable. %d dispatches "
+                "landed. Remaining candidates, none of which this guard can distinguish from the "
+                "log alone: the `POST /engage` confirmation ZAP sits behind was not granted, the "
+                "run was stopped or hit its wall-clock cut before the ZAP phase produced a step, or "
+                "an earlier phase consumed the budget. Check the engage record first"
+                % dispatches)
     return {
         "type": "tool_error",
         "tool": "run_zap",
