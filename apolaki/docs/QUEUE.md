@@ -5180,6 +5180,40 @@ O(surface discovered); and a `depth(2) × frontier(30)` = 60-visit cap standing 
    it, and forms only exist for fetched pages. The 2740 cases are plain `.html`. Coverage is
    O(pages fetched) = 12, and everything downstream is arithmetic on that 12.
 
+### Q-163 · SPA routes are discovered, but only the ones a LINK points at · **READY** · **HIGH**
+
+*Filed 2026-09-02. The SPA plumbing is complete and proven; this is the one remaining link.*
+
+Cycle 19 built the whole chain and each part is verified:
+
+```
+crawl harvest      katana reports "38 crawled URLs (+5 SPA route(s))" in-mission
+inventory          #/search?q= -> path "#/search", params ["q"], parameterized=True   (Q-161)
+sweep dedup        #/login and #/search are distinct keys, not both "/"               (Q-159)
+probe source       fragment_route puts the canary at #/search?q=CANARY                (Q-153)
+engine             _run_dom_trace on that URL reports juice-shop's DOM-based XSS
+```
+
+So a param-bearing hash route IS probed end to end. The gap is that we only ever FIND the routes
+an anchor points at. MEASURED on juice-shop: the rendered home page yields #/login, #/contact,
+#/about, #/chatbot, #/photo-wall -- five routes, NONE carrying a parameter. The sweep probes
+PARAMETERIZED endpoints, so all five are correctly skipped and the mission finds no DOM XSS.
+
+`#/search?q=` is not linked from anywhere. You reach it by TYPING in the search box.
+
+**Three candidate mechanisms, cheapest first. Do not do all three.**
+
+1. Drive the rendered controls: type into each visible input, submit, and record the `location.hash`
+   the app navigates to. BIE already drives real controls, so this is the same machinery.
+2. Extract the route table from the framework at runtime (`router.config` for Angular) rather than
+   from minified bundles -- attempted here and the bundles yielded no `path:"..."` matches.
+3. Seed-probe discovered routes with the DOM-sink param names already used elsewhere
+   (search/q/redirect/url/next) as `#/route?seed=canary`. Cheapest, and speculative -- it invents
+   a parameter the application never showed us, which this codebase generally refuses to do.
+
+**Definition of done:** a mission against juice-shop reports the `#/search?q=` DOM XSS without any
+hand-supplied URL. That is the acceptance test; nothing else proves the loop closed.
+
 ### Q-158 · Every FORM engine is blind on a single-page app · **READY** · **CRITICAL**
 
 *Filed 2026-09-02 from the Q-151 shakedown. The largest single coverage hole found by the loop.*
