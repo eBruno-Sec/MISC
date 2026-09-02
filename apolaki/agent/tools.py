@@ -5178,8 +5178,10 @@ class ToolRegistry:
         # A crawler is where new surface belongs, and katana cannot produce these itself: a fragment
         # is never sent to the server so it normalises them away, and an SPA renders its
         # `routerLink`s into anchors only after it boots. One render answers both.
+        _routes = []
         try:
-            urls += await self._spa_hash_routes(url)
+            _routes = await self._spa_hash_routes(url)
+            urls += _routes
         except Exception as _apolaki_spa_routes:
             # RECORDED, not silent. This AUGMENTS a crawl: an unreachable host or a browser that
             # will not start must not fail a crawl that otherwise succeeded, but it must not vanish
@@ -5198,7 +5200,13 @@ class ToolRegistry:
         note = " (authenticated)" if auth_h else ""
         if intensity != "standard":
             note += f" [{intensity}: depth {depth}]"
-        return ToolResult("katana", url, True, f"{len(urls)} crawled URLs{note}", [{"url": u} for u in urls[:50]])
+        # The SPA-route count is REPORTED, not inferred. Three iterations were spent guessing why
+        # a harvest that works standalone produced nothing in-mission, because "38 crawled URLs"
+        # says the same thing whether five routes were added or zero. A number nobody can see is a
+        # number nobody can debug.
+        _rnote = " (+%d SPA route(s))" % len(_routes) if _routes else " (+0 SPA routes)"
+        return ToolResult("katana", url, True, f"{len(urls)} crawled URLs{note}{_rnote}",
+                          [{"url": u} for u in urls[:50]])
 
     async def _gql_post(self, c, endpoint: str, payload):
         """POST a GraphQL query/batch; return parsed JSON or None."""
