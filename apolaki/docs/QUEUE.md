@@ -362,7 +362,39 @@ Narrowed deliberately from the Codex brief. The SEVERITY is already right -- Q-1
 `Informational` and prints why. What is wrong is that one behaviour on `linkpop.com` produces seven
 report rows. Deduplicate by (host, effect) and emit one observation carrying its instance count.
 
-### Q-138 · Hostless nodes: CORRECTED -- my first reasoning was wrong, the ticket may still stand · **READY** · **MEDIUM**
+### Q-138 · Hostless nodes: the SECOND PRODUCER found and fixed · **CLOSED** · **MEDIUM**
+
+**CLOSED 2026-09-02 by enumeration, not by another scan.** The ticket's first step was "re-run
+at 861c22ac's scale on a current build". That was the expensive way to ask the question, and
+the cheap way answers it: enumerate every site that mints an `endpoint` node and check which
+can produce a key with no host. Ten sites; two could.
+
+Both are in `archive_intel.py`, one file over from where Q-109 established the rule:
+
+* `ingest_repo_findings`, `kind="route"` -- keyed an `endpoint` on `val`, which is a PATH by
+  this function's own documented contract. **This is the volume-dependent producer the ticket
+  predicted**: it needs recon to have found repositories with routes in them, which is why
+  1441 surface URLs showed no row and 6679 showed thirty.
+* `ingest_archived_endpoints` -- `h = p.netloc or host`; with a relative archived entry and no
+  host argument both are empty and the key was the bare path.
+
+Q-109's rule applied verbatim: the FACT is kept and the CLAIM corrected -- a bare path becomes
+a `route` node, a netloc-carrying candidate stays an `endpoint`. Not absolutized onto the
+mission base, for the reason Q-109 already measured.
+
+**A test REQUIRED the defect**, the third time this cycle: `test_repo_secret_stores_ref_not_raw`
+asserted that the harvested route `/internal/debug` produces an endpoint node. Corrected, not
+deleted -- it still proves all three ingest kinds land.
+
+Five regression tests, two mutants, both KILLED. The drop and the row were never touched: the
+reporter was right both times, and reporting is not what was broken.
+
+The `9e8653b8` Shopify run does NOT satisfy the original measurement and was not used as if it
+did -- it carried 4 leads against 861c22ac's 554 parameterized endpoints.
+
+#### ORIGINAL TICKET, kept because the reasoning correction in it is the useful part
+
+### Q-138 (as filed) · Hostless nodes: CORRECTED -- my first reasoning was wrong
 
 **I FILED THIS ON AN INFERENCE AND THE ARTIFACT CONTRADICTS IT.** I wrote that the build behind
 `861c22ac` "also contained Q-114 -- same push as Q-109 -- so the fix was present and the symptom

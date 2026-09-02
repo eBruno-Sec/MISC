@@ -31,8 +31,17 @@ def ingest_archived_endpoints(graph, host: str, urls, source: str = "wayback") -
         h = p.netloc or host
         if not path or path == "/":
             continue
-        graph.observe("endpoint", (h + path) if h else path, label=path, source=source,
-                      confidence=_ag.LOW, archived=True, tested=False, provenance_kind="archive")
+        # Q-138. A harvested path is a PATH, never an ADDRESS -- the Q-109 rule, which was applied
+        # in asset_graph and not here. With no netloc and no `host` argument this keyed an
+        # `endpoint` node on a bare path, `_endpoint_url` then refused to resolve it, and
+        # `_graph_primary_state` dropped it and recorded a hostless-endpoint row. The fact is kept
+        # and its CLAIM corrected: a route is recorded as a `route`, never promoted to probe surface.
+        if h:
+            graph.observe("endpoint", h + path, label=path, source=source,
+                          confidence=_ag.LOW, archived=True, tested=False, provenance_kind="archive")
+        else:
+            graph.observe("route", path, label=path, source=source,
+                          confidence=_ag.LOW, archived=True, tested=False, provenance_kind="archive")
         n += 1
     return n
 
@@ -47,8 +56,19 @@ def ingest_repo_findings(graph, repo: str, items, source: str = "github") -> int
         kind = (it or {}).get("kind")
         val = (it or {}).get("value") or ""
         if kind == "route" and val:
-            graph.observe("endpoint", val, label=val, source=source, confidence=_ag.LOW,
-                          tested=False, provenance_kind="repo", repo=repo)
+            # Q-138, and this is the volume-dependent producer the ticket predicted: `kind="route"`
+            # carries a PATH by this function's own contract, so every harvested repo route minted a
+            # hostless `endpoint`. It only shows at scale because it needs recon to have found repos
+            # with routes in them -- which is exactly why the 1441-URL run showed no row and the
+            # 6679-URL run showed thirty.
+            _p = urlparse(val)
+            if _p.netloc:
+                graph.observe("endpoint", _p.netloc + (_p.path or "/"), label=(_p.path or "/"),
+                              source=source, confidence=_ag.LOW, tested=False,
+                              provenance_kind="repo", repo=repo)
+            else:
+                graph.observe("route", val, label=val, source=source, confidence=_ag.LOW,
+                              tested=False, provenance_kind="repo", repo=repo)
             n += 1
         elif kind == "secret":
             # store only a HASH fingerprint + vault reference — never the raw secret value
