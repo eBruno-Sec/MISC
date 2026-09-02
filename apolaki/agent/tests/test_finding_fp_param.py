@@ -126,3 +126,54 @@ def test_the_fingerprint_of_a_freshly_built_finding_actually_uses_it():
     a = ldap_tool.finding("http://h/search", "uid", "form field", "an oracle")
     b = ldap_tool.finding("http://h/search", "cn", "form field", "an oracle")
     assert memory.finding_fp(a) != memory.finding_fp(b)
+
+
+# =================================================================================================
+# Q-160. "Reflected XSS (html)" on a JSON API response.
+#
+# `contexts_of` classifies a reflection by the bytes AROUND it and assumes the body is HTML, so a
+# canary echoed into a JSON error body classifies as "html" and the finding graded
+# `confidence=confirmed, severity=high`.
+#
+# MEASURED on juice-shop `/api/Challenges/?sort=`: the value reflects unescaped, angle brackets
+# intact, into {"message":"Sorting not allowed...","errors":["<canary>"]} -- served as HTTP 400
+# `application/json` with `X-Content-Type-Options: nosniff`. A real browser navigated there with
+# three separate executing payloads fired NO dialog. Every API that echoes a bad parameter into a
+# JSON error was a HIGH.
+# =================================================================================================
+
+import xss_tool as _xt
+
+
+def test_a_json_response_with_nosniff_cannot_execute_markup():
+    assert _xt.markup_executable("application/json; charset=utf-8", nosniff=True) is False
+    assert _xt.markup_executable("text/plain", nosniff=True) is False
+
+
+def test_html_is_still_executable_and_so_is_an_undeclared_type():
+    """The true-positive path, which a fix that simply silenced this family would break. A missing
+    content-type stays executable because the browser may sniff it."""
+    assert _xt.markup_executable("text/html; charset=utf-8") is True
+    assert _xt.markup_executable("application/xhtml+xml") is True
+    assert _xt.markup_executable("") is True
+
+
+def test_a_non_html_type_without_nosniff_stays_executable():
+    """Deliberate. Sniffing varies by browser and type, so refusing these would trade a false
+    positive for a false negative on the commoner case. The nosniff header is the clear signal."""
+    assert _xt.markup_executable("application/json", nosniff=False) is True
+
+
+def test_the_finding_is_downgraded_not_deleted_when_the_body_is_not_markup():
+    """The reflection is a REAL observation -- the value came back unencoded. What changes is the
+    CLAIM. Deleting it would lose a true fact; calling it XSS asserts a false one."""
+    f = _xt.reflection_finding("http://h/api?p=1", "p", "html", evidence="<mark>", renderable=False)
+    assert f["severity"] == "informational" and f["confidence"] == "lead"
+    assert "not parsed as HTML" in f["title"]
+    assert "NOT as XSS" in f["description"]
+
+
+def test_a_genuine_html_reflection_is_still_a_confirmed_high():
+    f = _xt.reflection_finding("http://h/p?p=1", "p", "html", evidence="<mark>")
+    assert f["severity"] == "high" and f["confidence"] == "confirmed"
+    assert f["title"].startswith("Reflected XSS")

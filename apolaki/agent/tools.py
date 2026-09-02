@@ -5087,7 +5087,11 @@ class ToolRegistry:
             return []
         try:
             from playwright.async_api import async_playwright
-        except Exception:
+        except Exception as _apolaki_no_pw:
+            # RECORDS before returning the same empty value, so this is not a bare literal-return
+            # discard: "no browser" and "a browser that found no routes" must stay distinguishable
+            # in the ledger, which is the whole point of the silent-failure census.
+            self._swallow(_apolaki_no_pw, 'tools:_spa_hash_routes:no_playwright', url)
             return []
         base, out = url.split("#")[0], []
         async with async_playwright() as pw:
@@ -5164,7 +5168,13 @@ class ToolRegistry:
         # A crawler is where new surface belongs, and katana cannot produce these itself: a fragment
         # is never sent to the server so it normalises them away, and an SPA renders its
         # `routerLink`s into anchors only after it boots. One render answers both.
-        urls += await self._spa_hash_routes(url)
+        try:
+            urls += await self._spa_hash_routes(url)
+        except Exception as _apolaki_spa_routes:
+            # RECORDED, not silent. This AUGMENTS a crawl: an unreachable host or a browser that
+            # will not start must not fail a crawl that otherwise succeeded, but it must not vanish
+            # either -- "0 routes" and "the harvest never ran" have to stay distinguishable.
+            self._swallow(_apolaki_spa_routes, 'tools:_run_katana:spa_routes', url)
         urls = [u for u in dict.fromkeys(urls) if self.scope.validate(u)[0]]
         self._add_urls(urls)
         try:                                    # crawled URLs are intel: routes + external urls
@@ -5534,8 +5544,16 @@ class ToolRegistry:
                     idx = xt.breakout_index(rb.text, ctx)
                     if idx != -1:
                         ev_snip = xt._evidence_snippet(rb.text, idx, xt.BREAKOUTS[ctx])
+                        # Q-160. The context classifier reads the bytes AROUND the reflection and
+                        # assumes the body is HTML, so a canary echoed into a JSON error was graded
+                        # `html / confirmed / high`. Ask the response what it actually is.
+                        _hdrs = getattr(rb, "headers", {}) or {}
+                        _renderable = xt.markup_executable(
+                            _hdrs.get("content-type", ""),
+                            "nosniff" in str(_hdrs.get("x-content-type-options", "")).lower())
                         reflected.append((p, self._attach_poc(
-                            xt.reflection_finding(url, p, ctx, evidence=ev_snip), bu, rb)))
+                            xt.reflection_finding(url, p, ctx, evidence=ev_snip,
+                                                  renderable=_renderable), bu, rb)))
                         break
 
         # 1b) CUSTOM REQUEST HEADERS. The loop above rewrites the query string and nothing else, so a

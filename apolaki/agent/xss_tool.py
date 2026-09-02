@@ -181,13 +181,48 @@ def _evidence_snippet(body: str, idx: int, breakout: str) -> str:
     return " ".join(seg.split())[:200]
 
 
+#: Types a browser will parse as MARKUP. Anything else cannot run an injected element, no matter
+#: how unescaped the reflection is.
+_HTML_TYPES = ("text/html", "application/xhtml")
+
+
+def markup_executable(content_type: str = "", nosniff: bool = False) -> bool:
+    """Can a reflected payload in THIS response run as markup?
+
+    Q-160. `contexts_of` classifies a reflection by looking at the bytes around it and assumes the
+    body is HTML -- so a canary echoed into a JSON error body is classified "html", and the finding
+    said "Reflected XSS (html) ... confidence=confirmed, severity=high".
+
+    MEASURED on juice-shop `/api/Challenges/?sort=`: the value reflects unescaped, angle brackets
+    intact, into `{"message":"Sorting not allowed...","errors":["<canary>"]}` -- served as HTTP 400
+    `application/json` with `X-Content-Type-Options: nosniff`. Navigating a real browser there with
+    three separate executing payloads fired NO dialog, because the browser never parses it as HTML.
+
+    Every API that echoes a bad parameter into a JSON error was therefore a HIGH.
+
+    Declared HTML wins outright. No content-type at all is sniffable, so it stays executable. A
+    non-HTML type with `nosniff` cannot execute. A non-HTML type WITHOUT `nosniff` is left
+    executable on purpose -- sniffing behaviour varies by browser and by type, and refusing those
+    would trade a false positive for a false negative on the commoner case.
+    """
+    ct = str(content_type or "").split(";")[0].strip().lower()
+    if not ct:
+        return True                       # nothing declared -> the browser may sniff it
+    if any(ct.startswith(h) for h in _HTML_TYPES):
+        return True
+    return not nosniff
+
+
 def reflection_finding(url: str, param: str, context: str, where: str = "query",
-                       evidence: str = "") -> dict:
+                       evidence: str = "", renderable: bool = True) -> dict:
     # A surviving breakout that injects a new element is proof of exploitable
     # markup — but grade it CONFIRMED only WITH real in-context evidence. No
     # evidence => candidate, never confirmed. script / comment / unquoted-attr
     # always stay candidate for the browser-execution pass (or a human).
-    proven = context in EXECUTABLE_ON_REFLECTION and bool(evidence)
+    # Q-160. A response the browser will not parse as markup cannot execute an injected element,
+    # so the reflection is REAL and the XSS claim is not. Downgraded rather than dropped: the
+    # unescaped echo is a true observation and worth reporting as one.
+    proven = context in EXECUTABLE_ON_REFLECTION and bool(evidence) and renderable
     label = "confirmed" if proven else "candidate"
     finding = {
         "title": f"Reflected XSS ({context}) in '{param}'", "param": param,  # Q-046
@@ -203,6 +238,18 @@ def reflection_finding(url: str, param: str, context: str, where: str = "query",
         "evidence": evidence,
         "cwe": "CWE-79", "family": "xss", "tags": ["xss"], "confidence": label,
     }
+    if not renderable:
+        finding["severity"] = "informational"
+        finding["confidence"] = "lead"
+        finding["title"] = f"Unescaped reflection in '{param}' (response is not parsed as HTML)"
+        finding["description"] = (
+            f"The {where} parameter '{param}' reflects with structural characters unescaped, but the "
+            "response is not served as a markup type and cannot be sniffed into one, so a browser "
+            "never parses it as HTML and an injected element cannot execute. Reported as an "
+            "encoding observation, NOT as XSS. It becomes exploitable only if this same value is "
+            "later rendered into an HTML response, which is a separate finding about that sink.")
+        finding["impact"] = ("None on its own. Worth fixing because the value is stored/echoed "
+                             "unencoded and a future HTML sink would make it executable.")
     if proven:
         finding["negative_controls"] = [{
             "kind": "harmless-reflection-canary",
