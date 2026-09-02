@@ -161,3 +161,60 @@ def test_structural_oracle_needs_a_differential_not_just_an_error():
     assert not confirmed, "valid subquery errored too -- no differential"
     confirmed, hits = sqli.structural_confirmed("clean", "clean", err)
     assert confirmed and hits, "control: the real differential must still confirm"
+
+
+# =================================================================================================
+# THE SHOPIFY FALSE POSITIVES. Mission 9e8653b8 raised two CRITICALs and one HIGH, all "confirmed",
+# all against partners.shopify.com -- a live bug-bounty target. A false CRITICAL there is a false
+# accusation that costs Signal, and Signal costs invitations. Every case below is the exact
+# observation the engine reported, so a regression is caught by the input that caused it.
+# =================================================================================================
+
+class _R:
+    def __init__(self, status): self.status_code = status
+
+
+def test_a_rate_limited_baseline_is_not_a_quote_break_recovery():
+    """REPORTED HIGH: "429 (benign) -> 502 (single quote) -> 429 (doubled quote)", described as
+    "the quote breaks the SQL statement and escaping it restores it".
+
+    Nothing was restored. 429 is the edge refusing the request before any query runs, so the
+    baseline never worked and the "recovery" is the same refusal a second time. The predicate
+    asked `< 500`, which 429 satisfies twice, while its own docstring said "a benign value WORKS"
+    and "recovers to a NON-ERROR"."""
+    assert sqli.quote_break_recovers(429, 502, 429) is False
+
+
+def test_rate_limiting_anywhere_in_the_triple_voids_the_observation():
+    for triple in ((429, 500, 200), (200, 500, 429), (200, 503, 200), (503, 500, 200)):
+        assert sqli.quote_break_recovers(*triple) is False, triple
+
+
+def test_a_genuine_quote_break_recovery_still_confirms():
+    """The positive control. A fix that silences the false HIGH by silencing the family is not a
+    fix, it is a deletion."""
+    assert sqli.quote_break_recovers(200, 500, 200) is True
+
+
+def test_a_delta_far_short_of_the_injected_sleep_is_not_that_sleep():
+    """REPORTED CRITICAL: control 2.2s, probe 6.0s, pg_sleep(5). The delta is 3.8s. pg_sleep(5)
+    adds very close to five seconds -- a delta a quarter short of it is the network, and the old
+    0.6 margin accepted anything above 3.0s."""
+    assert sqli.analyze_time(2.2, 6.0, 5) is False
+
+
+def test_the_control_must_be_faster_than_the_delay_being_attributed():
+    """`analyze_time` promised "and the control itself was fast" in its docstring and tested no
+    such thing. If the control already costs more than the delta, the delta is not a sleep."""
+    assert sqli.analyze_time(4.0, 7.5, 5) is False
+    assert sqli.analyze_time(0.2, 5.3, 5) is True
+
+
+def test_a_timing_pair_with_mismatched_statuses_is_not_comparable():
+    """The call site discarded both responses and compared only elapsed times. A 429 is refused
+    at the edge and returns FAST, so pairing it with a served 200 measures the rate limiter."""
+    assert sqli.timing_pair_is_comparable(_R(429), _R(200)) is False
+    assert sqli.timing_pair_is_comparable(_R(200), _R(429)) is False
+    assert sqli.timing_pair_is_comparable(_R(200), _R(302)) is False
+    assert sqli.timing_pair_is_comparable(None, _R(200)) is False
+    assert sqli.timing_pair_is_comparable(_R(200), _R(200)) is True

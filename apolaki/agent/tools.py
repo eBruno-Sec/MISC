@@ -9057,8 +9057,26 @@ class ToolRegistry:
                     continue
                 # 3) time-based blind (only when quieter oracles found nothing)
                 for item in sqli.time_payloads(orig, seconds):
-                    _, ctl = await get(c, xt.set_param(url, p, item["control"]))
-                    _, slp = await get(c, xt.set_param(url, p, item["payload"]))
+                    _rc, ctl = await get(c, xt.set_param(url, p, item["control"]))
+                    _rs, slp = await get(c, xt.set_param(url, p, item["payload"]))
+                    # The responses were being DISCARDED and only the two elapsed times compared,
+                    # so a fast 429 control against a slower 200 probe was a confirmed CRITICAL.
+                    # A timing differential is only about the database if both requests actually
+                    # reached it, which means real application responses with the SAME status.
+                    if not sqli.timing_pair_is_comparable(_rc, _rs):
+                        continue
+                    # AND IT MUST REPRODUCE. This is the control that does not depend on choosing
+                    # a threshold: network jitter, a cold cache and a queued worker each produce a
+                    # multi-second outlier once, and essentially never twice on demand, while a
+                    # real sleep produces it every time. Two of three CRITICALs raised against
+                    # partners.shopify.com came from a single unrepeated observation.
+                    if sqli.analyze_time(ctl, slp, seconds):
+                        _rc2, ctl2 = await get(c, xt.set_param(url, p, item["control"]))
+                        _rs2, slp2 = await get(c, xt.set_param(url, p, item["payload"]))
+                        if not (sqli.timing_pair_is_comparable(_rc2, _rs2)
+                                and sqli.analyze_time(ctl2, slp2, seconds)):
+                            continue
+                        ctl, slp = max(ctl, ctl2), min(slp, slp2)
                     if sqli.analyze_time(ctl, slp, seconds):
                         _req = xt.set_param(url, p, item["payload"])
                         findings.append(self._attach_poc(

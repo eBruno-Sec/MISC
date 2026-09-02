@@ -57,13 +57,32 @@ def error_signatures(baseline_body: str, probe_body: str) -> list:
 
 
 # ── quote-break / recovery (status differential — no DBMS text needed) ──
+#: A request the application never actually served. 429 means the edge rejected it before any
+#: query could run; 503 is the same story from the other side. Neither is evidence about SQL.
+_INFRA_STATUSES = frozenset({429, 503})
+
+
+def _app_response(status: int) -> bool:
+    """A response the APPLICATION produced, as opposed to one its edge produced for it."""
+    return 200 <= int(status or 0) < 400
+
+
 def quote_break_recovers(base_status: int, single_status: int, double_status: int) -> bool:
     """Classic quote-injection signature that needs NO leaked SQL text: a benign
     value works, a single quote breaks the query into a SERVER ERROR (5xx) the
     baseline did not have, and DOUBLING the quote (escaping it) recovers to a
     non-error. The break+recover pair is what rules out a generic 500 — the
-    parameter is concatenated straight into SQL."""
-    return base_status < 500 and single_status >= 500 and 200 <= double_status < 500
+    parameter is concatenated straight into SQL.
+
+    THIS REPORTED A CONFIRMED HIGH AGAINST partners.shopify.com ON `429 -> 502 -> 429`.
+    The docstring said "a benign value WORKS" and "recovers to a NON-ERROR"; the code said
+    `< 500`, and 429 satisfies that twice. A rate-limited baseline plus one gateway blip was
+    therefore a confirmed SQL injection on a live bug-bounty target. "Not a 5xx" is not the
+    same claim as "the application answered", and the difference is a false accusation.
+    """
+    if any(int(s or 0) in _INFRA_STATUSES for s in (base_status, single_status, double_status)):
+        return False                     # nothing here reached a database; do not guess
+    return _app_response(base_status) and int(single_status or 0) >= 500 and _app_response(double_status)
 
 
 def quote_recovery_finding(url: str, param: str, base_status: int,
@@ -339,11 +358,30 @@ def time_payloads(value: str, seconds: int) -> list:
     ]
 
 
-def analyze_time(control_elapsed: float, sleep_elapsed: float, seconds: int, margin: float = 0.6) -> bool:
+def timing_pair_is_comparable(control_resp, sleep_resp) -> bool:
+    """Both requests reached the APPLICATION, and reached the same place in it.
+
+    A timing differential says something about a database only if both responses came from the
+    same handler. A rate-limited 429 is refused at the edge and returns fast; comparing it with a
+    200 measures the edge, not a query. Different statuses mean different code paths, so the
+    elapsed times are not comparable even when both are application responses.
+    """
+    if control_resp is None or sleep_resp is None:
+        return False
+    cs, ss = int(getattr(control_resp, "status_code", 0) or 0), int(getattr(sleep_resp, "status_code", 0) or 0)
+    return cs == ss and _app_response(cs) and cs not in _INFRA_STATUSES
+
+
+def analyze_time(control_elapsed: float, sleep_elapsed: float, seconds: int, margin: float = 0.8) -> bool:
     """Confirmed when the sleep request is slower than its control by ~the injected
     delay (and the control itself was fast) — jitter cannot fake this."""
     need = seconds * margin
-    return sleep_elapsed - control_elapsed >= need and sleep_elapsed >= need
+    delta = sleep_elapsed - control_elapsed
+    # "and the control itself was fast" was in this docstring and in no line of the code. A
+    # 2.2s control against a 6.0s probe was read as a 5s injected delay and reported CRITICAL
+    # against partners.shopify.com; the delta was 3.8s, which is not what pg_sleep(5) does.
+    # A sleep adds very close to the full delay, so a delta far short of it is jitter.
+    return delta >= need and sleep_elapsed >= need and control_elapsed < delta
 
 
 # ── finding builders ─────────────────────────────────────────────
