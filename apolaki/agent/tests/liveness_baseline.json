@@ -1,5 +1,6 @@
 {
   "live": [
+    "ajax_header_manipulation",
     "client_side_authz",
     "client_supplied_identity_param",
     "csp_allows_untrusted_script",

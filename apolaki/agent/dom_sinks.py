@@ -603,7 +603,8 @@ DOM_SINK_HOOKS_JS = r"""
 (() => {
   if (window.__apolaki_sinks) return;
   const B = { sink_hits: [], json_keys: [], xpath_exprs: [], xpath_error: false,
-              storage_writes: [], doc_domain_write: "", ws_urls: [], ws_opened: false };
+              storage_writes: [], doc_domain_write: "", ws_urls: [], ws_opened: false,
+              ajax_headers: [] };
   window.__apolaki_sinks = B;
 
   // RESTORED. Deleting the web-message hooks took `cap` out with them, because it sat between
@@ -645,6 +646,28 @@ DOM_SINK_HOOKS_JS = r"""
       set: function (v) { try { B.doc_domain_write = String(v).slice(0, 200); } catch (e) {}
                           return d.set.call(this, v); } })); } catch (e) {}
 
+  // Ajax request headers. `classify` has read `ajax_headers` since the module was written and
+  // NOTHING EVER PRODUCED IT, so the family could not fire -- reachable code, unreachable verdict.
+  // Only headers the PAGE sets are recorded: the browser puts the full probe URL, canary included,
+  // in `Referer` on every sub-resource request, so an unfiltered "canary in a header" test reports
+  // this family on every page that loads one image. `classify` drops BROWSER_HEADERS for the same
+  // reason; recording only what the page set is the other half of that guard.
+  try { const XS = XMLHttpRequest.prototype.setRequestHeader;
+    XMLHttpRequest.prototype.setRequestHeader = function (n, v) {
+      try { cap(B.ajax_headers, [String(n), String(v)]); } catch (e) {}
+      return XS.apply(this, arguments); }; } catch (e) {}
+  try { const F = window.fetch;
+    window.fetch = function (input, init) {
+      try {
+        const h = (init && init.headers) || (input && input.headers) || null;
+        if (h) {
+          if (typeof h.forEach === "function") { h.forEach((v, k) => cap(B.ajax_headers, [String(k), String(v)])); }
+          else if (Array.isArray(h)) { for (const kv of h) cap(B.ajax_headers, [String(kv[0]), String(kv[1])]); }
+          else { for (const k of Object.keys(h)) cap(B.ajax_headers, [String(k), String(h[k])]); }
+        }
+      } catch (e) {}
+      return F.apply(this, arguments); }; } catch (e) {}
+
   // WebSocket construction (belt-and-braces: the driver's page.on("websocket") is the primary)
   try { const W = window.WebSocket;
     const P = function (u, p) { try { cap(B.ws_urls, String(u).slice(0, 300)); } catch (e) {}
@@ -682,7 +705,7 @@ DOM_SINK_HOOKS_JS = r"""
 #: Takes the canary, like `dom_trace.DOM_SCAN_JS`, and returns keys that merge straight into `sig`.
 DOM_SINK_SCAN_JS = r"""(c) => {
   const B = window.__apolaki_sinks || {};
-  const o = { sink_hits: B.sink_hits || [], json_keys: B.json_keys || [],
+  const o = { ajax_headers: B.ajax_headers || [], sink_hits: B.sink_hits || [], json_keys: B.json_keys || [],
               xpath_exprs: B.xpath_exprs || [], xpath_error: !!B.xpath_error,
               storage_writes: B.storage_writes || [], doc_domain_write: B.doc_domain_write || "",
               ws_url: "", ws_opened: !!B.ws_opened, form_action: "", form_password: false,

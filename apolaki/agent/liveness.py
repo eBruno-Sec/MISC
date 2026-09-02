@@ -102,6 +102,12 @@ CHECKS = (
     {"technique": "websocket_url_poisoning", "lab": "domsource", "kind": "tool",
      "tool": "_run_dom_trace", "input": {"url": "http://domsource:8080/wsock"},
      "family": "websocket_url_poisoning"},
+    # Q-147. `classify` has read `ajax_headers` since this module was written and NOTHING EVER
+    # PRODUCED IT -- reachable code, unreachable verdict. The hooks now record what the PAGE sets,
+    # via both XHR and fetch, which is also the guard against the Referer trap.
+    {"technique": "ajax_header_manipulation", "lab": "domsource", "kind": "tool",
+     "tool": "_run_dom_trace", "input": {"url": "http://domsource:8080/ajaxhdr"},
+     "family": "ajax_header_manipulation"},
     # Q-145. `security_misconfig` is shared by every header rule, so this case is pinned by TITLE.
     # Matching the family alone would pass with csp_audit dead -- the missing-frame-ancestors
     # finding from the plain header rules would satisfy it, and the case would prove nothing.

@@ -121,10 +121,27 @@ _WSOCK = _HEAD + """<h1>live</h1><div id="s">idle</div>
                  document.getElementById("s").textContent = "connecting"; } catch (e) {} }
 </script>""" + _TAIL
 
+# Q-147 LIVENESS. The page copies the fragment into a request header it sets itself. Only headers
+# THE PAGE sets count: the browser puts the full URL, canary included, into `Referer` on every
+# sub-resource request, so an unfiltered "canary in a header" test would report this family on
+# every page that loads a single image.
+_AJAXHDR = _HEAD + """<h1>tracker</h1><div id="t">idle</div>
+<script>
+  var h = location.hash.slice(1);
+  if (h) {
+    var x = new XMLHttpRequest();
+    x.open("GET", "/inert");
+    x.setRequestHeader("X-Track-Id", h);
+    x.send();
+    document.getElementById("t").textContent = "sent";
+  }
+</script>""" + _TAIL
+
 _ROUTES = {"/hash": _HASH, "/hashparam": _HASHPARAM, "/safehash": _SAFEHASH,
            "/noquery": _NOQUERY, "/inert": _INERT, "/account": _ACCOUNT,
            "/leak": _LEAK,
-           "/wsock": _WSOCK}
+           "/wsock": _WSOCK,
+           "/ajaxhdr": _AJAXHDR}
 
 
 class Handler(http.server.BaseHTTPRequestHandler):

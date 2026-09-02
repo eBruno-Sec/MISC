@@ -121,6 +121,17 @@ TECHNIQUES: dict[str, dict] = {t["id"]: t for t in [
        wstg="WSTG-CLNT-10", mitre="T1190",
        validated_on=["domsource"]),
 
+    _t(id="ajax_header_manipulation", vuln_class="client_side", cwe="CWE-113",
+       owasp="A03:2021", permission=ACTIVE, transferable=True,
+       summary="Client-side code puts attacker-controlled data into an outbound request header.",
+       detect="Runtime hooks on XMLHttpRequest.setRequestHeader and fetch() init headers.",
+       exploit="Introduce or control a header the application never intended to send.",
+       oracle="The canary is in the NAME or VALUE of a header THE PAGE set. Browser-set headers are "
+              "excluded: the browser puts the full probe URL, canary included, in Referer on every "
+              "sub-resource request, so an unfiltered test fires on any page that loads one image.",
+       wstg="WSTG-CLNT-10", mitre="T1190",
+       validated_on=["domsource"]),
+
     _t(id="csp_allows_untrusted_script", vuln_class="security_misconfiguration", cwe="CWE-693",
        owasp="A05:2021", permission=PASSIVE, transferable=True,
        summary="The Content-Security-Policy permits untrusted script execution.",

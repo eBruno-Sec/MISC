@@ -626,3 +626,18 @@ def test_the_declaration_guard_is_not_vacuous():
     just asserting that a string contains some words."""
     js = ds.DOM_SINK_HOOKS_JS.replace("const cap = ", "const notcap = ", 1)
     assert js.find("const cap ") == -1
+
+
+def test_the_browser_set_Referer_is_not_an_ajax_header_finding():
+    """THE REFERER TRAP, asserted rather than assumed. The browser puts the FULL probe URL --
+    canary included -- into `Referer` on every sub-resource request, so an unfiltered "canary in a
+    header" test reports this family on every page that loads a single image. The producer records
+    only headers the PAGE set, and the classifier drops browser-set names; this pins the second
+    half so neither can quietly go away."""
+    sig = {"ajax_headers": [["Referer", "http://wpreach/p?lang=" + C], ["Origin", "http://" + C]]}
+    assert _fams(sig) == set()
+
+
+def test_a_page_set_header_carrying_the_canary_still_fires():
+    """The positive control for the guard above."""
+    assert "ajax_header_manipulation" in _fams({"ajax_headers": [["X-Track-Id", C]]})
