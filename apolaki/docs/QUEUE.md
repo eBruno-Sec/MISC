@@ -5180,6 +5180,52 @@ O(surface discovered); and a `depth(2) × frontier(30)` = 60-visit cap standing 
    it, and forms only exist for fetched pages. The 2740 cases are plain `.html`. Coverage is
    O(pages fetched) = 12, and everything downstream is arithmetic on that 12.
 
+### Q-151 · 101 of 110 tools have never been proven to work · **READY** · **CRITICAL**
+
+*Filed 2026-09-02 in answer to "are you sure all the tools will work now?" The honest answer was
+no, and this is the measurement behind it.*
+
+```
+tools in TOOL_PERMISSIONS                     110
+tools a liveness case actually drives           9
+never proven end-to-end                       101
+```
+
+A green suite does not answer this and cannot. Cycle 18 proved that on the record: deleting
+`const cap` made EVERY dom_sinks recorder a permanent no-op, and 4000+ tests stayed green because
+they hand `classify` a signal dict and never execute the JavaScript. The dead-code gate stayed
+green too, because the call site still existed. One liveness run caught it.
+
+**The zero histogram, measured across 90,228 log rows and every stored mission.** 75 tools have
+ever produced a `tool_result`; 40 have ever returned a non-zero count. Twenty-one have run 20+
+times and NEVER once returned a non-zero count:
+
+```
+run_ssi 1333   run_form_nosqli 1098   run_css_injection 960   run_sqli_structural 960
+run_waf_bypass 960   run_github_recon 451   run_nosqli 381   run_client_checks 367
+run_deserialization 335   run_form_cmdi 250   run_upload_test 248   run_dalfox 177
+run_nuclei 159   check_takeover 153   run_path_sqli 108   run_session_token 94
+run_cache_poison 59   run_sqlmap 58   run_llm_probe 46   run_cache_deception 24   run_ssrf 23
+```
+
+**THIS IS A CANDIDATE LIST, NOT A DEFECT LIST, and the distinction is the whole ticket.** A zero
+is CORRECT when the target does not have the bug -- `run_ssi` returning 0 against Shopify today is
+the right answer, not a failure. Nothing in the histogram separates "engine is broken" from
+"engine is right and the target is clean". Only a lab case with a KNOWN answer does.
+
+Two of these were already CONFIRMED broken once (`run_dalfox` 0/171, `run_nuclei` 0/155 -- `_cmd`
+dropped the exit code, fixed by Q-092), which is precisely why a long zero streak deserves a lab
+and not a shrug.
+
+**FIRST STEP IS A LAB CASE, NOT A FIX.** Per tool, in descending run count: a lab endpoint that
+HAS the bug, a liveness entry, and a negative control that must stay silent. Then the zero is
+either explained or the engine is dead, and there is no third answer. Cycle 18's five additions
+(`/leak`, `/wsock`, `/ajaxhdr`, `/calc`, `/api/me`, root CSP header) are the pattern to copy; each
+took roughly twenty lines of lab plus one CHECKS entry.
+
+**Do NOT "fix" an engine that has no lab case.** Without one there is no way to tell a fix from a
+regression, and this project has shipped that mistake before.
+
 ## BACKLOG VERIFICATION — 2026-09-02 — checked against the CODE, not against these headers
 
 The tickets in this section predate the `**CLOSED**` convention and carry no status marker, so
