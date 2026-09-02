@@ -425,6 +425,17 @@ def test_obstruction_clearing_waits_for_the_condition_and_gives_up_on_a_deadline
     assert rf.clear_obstruction(absent, "#nope") == "control-absent"
 
 
+def test_every_submission_is_shaped_for_the_one_traffic_ledger():
+    """NO ISLAND: this engine makes the application send real requests at the target, and those
+    belong in the same capture as every other engine's."""
+    row = rf.exchange_row(PROBE_QUOTE, "sqli probe on #email")
+    assert row["engine"] == "rendered-forms" and row["method"] == "POST"
+    assert (row["status"], row["url"], row["observed"]) == (500, LOGIN_URL, True)
+    assert row["len"] > 0 and row["note"] == "sqli probe on #email"
+    ghost = rf.exchange_row({"observed": False, "reason": "button disabled"}, "baseline")
+    assert ghost["observed"] is False and ghost["status"] == 0
+
+
 def test_run_without_a_browser_says_so_and_claims_nothing(monkeypatch):
     monkeypatch.setattr(rf, "available", lambda: (False, "playwright is not installed in this image"))
     out = rf.run("http://juice-shop:3000", ["#/login"])
@@ -479,3 +490,9 @@ def test_live_confirms_an_injection_through_a_control_juice_shop_actually_submit
         ok, missing = proof_schema.validate_confirmed(f)
         assert ok, (f["title"], missing)
     assert any(f["family"] in ("sqli", "auth_bypass") for f in confirmed)
+
+    # every submission the engine caused is offered to the one traffic ledger, not kept privately
+    rows = out["exchanges"]
+    assert len(rows) == out["counts"]["submissions"] >= len(form["probes"]) + 1
+    assert all(r["engine"] == "rendered-forms" for r in rows)
+    assert {r["url"] for r in rows if r["observed"]} == {wire["url"]}

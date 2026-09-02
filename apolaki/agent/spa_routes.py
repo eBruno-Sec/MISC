@@ -253,22 +253,55 @@ def _read_only_gate(route):
         pass
 
 
+# The readiness condition: the number of rendered controls has stopped changing. CONVERGENCE, not a
+# duration -- it resolves as soon as the app stops adding controls and keeps waiting while it is
+# still rendering, which a fixed settle can do in neither direction. Polled on animation frames.
+_STABLE_JS = """(sel) => {
+  const n = document.querySelectorAll(sel).length;
+  const w = window.__apolaki_ctl || {c: -1, s: 0};
+  if (n > 0 && n === w.c) { w.s++; } else { w.s = 0; }
+  w.c = n; window.__apolaki_ctl = w;
+  return w.s >= 3 ? n : false;
+}"""
+
+
 def _settle(page, timeout_ms: int) -> str:
-    """Wait for the CONDITION that the app has booted far enough to have controls. Bounded; never
-    raises. Returns how it was synchronised, so the evidence records the mechanism rather than
-    hiding a magic number."""
+    """Wait for the CONDITIONS that make the page drivable. Bounded; never raises. Returns how it was
+    synchronised, so the evidence records the mechanism instead of hiding a magic number.
+
+    `networkidle` IS NOT USED, and that is a measured decision rather than a preference. MEASURED on
+    juice-shop, same page, same browser:
+
+        no route handler installed        1.40s   networkidle+controls
+        page.route("**/*", ...) installed 15.28s  networkidle-TIMEOUT+controls   (the full bound)
+        ... and again                     25.20s  networkidle-timeout+controls
+
+    Interception (which this module requires to stay read-only) is enough to keep the connection
+    count from ever reaching idle, so `networkidle` is a condition that never becomes true here: it
+    degrades silently into "wait the entire timeout". Waiting on `load` plus control CONVERGENCE
+    instead costs 0.39-0.45s gated and finds the same route.
+    """
     reason = "load"
     try:
-        page.wait_for_load_state("networkidle", timeout=timeout_ms)
-        reason = "networkidle"
+        page.wait_for_load_state("load", timeout=timeout_ms)
     except Exception:
-        reason = "networkidle-timeout"
+        reason = "load-timeout"
+    try:
+        page.evaluate("() => { window.__apolaki_ctl = null; }")     # fresh count per navigation
+    except Exception:
+        pass
     try:
         page.wait_for_function("(sel) => document.querySelectorAll(sel).length > 0",
                                arg=CONTROL_SELECTOR, timeout=timeout_ms)
-        return reason + "+controls"
     except Exception:
         return reason + "+no-controls"
+    try:
+        page.wait_for_function(_STABLE_JS, arg=CONTROL_SELECTOR, polling="raf", timeout=timeout_ms)
+        return reason + "+controls-stable"
+    except Exception:
+        # Controls exist; they were still churning when the bound expired. Drivable, and SAID SO --
+        # a run synchronised on a weaker condition must not look identical to one that converged.
+        return reason + "+controls-unstable"
 
 
 def _goto(page, url: str, timeout_ms: int) -> str:
@@ -299,7 +332,8 @@ def _drive_page(page, page_url: str, *, marker: str, max_controls: int, timeout_
         errors.append("control-read %s: %s" % (type(exc).__name__, str(exc)[:140]))
         return []
     found = []
-    for ctl in controls[:max_controls]:
+    batch = controls[:max_controls]
+    for pos, ctl in enumerate(batch):
         idx = int(ctl.get("index", -1))
         if idx < 0:
             continue
@@ -329,9 +363,12 @@ def _drive_page(page, page_url: str, *, marker: str, max_controls: int, timeout_
         attempts.append(attempt)
         if rec:
             found.append(rec)
-            # Back to the page under test: the next control must be driven from the same state, not
-            # from wherever the last submission landed.
-            _goto(page, page_url, timeout_ms)
+            # Back to the page under test: the NEXT control must be driven from the same state, not
+            # from wherever the last submission landed. Skipped after the last one -- MEASURED on
+            # juice-shop, whose networkidle settle is ~7s, that restore was 40% of a 17.5s discovery
+            # and nothing ever read the page it restored.
+            if pos < len(batch) - 1:
+                _goto(page, page_url, timeout_ms)
     return found
 
 

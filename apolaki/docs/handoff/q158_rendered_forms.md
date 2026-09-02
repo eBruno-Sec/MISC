@@ -211,7 +211,136 @@ returns nothing.
 * The navbar search box is deliberately NOT probed here. It is Q-163's lane (a param-bearing SPA
   route reached by typing), and two lanes driving the same control would collide.
 
-## 7. Status
+## 7. WIRING PATCH for the Coordinator (I do not hold `tools.py` / `agent.py`)
+
+Four edits. Verified against the current files by reading them; NOT applied by me.
+
+### 7a. `agent/tools.py` -- tool spec, in the `TOOLS` list next to `run_xss` (~line 1043)
+
+```python
+    {"name": "run_rendered_forms",
+     "description": ("ACTIVE: Injection through the forms a SINGLE-PAGE APP actually RENDERS (Q-158). "
+                     "run_form_xss / run_form_nosqli / run_form_cmdi / run_upload_test all scrape <form> "
+                     "out of the SERVED response, and an SPA serves a shell -- MEASURED on juice-shop: 0 "
+                     "forms served, 1 form with 6 inputs after render. This engine drives the RENDERED "
+                     "controls in a real browser, lets the application build and send its OWN request, and "
+                     "learns the endpoint, verb, encoding and parameter names from where its markers land "
+                     "on the wire -- so it needs no action=, no method= and no name=. Every probe carries a "
+                     "benign baseline and an escaped-quote control. Pass base_url plus the SPA routes to "
+                     "drive (e.g. ['#/login', '#/contact'])."),
+     "input_schema": {"type": "object", "properties": {
+         "base_url": {"type": "string"},
+         "routes": {"type": "array", "items": {"type": "string"},
+                    "description": "SPA routes to render, e.g. ['#/login']. Default ['/']"},
+         "persona": {"type": "string", "description": "identity whose session state to seed"},
+         "max_forms": {"type": "integer", "default": 3},
+         "max_fields": {"type": "integer", "default": 3}},
+         "required": ["base_url"]}},
+```
+
+### 7b. `agent/tools.py` -- permission, next to `"run_form_xss"` (line 516)
+
+```python
+    "run_rendered_forms": PermissionLevel.ACTIVE,
+```
+
+ACTIVE is the honest tier and the docstring states it first (Q-058). The engine SUBMITS forms, but
+only forms the application already exposes, with a benign baseline and an escaped-quote control --
+the same reasoning `_run_form_xss` records for its own ACTIVE registration.
+
+No `deadline.OVERRIDES` entry: MEASURED cost is 4.3 s for one route / 9 submissions, against a
+600 s default.
+
+### 7c. `agent/tools.py` -- the dispatch method (dispatch is `getattr(self, f"_{tool_name}")`)
+
+```python
+    async def _run_rendered_forms(self, inp: dict) -> ToolResult:
+        """ACTIVE: injection through the forms a SINGLE-PAGE APP actually RENDERS (Q-158).
+
+        `parse_forms` asks what the DOCUMENT declares; on an SPA the answer is "none" and that answer is
+        correct. This asks what the APPLICATION sends when its controls are filled: every rendered control
+        gets its own marker, the app's own JavaScript builds and sends the request, and the endpoint, verb,
+        encoding and parameter names are read back from where the markers landed. No `action`, `method` or
+        `name=` is required, because none is consulted.
+
+        The oracles are the existing ones (`sqli_tool.error_signatures` / `auth_bypass_confirmed`,
+        `xss_tool` reflection); what is new is the CARRIER. Read-only in effect: it submits forms the
+        application already exposes, and every probe carries a benign baseline plus an escaped-quote
+        control, so a verdict is always a differential and never a single observation."""
+        import rendered_forms as _rf
+        base = (inp.get("base_url") or inp.get("url") or "").strip().rstrip("/")
+        if not base:
+            return ToolResult("rendered_forms", "", False, "", [], "need base_url")
+        if not self.scope.validate(base)[0]:
+            return ToolResult("rendered_forms", base, False, "", [], "SCOPE BLOCK")
+        usable, note = _rf.available()
+        if not usable:
+            # NOT a pass. A missing browser is a degraded instrument, not a clean form surface.
+            return ToolResult("rendered_forms", base, False, "", [], "DEGRADED: %s" % note)
+        res = await asyncio.to_thread(
+            _rf.run, base, [r for r in (inp.get("routes") or ["/"]) if r],
+            headers=self.session_headers or {},
+            storage=(getattr(self, "_session_state", {}) or {}).get(inp.get("persona") or ""),
+            timeout_ms=int(inp.get("timeout_ms") or 25000),
+            max_forms=int(inp.get("max_forms") or 3),
+            max_fields=int(inp.get("max_fields") or 3),
+            scope_ok=lambda u: self.scope.validate(u)[0])
+        # NO ISLAND: every submission this engine caused the application to send joins the ONE
+        # engagement ledger (and therefore the HAR export + traffic view), tagged with its provenance.
+        for row in (res.get("exchanges") or []):
+            if row.get("url") and row.get("observed"):
+                self.capture.add(row["method"], row["url"], row["status"], resp_len=row["len"],
+                                 engine="rendered-forms", resp_ct=row.get("resp_ct") or "")
+        findings = [f for f in (res.get("findings") or []) if f.get("confidence") == "confirmed"]
+        summary = {"ran": bool(res.get("ran")), "note": res.get("note") or "",
+                   "counts": res.get("counts") or {},
+                   "forms": [{k: f.get(k) for k in
+                              ("route", "container", "action", "method_attr", "wire", "probes")}
+                             for f in (res.get("forms") or [])],
+                   "errors": (res.get("errors") or [])[:5]}
+        return ToolResult("rendered_forms", base, bool(res.get("ran")), json.dumps(summary), findings)
+```
+
+### 7d. `agent/agent.py` -- auto-store + one call site
+
+Add `"run_rendered_forms"` to `_AUTO_STORE_TOOLS` (line ~98). Its findings are only ever emitted
+with `confidence == "confirmed"` and every one of them passes `proof_schema.validate_confirmed`
+(asserted in `tests/test_rendered_forms.py`), so auto-store cannot promote an unproven row.
+
+Call site: ONCE per base, not per URL. It is browser-backed and route-shaped, so `_htools`
+(per-crawled-URL) is the wrong list. The routes should be OBSERVED ones -- the fragment routes the
+katana harvest already put on the surface (`" (+%d SPA route(s))"`, tools.py ~5207, added via
+`_add_urls`):
+
+```python
+        # Q-158: the form engines are blind on an SPA. Drive the rendered forms of the routes the
+        # crawl actually found, once per base.
+        _spa = [u for u in (self.tools.urls or []) if "#/" in str(u)][:6]
+        if _spa or base:
+            async for ev in self._run_tool("run_rendered_forms",
+                                           {"base_url": base, "routes": _spa or ["/"]}, session_id):
+                if "_content" not in ev:
+                    yield ev
+```
+
+If lane C's Q-163 lands, its discovered routes are the better input and should replace `_spa`
+directly -- the two compose (C finds the routes, A drives the forms on them) and neither needs the
+other to be useful.
+
+**Deliberately NOT proposed:** touching `_run_form_xss` or `parse_forms`. The ticket forbids
+extending the parser, and the two engines answer different questions -- a server-rendered form is
+still `parse_forms`'s job and it does that job correctly.
+
+## 8. Files
+
+* `agent/rendered_forms.py` (new)
+* `agent/tests/test_rendered_forms.py` (new, 34 tests: 33 pure + 1 live acceptance)
+* `docs/handoff/q158_rendered_forms.md` (this file)
+
+Nothing else was written. `tools.py`, `agent.py`, `surface.py`, `xss_tool.py`, `main.py`,
+`liveness.py` and `form_xss.py` are untouched -- `git show --stat` on each commit confirms it.
+
+## 9. Status
 
 - [x] Read `docs/QUEUE.md` Q-158, `agent/bie.py`, `agent/form_xss.py`, `agent/sqli_tool.py`
 - [x] Measurements 2.1-2.3

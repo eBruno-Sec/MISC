@@ -774,7 +774,8 @@ def probe_form(page, base: str, route: str, descriptor: dict, *, tag: str, timeo
     wire = wire_form(baseline, base_plan)
     result = {"route": route, "container": descriptor.get("container"),
               "action": descriptor.get("action"), "method_attr": descriptor.get("method"),
-              "wire": wire, "baseline": _clip(baseline), "probes": [], "findings": []}
+              "wire": wire, "baseline": _clip(baseline), "probes": [], "findings": [],
+              "exchanges": [exchange_row(baseline, "baseline")]}
     if not wire.get("observed") or not wire.get("params"):
         return result
 
@@ -795,7 +796,11 @@ def probe_form(page, base: str, route: str, descriptor: dict, *, tag: str, timeo
                     _open_route(page, base, route, descriptor, timeout_ms=timeout_ms)
                     controls[key] = fill_and_submit(page, descriptor, cplan["values"],
                                                     [cplan["payload"]] + needles, errors=errors)
+                    result["exchanges"].append(
+                        exchange_row(controls[key], "escaped-quote control for %s" % plan["field"]))
             control = controls.get(key)
+        result["exchanges"].append(
+            exchange_row(probe, "%s probe on %s" % (plan["family"], plan["field"])))
         verdict = judge_probe(baseline, probe, plan, control)
         result["probes"].append({"field": plan["field"], "field_label": plan["field_label"],
                                  "param": plan.get("param"), "family": plan["family"],
@@ -806,6 +811,18 @@ def probe_form(page, base: str, route: str, descriptor: dict, *, tag: str, timeo
         if verdict.get("confirmed"):
             result["findings"].append(finding(route, plan, wire, baseline, probe, verdict))
     return result
+
+
+def exchange_row(ex: dict, note: str = "") -> dict:
+    """One submission, in the shape the engagement's ONE traffic ledger stores.
+
+    NO ISLAND: every request this engine causes the application to send is a real request against
+    the target and belongs in the same capture as every other engine's, tagged with its own
+    provenance. An engine whose traffic is invisible to the ledger is a second, private history."""
+    return {"method": str(ex.get("method") or "POST").upper(), "url": ex.get("url") or "",
+            "status": int(ex.get("status") or 0), "len": len(str(ex.get("body") or "")),
+            "resp_ct": ex.get("response_content_type") or "", "engine": "rendered-forms",
+            "note": note, "observed": bool(ex.get("observed"))}
 
 
 def _clip(ex: dict) -> dict:
@@ -824,7 +841,7 @@ def run(base: str, routes=None, *, headers: dict = None, storage: dict = None, t
     import bie
     usable, note = available()
     out = {"base": base, "browser": bool(usable), "ran": False, "note": note, "forms": [],
-           "findings": [], "errors": []}
+           "findings": [], "exchanges": [], "errors": []}
     if not usable:
         return out
     ok = scope_ok or (lambda _u: True)
@@ -859,6 +876,7 @@ def run(base: str, routes=None, *, headers: dict = None, storage: dict = None, t
                                          errors=out["errors"])
                         out["forms"].append(res)
                         out["findings"].extend(res.get("findings") or [])
+                        out["exchanges"].extend(res.get("exchanges") or [])
                 try:
                     ctx.close()
                 except Exception:
@@ -874,5 +892,6 @@ def run(base: str, routes=None, *, headers: dict = None, storage: dict = None, t
     out["counts"] = {"forms": len(out["forms"]),
                      "wire_observed": sum(1 for f in out["forms"] if (f.get("wire") or {}).get("observed")),
                      "probes": sum(len(f.get("probes") or []) for f in out["forms"]),
+                     "submissions": len(out["exchanges"]),
                      "findings": len(out["findings"])}
     return out

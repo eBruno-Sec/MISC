@@ -284,6 +284,134 @@ def test_discovered_route_is_a_page_the_application_really_serves():
     assert hash_now.startswith("#/"), hash_now
 
 
+# ───────────────────────────── GENERALITY: a second, structurally different application
+#
+# Every other lab on apolaki_default renders ZERO typeable controls on its root page -- MEASURED:
+# domsource:8080 and dvga:5013 and bwapp:80 and wpreach:80 have no input at all, and mutillidae:80's
+# only input is a `type=submit` button (correctly not typeable). juice-shop is the sole lab with a
+# search control on its landing page, so a second REAL application cannot supply this proof.
+#
+# So the second application is served here. It is deliberately nothing like juice-shop: no Angular,
+# no router, no framework at all, a route named `/find` and `#/lookup`, and parameters named `term`
+# and `needle` -- four names that appear nowhere in spa_routes.py. If the module carried a
+# juice-shop signature, it would find neither.
+_FIXTURE_HTML = """<!doctype html><html><head><title>fixture</title></head><body>
+<form id="f1" action="/find" method="get"><input id="term" name="term" type="text"></form>
+<input id="needle" type="text">
+<form id="f3" action="/save" method="post"><input id="note" name="note" type="text"></form>
+<form id="f4" action="/login" method="post">
+  <input id="user" name="user" type="text">
+  <input id="pw" name="pw" type="password">
+  <input type="submit" value="go">
+</form>
+<script>
+document.getElementById('needle').addEventListener('keydown', function (e) {
+  if (e.key === 'Enter') { location.hash = '/lookup?needle=' + encodeURIComponent(e.target.value); }
+});
+</script></body></html>"""
+
+
+class _Fixture:
+    """A tiny second application, plus the LOG of what actually reached it. The log is the point:
+    it is how "no POST was sent" is proved rather than asserted."""
+
+    def __init__(self):
+        import http.server
+        import threading
+        self.seen = []
+        log = self.seen
+
+        class H(http.server.BaseHTTPRequestHandler):
+            def _reply(self, body=b"ok"):
+                self.send_response(200)
+                self.send_header("Content-Type", "text/html")
+                self.send_header("Content-Length", str(len(body)))
+                self.end_headers()
+                self.wfile.write(body)
+
+            def do_GET(self):
+                log.append(("GET", self.path))
+                self._reply(_FIXTURE_HTML.encode() if self.path in ("/", "") else b"<html>hit</html>")
+
+            def do_POST(self):
+                log.append(("POST", self.path))
+                self._reply()
+
+            def log_message(self, *a):
+                pass
+
+        self.srv = http.server.ThreadingHTTPServer(("127.0.0.1", 0), H)
+        self.base = "http://127.0.0.1:%d/" % self.srv.server_address[1]
+        self.t = threading.Thread(target=self.srv.serve_forever, daemon=True)
+        self.t.start()
+
+    def close(self):
+        try:
+            self.srv.shutdown()
+            self.srv.server_close()
+        except Exception:
+            pass
+
+
+@pytest.fixture()
+def fixture_app():
+    fx = _Fixture()
+    try:
+        yield fx
+    finally:
+        fx.close()
+
+
+def test_finds_routes_on_an_application_that_is_nothing_like_juice_shop(fixture_app):
+    """Anti-signature proof. Same code, a different framework (none), a different navigation kind
+    (a real GET form AND a hand-rolled hash route), and four names the module has never heard of."""
+    res = SR.discover(fixture_app.base, max_pages=1)
+    assert res["ran"], res["note"]
+    by_path = {r["path"]: r for r in res["routes"]}
+    assert by_path["/find"]["params"] == ["term"]
+    assert by_path["/find"]["parameterized"] is True and by_path["/find"]["hash_route"] is False
+    assert by_path["#/lookup"]["params"] == ["needle"]
+    assert by_path["#/lookup"]["parameterized"] is True and by_path["#/lookup"]["hash_route"] is True
+    assert sorted(res["urls"]) == sorted([fixture_app.base + "find?term=",
+                                          fixture_app.base + "#/lookup?needle="])
+
+
+def test_the_drive_never_sends_a_write_and_the_password_field_is_never_driven(fixture_app):
+    """The read-only guarantee, proved against a server that would have RECORDED the write.
+
+    The fixture posts to /save and /login. After a full drive the server log must contain no POST at
+    all -- and it must contain the GET the drive DID make, so "no POST" means the gate worked and
+    not that the drive never ran."""
+    res = SR.discover(fixture_app.base, max_pages=1)
+    assert res["attempts"], res["note"]
+    methods = [m for m, _ in fixture_app.seen]
+    assert "POST" not in methods, fixture_app.seen
+    assert any(p.startswith("/find?term=") for m, p in fixture_app.seen if m == "GET"), \
+        fixture_app.seen
+    driven = {a["control"]["id"] for a in res["attempts"]}
+    assert "pw" not in driven, driven
+    # and the write-shaped controls WERE driven -- the gate is what stopped them, not a skip
+    assert {"note", "user"} <= driven, driven
+
+
+def test_the_fixture_really_would_have_posted(fixture_app):
+    """POSITIVE CONTROL for the test above. Drive the same control with NO gate installed and the
+    server records the POST. Without this, a fixture that simply never submits would make the
+    read-only claim unfalsifiable."""
+    from playwright.sync_api import sync_playwright
+    with sync_playwright() as p:
+        b = p.chromium.launch(args=["--no-sandbox", "--disable-dev-shm-usage"])
+        try:
+            pg = b.new_context().new_page()
+            pg.goto(fixture_app.base, wait_until="domcontentloaded", timeout=20000)
+            pg.fill("#note", "apolakirt7")
+            pg.press("#note", "Enter")
+            pg.wait_for_function("() => location.pathname === '/save'", timeout=20000)
+        finally:
+            b.close()
+    assert ("POST", "/save") in fixture_app.seen, fixture_app.seen
+
+
 def test_scope_gate_is_honoured_on_every_discovered_url():
     """A discovery path that outruns the scope gate is how a scanner ends up touching a host nobody
     authorised. With the gate closed the run still happens -- and still returns nothing."""
