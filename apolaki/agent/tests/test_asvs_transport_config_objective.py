@@ -72,7 +72,7 @@ def _clean_observation() -> list:
     """A HARDENED origin: every control the engine checks is present. The negative control."""
     return tp.findings_for(
         _TARGET,
-        headers={"content-security-policy": "default-src 'self'; frame-ancestors 'none'",
+        headers={"content-security-policy": "default-src 'self'; frame-ancestors 'none'; form-action 'self'",
                  "strict-transport-security": "max-age=31536000",
                  "x-content-type-options": "nosniff",
                  "referrer-policy": "no-referrer",

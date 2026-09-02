@@ -313,6 +313,16 @@ def analyze_security_headers(headers: dict, *, is_https: bool) -> list:
         issues.append({"id": "header_missing_csp", "severity": "low",
                        "detail": "no Content-Security-Policy, so an injected script has no second line "
                                  "of defence"})
+    else:
+        # Q-145. A PRESENT CSP IS NOT A WORKING CSP. `script-src *` passes the presence check above
+        # and stops nothing, and "is the header there" was the only question Apolaki asked. Mined
+        # from Burp's published issue catalog, which lists seven distinct CSP issues.
+        #
+        # Only reached when a CSP EXISTS, so this can never double-report with
+        # `header_missing_csp` -- one fact, one finding.
+        import csp_audit
+        for _f in csp_audit.analyze_csp(csp, low.get("content-security-policy-report-only", "")):
+            issues.append({"id": _f["check"], "severity": _f["severity"], "detail": _f["detail"]})
     for h, (sev, why) in _HEADER_RULES.items():
         if h == "strict-transport-security" and not is_https:
             continue                       # HSTS is meaningless on a plaintext origin
@@ -367,6 +377,14 @@ _FINDING_META = {
     "cookie_scope_widest": ("CWE-565", "Session cookie at the broadest possible scope", "low"),
     "header_missing_framing_control": ("CWE-1021", "Page can be framed by any origin", "medium"),
     "header_missing_csp": ("CWE-693", "No Content-Security-Policy", "low"),
+    # Q-145: the seven granular CSP checks. CWEs follow Burp's own mapping for these issues.
+    "csp_untrusted_script": ("CWE-79", "CSP allows untrusted script execution", "medium"),
+    "csp_untrusted_style": ("CWE-116", "CSP allows untrusted style execution", "low"),
+    "csp_allows_clickjacking": ("CWE-1021", "CSP does not restrict framing", "low"),
+    "csp_allows_form_hijacking": ("CWE-116", "CSP does not restrict form submission targets", "low"),
+    "csp_allowlisted_script_resources": ("CWE-829", "CSP allowlists a bypassable script host", "low"),
+    "csp_malformed": ("CWE-693", "Content-Security-Policy has malformed syntax", "low"),
+    "csp_not_enforced": ("CWE-693", "Content-Security-Policy is Report-Only (not enforced)", "low"),
     "header_missing_strict_transport_security": ("CWE-319", "HSTS not enabled on an HTTPS origin", "medium"),
     "header_missing_x_content_type_options": ("CWE-693", "MIME sniffing not disabled", "info"),
     "header_missing_referrer_policy": ("CWE-200", "No Referrer-Policy", "info"),

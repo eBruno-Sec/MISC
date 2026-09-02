@@ -202,7 +202,8 @@ def test_a_clean_target_produces_no_findings():
                                                  "TLSv1.2": True, "TLSv1.3": True},
                          cipher="TLS_AES_256_GCM_SHA384", cert=_cert(), hostname="example.com",
                          key_bits=2048, set_cookies=["sid=x; Secure; HttpOnly; SameSite=Lax"],
-                         headers={"Content-Security-Policy": "frame-ancestors 'none'",
+                         headers={"Content-Security-Policy": "default-src 'self'; script-src 'self'; "
+                                                              "frame-ancestors 'none'; form-action 'self'",
                                   "Strict-Transport-Security": "max-age=63072000",
                                   "X-Content-Type-Options": "nosniff",
                                   "Referrer-Policy": "no-referrer",
