@@ -5180,6 +5180,41 @@ O(surface discovered); and a `depth(2) × frontier(30)` = 60-visit cap standing 
    it, and forms only exist for fetched pages. The 2740 cases are plain `.html`. Coverage is
    O(pages fetched) = 12, and everything downstream is arithmetic on that 12.
 
+### Q-155 · NoSQL injection is probed in query params only, never in JSON bodies · **READY** · **HIGH**
+
+*Filed 2026-09-02 from the Q-151 shakedown. NOT a broken engine -- a coverage gap, and the
+distinction matters because "fixing" a working engine is how regressions get introduced.*
+
+`_run_nosqli` appends an operator suffix to a parameter NAME (`id[$ne]=`, `id[$regex]=`) on a
+query string. That is one of the two places Mongo-style injection lives, and it is the less
+common one in a modern API: the other is a JSON REQUEST BODY, where the operator goes in as a
+real object -- `{"id": {"$ne": -1}}` -- and no amount of query-string probing reaches it.
+
+MEASURED: 12 dispatches against juice-shop, 0 results. Juice Shop IS NoSQL-injectable, and its
+injection points (`PATCH /rest/products/reviews`, the `$ne` review manipulation) are all JSON
+bodies. The engine was right about every URL it was given and was never given the shape that
+carries the bug.
+
+The oracle needs no change: the operator-vs-plain-control differential is the same. What is
+missing is the CARRIER -- build the probe as a nested object in a JSON body for endpoints that
+accept one, the way `run_form_nosqli` already does for form encodings.
+
+**Definition of done:** a lab endpoint that reads a JSON body into a Mongo-style query, a liveness
+entry, and a negative control whose body is a plain value.
+
+### Q-156 · `run_sourcemap` cannot distinguish a real .map from an SPA fallback -- and gets it right · **CLOSED** · **LOW**
+
+*Recorded as a NON-DEFECT so nobody re-opens it from the zero histogram.*
+
+`run_sourcemap` ran 8 times against juice-shop and reported nothing. Juice Shop returns HTTP 200
+for `/main.js.map` -- and for every other unknown path -- because an SPA serves its index.html as
+a catch-all. All four probed `.map` URLs came back 200 with an identical 9903-byte body that is
+HTML.
+
+The engine correctly did NOT report a source-map disclosure for a 200 that is not a source map.
+That is the right answer, and a zero here is the engine working. Kept because a future reader
+looking only at the histogram would see "8 runs, never a result" and go hunting.
+
 ### Q-151 · 101 of 110 tools have never been proven to work · **READY** · **CRITICAL**
 
 *Filed 2026-09-02 in answer to "are you sure all the tools will work now?" The honest answer was
