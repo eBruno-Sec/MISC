@@ -420,7 +420,10 @@ TECHNIQUES: dict[str, dict] = {t["id"]: t for t in [
               "replaces it with a live DATE between the markers (executed) rather than echoing the literal.",
        exploit="Escalate to file read via `#include file=` and, if the exec directive is on, OS command via "
                "`#exec cmd=` (NOT fired by the engine — confirmation is the benign echo only).",
-       oracle="A live date appears between our two random markers where the literal directive was injected."),
+       oracle="A live date appears between our two random markers where the literal directive was injected.",
+       # EARNED by a liveness run against domsource /ssi, not asserted by hand. 1333 field
+       # dispatches had never produced one result, which proved nothing until the lab had the bug.
+       validated_on=["domsource"]),
 
     # distilled from *Redefining Hacking* (Santos), ch 8 AI security — Table 8-2 + garak/ps-fuzz probes.
     _t(id="llm_prompt_injection", vuln_class="llm_prompt_injection", cwe="CWE-1427", owasp="LLM01:2025",
