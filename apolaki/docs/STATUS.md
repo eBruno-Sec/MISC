@@ -56,6 +56,11 @@ call site still existed. Liveness caught it in one run.
 * Mission `9e8653b8` ended `status=failed` in the report phase; its three findings are WITHDRAWN
   and the failure itself is untriaged.
 
+**Blast radius, measured rather than assumed.** All 7 stored real-target missions were re-checked
+against the corrected oracles: `9e8653b8` is the ONLY one carrying any critical or high finding.
+The other six Shopify runs carry zero. So the exposure is exactly those three findings, none of
+which left the tool.
+
 ---
 
 # CYCLE 15 — 2026-08-29 — the Shopify-engagement remainder
