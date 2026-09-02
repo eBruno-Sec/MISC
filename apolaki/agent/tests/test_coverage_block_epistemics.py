@@ -186,7 +186,11 @@ def test_the_q084_sentence_is_extended_and_not_undone():
     m = re.search(r"WSTG catalogue:[^<]*", block)
     assert m, "the WSTG line was deleted rather than corrected"
     line = m.group(0)
-    assert "109" in line and "85" in line                      # Q-084's positive control
+    # 85 -> 86 (full 60 -> 61, none 24 -> 23): WSTG-CLNT-10 (Testing WebSockets) was in the
+    # taxonomy table with no engine mapping, so it counted as uncovered while Apolaki had no
+    # executor for it. It has one now -- the dom_sinks WebSocket hook inside run_dom_trace,
+    # proven live -- so the mapping was added and the number moved for a real reason.
+    assert "109" in line and "86" in line                      # Q-084's positive control
     assert "this tool, not this mission" in line               # Q-084's wording
     assert "unlike the figures above" not in line, \
         "the line still claims every cell above varies with the mission; Blocked does not"

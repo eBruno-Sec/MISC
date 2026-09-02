@@ -139,7 +139,11 @@ def test_the_number_itself_is_still_reported_because_it_is_useful():
     """
     html = _render([], {})
     line = _wstg_line(html)
-    assert "109" in line and "85" in line, (
+    # 85 -> 86 (full 60 -> 61, none 24 -> 23): WSTG-CLNT-10 (Testing WebSockets) was in the
+    # taxonomy table with no engine mapping, so it counted as uncovered while Apolaki had no
+    # executor for it. It has one now -- the dom_sinks WebSocket hook inside run_dom_trace,
+    # proven live -- so the mapping was added and the number moved for a real reason.
+    assert "109" in line and "86" in line, (
         "the coverage MODEL number is gone; the fix was supposed to correct the claim, not remove "
         "the information: %r" % line)
 
@@ -179,14 +183,18 @@ def test_coverage_does_not_advertise_an_evidence_path_it_does_not_have():
             "coverage() still accepts %r and every value produces an identical tally, so the "
             "parameter is decoration: %r" % (params, a))
     else:
-        assert wc.coverage()["tally"]["full"] == 60, "sanity: the catalogue still parses"
+        assert wc.coverage()["tally"]["full"] == 61, "sanity: the catalogue still parses"
 
 
 def test_the_catalogue_totals_are_unchanged_by_this_fix():
     """NEGATIVE CONTROL on scope. Q-084 is about a SENTENCE. If these move, the fix went too far and
     started editing the coverage model, which is a different ticket with a different bar."""
     t = wc.coverage()["tally"]
-    assert t == {"full": 60, "partial": 25, "none": 24, "excluded": 5}, t
+    # 85 -> 86 (full 60 -> 61, none 24 -> 23): WSTG-CLNT-10 (Testing WebSockets) was in the
+    # taxonomy table with no engine mapping, so it counted as uncovered while Apolaki had no
+    # executor for it. It has one now -- the dom_sinks WebSocket hook inside run_dom_trace,
+    # proven live -- so the mapping was added and the number moved for a real reason.
+    assert t == {"full": 61, "partial": 25, "none": 23, "excluded": 5}, t
     assert wc.coverage()["total_tests"] == 109
 
 
