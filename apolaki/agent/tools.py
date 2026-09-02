@@ -6437,7 +6437,11 @@ class ToolRegistry:
             try:
                 await self._ctx_add_cookies(ctx2)
                 pg = await ctx2.new_page()
-                await _browser_engine.rate_limited_goto(pg, u, wait_until="load", timeout=9000)
+                # `domcontentloaded`, not `load`: an SPA keeps loading lazy chunks long after the
+                # anchors exist, and waiting for `load` timed out at 9s under mission load. The
+                # settle below is what actually gives Angular time to render its routerLinks.
+                await _browser_engine.rate_limited_goto(pg, u, wait_until="domcontentloaded",
+                                                        timeout=12000)
                 await pg.wait_for_timeout(1200)
                 hrefs = await pg.evaluate(
                     "() => [...new Set([...document.querySelectorAll('a[href]')]"
@@ -6712,6 +6716,17 @@ class ToolRegistry:
                     #    path-relative reference, renders in quirks mode (so the browser accepts
                     #    whatever comes back as CSS), and the SERVER returns this same page for a
                     #    padded path. Only the third is invisible to the browser.
+                    # Harvested in its OWN try. It first shared one with PRSSI, and when the
+                    # navigation timed out under mission load BOTH were lost -- the swallow said
+                    # "prssi" and the routes silently never arrived. Two independent facts must not
+                    # share a failure domain.
+                    try:
+                        _routes = await _page_hash_routes(url)
+                        if _routes:
+                            self._add_urls(_routes)
+                    except Exception as _apolaki_routes:
+                        self._swallow(_apolaki_routes, 'tools:_run_dom_trace:hash_routes', url)
+
                     try:
                         # One render of the page AS SERVED -- PRSSI is a property of the
                         # unmodified document, so a parameter probe's render cannot answer it.
@@ -6728,9 +6743,6 @@ class ToolRegistry:
                         #
                         # Harvested from the render already taken above, so this costs no extra
                         # page load. `_add_urls` re-validates every URL against scope.
-                        _routes = await _page_hash_routes(url)
-                        if _routes:
-                            self._add_urls(_routes)
                         if psig.get("prssi_relative_css") and psig.get("prssi_quirks"):
                             pad = url.split("?")[0].rstrip("/") + "/apolakiprssi/"
                             if self.scope.validate(pad)[0]:
