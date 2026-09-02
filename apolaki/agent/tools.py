@@ -5182,6 +5182,22 @@ class ToolRegistry:
         try:
             _routes = await self._spa_hash_routes(url)
             urls += _routes
+            # Q-163 (Lane C). The harvest above finds the routes an ANCHOR points at; on
+            # juice-shop that is five routes and NONE carries a parameter, so the sweep -- which
+            # probes only PARAMETERIZED endpoints -- correctly skipped every one and the whole
+            # Q-153/159/161 chain never received an input. `spa_routes.discover` types a benign
+            # marker into the controls the APPLICATION rendered and reads back where the app
+            # itself navigated, so the route AND the parameter name are both observed rather
+            # than invented. Read-only by mechanism: it never types into a password field and
+            # aborts every non-GET request at the route layer.
+            import spa_routes as _spa
+            if _spa.available()[0]:
+                _d = await _spa.discover_async(
+                    url, scope_ok=lambda u: self.scope.validate(u)[0],
+                    headers=self.session_headers or None)
+                _param_routes = _spa.parameterized_urls(_d.get("routes") or [])
+                _routes += _param_routes
+                urls += _param_routes
         except Exception as _apolaki_spa_routes:
             # RECORDED, not silent. This AUGMENTS a crawl: an unreachable host or a browser that
             # will not start must not fail a crawl that otherwise succeeded, but it must not vanish

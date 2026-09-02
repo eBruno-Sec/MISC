@@ -187,7 +187,9 @@ def test_partition_is_non_vacuous_and_matches_the_measured_rebased_tree():
     # 178 -> 179: Q-112 adds `agent/middlebox.py`. 179 -> 180: Q-142 adds `agent/deadline.py`. 180 -> 181: Q-145 adds `agent/csp_audit.py`. 181 -> 185: Q-146 `code_injection.py`, Q-147 `dom_sinks.py`, Q-148 `passive_disclosure.py`, Q-149 `jwt_attacks.py`. This equality exists so
     # the census cannot quietly stop parsing part of the tree; a module ADDED is a legitimate move
     # and the number moves with it, while a module that vanishes still trips it.
-    assert len(trees) == 185
+    # 185 -> 188: cycle 20 lanes add `rendered_forms.py` (Q-158), `nosqli_body.py` (Q-155)
+    # and `spa_routes.py` (Q-163), each a new engine module with its own test file.
+    assert len(trees) == 188
     # 917 at 1c357c8; the durable observer adds one guarded persistence handler.
     # This is a floor so deleting production modules cannot make the census quietly shrink.
     assert all_handlers >= 917
@@ -197,7 +199,18 @@ def test_partition_is_non_vacuous_and_matches_the_measured_rebased_tree():
     # gone (Q-091 -- it parsed a JSON ARRAY line by line, so it discarded every line of
     # every possible dalfox output).  Ratcheted rather than left slack, so the seat that
     # handler occupied cannot be silently refilled.
-    assert counts["optional"] <= 387
+    # 387 -> 407. Twenty from the three cycle-20 engine modules, which are browser and network
+    # drivers: spa_routes 10, rendered_forms 7, nosqli_body 4 (one of spa_routes' became a
+    # recorder, below). Checked rather than waved through, because +20 handlers is exactly the
+    # size of jump this census exists to make somebody look at:
+    #   * BOTH load-bearing handlers the lanes introduced were FIXED, not budgeted --
+    #     `spa_routes._href` (a failed href read makes a real navigation look like none, losing the
+    #     route) and `spa_routes._settle`'s control-count reset (stale count -> the stability wait
+    #     satisfies itself against the previous page). Both now record through the active registry.
+    #   * The remaining twenty are optional by the census's own rule: no oracle reads their silence
+    #     as a clean result. Most are Playwright timeouts on a bounded wait, where the timeout IS
+    #     the answer and is returned as a reason string rather than swallowed.
+    assert counts["optional"] <= 407
     # 77 -> 78: Q-121 adds one guarded persistence handler in `main.py` (`_record_memory`), the
     # same best-effort shape as the report-time graph save right beside it -- `tools.graph.save`
     # writing the LIVE graph must not abort mission teardown if persistence fails. `main.py` is
@@ -621,6 +634,12 @@ def test_literal_return_discards_are_censused_and_capped():
     counts = Counter(row["category"] for row in rows)
     named = ["%s:%d:%s" % (r["module"], r["line"], r["function"])
              for r in rows if r["category"] == "load-bearing"]
-    assert counts["optional"] <= 61
+    # 61 -> 63. Both new entries are in `spa_routes.py` and both are defensive `urlparse`
+    # wrappers -- `split_fragment` and `inventory_path` return a safe default for a malformed URL,
+    # which yields no route. That is the correct answer and no oracle reads their silence as
+    # "clean", which is what keeps them OPTIONAL rather than load-bearing. The module's one
+    # LOAD-BEARING discard (`_href`, where a failed read would make a real navigation look like no
+    # navigation and lose the route) was fixed to record instead of raising this ceiling further.
+    assert counts["optional"] <= 63
     assert counts["control-plane"] <= 13
     assert counts["load-bearing"] == 0, named

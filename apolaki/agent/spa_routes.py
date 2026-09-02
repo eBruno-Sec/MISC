@@ -288,8 +288,14 @@ def _settle(page, timeout_ms: int) -> str:
         reason = "load-timeout"
     try:
         page.evaluate("() => { window.__apolaki_ctl = null; }")     # fresh count per navigation
-    except Exception:
-        pass
+    except Exception as _apolaki_exc:
+        # Coordinator repair: LOAD-BEARING, and it was a bare `pass`. This reset is what makes the
+        # control count fresh per navigation; if it fails silently the PREVIOUS page's count
+        # survives, the stability wait below can satisfy itself against stale state, and the drive
+        # then runs on a page that never settled. Recorded through the active registry, the same
+        # way `dns_recon.doh` reaches the ledger from module scope.
+        import tools as _tools
+        _tools._swallow(_apolaki_exc, "spa_routes._settle:ctl_reset", "")
     try:
         page.wait_for_function("(sel) => document.querySelectorAll(sel).length > 0",
                                arg=CONTROL_SELECTOR, timeout=timeout_ms)
@@ -314,9 +320,24 @@ def _goto(page, url: str, timeout_ms: int) -> str:
 
 
 def _href(page) -> str:
+    """The browser's current location, or "" when it could not be read -- RECORDED either way.
+
+    Coordinator repair. This was a bare `except: return ""`, which the silent-failure census
+    classifies LOAD-BEARING, and it is right to: the route record is a BEFORE/AFTER href pair, so a
+    read that fails silently makes a real navigation look like "the app did not move" and the
+    discovered route disappears. `_drive_page`'s own docstring three lines below says exactly this
+    about `except: return []`, and the same reasoning had not been carried up here.
+
+    Module-level helpers with no `self` reach the ledger through `tools._ACTIVE_REGISTRY`,
+    published for the span of `ToolRegistry.execute` -- the pattern `dns_recon.doh` already uses.
+    Imported as a statement, not via `sys.modules.get`, because `deadcode_gate` only resolves a
+    caller through a RESOLVED import.
+    """
     try:
         return str(page.evaluate("() => location.href") or "")
-    except Exception:
+    except Exception as _apolaki_exc:
+        import tools as _tools
+        _tools._swallow(_apolaki_exc, "spa_routes._href", "")
         return ""
 
 
