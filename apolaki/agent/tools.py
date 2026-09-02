@@ -6426,6 +6426,27 @@ class ToolRegistry:
         params = params[:8]
         findings, seen = [], set()
 
+        async def _page_hash_routes(u):
+            """Hash routes an SPA renders into real anchors once it has booted.
+
+            Q-157. Returns absolute URLs for `<a href="#/...">`, which no HTTP crawler can produce:
+            the fragment never reaches the server, so it is normalised away upstream. Bounded to a
+            small number because each one becomes probe surface.
+            """
+            ctx2 = await browser.new_context(ignore_https_errors=True)
+            try:
+                await self._ctx_add_cookies(ctx2)
+                pg = await ctx2.new_page()
+                await _browser_engine.rate_limited_goto(pg, u, wait_until="load", timeout=9000)
+                await pg.wait_for_timeout(1200)
+                hrefs = await pg.evaluate(
+                    "() => [...new Set([...document.querySelectorAll('a[href]')]"
+                    ".map(a => a.getAttribute('href')))].filter(h => h && h[0] === '#')")
+            finally:
+                await ctx2.close()
+            base = u.split("#")[0]
+            return [base + h for h in (hrefs or [])[:12]]
+
         async def _render(u, canary, anon: bool = False):
             """Load u in a fresh context; return the runtime signals for `canary`.
 
@@ -6695,6 +6716,21 @@ class ToolRegistry:
                         # One render of the page AS SERVED -- PRSSI is a property of the
                         # unmodified document, so a parameter probe's render cannot answer it.
                         psig = await _render(url, "domtr" + os.urandom(4).hex())
+
+                        # Q-157. HASH ROUTES ARE INVISIBLE TO EVERY CRAWLER, BY DESIGN. A fragment
+                        # is never sent to the server, so katana and every HTTP crawler normalise
+                        # it away -- and an Angular/Vue/React app renders its `routerLink`s into
+                        # real anchors only AFTER it boots. MEASURED on juice-shop: curl sees zero
+                        # hash hrefs in the served HTML, and a render sees five (#/login, #/contact,
+                        # #/about, #/chatbot, #/photo-wall). Q-153 taught the engine to PROBE a
+                        # hash route; without this it was never handed one, so on a real mission it
+                        # changed nothing.
+                        #
+                        # Harvested from the render already taken above, so this costs no extra
+                        # page load. `_add_urls` re-validates every URL against scope.
+                        _routes = await _page_hash_routes(url)
+                        if _routes:
+                            self._add_urls(_routes)
                         if psig.get("prssi_relative_css") and psig.get("prssi_quirks"):
                             pad = url.split("?")[0].rstrip("/") + "/apolakiprssi/"
                             if self.scope.validate(pad)[0]:
