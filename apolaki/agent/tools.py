@@ -13,6 +13,7 @@ import asyncio
 import contextvars
 import html as _html
 import json
+import secrets
 import os
 import re
 import shutil
@@ -27,6 +28,7 @@ import authz_tool as authz
 import db
 import dns_recon
 import guidance as guidance_mod
+import code_injection as _codeinj
 import deadline as _deadline
 import middlebox as _mbx
 import surface as surface_mod
@@ -5283,19 +5285,76 @@ class ToolRegistry:
             def wrap(t):
                 return f"Bearer {t}" if hname.lower() == "authorization" else t
 
-            for label, forged in (("alg:none", res.get("forged_none")),
-                                  ("cracked-secret admin", res.get("forged_admin"))):
-                if not forged:
+            # Q-149 / LANE D FINDING. What stood here reported CRITICAL "Forged JWT accepted" on
+            # ANY 2xx, with no control of any kind. Pointed at an unauthenticated endpoint it fired
+            # on every target in existence -- a 200 proves the endpoint answered, not that it
+            # honoured our forgery. The differential pattern used 30 lines below for algorithm
+            # confusion was already correct; this block simply never adopted it.
+            import jwt_attacks as ja
+
+            async def _resp(tok):
+                """One captured response. status 0 is a transport failure, which jwt_attacks reads
+                as `not_tested` rather than as a refusal."""
+                r = await self._http(url, headers=({hname: wrap(tok)} if tok else {}),
+                                     capture=True)
+                return ja.Response(r.get("status", 0), r.get("body", "") or "")
+
+            # THE THREE LEGS. Missing any one of them, the honest verdict is `not_tested` -- never
+            # "not vulnerable", and never a bare 2xx read as an acceptance.
+            ctrl = ja.Controls(authenticated=await _resp(token),
+                               unauthenticated=await _resp(""),
+                               tampered=await _resp(jt.tamper_signature(token)))
+
+            # This one takes the payload-rewrite response DIRECTLY: it must not gate on the
+            # signature oracle being sound, because an unsound oracle IS the finding here.
+            rewritten = ja.forge_payload_tamper(token)
+            verdicts = [ja.analyze_signature_verification(
+                ctrl, payload_tampered=(await _resp(rewritten.token)) if rewritten else None)]
+
+            for probe in ja.forge_none_variants(token, max_variants=6):
+                verdicts.append(ja.analyze_forgery(probe.check, ctrl, await _resp(probe.token),
+                                                   shape=probe.shape, payload=probe.token))
+
+            crack = ja.crack_hmac_secret(token, inp.get("extra_secrets"))
+            verdicts.append(crack)
+            if crack["verdict"] == ja.VERDICT_CONFIRMED:
+                resigned = ja.forge_with_secret(token, crack["secret"])
+                if resigned is not None:
+                    verdicts.append(ja.analyze_forgery(
+                        resigned.check, ctrl, await _resp(resigned.token),
+                        shape=resigned.shape, payload=resigned.token))
+
+            key = ja.generate_key()
+            for build in (ja.forge_self_signed_jwk, ja.forge_self_signed_x5c):
+                probe = build(token, key)
+                if probe is None:
                     continue
-                r = await self._http(url, headers={hname: wrap(forged)}, capture=True)
-                if 200 <= r.get("status", 0) < 300:
-                    findings.append({
-                        "title": f"Forged JWT accepted ({label})", "severity": "critical", "target": url,
-                        "description": f"The API accepted a {label} forged token (HTTP {r['status']}).",
-                        "impact": "Authentication bypass / account takeover via forged JWT.",
-                        "reproduction_steps": [f"Send the {label} forged token to {url}",
-                                               f"Observe HTTP {r['status']} (authorized)"],
-                        "cwe": "CWE-347", "family": "jwt", "tags": ["jwt", "auth"]})
+                verdicts.append(ja.analyze_forgery(probe.check, ctrl, await _resp(probe.token),
+                                                   shape=probe.shape, payload=probe.token))
+
+            # jwt_attacks owns the weak-secret finding now; dropping analyze()'s row keeps ONE
+            # producer per fact instead of two rows saying the same thing at different severities.
+            findings = [f for f in findings if "secret" not in str(f.get("title", "")).lower()]
+            # jku / x5u. These headers point the verifier at a REMOTE key, so the only honest oracle
+            # is out-of-band: the target must actually fetch our URL. With no reachable collaborator
+            # there is no oracle, and the verdict is `not_tested` -- NOT "not vulnerable". Gated
+            # rather than approximated in-band, because an in-band guess here is a CVSS 9 guess.
+            import collaborator
+            if collaborator.enabled() and collaborator.reachable_from(url):
+                oob = collaborator.new_token()
+                collaborator.register(oob)
+                for build, name, check in ((ja.forge_jku, "jwks.json", "jwt_arbitrary_jku_header_supported"),
+                                           (ja.forge_x5u, "cert.pem", "jwt_arbitrary_x5u_header_supported")):
+                    probe = build(token, "%s/%s" % (collaborator.probe_url(oob).rstrip("/"), name), key)
+                    if probe is None:
+                        continue
+                    resp = await _resp(probe.token)
+                    hits = collaborator.hits(oob)
+                    verdicts.append(ja.analyze_remote_key_header(
+                        check, ctrl, resp, oob_available=True, oob_interactions=hits,
+                        oob_token=oob, shape=probe.shape, payload=probe.token))
+            findings += [f for f in (ja.finding_for(v, url) for v in verdicts) if f]
+            self.recon.setdefault("jwt_coverage", []).extend(ja.coverage_rows(verdicts))
 
             # Algorithm confusion (RS/ES/PS -> HS) ACTIVE confirmation: the analyze() lead becomes a CONFIRMED
             # finding only here. Fetch the server's own RSA public key (its JWKS, or the token's x5c cert),
@@ -6336,6 +6395,7 @@ class ToolRegistry:
         The tier token opens the docstring (Q-058) because it was previously stated only in a trailing
         clause, where the tier gate cannot see it."""
         import dom_trace as dt
+        import dom_sinks as ds
         url = inp["url"]
         if not self.scope.validate(url)[0]:
             return ToolResult("dom_trace", url, False, "", [], "SCOPE BLOCK")
@@ -6386,6 +6446,13 @@ class ToolRegistry:
                 if not anon:
                     await self._ctx_add_cookies(ctx)
                 page = await ctx.new_page()
+                # Q-147 DOM SINK FAMILY. The hooks must be an INIT script, not an evaluate: a page
+                # that opens its WebSocket or writes document.domain during load has already done it
+                # by the time an evaluate could run, and the signal would be gone.
+                try:
+                    await page.add_init_script(ds.DOM_SINK_HOOKS_JS)
+                except Exception as _apolaki_sinkhooks:
+                    self._swallow(_apolaki_sinkhooks, 'tools:_render:sink_hooks', u)
                 page.on("dialog", lambda d: (sig.__setitem__("executed", sig["executed"] or (canary in str(d.message))),
                                              asyncio.ensure_future(d.dismiss())))
                 page.on("framenavigated", lambda fr: sig.__setitem__("redirect", sig["redirect"] or (fr.url if dt.is_evil_host(fr.url) else "")))
@@ -6439,6 +6506,11 @@ class ToolRegistry:
                 try:
                     dom = await page.evaluate(dt.DOM_SCAN_JS, canary)
                     sig.update({k: dom.get(k, sig[k]) for k in ("in_href", "in_src", "in_attr", "in_text")})
+                    # The sink recorder's own readback. Merged rather than assigned so a key the
+                    # hooks never saw keeps its default instead of becoming None.
+                    sinks = await page.evaluate(ds.DOM_SINK_SCAN_JS, canary)
+                    if isinstance(sinks, dict):
+                        sig.update({k: v for k, v in sinks.items() if v not in (None, "", [], 0)})
                 except Exception as _apolaki_swallowed_5672:
                     self._swallow(_apolaki_swallowed_5672, 'tools:_render:5672', "")
                     pass
@@ -6507,7 +6579,12 @@ class ToolRegistry:
                                 if xs["executed"]:
                                     s["executed"], s["xss_target"], s["xss_payload"] = True, xu, pl
                                     break
-                        return list(dt.classify(url, p, canary, s))
+                        # Both classifiers read ONE render. dom_trace owns the reflected-XSS
+                        # and redirect families; dom_sinks owns the sink families Burp lists
+                        # separately (web message, storage, socket, HPP, JSON, XPath). They
+                        # share no family name, so a hit cannot be produced twice.
+                        return (list(dt.classify(url, p, canary, s))
+                                + [("ds", h) for h in ds.classify(url, p, canary, s)])
 
                     # Render the parameters CONCURRENTLY, browser_concurrency() at a time. MEASURED:
                     # this engine cost 7.95 s per call in-mission and nearly all of it is the fixed
@@ -6519,10 +6596,11 @@ class ToolRegistry:
                             self._swallow(hits, "dom_trace.param", "%s?%s" % (url, p))
                             continue
                         for hit in hits:
+                            owner, hit = hit if isinstance(hit, tuple) else ("dt", hit)
                             key = (hit["family"], hit["param"])
                             if key not in seen:
                                 seen.add(key)
-                                findings.append(dt.finding(hit))
+                                findings.append((ds if owner == "ds" else dt).finding(hit))
                     # 4) THE URL FRAGMENT as a source. Everything after '#' is never sent to the server,
                     #    so a fragment-sourced DOM bug is invisible to every request/response engine and
                     #    to the proxy log — only a render can see it. Bounded deliberately: the whole-hash
@@ -6544,7 +6622,12 @@ class ToolRegistry:
                                 if xs["executed"]:
                                     s["executed"], s["xss_target"], s["xss_payload"] = True, xu, pl
                                     break
-                        return list(dt.classify(url, p, canary, s, source=src))
+                        # Both classifiers read ONE render. dom_trace owns the reflected-XSS
+                        # and redirect families; dom_sinks owns the sink families Burp lists
+                        # separately (web message, storage, socket, HPP, JSON, XPath). They
+                        # share no family name, so a hit cannot be produced twice.
+                        return (list(dt.classify(url, p, canary, s, source=src))
+                                + [("ds", h) for h in ds.classify(url, p, canary, s, source=src)])
 
                     # Concurrent like the query pass, and folded in the SAME order. It runs AFTER the
                     # query pass, not alongside it, because its dedup deliberately reads `seen`: a family
@@ -6555,12 +6638,84 @@ class ToolRegistry:
                             self._swallow(hits, "dom_trace.fragment", "%s#%s" % (url, p))
                             continue
                         for hit in hits:
+                            owner, hit = hit if isinstance(hit, tuple) else ("dt", hit)
                             if (hit["family"], hit["param"]) in seen:
                                 continue            # already proven via the query source; not a 2nd bug
                             key = (hit["family"], hit["param"], src)
                             if key not in seen:
                                 seen.add(key)
-                                findings.append(dt.finding(hit))
+                                findings.append((ds if owner == "ds" else dt).finding(hit))
+
+                    # 5) PAGE-LEVEL SINKS. No URL parameter is involved, so nothing above can reach
+                    #    these. A web message must be delivered from a genuinely FOREIGN ORIGIN: a
+                    #    handler that correctly tests `event.origin === location.origin` ACCEPTS a
+                    #    same-origin probe and rejects the real attacker, so a same-origin shortcut
+                    #    would report every correctly-written handler as vulnerable. We therefore
+                    #    load an attacker origin for real and frame the target from it.
+                    try:
+                        pmc = "apolakipm" + secrets.token_hex(4)
+                        evil = "http://evilc%s.example" % secrets.token_hex(4)
+                        psig = {"navigated": False, "pm_canary": pmc, "pm_cross_origin": False,
+                                "pm_executed": False, "pm_sink": "", "pm_origin_checked": False}
+                        pctx = await browser.new_context(ignore_https_errors=True)
+                        try:
+                            await pctx.add_init_script(ds.DOM_SINK_HOOKS_JS)
+                            await self._ctx_add_cookies(pctx)
+                            ppage = await pctx.new_page()
+                            ppage.on("dialog", lambda d: (
+                                psig.__setitem__("pm_executed",
+                                                 psig["pm_executed"] or (pmc in str(d.message))),
+                                asyncio.ensure_future(d.dismiss())))
+                            attacker = (
+                                "<!doctype html><body><iframe id=f src=" + json.dumps(url) + "></iframe>"
+                                "<script>/*__apolaki*/var P=[" 
+                                + json.dumps("<img src=x onerror=alert('" + pmc + "')>") + ","
+                                + json.dumps("javascript:alert('" + pmc + "')") + ","
+                                + json.dumps(pmc) + "];"
+                                "document.getElementById('f').onload=function(){"
+                                "  var w=document.getElementById('f').contentWindow;"
+                                "  P.forEach(function(p,i){setTimeout(function(){"
+                                "    try{w.postMessage(p,'*');}catch(e){}},60*i);});};"
+                                "</script></body>")
+
+                            async def _proute(route):
+                                if route.request.url.startswith(evil):
+                                    await route.fulfill(status=200, content_type="text/html",
+                                                        body=attacker)
+                                else:
+                                    await route.continue_()
+
+                            await ppage.route("**/*", _proute)
+                            await ppage.goto(evil + "/", wait_until="load")
+                            await ppage.wait_for_timeout(900)
+                            tgt = [f for f in ppage.frames if f != ppage.main_frame and f.url]
+                            if tgt:
+                                psig["navigated"] = True
+                                # The frame is on the target's origin and the message came from
+                                # `evil`. That is the cross-origin delivery the family requires.
+                                psig["pm_cross_origin"] = True
+                                ps = await tgt[0].evaluate(ds.DOM_SINK_SCAN_JS, pmc)
+                                if isinstance(ps, dict):
+                                    psig["pm_origin_checked"] = bool(ps.get("pm_origin_checked"))
+                                    psig["pm_sink"] = ds.message_sink(ps.get("sink_hits") or [], pmc)
+                                    psig.update({k: v for k, v in ps.items()
+                                                 if k.startswith("prssi_") and v})
+                        finally:
+                            await pctx.close()
+                        # PRSSI needs one server-side fact the browser cannot supply: whether the
+                        # server returns THIS page for a padded path.
+                        if psig.get("prssi_relative_css"):
+                            pad = url.split("?")[0].rstrip("/") + "/apolakiprssi/"
+                            if self.scope.validate(pad)[0]:
+                                pr = await self._http(pad, "GET", capture=True)
+                                psig["prssi_path_tolerant"] = 200 <= pr.get("status", 0) < 300
+                        for hit in ds.classify_page(url, psig):
+                            key = (hit["family"], hit["param"])
+                            if key not in seen:
+                                seen.add(key)
+                                findings.append(ds.finding(hit))
+                    except Exception as _apolaki_pagesinks:
+                        self._swallow(_apolaki_pagesinks, 'tools:_run_dom_trace:page_sinks', url)
                 finally:
                     await browser.close()
         except Exception as e:
@@ -7726,6 +7881,25 @@ class ToolRegistry:
             return ToolResult("web_probes", url, False, "", [], baseline["error"])
         findings = []
 
+        # Q-148: PASSIVE DISCLOSURE over the body we ALREADY fetched. Zero extra requests, zero probe
+        # risk, and it runs on every URL the sweep reaches -- which matters because the last real run
+        # crawled 6345 URLs and dispatched 29 of 90 engines. A passive family lights up the whole
+        # surface on data already in hand.
+        #
+        # Mined from Burp's published catalog. FOUR checks shipped (private key, JWT private key,
+        # JWKS, DB connection string); the card and SSN scans are NOT here, and the SSN one is a
+        # deliberate refusal recorded in the module -- `\d{3}-\d{2}-\d{4}` is also a product SKU.
+        import passive_disclosure as _pdisc
+        for _d in _pdisc.scan_response(baseline.get("body", ""), url=url):
+            findings.append({
+                "title": _d["check"].replace("_", " ").capitalize(), "severity": _d["severity"],
+                "target": url, "description": _d["detail"], "evidence": _d["evidence"],
+                "confidence": _d.get("confidence", "confirmed"), "cwe": _d["cwe"],
+                "family": "info_disclosure", "tags": ["information-disclosure", "passive"],
+                "success_oracle": "the secret material is present in a response body the scanner "
+                                  "fetched without authentication; the finding quotes a REDACTED "
+                                  "form only"})
+
         # CWE-614 from the RAW Set-Cookie header. Never from the body: a response can claim the secure
         # flag is off while the header sets it, and vice versa.
         try:
@@ -8041,6 +8215,39 @@ class ToolRegistry:
                     except Exception as _apolaki_swallowed_7230:
                         self._swallow(_apolaki_swallowed_7230, 'tools:_run_injection_probes:7230', "")
                         pass
+                # Q-146: LANGUAGE-SPECIFIC SERVER-SIDE CODE INJECTION. Seven Burp checks Apolaki had
+                # none of. SSTI above evaluates a TEMPLATE expression; this evaluates INTERPRETER
+                # code, which is a different vulnerability with a different oracle.
+                #
+                # Same defence as Q-126 and stronger: each probe carries TWO independently-derived
+                # tokens -- a random-operand arithmetic product and a LANGUAGE-EXCLUSIVE construct.
+                # Neither is a substring of the payload, so an echo cannot produce either. Arithmetic
+                # alone proves EVALUATION but not WHICH interpreter, and in that case the engine
+                # reports `unidentified_code_injection` and declines to name a language rather than
+                # guessing. Placed after SSTI because `${...}` is shared vocabulary and SSTI's
+                # narrower claim should win when both fire.
+                # One representative parameter per URL: these probes are 6 requests each and the
+                # sweep already covers every endpoint, so widening here multiplies cost without
+                # widening reach.
+                _qs = parse_qsl(urlparse(url).query, keep_blank_values=True)
+                _first_param = _qs[0][0] if _qs else ""
+                for _cprobe in (_codeinj.build_probes("1") if _first_param else []):
+                    _curl = ws._replace_query_value(url, _first_param, _cprobe.payload) if _first_param else ""
+                    if not _curl or not self.scope.validate(_curl)[0]:
+                        continue
+                    try:
+                        _cr = await c.get(_curl)
+                        _cv = _codeinj.analyze_code_injection(base_body, _cr.text, _cprobe)
+                        if _cv:
+                            # The module owns its own finding shape. Rebuilding the dict here
+                            # meant two producers of one finding, drifting apart on every edit
+                            # -- and the builder went unused, which is how the gate caught it.
+                            findings.append(_codeinj.code_injection_finding(
+                                _curl, _first_param, _cprobe, _cv))
+                            break
+                    except Exception as _apolaki_swallowed_codeinj:
+                        self._swallow(_apolaki_swallowed_codeinj,
+                                      'tools:_run_injection_probes:code_injection', _curl)
                 # CRLF / response-header injection
                 for probe in ws.build_crlf_probes(url):
                     if not self.scope.validate(probe.url)[0]:
