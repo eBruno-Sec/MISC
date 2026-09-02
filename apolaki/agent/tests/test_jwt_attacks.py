@@ -362,6 +362,230 @@ def test_forging_with_a_secret_refuses_an_asymmetric_token():
 
 
 # =================================================================================================
+# CHECK 4 -- Burp "JWT self-signed JWK header supported" (and its x5c sibling)
+#
+# The key is generated once for the whole module: an RSA-2048 keygen is ~90 ms MEASURED, and one
+# key exercises every asymmetric shape.
+# =================================================================================================
+
+KEY = ja.generate_key(2048)
+
+
+def _verify_rs256(token, pem):
+    """Verify an RS256 token against a PEM, using the SAME reader Apolaki points at a real
+    target's JWKS. Ground truth for the forgery: not 'it has three segments' but 'it verifies'."""
+    from cryptography.hazmat.primitives import hashes, serialization
+    from cryptography.hazmat.primitives.asymmetric import padding
+    from cryptography.exceptions import InvalidSignature
+    head, body, sig = token.split(".")
+    public = serialization.load_pem_public_key(pem.encode())
+    try:
+        public.verify(jwt_tool.b64url_decode(sig), ("%s.%s" % (head, body)).encode(),
+                      padding.PKCS1v15(), hashes.SHA256())
+        return True
+    except InvalidSignature:
+        return False
+
+
+def test_the_self_signed_jwk_token_actually_verifies_against_the_key_it_carries():
+    """GROUND TRUTH, and the strongest assertion in the file: the forged token is reconstructed
+    through `jwt_tool.first_rsa_pem` -- the tree's own JWKS reader -- and the signature CHECKS OUT.
+    A forgery that merely looks right would sail past a shape assertion and be rejected by every
+    real verifier on contact."""
+    forged = ja.forge_self_signed_jwk(hs_token(), KEY)
+    header = json.loads(jwt_tool.b64url_decode(forged.token.split(".")[0]))
+    assert header["alg"] == "RS256" and header["jwk"]["kty"] == "RSA"
+    pem = jwt_tool.first_rsa_pem(json.dumps(header["jwk"]))
+    assert pem.startswith("-----BEGIN PUBLIC KEY-----")
+    assert _verify_rs256(forged.token, pem) is True
+
+
+def test_the_kid_is_the_rfc7638_thumbprint_so_header_and_jwks_agree_by_construction():
+    forged = ja.forge_self_signed_jwk(hs_token(), KEY)
+    header = json.loads(jwt_tool.b64url_decode(forged.token.split(".")[0]))
+    served = json.loads(ja.jwks_document(KEY))["keys"][0]
+    assert header["kid"] == KEY.kid == served["kid"]
+    assert ja.jwk_thumbprint(served) == KEY.kid
+
+
+def test_the_forged_header_does_not_carry_the_servers_own_kid_forward():
+    """Preserving the original `kid` would point the verifier back at the SERVER's key, which is
+    the opposite of the attack -- the forged token would then simply fail to validate."""
+    original = jwt_tool.forge_hs({"typ": "JWT", "kid": "server-signing-key-1"}, CLAIMS,
+                                 SYNTHETIC_SECRET, "HS256")
+    header = json.loads(jwt_tool.b64url_decode(
+        ja.forge_self_signed_jwk(original, KEY).token.split(".")[0]))
+    assert header["kid"] == KEY.kid != "server-signing-key-1"
+
+
+def test_the_x5c_sibling_carries_a_self_signed_certificate_that_matches_the_signing_key():
+    """A verifier can reject `jwk` and still trust `x5c`, so they are separate probes. The cert is
+    parsed back through `jwt_tool.x5c_to_pem`, the tree's own x5c reader."""
+    forged = ja.forge_self_signed_x5c(hs_token(), KEY)
+    header = json.loads(jwt_tool.b64url_decode(forged.token.split(".")[0]))
+    pem = jwt_tool.x5c_to_pem(header["x5c"][0])
+    assert pem.startswith("-----BEGIN PUBLIC KEY-----")
+    assert _verify_rs256(forged.token, pem) is True
+    assert forged.shape == "x5c_embedded" and forged.check == ja.CHECK_SELF_SIGNED_JWK
+
+
+def test_the_certificate_is_clock_free_so_a_forged_cert_is_reproducible():
+    """MUTANT S2-9 CAUGHT THIS TEST BEING VACUOUS. The first version asserted only that two calls
+    in one process produce the same PEM -- which stays true even with `datetime.now()` as the
+    default, because a module-level default is evaluated ONCE at import. The assertion has to be
+    against the LITERAL pinned instant, or the reproducibility it claims holds for one process and
+    no longer.
+    """
+    import datetime
+
+    from cryptography import x509
+    cert = x509.load_pem_x509_certificate(ja.self_signed_cert_pem(KEY).encode())
+    assert cert.not_valid_before_utc == datetime.datetime(2020, 1, 1, tzinfo=datetime.timezone.utc)
+    assert cert.not_valid_after_utc == datetime.datetime(2035, 1, 1, tzinfo=datetime.timezone.utc)
+    assert ja.self_signed_cert_pem(KEY) == ja.self_signed_cert_pem(KEY)
+    # the serial is derived from the key thumbprint, so it is stable per key and distinct per key
+    assert cert.serial_number == x509.load_pem_x509_certificate(
+        ja.self_signed_cert_pem(KEY).encode()).serial_number
+
+
+def test_self_signed_jwk_positive_and_negative():
+    accepted = ja.analyze_forgery(ja.CHECK_SELF_SIGNED_JWK, controls(),
+                                  ja.Response(200, AUTH_BODY_SECOND_CAPTURE), shape="jwk_embedded")
+    assert accepted["verdict"] == ja.VERDICT_CONFIRMED
+    assert ja.finding_for(accepted, "https://lab.invalid/me")["cwe"] == "CWE-347"
+    refused = ja.analyze_forgery(ja.CHECK_SELF_SIGNED_JWK, controls(), REFUSED, shape="jwk_embedded")
+    assert refused["verdict"] == ja.VERDICT_REJECTED
+    assert ja.finding_for(refused, "https://lab.invalid/me") is None
+
+
+def test_the_asymmetric_builders_refuse_a_non_jwt():
+    for build in (ja.forge_self_signed_jwk, ja.forge_self_signed_x5c):
+        assert build("not-a-jwt", KEY) is None
+    assert ja.forge_jku("not-a-jwt", "https://oob.invalid/j", KEY) is None
+    assert ja.forge_jku(hs_token(), "", KEY) is None
+    assert ja.forge_x5u(hs_token(), "   ", KEY) is None
+
+
+def test_an_unsupported_signing_algorithm_is_a_value_not_an_exception():
+    assert ja.sign_rs("a.b", KEY, "HS256") == ""
+    assert ja.sign_rs("a.b", KEY, "RS512") != ""
+
+
+# =================================================================================================
+# CHECKS 5 and 6 -- Burp "arbitrary jku / x5u header supported". OOB-ONLY. NO IN-BAND ORACLE.
+# =================================================================================================
+
+HIT = {"method": "GET", "source_ip": "203.0.113.9", "path": "/oob/deadbeefcafe/jwks.json",
+       "host": "collab.invalid"}
+OOB_TOKEN = "deadbeefcafe"
+
+
+def test_the_jku_token_ships_the_jwks_it_needs_and_is_flagged_oob_only():
+    forged = ja.forge_jku(hs_token(), "https://collab.invalid/oob/%s/jwks.json" % OOB_TOKEN, KEY)
+    assert forged.requires_oob is True
+    header = json.loads(jwt_tool.b64url_decode(forged.token.split(".")[0]))
+    assert header["jku"] == forged.side_channel_url
+    # the served document must actually contain the key the token was signed with
+    assert _verify_rs256(forged.token, jwt_tool.first_rsa_pem(forged.side_channel)) is True
+    assert json.loads(forged.side_channel)["keys"][0]["kid"] == header["kid"]
+
+
+def test_the_x5u_token_ships_the_pem_certificate_it_needs():
+    forged = ja.forge_x5u(hs_token(), "https://collab.invalid/oob/%s/cert.pem" % OOB_TOKEN, KEY)
+    assert forged.requires_oob is True
+    assert forged.side_channel.startswith("-----BEGIN CERTIFICATE-----")
+    header = json.loads(jwt_tool.b64url_decode(forged.token.split(".")[0]))
+    assert header["x5u"] == forged.side_channel_url
+
+
+def test_without_a_collaborator_jku_is_NOT_TESTED_and_says_so():
+    """THE HONEST REFUSAL. `BBH_OOB_BASE` defaults to a Docker-internal hostname, so
+    `collaborator.reachable_from()` is False for every external target and this is the verdict that
+    actually fires off-lab. It must never read as 'not vulnerable'."""
+    got = ja.analyze_remote_key_header(ja.CHECK_ARBITRARY_JKU, controls(), REFUSED,
+                                       oob_available=False, oob_interactions=[])
+    assert got["verdict"] == ja.VERDICT_NOT_TESTED, got
+    assert "no in-band oracle" in got["reason"], got
+    assert ja.finding_for(got, "https://lab.invalid/me") is None
+
+
+def test_jku_positive_fetched_and_accepted_is_the_full_forgery():
+    got = ja.analyze_remote_key_header(
+        ja.CHECK_ARBITRARY_JKU, controls(), ja.Response(200, AUTH_BODY_SECOND_CAPTURE),
+        oob_available=True, oob_interactions=[HIT], oob_token=OOB_TOKEN, shape="jku_remote_jwks")
+    assert got["verdict"] == ja.VERDICT_CONFIRMED and got["check"] == ja.CHECK_ARBITRARY_JKU
+    finding = ja.finding_for(got, "https://lab.invalid/me")
+    assert finding["severity"] == "critical" and finding["cwe"] == "CWE-347"
+    assert "203.0.113.9" in finding["evidence"]
+
+
+def test_jku_fetched_but_refused_is_reported_as_a_FETCH_not_a_forgery():
+    """THE OVER-CLAIM THIS REFUSES. A callback proves the server dereferenced an attacker-chosen
+    URL -- an SSRF-grade fact. It does NOT prove the key was trusted. Reported as the fetched
+    check at CWE-918/medium, never upgraded."""
+    got = ja.analyze_remote_key_header(
+        ja.CHECK_ARBITRARY_JKU, controls(), REFUSED, oob_available=True,
+        oob_interactions=[HIT], oob_token=OOB_TOKEN)
+    assert got["verdict"] == ja.VERDICT_CONFIRMED
+    assert got["check"] == ja.CHECK_JKU_FETCHED, got
+    finding = ja.finding_for(got, "https://lab.invalid/me")
+    assert finding["severity"] == "medium" and finding["cwe"] == "CWE-918"
+    assert "ssrf" in finding["tags"]
+
+
+def test_jku_accepted_with_no_fetch_is_a_contradiction_and_claims_nothing():
+    """If the server never fetched our key set it cannot have verified with our key, so an
+    'acceptance' here was produced by something else entirely."""
+    got = ja.analyze_remote_key_header(
+        ja.CHECK_ARBITRARY_JKU, controls(), ja.Response(200, AUTH_BODY_SECOND_CAPTURE),
+        oob_available=True, oob_interactions=[], oob_token=OOB_TOKEN)
+    assert got["verdict"] == ja.VERDICT_NOT_TESTED, got
+    assert "never fetched" in got["reason"], got
+
+
+def test_jku_neither_fetched_nor_accepted_is_a_probe_rejection_not_a_clean_target():
+    got = ja.analyze_remote_key_header(
+        ja.CHECK_ARBITRARY_JKU, controls(), REFUSED, oob_available=True,
+        oob_interactions=[], oob_token=OOB_TOKEN)
+    assert got["verdict"] == ja.VERDICT_REJECTED, got
+    assert "not proof that it refused" in got["reason"], got
+    assert ja.finding_for(got, "https://lab.invalid/me") is None
+
+
+def test_another_probes_callback_cannot_confirm_this_one():
+    """A collaborator shared across a mission holds callbacks from every probe. Confirming a jku
+    forgery on someone else's callback would be a fabricated finding."""
+    other = dict(HIT, path="/oob/0123456789ab/ssrf")
+    got = ja.analyze_remote_key_header(
+        ja.CHECK_ARBITRARY_JKU, controls(), REFUSED, oob_available=True,
+        oob_interactions=[other], oob_token=OOB_TOKEN)
+    assert got["check"] == ja.CHECK_ARBITRARY_JKU and got["verdict"] == ja.VERDICT_REJECTED, got
+    assert ja.correlated_interactions([other], OOB_TOKEN) == []
+    assert ja.correlated_interactions([HIT], OOB_TOKEN) == [HIT]
+
+
+def test_x5u_uses_its_own_check_names_and_names_its_own_header():
+    got = ja.analyze_remote_key_header(ja.CHECK_ARBITRARY_X5U, controls(), REFUSED,
+                                       oob_available=False, oob_interactions=[])
+    assert "x5u forgery" in got["reason"], got
+    fetched = ja.analyze_remote_key_header(ja.CHECK_ARBITRARY_X5U, controls(), REFUSED,
+                                           oob_available=True, oob_interactions=[HIT])
+    assert fetched["check"] == ja.CHECK_X5U_FETCHED, fetched
+
+
+def test_the_signature_gate_still_applies_to_jku_even_with_a_callback():
+    """A callback plus an endpoint that honours a mangled signature is still not a jku forgery --
+    the acceptance is attributable to the broken verifier. It degrades to the FETCHED check, which
+    is the one fact that IS proven."""
+    broken = controls(tampered=ja.Response(200, AUTH_BODY))
+    got = ja.analyze_remote_key_header(
+        ja.CHECK_ARBITRARY_JKU, broken, ja.Response(200, AUTH_BODY), oob_available=True,
+        oob_interactions=[HIT], oob_token=OOB_TOKEN)
+    assert got["check"] == ja.CHECK_JKU_FETCHED, got
+    assert got["verdict"] == ja.VERDICT_CONFIRMED
+
+
+# =================================================================================================
 # the report boundary -- a finding is built ONLY from a confirmation, and coverage is surfaced
 # =================================================================================================
 

