@@ -7,6 +7,57 @@ ledger wins and this file is stale.
 checks before retiring itself, so leaving it stale silently disables that retirement.** Updating it is
 not bookkeeping. It rotted three cycles running (08-13, 08-16, 08-19) before that was written down.
 
+# CYCLE 19 — 2026-09-02 — THE SHAKEDOWN LOOP: scan a lab, census the tools, fix, repeat
+
+**Operator's design, and it beat mine.** I was about to hand-build lab cases for 101 unproven
+tools one at a time. The instruction was: spin up a scan on something small, monitor whether all
+the tools work, fix from there, repeat. ONE SCAN found more real defects than 4,285 passing tests
+and every gate in the repo.
+
+## Fixed (9)
+
+| # | defect | measured |
+|---|---|---|
+| Q-152 | warm-start replayed every stored asset as `https://`, ignoring scope | 1030 tool errors -> 0 |
+| Q-153 | hash-route params never probed; two sources destroyed the route | juice-shop DOM XSS found |
+| Q-154 | render settle was a race with the framework | canary at 0.49-0.59s vs a 600ms wait |
+| — | my own `window.Function` wrapper BROKE Angular silently | in_text True -> False, no page error |
+| Q-157 | SPA routes never discovered (+2 follow-ups: wrong phase, fixed settle) | 0 -> 5 routes |
+| Q-159 | DOM sweep deduped on path, so an SPA is one page | 1 key -> 3 |
+| Q-160 | "Reflected XSS (html)" graded HIGH on a JSON response | browser fired NO dialog |
+| Q-161 | the inventory dropped every SPA route before the planner saw it | `#/search?q=` now parameterized |
+| Q-162 | warm-start replayed stored DNS artifacts every mission | 6 scope blocks -> 0 |
+
+## Filed with measurements, not guesses
+
+* **Q-151 CRITICAL** — 101 of 110 tools have never been proven to work. Includes the zero
+  histogram over 90,228 log rows, filed explicitly as a CANDIDATE list.
+* **Q-158 CRITICAL** — every FORM engine is blind on an SPA. curl sees 0 forms, a render sees 1
+  form / 6 inputs. Rendering alone does not fix it: the form has no `action` and no `method`.
+* **Q-155 HIGH** — NoSQL injection is probed in query params only; the bug lives in JSON bodies.
+* **Q-156 CLOSED as a NON-DEFECT** — `run_sourcemap`'s zero is CORRECT.
+
+## The three lessons this cycle actually taught
+
+1. **A fixed settle is a race with the framework.** Cost three iterations, in two different
+   files, because I fixed it in `_render` (Q-154) and then wrote the same bug two hours later in
+   the route harvest. Wait for the CONDITION, bounded -- never for a duration.
+2. **A fix verified standalone can do nothing in a mission.** Three correct fixes in a row changed
+   nothing, because the routes were being deleted a layer below (Q-161). Component tests cannot
+   see this; only asking what the mission ACTUALLY did can.
+3. **A number nobody can see is a number nobody can debug.** "38 crawled URLs" reads identically
+   whether five routes were added or zero, which is what made lesson 2 cost three rebuild cycles.
+   katana now reports "(+5 SPA route(s))".
+
+## Ground truth beats intuition, twice
+
+`run_dalfox` reported 0 where `run_xss` reported a confirmed HIGH. I assumed dalfox was broken.
+**dalfox was right** -- that is how Q-160 was found. And `run_sourcemap`'s silence on juice-shop is
+correct, because juice-shop serves an SPA fallback for `.map` and the engine refused to call a 200
+a source map. Two engines I would have "fixed" into regressions.
+
+---
+
 # CYCLE 18 — 2026-09-02 — Burp's issue catalog, and five false CRITICALs killed before they shipped
 
 **Headline number: engine liveness 19 -> 25.** Every engine landed this cycle confirms through the
