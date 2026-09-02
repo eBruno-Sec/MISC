@@ -94,7 +94,7 @@ PHASES = ["recon", "enum", "scan", "probe", "guidance", "report"]
 # is driving (deterministic / low_ai). These native probes only emit CONFIRMED
 # vulns; without auto-store a deterministic scan would confirm and then drop them.
 _AUTO_STORE_TOOLS = {
-    "run_sqli", "run_auth_sqli", "run_form_cmdi", "run_nosqli", "run_form_nosqli", "run_upload_test",
+    "run_sqli", "run_auth_sqli", "run_form_cmdi", "run_nosqli", "run_nosqli_body", "run_form_nosqli", "run_upload_test",
     "run_cache_poison", "run_cache_deception", "run_client_checks", "run_css_injection", "run_waf_bypass", "run_sqli_structural", "run_session_token", "run_username_enum", "run_session_fixation", "run_default_creds", "run_ssh_audit", "run_ldap_enum", "run_smb_enum", "run_snmp_audit", "run_modbus_audit", "run_vnc_audit", "run_rsync_audit", "run_ntp_audit", "run_ipmi_audit", "run_rdp_audit", "run_path_sqli", "run_llm_probe", "run_cmdi", "run_ssrf", "run_xss", "run_form_xss", "run_xpath", "run_ldap", "run_ssi", "run_stored_xss", "run_dom_audit", "run_dom_trace", "run_rendered_forms", "run_encoded_cookie", "run_xxe", "run_deserialization",
     "run_injection_probes", "run_web_probes", "run_exposure", "run_bfla", "run_race",
     "run_nuclei", "run_zap", "check_takeover", "run_oauth", "run_jwt", "run_csrf",

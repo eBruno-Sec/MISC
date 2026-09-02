@@ -541,6 +541,7 @@ TOOL_PERMISSIONS = {
     "run_auth_sqli": PermissionLevel.ACTIVE,
     "run_form_cmdi": PermissionLevel.INTRUSIVE,
     "run_nosqli": PermissionLevel.ACTIVE,
+    "run_nosqli_body": PermissionLevel.ACTIVE,     # Q-155: JSON-body carrier, read-only operators
     "run_form_nosqli": PermissionLevel.ACTIVE,
     "run_upload_test": PermissionLevel.INTRUSIVE,
     "run_stored_xss": PermissionLevel.INTRUSIVE,
@@ -863,6 +864,17 @@ _PARAM_WORDS = [
 
 # ── Canonical tool definitions (Anthropic format) ────────────────
 CLAUDE_TOOLS = [
+    {"name": "run_nosqli_body",
+     "description": ("ACTIVE: Mongo-style operator injection in a JSON REQUEST BODY (Q-155). "
+                     "run_nosqli appends the operator to a parameter NAME on a query string "
+                     "(id[$ne]=), which is one of the two carriers; the other is a real nested "
+                     "object in a JSON body ({\"id\": {\"$ne\": -1}}) that no query-string probe "
+                     "reaches. The probe body is built by mutating a body this mission actually "
+                     "OBSERVED, never an invented one. Read-only operators only."),
+     "input_schema": {"type": "object", "properties": {
+         "url": {"type": "string"},
+         "max_fields": {"type": "integer", "default": 4}},
+         "required": ["url"]}},
     {"name": "run_rendered_forms",
      "description": ("ACTIVE: Injection through the forms a SINGLE-PAGE APP actually RENDERS (Q-158). "
                      "run_form_xss / run_form_nosqli / run_form_cmdi / run_upload_test all scrape <form> "
@@ -9637,6 +9649,55 @@ class ToolRegistry:
         summary = ("auth-bypass SQLi CONFIRMED on the login body" if findings
                    else "no body auth-bypass SQLi on this endpoint")
         return ToolResult("auth_sqli", url, True, summary, findings)
+
+    async def _run_nosqli_body(self, inp: dict) -> ToolResult:
+        """ACTIVE: Mongo-style operator injection in a JSON REQUEST BODY (Q-155).
+
+        `_run_nosqli` appends the operator to a parameter NAME on a query string (`id[$ne]=`). That
+        is one of the two carriers and the less common one in a modern API; the other is a real
+        nested object in a JSON body (`{"id": {"$ne": -1}}`), which no query-string probe reaches.
+        MEASURED: 12 dispatches against juice-shop, 0 results, on a target that IS NoSQL-injectable
+        -- every one of its injection points is a JSON body. The oracle was right about every URL it
+        was given and was never given the shape that carries the bug.
+
+        THE BODY IS OBSERVED, NEVER INVENTED. Probes are built by mutating a request body this
+        mission actually recorded, because a made-up body makes baseline and probe fail identically
+        and the engine then reports clean on a vulnerable field -- the failure that has bitten three
+        engines here already. No observed JSON body for the target means NOT TESTED, not clean."""
+        import nosqli_body as _nb
+        url = (inp.get("url") or "").strip()
+        if not url:
+            return ToolResult("nosqli_body", "", False, "", [], "need url")
+        if not self.scope.validate(url)[0]:
+            return ToolResult("nosqli_body", url, False, "", [], "SCOPE BLOCK")
+        rows = []
+        if self.mission_id:
+            for ex in (db.get_exchanges(self.mission_id) or []):
+                b = (ex.get("request_body") or "").strip()
+                if not b or not b.startswith(("{", "[")):
+                    continue
+                if str(ex.get("url") or "").split("?")[0] != url.split("?")[0]:
+                    continue
+                rows.append(ex)
+        if not rows:
+            return ToolResult("nosqli_body", url, True,
+                              "no JSON request body observed for this endpoint - NOT TESTED "
+                              "(a body we invented would make baseline and probe fail identically)",
+                              [])
+
+        async def _send(method, u, headers, body_str):
+            return await self._http(u, method, headers or {}, body_str, capture=True)
+
+        ex = rows[0]
+        res = await _nb.probe_json_body(_send, url, str(ex.get("method") or "POST").upper(),
+                                        ex.get("request_body"),
+                                        headers=ex.get("request_headers") or {},
+                                        max_fields=int(inp.get("max_fields") or 4))
+        findings = [f for f in (res.get("findings") or []) if f.get("confidence") == "confirmed"]
+        note = "%d field(s) probed over %d request(s)%s" % (
+            len(res.get("fields") or []), int(res.get("requests") or 0),
+            "; " + res["skipped"] if res.get("skipped") else "")
+        return ToolResult("nosqli_body", url, True, note, findings)
 
     async def _run_nosqli(self, inp: dict) -> ToolResult:
         """NoSQL (MongoDB-style) operator injection on a parameterized URL. Appends

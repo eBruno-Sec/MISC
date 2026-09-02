@@ -980,6 +980,11 @@ def next_batch(state: dict) -> list:
         e_steps.append(_step("run_xss", {"url": u}, f"run_xss:{tag}"))
         e_steps.append(_step("run_sqli", {"url": u}, f"run_sqli:{tag}"))
         e_steps.append(_step("run_nosqli", {"url": u}, f"run_nosqli:{tag}"))
+        # Q-155. The query-string carrier above reaches `id[$ne]=`; the JSON-body carrier reaches
+        # `{"id": {"$ne": -1}}`, which is where a modern API actually carries it. It self-skips as
+        # NOT TESTED when this mission observed no JSON body for the endpoint, so scheduling it
+        # beside its sibling costs one dispatch on an endpoint that has none.
+        e_steps.append(_step("run_nosqli_body", {"url": u}, f"run_nosqli_body:{tag}"))
         e_steps.append(_step("run_injection_probes", {"url": u}, f"run_injection_probes:{tag}"))
         e_steps.append(_step("run_web_probes", {"url": u}, f"run_web_probes:{tag}"))   # LFI/traversal + IDOR
         if any(p in _URLISH_PARAM for p in params_l):
