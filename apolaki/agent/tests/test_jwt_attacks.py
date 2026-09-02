@@ -226,6 +226,45 @@ def test_the_payload_tamper_probe_is_not_built_from_a_non_jwt():
     assert ja.forge_payload_tamper("") is None
 
 
+def test_the_payload_rewrite_shape_confirms_where_the_byte_flip_does_not():
+    """THE SECOND SHAPE, and the reason it is not redundant. Here the byte-flipped token is
+    correctly REFUSED -- a verifier that ignores signatures entirely would have honoured it -- and
+    yet the claims-rewritten token with a REAL (just wrong) signature is honoured. That is a
+    verifier checking the signature's shape, or verifying it against a stale signing input, or
+    reading the claims from an unverified copy. Shape one alone reports nothing here."""
+    got = ja.analyze_signature_verification(controls(tampered=REFUSED),
+                                            payload_tampered=ja.Response(200, AUTH_BODY))
+    assert got["verdict"] == ja.VERDICT_CONFIRMED, got
+    assert got["shape"] == "payload_rewritten_signature_kept", got
+    assert ja.finding_for(got, "https://lab.invalid/me")["cwe"] == "CWE-347"
+
+
+def test_the_payload_rewrite_shape_needs_no_tampered_leg():
+    """A rewritten payload accepted while a no-token request is refused is already the whole
+    differential, so this shape works on a two-leg control set."""
+    got = ja.analyze_signature_verification(
+        ja.Controls(authenticated=AUTH, unauthenticated=UNAUTH, tampered=None),
+        payload_tampered=ja.Response(200, AUTH_BODY))
+    assert got["verdict"] == ja.VERDICT_CONFIRMED, got
+
+
+def test_the_payload_rewrite_shape_reports_nothing_against_a_sound_verifier():
+    """NEGATIVE CONTROL. Both shapes refused -> `rejected`, no finding."""
+    got = ja.analyze_signature_verification(controls(tampered=REFUSED), payload_tampered=REFUSED)
+    assert got["verdict"] == ja.VERDICT_REJECTED, got
+    assert ja.finding_for(got, "https://lab.invalid/me") is None
+
+
+def test_the_payload_rewrite_shape_is_not_tested_on_an_ungated_endpoint():
+    public = ja.Controls(authenticated=ja.Response(200, "welcome to the shop"),
+                         unauthenticated=ja.Response(200, "welcome to the shop"),
+                         tampered=ja.Response(200, "welcome to the shop"))
+    got = ja.analyze_signature_verification(public,
+                                            payload_tampered=ja.Response(200, "welcome to the shop"))
+    assert got["verdict"] == ja.VERDICT_NOT_TESTED, got
+    assert ja.finding_for(got, "https://lab.invalid/me") is None
+
+
 # =================================================================================================
 # CHECK 2 -- Burp "JWT none algorithm supported"
 # =================================================================================================

@@ -347,21 +347,24 @@ def classify_acceptance(controls: Controls, probe: Response) -> dict:
 
 SIGNATURE_SOUND = "sound"
 SIGNATURE_NOT_VERIFIED = "not_verified"
-SIGNATURE_VACUOUS = "vacuous"
 SIGNATURE_UNKNOWN = "unknown"
 
 
 def signature_oracle(controls: Controls) -> dict:
-    """`{state, reason}` for the signature-tampered leg. Four states, and three of them block.
+    """`{state, reason}` for the signature-tampered leg. Three states, and two of them block.
 
       SOUND          the tampered token was refused. The endpoint checks signatures, so an
                      acceptance of some OTHER forgery is attributable to that forgery.
       NOT_VERIFIED   the tampered token was honoured while the no-token control was refused.
                      The endpoint reads the claims and does not verify the signature: Burp's
                      `jwt_signature_not_verified`, CONFIRMED.
-      VACUOUS        the tampered token was honoured and so was the no-token control. The endpoint
-                     is not gated at all; nothing here is a finding and nothing else can be tested.
       UNKNOWN        no tampered leg, or its response was inconclusive.
+
+    There is deliberately no VACUOUS state. "The tampered token was honoured AND so was the
+    no-token request" is the ungated-endpoint case, and it is caught one level up by
+    `controls_usable()` -- those two controls are indistinguishable by construction, so this
+    function never sees it. Keeping a fourth state for a case that cannot arrive would be a branch
+    no test could reach.
     """
     if controls.tampered is None:
         return {"state": SIGNATURE_UNKNOWN,
@@ -387,12 +390,27 @@ def signature_oracle(controls: Controls) -> dict:
     return {"state": SIGNATURE_UNKNOWN, "reason": verdict["reason"]}
 
 
-def analyze_signature_verification(controls: Controls) -> dict:
-    """Burp's `JWT signature not verified`, as a verdict row.
+def analyze_signature_verification(controls: Controls, payload_tampered: Response = None) -> dict:
+    """Burp's `JWT signature not verified`, as a verdict row, from EITHER of two probe shapes.
 
-    CONFIRMED requires the differential in both directions: tampered honoured AND no-token
-    refused. Either half alone is the false positive -- "tampered honoured" on an ungated endpoint
-    is a public page, and "no-token refused" on its own says nothing about signatures.
+    CONFIRMED requires the differential in both directions: the forgery honoured AND the no-token
+    request refused. Either half alone is the false positive -- "forgery honoured" on an ungated
+    endpoint is a public page, and "no-token refused" on its own says nothing about signatures.
+
+    TWO SHAPES, because they fail independently:
+
+      signature_byte_flipped            the `tampered` control leg. The claims are untouched and one
+                                        signature byte is wrong. Catches a verifier that never looks
+                                        at the signature at all.
+      payload_rewritten_signature_kept  `forge_payload_tamper()`. The signature is a REAL one, just
+                                        not over these claims. Catches a verifier that checks the
+                                        signature's shape, or verifies it against a stale signing
+                                        input, or reads the claims from an unverified copy -- all of
+                                        which pass the first shape and fail this one.
+
+    The second shape needs NO tampered leg: a rewritten payload accepted while a no-token request
+    is refused is already the whole differential. That is why this takes the response directly
+    rather than reading it off `Controls`.
     """
     oracle = signature_oracle(controls)
     if oracle["state"] == SIGNATURE_NOT_VERIFIED:
@@ -401,6 +419,27 @@ def analyze_signature_verification(controls: Controls) -> dict:
                 "evidence": ("HTTP request with a signature-tampered JWT -> accepted; the same "
                              "request with no token -> refused. %s" % oracle["reason"]),
                 "reason": oracle["reason"]}
+
+    if payload_tampered is not None:
+        rewritten = classify_acceptance(controls, payload_tampered)
+        if rewritten["verdict"] == VERDICT_CONFIRMED:
+            return {"check": CHECK_SIGNATURE_NOT_VERIFIED, "verdict": VERDICT_CONFIRMED,
+                    "shape": "payload_rewritten_signature_kept",
+                    "evidence": ("HTTP request with the JWT's claims rewritten and its ORIGINAL "
+                                 "signature reattached -> accepted (%s); the same request with no "
+                                 "token -> refused. The reattached signature cannot validate over "
+                                 "the new signing input, so the claims were trusted unverified."
+                                 % rewritten["reason"]),
+                    "reason": rewritten["reason"]}
+        if oracle["state"] == SIGNATURE_SOUND:
+            return {"check": CHECK_SIGNATURE_NOT_VERIFIED, "verdict": rewritten["verdict"],
+                    "shape": "payload_rewritten_signature_kept", "evidence": "",
+                    "reason": rewritten["reason"]}
+        return {"check": CHECK_SIGNATURE_NOT_VERIFIED, "verdict": VERDICT_NOT_TESTED,
+                "shape": "payload_rewritten_signature_kept", "evidence": "",
+                "reason": rewritten["reason"] if rewritten["verdict"] == VERDICT_NOT_TESTED
+                          else oracle["reason"]}
+
     if oracle["state"] == SIGNATURE_SOUND:
         return {"check": CHECK_SIGNATURE_NOT_VERIFIED, "verdict": VERDICT_REJECTED,
                 "shape": "signature_byte_flipped", "evidence": "", "reason": oracle["reason"]}
