@@ -257,6 +257,28 @@ def _require_mission(sid: str) -> dict:
     return m
 
 
+def _seed_url(value: str, bases: dict) -> str:
+    """A stored asset ("host/path", no scheme) rebuilt as an absolute URL.
+
+    Q-152. THE SCHEME MUST COME FROM THE SCOPE, NOT FROM A CONSTANT. Memory stores assets without
+    one and warm-start replayed every asset as `https://`. On an HTTP-only target that seeds a
+    thousand URLs nothing can connect to, and the engines then report "ran, found nothing" for a
+    target they never reached.
+
+    MEASURED on the juice-shop shakedown: 1001 seeded endpoints, 1030 tool_errors against 350
+    results, `http_probe` alone returning 250 x [SSL: WRONG_VERSION_NUMBER], and 22 tools recorded
+    as silent. `scope.base_map()` already answers this per host -- it carries the operator's
+    declared scheme and port, and falls back to https itself -- so an ordinary engagement is
+    unchanged and only a declared non-https base behaves differently.
+    """
+    v = str(value or "")
+    if "://" in v:
+        return v
+    netloc = v.split("/", 1)[0]
+    base = (bases or {}).get(netloc) or (bases or {}).get(netloc.split(":")[0])
+    return (base.rstrip("/") + v[len(netloc):]) if base else ("https://" + v)
+
+
 def _warm_start_technology(scope: ScopeEngine, tools: ToolRegistry, prior: dict) -> int:
     """Re-seed TechnologyFacts from the previous mission on this target. Returns how many.
 
@@ -315,11 +337,10 @@ def _warm_start(scope: ScopeEngine, tools: ToolRegistry, agent) -> dict:
         if s not in tools.recon["subdomains"]:
             tools.recon["subdomains"].append(s)
 
-    host_urls = [f"https://{a['value']}" for a in assets.get("hosts", [])]
-    ep_urls = []
-    for a in assets.get("endpoints", []):
-        v = a["value"]                        # stored as "host/path"
-        ep_urls.append("https://" + v if "://" not in v else v)
+    # Q-152. The scheme comes from the SCOPE, never from a constant. See `_seed_url`.
+    _bases = scope.base_map()
+    host_urls = [_seed_url(a["value"], _bases) for a in assets.get("hosts", [])]
+    ep_urls = [_seed_url(a["value"], _bases) for a in assets.get("endpoints", [])]
     before = len(tools.urls)
     tools._add_urls(host_urls + ep_urls)      # each URL re-validated against scope
     seeded_urls = len(tools.urls) - before

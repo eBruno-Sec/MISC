@@ -216,3 +216,61 @@ def test_technology_alone_is_enough_to_warm_start():
     summary = mainmod._warm_start(sc, tools, _Agent())
     assert summary["technology"] == 1
     assert len(tools.recon["technology"]) == 1
+
+
+# =================================================================================================
+# Q-152. Warm-start replayed every stored asset as `https://`, whatever the operator declared.
+#
+# MEASURED on the juice-shop shakedown (mission d9f5e1a3), which is what surfaced it: 1001 seeded
+# endpoints, 1030 tool_errors against 350 tool_results, `http_probe` alone reporting 250 x
+# [SSL: WRONG_VERSION_NUMBER], `run_dom_trace` 192 x ERR_SSL_PROTOCOL_ERROR, and 22 tools recorded
+# as "ran, always zero". They were not broken. They never reached the target.
+#
+# That is the same lie as a middlebox eating the payloads (Q-112): a run whose requests never
+# arrived is not a clean result, and here it was self-inflicted.
+# =================================================================================================
+
+import main as _mainmod
+import scope as _scopemod
+
+
+def _bases_for(entry):
+    sc = _scopemod.ScopeEngine()
+    sc.load_manual([entry], [], "T")
+    return sc.base_map()
+
+
+def test_a_declared_http_base_is_used_for_seeded_assets():
+    b = _bases_for("http://juice-shop:3000")
+    assert _mainmod._seed_url("juice-shop/rest/products", b) == "http://juice-shop:3000/rest/products"
+    assert _mainmod._seed_url("juice-shop", b) == "http://juice-shop:3000"
+
+
+def test_a_host_port_entry_with_no_scheme_still_resolves_to_http():
+    """`_split_scope_entry` infers http for a non-443 port. Warm-start must honour that too."""
+    assert _mainmod._seed_url("juice-shop/x", _bases_for("juice-shop:3000")) == \
+        "http://juice-shop:3000/x"
+
+
+def test_an_undeclared_host_still_defaults_to_https():
+    """The fallback is unchanged, so an ordinary engagement behaves exactly as before. A fix that
+    flipped the default to http would be a security regression for the sake of a lab."""
+    assert _mainmod._seed_url("elsewhere.test/a", _bases_for("http://juice-shop:3000")) == \
+        "https://elsewhere.test/a"
+    assert _mainmod._seed_url("h.example/p", {}) == "https://h.example/p"
+
+
+def test_an_asset_that_already_carries_a_scheme_is_left_alone():
+    assert _mainmod._seed_url("https://x.example/z", _bases_for("http://juice-shop:3000")) == \
+        "https://x.example/z"
+
+
+def test_the_scheme_is_not_hardcoded_anywhere_in_the_seeding_path():
+    """NON-VACUITY. The two lines this replaced were `f"https://{a['value']}"` and
+    `"https://" + v`. If either comes back, the helper is being bypassed and every test above
+    still passes while the defect returns."""
+    import inspect
+    src = inspect.getsource(_mainmod._warm_start)
+    assert 'f"https://{a[' not in src, "warm-start hardcodes an https host URL again"
+    assert '"https://" + v' not in src, "warm-start hardcodes an https endpoint URL again"
+    assert "_seed_url(" in src, "warm-start no longer routes through the scope-aware helper"
