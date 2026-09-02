@@ -85,6 +85,7 @@ FULL = {
     "WSTG-CLNT-03": "run_xss / run_form_xss", "WSTG-CLNT-04": "run_dom_trace (open redirect)",
     "WSTG-CLNT-05": "run_css_injection", "WSTG-CLNT-07": "run_injection_probes (CORS)",
     "WSTG-CLNT-09": "guidance (framing headers)",
+    "WSTG-CLNT-10": "run_dom_trace (dom_sinks WebSocket + ajax header hooks)",
     "WSTG-CONF-04": "run_exposure + run_dir_harvest", "WSTG-CONF-05": "run_content_discovery",
     "WSTG-CONF-06": "run_web_probes (dangerous methods)", "WSTG-CONF-07": "header analysis (HSTS)",
     "WSTG-CONF-10": "check_takeover", "WSTG-CONF-12": "header analysis (CSP)",

@@ -199,7 +199,8 @@ def test_deleting_the_only_negative_row_changes_reporting_and_nothing_else(monke
               "descriptors"):
         assert before[k] == after[k], (k, before[k], after[k])
     assert before["plan_auth"] == ["sqli_auth_bypass"], before["plan_auth"]
-    assert before["descriptors"] == 88, before["descriptors"]
+    # 88 -> 94: cycle 18 declared six new techniques, each with a typed claim and a route.
+    assert before["descriptors"] == 94, before["descriptors"]
 
 
 def test_the_row_is_restored_after_the_mutation(monkeypatch):

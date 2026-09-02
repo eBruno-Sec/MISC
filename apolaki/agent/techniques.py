@@ -101,7 +101,7 @@ TECHNIQUES: dict[str, dict] = {t["id"]: t for t in [
     # a green tick nothing can hold to account. Every `validated_on` below was earned by a
     # liveness run against the named lab, not hand-written.
 
-    _t(id="private_key_disclosed", vuln_class="information_disclosure", cwe="CWE-522",
+    _t(id="private_key_disclosed", vuln_class="sensitive_exposure", cwe="CWE-522",
        owasp="A02:2021", permission=PASSIVE, transferable=True,
        summary="A private key is served in a response body.",
        detect="PEM armour with real key material between the markers, outside any display element.",
@@ -132,7 +132,7 @@ TECHNIQUES: dict[str, dict] = {t["id"]: t for t in [
        wstg="WSTG-CLNT-10", mitre="T1190",
        validated_on=["domsource"]),
 
-    _t(id="csp_allows_untrusted_script", vuln_class="security_misconfiguration", cwe="CWE-693",
+    _t(id="csp_allows_untrusted_script", vuln_class="misconfiguration", cwe="CWE-693",
        owasp="A05:2021", permission=PASSIVE, transferable=True,
        summary="The Content-Security-Policy permits untrusted script execution.",
        detect="Parse the enforced policy's script-src, accounting for default-src inheritance.",
@@ -142,7 +142,7 @@ TECHNIQUES: dict[str, dict] = {t["id"]: t for t in [
        wstg="WSTG-CONF-12", mitre="T1189",
        validated_on=["domsource"]),
 
-    _t(id="jwt_signature_not_verified", vuln_class="broken_authentication", cwe="CWE-347",
+    _t(id="jwt_signature_not_verified", vuln_class="broken_auth", cwe="CWE-347",
        owasp="A07:2021", permission=ACTIVE, transferable=True,
        summary="The application honours a JWT whose signature it never verified.",
        detect="Three controls -- authenticated, unauthenticated, signature-tampered -- then compare.",
@@ -152,7 +152,7 @@ TECHNIQUES: dict[str, dict] = {t["id"]: t for t in [
        wstg="WSTG-SESS-10", mitre="T1550",
        validated_on=["domsource"]),
 
-    _t(id="python_code_injection", vuln_class="code_injection", cwe="CWE-94", owasp="A03:2021",
+    _t(id="python_code_injection", vuln_class="injection", cwe="CWE-94", owasp="A03:2021",
        permission=ACTIVE, transferable=True,
        summary="A parameter is evaluated as server-side Python.",
        detect="A probe carrying two independently-derived tokens: a random-operand arithmetic "

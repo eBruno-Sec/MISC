@@ -732,7 +732,7 @@ def test_an_endpoint_that_answers_200_to_everyone_yields_NO_jwt_finding():
     without any token, and with the signature mangled. Nothing here distinguishes an accepted
     forgery from a page that never looked at the token, so the honest output is nothing at all."""
     reg = _registry_answering(lambda url, h: {"status": 200, "body": "<html>welcome</html>"})
-    res = asyncio.get_event_loop().run_until_complete(
+    res = asyncio.run(
         reg._run_jwt({"token": _TOK, "url": "https://target.tld/inert"}))
     assert _confirmed(res) == [], [f.get("title") for f in _confirmed(res)]
 
@@ -747,7 +747,7 @@ def test_a_token_gated_endpoint_that_ignores_the_signature_IS_reported():
             return {"status": 401, "body": '{"error":"authentication required"}'}
         return {"status": 200, "body": '{"user":"alice","balance":4210}'}
 
-    res = asyncio.get_event_loop().run_until_complete(
+    res = asyncio.run(
         _registry_answering(answer)._run_jwt({"token": _TOK, "url": "https://target.tld/api/me"}))
     titles = [f.get("title") for f in _confirmed(res)]
     assert any("signature is not verified" in str(t) for t in titles), titles

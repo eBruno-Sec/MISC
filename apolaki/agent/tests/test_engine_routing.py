@@ -225,7 +225,9 @@ def test_the_routing_layer_is_not_itself_an_island():
     r = asyncio.run(mainmod.orchestration_audit())
     assert "error" not in r, r
     assert r["routing"]["registry_readable"] is True
-    assert r["routing"]["routed"] == 77
+    # 77 -> 83: cycle 18 added six techniques and ROUTED all six. This number may only move
+    # up for that reason -- a drop means something stopped being dispatchable.
+    assert r["routing"]["routed"] == 83
     assert r["routing"]["phantom"] == []
     assert r["unroutable"] == UNROUTED_2026_08_17
     # the honest contrast, on one payload: declared clean, factually 11 short

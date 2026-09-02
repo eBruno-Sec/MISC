@@ -113,6 +113,18 @@ PRECONDITIONS = {
 # reached. The orchestration guard (orchestration_audit) treats _PRECONDITIONS ∪ ALWAYS_ON as "wired"; any
 # auto+oracle+transferable technique in NEITHER is an island the engagement can't orchestrate, and fails the guard.
 ALWAYS_ON = {
+    # CYCLE 18. Each of these was proven to dispatch by a LIVENESS RUN against a lab case, not by
+    # reading the call site -- which matters, because one of them (dom_sinks) had a live call site
+    # while every recorder it feeds was silently a no-op. The engine named here is the tool the
+    # liveness case actually drove.
+    "private_key_disclosed":       "always-on passive body scan inside run_web_probes on every fetched response",
+    "websocket_url_poisoning":     "always-on DOM sink sweep (run_dom_trace) on every probed source, query and fragment",
+    "ajax_header_manipulation":    "always-on DOM sink sweep (run_dom_trace): XHR/fetch header hooks on every render",
+    "csp_allows_untrusted_script": "always-on header posture pass (run_transport_posture) on every origin",
+    "jwt_signature_not_verified":  "run_jwt whenever a JWT is observed in a session header or cookie",
+    "python_code_injection":       "always-on run_injection_probes sweep on every parameterized "
+                                   "endpoint (the bare phrase `injection_probes` is not an engine-shaped "
+                                   "token, which is why ssti and crlf_injection still read as unrouted)",
     "dom_xss":                  "always-on DOM sweep (run_xss / run_dom_trace on every reflected param + app page)",
     "csti":                     "always-on DOM audit (run_dom_audit on every page with a discoverable param)",
     "prototype_pollution":      "always-on DOM audit (run_dom_audit prototype-gadget scan)",
