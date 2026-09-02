@@ -5071,6 +5071,44 @@ class ToolRegistry:
         return ToolResult("fetch_openapi", url, True, f"{len(endpoints)} endpoints imported",
                           [{"url": e} for e in endpoints[:50]])
 
+    async def _spa_hash_routes(self, url: str) -> list:
+        """Hash routes a single-page app renders into real anchors once it has booted.
+
+        Q-157. No HTTP crawler can produce these: the fragment never reaches the server, so it is
+        normalised away upstream, and the anchors do not exist in the served bytes at all. MEASURED
+        on juice-shop -- curl sees zero, a render sees five. Bounded, and every URL is re-validated
+        against scope by the caller.
+
+        Returns [] rather than raising when there is no browser: this augments a crawl, and a
+        missing browser must not fail the crawl that would otherwise have succeeded.
+        """
+        chrome = _chrome_path()
+        if not chrome:
+            return []
+        try:
+            from playwright.async_api import async_playwright
+        except Exception:
+            return []
+        base, out = url.split("#")[0], []
+        async with async_playwright() as pw:
+            browser = await pw.chromium.launch(headless=True, executable_path=chrome,
+                                               args=["--no-sandbox", "--disable-gpu",
+                                                     "--disable-dev-shm-usage"])
+            try:
+                ctx = await browser.new_context(ignore_https_errors=True)
+                await self._ctx_add_cookies(ctx)
+                pg = await ctx.new_page()
+                await _browser_engine.rate_limited_goto(pg, base, wait_until="domcontentloaded",
+                                                        timeout=12000)
+                await pg.wait_for_timeout(1500)
+                hrefs = await pg.evaluate(
+                    "() => [...new Set([...document.querySelectorAll('a[href]')]"
+                    ".map(a => a.getAttribute('href')))].filter(h => h && h[0] === '#')")
+                out = [base + h for h in (hrefs or [])[:12]]
+            finally:
+                await browser.close()
+        return out
+
     async def _run_katana(self, inp: dict) -> ToolResult:
         url = inp["url"]
         _MISSING = "katana not installed (use http_probe / run_wayback instead)"
@@ -5118,7 +5156,16 @@ class ToolRegistry:
                 return ToolResult("katana", url, False, "", [],
                                   _MISSING if "not installed" in _failed else _failed)
         urls = [u.strip() for u in out.splitlines() if u.strip().startswith("http")]
-        urls = [u for u in urls if self.scope.validate(u)[0]]
+        # Q-157, IN THE RIGHT PHASE. Hash routes were first harvested inside `_run_dom_trace`, which
+        # runs in PROBE -- by then the planner has already fixed its work list, so the routes were
+        # added to the surface and never dispatched against. MEASURED: 46 dom_trace events, no
+        # errors, and still zero hash-route URLs anywhere in the mission.
+        #
+        # A crawler is where new surface belongs, and katana cannot produce these itself: a fragment
+        # is never sent to the server so it normalises them away, and an SPA renders its
+        # `routerLink`s into anchors only after it boots. One render answers both.
+        urls += await self._spa_hash_routes(url)
+        urls = [u for u in dict.fromkeys(urls) if self.scope.validate(u)[0]]
         self._add_urls(urls)
         try:                                    # crawled URLs are intel: routes + external urls
             for _u in urls:
@@ -6426,31 +6473,6 @@ class ToolRegistry:
         params = params[:8]
         findings, seen = [], set()
 
-        async def _page_hash_routes(u):
-            """Hash routes an SPA renders into real anchors once it has booted.
-
-            Q-157. Returns absolute URLs for `<a href="#/...">`, which no HTTP crawler can produce:
-            the fragment never reaches the server, so it is normalised away upstream. Bounded to a
-            small number because each one becomes probe surface.
-            """
-            ctx2 = await browser.new_context(ignore_https_errors=True)
-            try:
-                await self._ctx_add_cookies(ctx2)
-                pg = await ctx2.new_page()
-                # `domcontentloaded`, not `load`: an SPA keeps loading lazy chunks long after the
-                # anchors exist, and waiting for `load` timed out at 9s under mission load. The
-                # settle below is what actually gives Angular time to render its routerLinks.
-                await _browser_engine.rate_limited_goto(pg, u, wait_until="domcontentloaded",
-                                                        timeout=12000)
-                await pg.wait_for_timeout(1200)
-                hrefs = await pg.evaluate(
-                    "() => [...new Set([...document.querySelectorAll('a[href]')]"
-                    ".map(a => a.getAttribute('href')))].filter(h => h && h[0] === '#')")
-            finally:
-                await ctx2.close()
-            base = u.split("#")[0]
-            return [base + h for h in (hrefs or [])[:12]]
-
         async def _render(u, canary, anon: bool = False):
             """Load u in a fresh context; return the runtime signals for `canary`.
 
@@ -6716,17 +6738,6 @@ class ToolRegistry:
                     #    path-relative reference, renders in quirks mode (so the browser accepts
                     #    whatever comes back as CSS), and the SERVER returns this same page for a
                     #    padded path. Only the third is invisible to the browser.
-                    # Harvested in its OWN try. It first shared one with PRSSI, and when the
-                    # navigation timed out under mission load BOTH were lost -- the swallow said
-                    # "prssi" and the routes silently never arrived. Two independent facts must not
-                    # share a failure domain.
-                    try:
-                        _routes = await _page_hash_routes(url)
-                        if _routes:
-                            self._add_urls(_routes)
-                    except Exception as _apolaki_routes:
-                        self._swallow(_apolaki_routes, 'tools:_run_dom_trace:hash_routes', url)
-
                     try:
                         # One render of the page AS SERVED -- PRSSI is a property of the
                         # unmodified document, so a parameter probe's render cannot answer it.
