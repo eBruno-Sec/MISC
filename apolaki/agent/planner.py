@@ -921,6 +921,21 @@ def next_batch(state: dict) -> list:
             dom_pages.append(u)
     for u in dom_pages[:CAP_DOM]:
         e_steps.append(_step("run_dom_audit", {"url": u}, f"run_dom_audit:{u}"))
+    # Q-158. The form engines scrape <form> out of the SERVED response, and a single-page app
+    # serves a shell -- MEASURED on juice-shop: 0 forms served, 1 form with 6 inputs after render.
+    # So `run_form_xss` and its siblings are structurally blind there and report a clean form
+    # surface they never saw. This drives the RENDERED controls instead.
+    #
+    # ONCE PER BASE, not per URL: it is browser-backed and route-shaped, and the routes it needs
+    # are the SPA routes the crawl already put on the surface (Q-157/Q-163 harvest them; a
+    # server-rendered app simply yields none and this falls back to "/").
+    _spa_routes = [u for u in (urls or []) if "#/" in str(u)][:6]
+    for h in host_bases[:CAP_HOSTS]:
+        _rf_in = {"base_url": _b(h)}
+        _mine = [u for u in _spa_routes if _host(u) == h]
+        if _mine:
+            _rf_in["routes"] = _mine
+        e_steps.append(_step("run_rendered_forms", _rf_in, f"run_rendered_forms:{h}"))
     # active parameter mining (deep/insane): brute-force hidden params on host roots + key
     # pages so injection probes reach inputs the crawl never saw. Discovered params are
     # added to the surface and picked up by the iterative planner on a later batch.

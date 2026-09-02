@@ -514,6 +514,7 @@ TOOL_PERMISSIONS = {
     "run_oauth": PermissionLevel.ACTIVE,
     "run_xss": PermissionLevel.ACTIVE,
     "run_form_xss": PermissionLevel.ACTIVE,
+    "run_rendered_forms": PermissionLevel.ACTIVE,     # Q-158: submits only forms the app already exposes
     "run_dom_trace": PermissionLevel.ACTIVE,
     "run_encoded_cookie": PermissionLevel.ACTIVE,
     "run_dom_audit": PermissionLevel.ACTIVE,
@@ -862,6 +863,24 @@ _PARAM_WORDS = [
 
 # ── Canonical tool definitions (Anthropic format) ────────────────
 CLAUDE_TOOLS = [
+    {"name": "run_rendered_forms",
+     "description": ("ACTIVE: Injection through the forms a SINGLE-PAGE APP actually RENDERS (Q-158). "
+                     "run_form_xss / run_form_nosqli / run_form_cmdi / run_upload_test all scrape <form> "
+                     "out of the SERVED response, and an SPA serves a shell -- MEASURED on juice-shop: 0 "
+                     "forms served, 1 form with 6 inputs after render. This engine drives the RENDERED "
+                     "controls in a real browser, lets the application build and send its OWN request, and "
+                     "learns the endpoint, verb, encoding and parameter names from where its markers land "
+                     "on the wire, so it needs no action=, no method= and no name=. Every probe carries a "
+                     "benign baseline and an escaped-quote control. Pass base_url plus the SPA routes to "
+                     "drive (e.g. ['#/login', '#/contact'])."),
+     "input_schema": {"type": "object", "properties": {
+         "base_url": {"type": "string"},
+         "routes": {"type": "array", "items": {"type": "string"},
+                    "description": "SPA routes to render, e.g. ['#/login']. Default ['/']"},
+         "persona": {"type": "string", "description": "identity whose session state to seed"},
+         "max_forms": {"type": "integer", "default": 3},
+         "max_fields": {"type": "integer", "default": 3}},
+         "required": ["base_url"]}},
     {"name": "run_subfinder",
      "description": "PASSIVE: Enumerate subdomains via OSINT sources. Zero direct target contact.",
      "input_schema": {"type": "object", "properties": {"domain": {"type": "string"}}, "required": ["domain"]}},
@@ -6107,6 +6126,53 @@ class ToolRegistry:
         _mb = self._middlebox_note()                                        # Q-112
         return ToolResult("ssi", url, not _mb,
                           "%d SSI injection finding(s)" % len(findings) + _mb, findings)
+
+    async def _run_rendered_forms(self, inp: dict) -> ToolResult:
+        """ACTIVE: injection through the forms a SINGLE-PAGE APP actually RENDERS (Q-158).
+
+        `parse_forms` asks what the DOCUMENT declares; on an SPA the answer is "none" and that answer
+        is correct. This asks what the APPLICATION sends when its controls are filled: every rendered
+        control gets its own marker, the app's own JavaScript builds and sends the request, and the
+        endpoint, verb, encoding and parameter names are read back from where the markers landed. No
+        `action`, `method` or `name=` is required, because none is consulted.
+
+        MEASURED on juice-shop: 0 forms in the served HTML, 1 form with 6 inputs after render.
+
+        The oracles are the existing ones (`sqli_tool.error_signatures` / `auth_bypass_confirmed`,
+        `xss_tool` reflection); what is new is the CARRIER. Every probe carries a benign baseline plus
+        an escaped-quote control, so a verdict is always a differential, never a single observation."""
+        import rendered_forms as _rf
+        base = (inp.get("base_url") or inp.get("url") or "").strip().rstrip("/")
+        if not base:
+            return ToolResult("rendered_forms", "", False, "", [], "need base_url")
+        if not self.scope.validate(base)[0]:
+            return ToolResult("rendered_forms", base, False, "", [], "SCOPE BLOCK")
+        usable, note = _rf.available()
+        if not usable:
+            # NOT a pass. A missing browser is a degraded instrument, not a clean form surface.
+            return ToolResult("rendered_forms", base, False, "", [], "DEGRADED: %s" % note)
+        res = await asyncio.to_thread(
+            _rf.run, base, [r for r in (inp.get("routes") or ["/"]) if r],
+            headers=self.session_headers or {},
+            storage=(getattr(self, "_session_state", {}) or {}).get(inp.get("persona") or ""),
+            timeout_ms=int(inp.get("timeout_ms") or 25000),
+            max_forms=int(inp.get("max_forms") or 3),
+            max_fields=int(inp.get("max_fields") or 3),
+            scope_ok=lambda u: self.scope.validate(u)[0])
+        # NO ISLAND: every submission this engine caused the application to send joins the ONE
+        # engagement ledger (and therefore the HAR export + traffic view), tagged with its provenance.
+        for row in (res.get("exchanges") or []):
+            if row.get("url") and row.get("observed"):
+                self.capture.add(row["method"], row["url"], row["status"], resp_len=row["len"],
+                                 engine="rendered-forms", resp_ct=row.get("resp_ct") or "")
+        findings = [f for f in (res.get("findings") or []) if f.get("confidence") == "confirmed"]
+        summary = {"ran": bool(res.get("ran")), "note": res.get("note") or "",
+                   "counts": res.get("counts") or {},
+                   "forms": [{k: f.get(k) for k in
+                              ("route", "container", "action", "method_attr", "wire", "probes")}
+                             for f in (res.get("forms") or [])],
+                   "errors": (res.get("errors") or [])[:5]}
+        return ToolResult("rendered_forms", base, bool(res.get("ran")), json.dumps(summary), findings)
 
     async def _run_form_xss(self, inp: dict) -> ToolResult:
         """ACTIVE: reflected XSS through POST FORM fields (general). The GET-query engine misses a value
