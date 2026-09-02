@@ -316,8 +316,8 @@ correct code with no way to fire yet. That is a RESULT, recorded here rather tha
 ```
 $ docker run --rm --network apolaki_default -v ".../agent:/app" -w /app apolaki-agent \
     python -m pytest tests/test_jwt_attacks.py -p no:cacheprovider -q -rfE
-..........................................................               [100%]
-58 passed
+............................................................             [100%]
+60 passed
 ```
 
 Adjacent JWT tests, unaffected:
@@ -348,8 +348,8 @@ verifies the sha256):
 
 ```
 BASELINE GREEN
-... 25 mutants ...
-25/25 killed, survivors: 0  (restore verified, sha256 unchanged)
+... 27 mutants ...
+27/27 killed, survivors: 0  (restore verified, sha256 unchanged)
 ```
 
 MUTANT S2-9 CAUGHT ONE OF MY OWN TESTS BEING VACUOUS, which is the point of running them.
@@ -358,7 +358,7 @@ produce the same PEM. That stays true with `datetime.now()` as the default, beca
 default is evaluated ONCE at import -- the test could not fail. It now asserts against the literal
 pinned instant (`not_valid_before_utc == 2020-01-01Z`), and the mutant dies.
 
-The 25 mutants, all killed:
+The 27 mutants, all killed:
 
 | id | mutant | test that kills it |
 |---|---|---|
@@ -376,6 +376,8 @@ The 25 mutants, all killed:
 | S1-12 | a confirmation with no evidence is emitted | `test_a_confirmation_with_no_evidence_is_refused` |
 | S1-13 | the payload-rewrite probe is ignored entirely | `test_the_payload_rewrite_shape_confirms_where_the_byte_flip_does_not` |
 | S1-14 | the payload-rewrite branch confirms regardless of the acceptance verdict | `test_the_payload_rewrite_shape_reports_nothing_against_a_sound_verifier` |
+| S1-15 | `escalated_claims` lets jwt_tool's clock rewrite `exp` | `test_escalated_claims_is_clock_free...` |
+| S1-16 | an inconclusive tampered response is called SOUND | `test_the_signature_oracle_reports_its_three_states_directly` |
 | S2-1 | the forged header carries the SERVER's own kid forward | `test_the_forged_header_does_not_carry_the_servers_own_kid_forward` |
 | S2-2 | a fetch is UPGRADED to a forgery | `test_jku_fetched_but_refused_is_reported_as_a_FETCH_not_a_forgery` |
 | S2-3 | `correlated_interactions` ignores the token | `test_another_probes_callback_cannot_confirm_this_one` |

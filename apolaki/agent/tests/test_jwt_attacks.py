@@ -166,6 +166,33 @@ def test_a_bodiless_api_is_classified_on_status_alone():
     assert ja.classify_acceptance(api, ja.Response(401, ""))["verdict"] == ja.VERDICT_REJECTED
 
 
+def test_escalated_claims_is_clock_free_so_every_forged_token_is_reproducible():
+    """`jwt_tool.escalate_payload` rewrites `exp` to `time.time() + 3600`. Left in, EVERY forged
+    token this module builds would differ between two runs and none of them could be checked by
+    hand. The original `exp` is restored, and a caller that needs a fresh one passes it explicitly
+    -- keeping the clock in the caller is what makes the forgeries hand-verifiable."""
+    out = ja.escalated_claims(CLAIMS)
+    assert out["exp"] == CLAIMS["exp"], out
+    assert out["role"] == "admin" and out["admin"] is True
+    assert ja.escalated_claims(CLAIMS) == out
+    # a payload with no exp must not GAIN one from the clock
+    assert "exp" not in ja.escalated_claims({"sub": "alice"})
+    # and the caller's override wins
+    assert ja.escalated_claims(CLAIMS, {"exp": 9999})["exp"] == 9999
+
+
+def test_the_signature_oracle_reports_its_three_states_directly():
+    """`signature_oracle` is public API -- `tools.py` can check the gate once instead of per probe
+    -- so its contract is pinned here rather than only through its callers."""
+    assert ja.signature_oracle(controls(tampered=REFUSED))["state"] == ja.SIGNATURE_SOUND
+    assert ja.signature_oracle(
+        controls(tampered=ja.Response(200, AUTH_BODY)))["state"] == ja.SIGNATURE_NOT_VERIFIED
+    assert ja.signature_oracle(controls(tampered=None))["state"] == ja.SIGNATURE_UNKNOWN
+    # an inconclusive tampered response is UNKNOWN, not SOUND -- a crash must not read as a refusal
+    assert ja.signature_oracle(
+        controls(tampered=ja.Response(500, "boom")))["state"] == ja.SIGNATURE_UNKNOWN
+
+
 def test_per_request_nonces_do_not_make_a_page_look_unlike_itself():
     """NON-VACUITY for the normaliser. Two captures of the same authenticated page differ in their
     CSRF token and their balance. If digits and hex runs were not erased, the second capture would
