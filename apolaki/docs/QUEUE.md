@@ -5180,6 +5180,25 @@ O(surface discovered); and a `depth(2) × frontier(30)` = 60-visit cap standing 
    it, and forms only exist for fetched pages. The 2740 cases are plain `.html`. Coverage is
    O(pages fetched) = 12, and everything downstream is arithmetic on that 12.
 
+## CYCLE 20 — 2026-09-02 — three lanes off the shakedown backlog. OWNERSHIP TABLE, authoritative.
+
+Every ticket below was FOUND BY THE SHAKEDOWN LOOP and filed with a measurement, so no lane has to
+re-derive whether the problem is real. Each is independent and each has its own module.
+
+| Lane | Ticket | WRITES (exclusive) | Handoff |
+|---|---|---|---|
+| A | Q-158 form engines blind on an SPA | `agent/rendered_forms.py`, `agent/tests/test_rendered_forms.py` | `docs/handoff/q158_rendered_forms.md` |
+| B | Q-155 NoSQL injection in JSON bodies | `agent/nosqli_body.py`, `agent/tests/test_nosqli_body.py` | `docs/handoff/q155_nosqli_body.md` |
+| C | Q-163 discover param-bearing SPA routes | `agent/spa_routes.py`, `agent/tests/test_spa_routes.py` | `docs/handoff/q163_spa_routes.md` |
+
+**NOBODY TOUCHES `tools.py`, `agent.py`, `surface.py`, `xss_tool.py`, `main.py` or `liveness.py`.**
+The Coordinator holds all six and is actively editing them. Every lane's wiring goes in its handoff
+as a patch; the Coordinator applies all three. That is what makes the write sets genuinely disjoint
+-- last cycle four tickets all needed `tools.py` and only serialising avoided the collision.
+
+**Coordinator lane:** the Shopify re-scan with tools + orchestration monitoring, applying the three
+wiring patches, and the ledgers.
+
 ### Q-163 · SPA routes are discovered, but only the ones a LINK points at · **READY** · **HIGH**
 
 *Filed 2026-09-02. The SPA plumbing is complete and proven; this is the one remaining link.*
