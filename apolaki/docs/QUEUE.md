@@ -5180,6 +5180,45 @@ O(surface discovered); and a `depth(2) × frontier(30)` = 60-visit cap standing 
    it, and forms only exist for fetched pages. The 2740 cases are plain `.html`. Coverage is
    O(pages fetched) = 12, and everything downstream is arithmetic on that 12.
 
+### Q-158 · Every FORM engine is blind on a single-page app · **READY** · **CRITICAL**
+
+*Filed 2026-09-02 from the Q-151 shakedown. The largest single coverage hole found by the loop.*
+
+`form_xss.parse_forms` regex-scrapes `<form>` out of the SERVED response. An SPA serves a shell.
+
+MEASURED on juice-shop:
+
+```
+served HTML  (curl)          0 forms, 0 inputs
+after render (#/contact)     1 form,  6 inputs
+```
+
+So `run_form_xss`, `run_form_nosqli`, `run_form_cmdi` and `run_upload_test` -- 40 dispatches
+between them in one mission -- found nothing, and could not have. Not broken engines: they were
+handed a document with no forms in it.
+
+**AND RENDERING ALONE DOES NOT FIX IT**, which is why this is a feature and not a patch. The
+rendered form is:
+
+```
+action: null    method: null
+fields: userId (text), mat-input-1 (text), comment (textarea), captchaControl (text)
+```
+
+`parse_forms` requires `method="post"` and an `action`, and reads `name=`; this form has neither
+attribute and names its controls with `formcontrolname`/`id`. An SPA form does not submit to an
+action at all -- its JS builds an XHR. Feeding rendered HTML into the existing parser would
+produce a form that cannot be submitted, and a "no findings" that means the same nothing.
+
+**The mechanism already exists**: BIE drives real controls in a real browser and intercepts the
+request the app itself issues (`bie.route_mutate`). That is the shape this needs -- fill the
+rendered control, let the application send its own request, mutate/observe there -- rather than a
+second HTML parser.
+
+**Definition of done:** a rendered-form probe that confirms an injection through a control the app
+actually submits, on a lab page whose form has no `action` and no `method`, plus a negative
+control where the field is correctly encoded. Do NOT extend `parse_forms`.
+
 ### Q-155 · NoSQL injection is probed in query params only, never in JSON bodies · **READY** · **HIGH**
 
 *Filed 2026-09-02 from the Q-151 shakedown. NOT a broken engine -- a coverage gap, and the
