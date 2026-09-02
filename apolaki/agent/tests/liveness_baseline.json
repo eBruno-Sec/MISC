@@ -2,6 +2,7 @@
   "live": [
     "client_side_authz",
     "client_supplied_identity_param",
+    "csp_allows_untrusted_script",
     "dnp3_exposed",
     "dom_data_manipulation",
     "dom_link_manipulation",

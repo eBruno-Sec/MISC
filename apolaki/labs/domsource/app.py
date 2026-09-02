@@ -156,6 +156,17 @@ class Handler(http.server.BaseHTTPRequestHandler):
         self.send_response(200)
         self.send_header("Content-Type", "text/html; charset=utf-8")
         self.send_header("Content-Length", str(len(data)))
+        # Q-145 LIVENESS, ROOT ONLY. `_run_transport_posture` reads `origin + "/"`, never the path
+        # it was handed, so the header has to live here. Root only, because a CSP on every response
+        # would change what the DOM-XSS routes are allowed to execute and quietly rewrite the
+        # meaning of the four cases that already pass.
+        #
+        # `unsafe-inline` with NO nonce and NO hash is the real weakness: a nonce would neutralise
+        # it, and reporting both together would be the bug csp_audit was written to avoid. There is
+        # deliberately no frame-ancestors and no form-action, neither of which inherits default-src.
+        if path == "/":
+            self.send_header("Content-Security-Policy",
+                             "default-src 'self'; script-src 'self' 'unsafe-inline'; object-src 'none'")
         self.end_headers()
         self.wfile.write(data)
 
