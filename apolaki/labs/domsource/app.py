@@ -30,6 +30,8 @@ reached a sink", not "the FRAGMENT reached a sink" — and the engine's whole cl
 
 Standard library only; no build, no dependency.
 """
+import base64
+import hashlib
 import http.server
 import socketserver
 
@@ -85,8 +87,28 @@ _AUTHBOUNCE = _HEAD + """<h1>login</h1><div id="out">…</div>
 
 _ACCOUNT = _HEAD + "<h1>account</h1><p>signed in; this page has no user-controlled sink</p>" + _TAIL
 
+# Q-148 LIVENESS. A page that leaks key material, so `passive_disclosure` can be proven to fire
+# through the REAL dispatch path rather than only in unit tests. Static reachability is not
+# liveness: engines have been found silently dead here with the whole suite green.
+#
+# The key material is DERIVED AT RUNTIME and never stored in the repo. A literal PEM block in
+# source is indistinguishable from a real leaked key to a secret scanner -- ours and GitHub push
+# protection alike -- and the lab does not need one to be structurally valid. This is
+# deterministic, clears the module minimum body length, and is not a key.
+_FAKE_KEY_BODY = "\n".join(
+    base64.b64encode(hashlib.sha256(("apolaki-domsource-liveness-%d" % i).encode()).digest() * 2
+                     ).decode()
+    for i in range(3))
+# NOT wrapped in <pre>. The first version of this route was, and `passive_disclosure`
+# correctly stayed silent: a key inside a display element is a DOCUMENTATION page, which is
+# the exact false positive the module suppresses. A real leak is a backup file served as-is,
+# so that is what this serves -- the lab has to look like the bug, not like a page about it.
+_LEAK = ("-----BEGIN RSA PRIVATE KEY-----\n" + _FAKE_KEY_BODY
+         + "\n-----END RSA PRIVATE KEY-----\n")
+
 _ROUTES = {"/hash": _HASH, "/hashparam": _HASHPARAM, "/safehash": _SAFEHASH,
-           "/noquery": _NOQUERY, "/inert": _INERT, "/account": _ACCOUNT}
+           "/noquery": _NOQUERY, "/inert": _INERT, "/account": _ACCOUNT,
+           "/leak": _LEAK}
 
 
 class Handler(http.server.BaseHTTPRequestHandler):

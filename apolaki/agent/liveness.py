@@ -89,6 +89,13 @@ CHECKS = (
      "input": {"url": "http://domsource:8080/hash"}, "family": "dom_data_manipulation"},
     {"technique": "dom_xss", "lab": "domsource", "kind": "tool", "tool": "_run_dom_trace",
      "input": {"url": "http://domsource:8080/hash"}, "family": "dom_xss"},
+    # Q-148. Proves `passive_disclosure` fires through the REAL tool dispatch, not just in unit
+    # tests. The lab serves the key as a BACKUP FILE, not inside <pre>: the first version wrapped
+    # it for display and the engine correctly stayed silent, because a key in a display element is
+    # a documentation page -- the exact false positive it exists to suppress.
+    {"technique": "private_key_disclosed", "lab": "domsource", "kind": "tool",
+     "tool": "_run_web_probes", "input": {"url": "http://domsource:8080/leak"},
+     "family": "info_disclosure"},
     {"technique": "dom_link_manipulation", "lab": "domsource", "kind": "tool", "tool": "_run_dom_trace",
      "input": {"url": "http://domsource:8080/hashparam"}, "family": "dom_link_manipulation"},
     # ── browser-runtime access control (BIE) ──────────────────────────────────────────────────

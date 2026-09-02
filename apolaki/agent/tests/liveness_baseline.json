@@ -13,6 +13,7 @@
     "ldap_anonymous_read",
     "mass_assignment",
     "modbus_exposed",
+    "private_key_disclosed",
     "s7comm_exposed",
     "smb_null_session",
     "smb_signing_disabled",
