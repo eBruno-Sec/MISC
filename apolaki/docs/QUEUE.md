@@ -7093,12 +7093,47 @@ silent). `_run_dom_audit`, twenty lines further down, already did it -- from a r
 origin, with a targeted-origin control. It was a second producer of one family, so it was
 removed along with `message_sink` and the hooks feeding it. Working is not the same as belonging.
 
+### Liveness: 19 -> 24, every engine this cycle proven through the SHIPPING path
+
+The dead-code gate proves a call site exists. It does not prove the engine ever runs, and this
+cycle produced the sharpest example yet: deleting the web-message hooks took `const cap` out with
+them, every recorder in dom_sinks.py calls it inside its own `try { } catch (e) {}`, and so the
+ReferenceError was swallowed 100% of the time and EVERY sink silently stopped recording. 4000+
+green tests said nothing, because every unit test hands `classify` a signal dict and never runs
+the JavaScript. The dead-code gate was satisfied too. The liveness gate caught it in one run.
+
+| engine | tool | lab case |
+|---|---|---|
+| passive_disclosure | `_run_web_probes` | domsource `/leak` |
+| dom_sinks | `_run_dom_trace` | domsource `/wsock` |
+| csp_audit | `_run_transport_posture` | domsource `/` (root header) |
+| jwt_attacks | `_run_jwt` | domsource `/api/me` |
+| code_injection | `_run_injection_probes` | domsource `/calc` |
+
+Two of these cases were built wrong first and the ENGINES were right:
+
+* `/leak` first served the key inside `<pre>` and passive_disclosure stayed silent -- correctly, a
+  key in a display element is a documentation page. The lab has to look like the bug, not like a
+  page about it.
+* The CSP case was first keyed on `family: security_misconfig`, which every header rule shares, so
+  it would have passed with csp_audit dead. Pinned by TITLE instead, and proven non-vacuous both
+  ways: stub `analyze_csp` to return [] and the case goes dead, then the gate exits 1.
+
+`_run_jwt`'s false positive is now pinned at the CALL SITE, where the defect actually lived --
+0 confirmed findings against an endpoint that answers 200 to everyone, and the real finding
+against one that gates on the token. No pure-function test could have caught it; the pure
+functions were not the thing that was wrong.
+
 ### Open
 
 * `jku`/`x5u` can only reach the `jwt_jku_url_fetched` rung: `collaborator` RECORDS inbound hits
   but nothing can SERVE `probe.side_channel` at `probe.side_channel_url` yet. Real CWE-918, but
   the acceptance leg is unreachable until that lands.
-* `cmdi_tool.analyze_time` has the SAME signature and the same missing control-is-fast clause
-  that `sqli_tool.analyze_time` just had. Not yet measured against a live FP -- next ticket.
+* DONE: `cmdi_tool.analyze_time` had the same missing control-is-fast clause; fixed with the same
+  status-validity and repeat-confirmation treatment, before it was ever measured wrong in the
+  field. Its claim is RCE, so it was the more expensive place to be wrong.
+* `dom_sinks` families that still have NO signal producer, so they cannot fire: `ajax_headers`,
+  `hpp_request_urls`, and the `storage_replay_*` pair (which needs a second render sharing one
+  browser context, since localStorage is per-context). Reachable code, unreachable verdicts.
 * Mission 9e8653b8 ended `status=failed` in the report phase; the three findings above are
   withdrawn, and the failure itself is untriaged.
