@@ -3,9 +3,60 @@
 Updated by the Coordinator. Numbers here must match [LEDGERS.md](LEDGERS.md); if they disagree, the
 ledger wins and this file is stale.
 
-**Last update**: 2026-08-29. **This file is one of four criteria the `apolaki-autocontinue` watchdog
+**Last update**: 2026-09-02. **This file is one of four criteria the `apolaki-autocontinue` watchdog
 checks before retiring itself, so leaving it stale silently disables that retirement.** Updating it is
 not bookkeeping. It rotted three cycles running (08-13, 08-16, 08-19) before that was written down.
+
+# CYCLE 18 — 2026-09-02 — Burp's issue catalog, and five false CRITICALs killed before they shipped
+
+**Headline number: engine liveness 19 -> 25.** Every engine landed this cycle confirms through the
+SHIPPING dispatch path, not merely a call site that exists.
+
+| ticket | what shipped | the defect worth remembering |
+|---|---|---|
+| Q-145 | `csp_audit`, 7 Burp CSP checks | a nonce NEUTRALISES unsafe-inline; frame-ancestors does not inherit |
+| Q-146 | language-specific code injection, 7 checks | the self-check tested SUBSTRING; `el_replace`'s token was its payload minus one hyphen |
+| Q-147 | DOM sink families + PRSSI | our own instrumentation lied about the page, three separate ways |
+| Q-148 | passive disclosure, 8 checks | a documented FP control with ZERO CALLERS |
+| Q-149 | JWT, 6/6 Burp checks | `_run_jwt` reported CRITICAL on ANY 2xx |
+| Q-150 | ZAP cause diagnosis | named a phase that no longer plans ZAP, and a cause it never checked |
+
+## Five false CRITICALs/HIGHs, killed before any reached a report
+
+Three were on `partners.shopify.com`, a live bug-bounty target, all `confidence=confirmed`:
+
+* HIGH "error-recovery" SQLi whose entire evidence was **`429 -> 502 -> 429`**. 429 is the edge
+  refusing the request before any query runs, so the baseline never worked and the "recovery" is
+  the same refusal again. The predicate asked `< 500`, which 429 satisfies twice.
+* Two CRITICAL time-blind SQLi from single unrepeated observations on a rate-limiting host. The
+  call site discarded both RESPONSES and compared only elapsed times.
+* A documentation page showing an example PEM -> `private_key_disclosed` CRITICAL.
+* A public `/.well-known/jwks.json` with any nested `d` -> `jwt_private_key_disclosed` CRITICAL.
+
+**The pattern, stated once.** In every case the measurement was correct and the DECISION on it was
+not. `429 < 500` is true; "the application answered" is what the code meant. Three modules had a
+docstring stating the correct rule over code implementing a weaker one. Read the sentence the
+finding will print, then ask what the code actually established.
+
+## The one that justifies the liveness gate on its own
+
+Removing a duplicated hook block took `const cap` out with it. Every recorder in `dom_sinks.py`
+calls it, each inside `try { } catch (e) {}`, so the ReferenceError was swallowed 100% of the time
+and EVERY DOM sink silently stopped recording. **4000+ tests stayed green** -- they hand `classify`
+a signal dict and never run the JavaScript -- and the dead-code gate stayed satisfied, because the
+call site still existed. Liveness caught it in one run.
+
+## Unproven claims / open
+
+* Three `dom_sinks` families cannot fire for want of a signal producer: `hpp_request_urls` and the
+  `storage_replay_*` pair (which needs two renders sharing one browser context). Reachable code,
+  unreachable verdicts -- written down rather than counted as coverage.
+* `jku`/`x5u` reach only the `jwt_jku_url_fetched` rung: `collaborator` RECORDS inbound hits but
+  nothing can yet SERVE the side channel.
+* Mission `9e8653b8` ended `status=failed` in the report phase; its three findings are WITHDRAWN
+  and the failure itself is untriaged.
+
+---
 
 # CYCLE 15 — 2026-08-29 — the Shopify-engagement remainder
 
