@@ -392,30 +392,10 @@ def classify_page(url: str, sig: dict) -> list:
         hit.update(extra)
         hits.append(hit)
 
-    # ── 1/2. HTML5 web message manipulation (postMessage) ───────────────────────────────────────
-    #
-    # THE FALSE-POSITIVE TRAP THAT DEFINES THIS FAMILY: a handler that correctly checks
-    # `event.origin === location.origin` accepts a SAME-ORIGIN probe and rejects the real attacker.
-    # Proving anything therefore requires delivery from a FOREIGN origin, and `pm_cross_origin` says
-    # the probe actually was. Unlike `navigated` and `server_reflected`, this signal has no existing
-    # callers, so absent means NOT PROVEN rather than "assume the good case" - an engine that stays
-    # silent until its proof is wired is correct; one that assumes its own premise is not.
-    pmc = _s(s, "pm_canary")
-    if s.get("pm_cross_origin") and pmc:
-        origin_note = ("; the handler performs no `event.origin` check"
-                       if not s.get("pm_origin_checked") else
-                       "; the handler inspects `event.origin` but accepted the foreign origin anyway")
-        if s.get("pm_executed"):
-            _add("web_message_xss", "(web message)", "web_message",
-                 "A web message posted from a FOREIGN origin executed script in this page: the "
-                 "payload carried in `event.data` reached %s and the browser fired alert(%s)%s. No "
-                 "URL parameter is involved, so no request/response test can observe this." % (
-                     _s(s, "pm_sink") or "a script-executing sink", pmc, origin_note))
-        elif _s(s, "pm_sink"):
-            _add("web_message_manipulation", "(web message)", "web_message",
-                 "A web message posted from a FOREIGN origin reached the dangerous sink `%s` in "
-                 "this page's `message` handler, carrying the payload %s%s. The page treats "
-                 "cross-origin message data as trusted input." % (_s(s, "pm_sink"), pmc, origin_note))
+    # WEB MESSAGES ARE NOT CLASSIFIED HERE. `_run_dom_audit` already delivers them from a real
+    # bound harness origin and applies a targeted-origin control, and this module reaching the same
+    # verdict from its own hooks would put two rows for one fact in the report, drifting apart on
+    # every edit. The families this file still owns are the ones with no other producer.
 
     # ── 3. Path-relative style sheet import ─────────────────────────────────────────────────────
     #
@@ -451,8 +431,6 @@ _V_43 = ("CVSS:3.1/AV:N/AC:L/PR:N/UI:R/S:U/C:L/I:N/A:N", 4.3)
 _V_31 = ("CVSS:3.1/AV:N/AC:H/PR:N/UI:R/S:U/C:L/I:N/A:N", 3.1)
 
 _CVSS = {
-    "web_message_xss": _V_61,
-    "web_message_manipulation": _V_43,
     "document_domain_manipulation": _V_47,
     "websocket_url_poisoning": _V_54,
     "form_action_hijack": _V_47,
@@ -468,8 +446,6 @@ _CVSS = {
 }
 
 _CWE = {
-    "web_message_xss": "CWE-79",
-    "web_message_manipulation": "CWE-346",          # Origin Validation Error
     "document_domain_manipulation": "CWE-346",
     "websocket_url_poisoning": "CWE-918",           # attacker chooses the request target
     "form_action_hijack": "CWE-601",
@@ -485,8 +461,6 @@ _CWE = {
 }
 
 _TITLE = {
-    "web_message_xss": "DOM XSS via HTML5 web message (postMessage)",
-    "web_message_manipulation": "HTML5 web message manipulation",
     "document_domain_manipulation": "Document domain manipulation",
     "websocket_url_poisoning": "WebSocket URL poisoning",
     "form_action_hijack": "Form action hijacking",
@@ -502,12 +476,6 @@ _TITLE = {
 }
 
 _IMPACT = {
-    "web_message_xss":
-        "Any web page the victim visits can post a message to this page and run arbitrary script in "
-        "its origin - session theft, account takeover, or silent action as the victim.",
-    "web_message_manipulation":
-        "Any origin can feed data into this page's dangerous sinks; combined with a sink that "
-        "renders or evaluates, this becomes script execution in the application's origin.",
     "document_domain_manipulation":
         "The payload chooses the document's effective origin, collapsing the same-origin boundary "
         "with sibling subdomains: one XSS anywhere under the parent domain then reaches this page's "
@@ -635,58 +603,9 @@ DOM_SINK_HOOKS_JS = r"""
 (() => {
   if (window.__apolaki_sinks) return;
   const B = { sink_hits: [], json_keys: [], xpath_exprs: [], xpath_error: false,
-              storage_writes: [], doc_domain_write: "", ws_urls: [], ws_opened: false,
-              pm_handlers: 0, pm_origin_checked: false };
+              storage_writes: [], doc_domain_write: "", ws_urls: [], ws_opened: false };
   window.__apolaki_sinks = B;
 
-  // WEB MESSAGE HANDLERS. `classify_page` refuses to report a postMessage finding without
-  // `pm_cross_origin`, and it distinguishes a handler that never looks at `event.origin` from one
-  // that looks and accepts anyway. Neither signal had a producer, which is why both the page-level
-  // classifier and `message_sink` sat unreachable. Recording registration is not proof of a bug --
-  // it only lets the evidence sentence say which of the two cases we actually observed.
-  // CAPTURED BEFORE `wrapFn` RUNS, and that ordering is the whole point. This engine wraps
-  // `window.Function` as a dangerous sink; the wrapper is an ordinary function object with its own
-  // plain `.prototype`, so from that moment `Function.prototype.toString` resolves to
-  // `Object.prototype.toString` and returns "[object Function]" for every handler. Our own
-  // instrumentation blinded our own introspection, and the origin check read False on every page,
-  // including pages that plainly inspect `event.origin`. Take the reference while it is pristine.
-  const FTS = Function.prototype.toString;
-  const origAdd = EventTarget.prototype.addEventListener;
-  EventTarget.prototype.addEventListener = function (t, h) {
-    try {
-      if (String(t).toLowerCase() === "message") {
-        B.pm_handlers++;
-        const src = typeof h === "function" ? FTS.call(h)
-                                            : String((h && h.handleEvent) || "");
-        if (/\borigin\b/.test(src)) B.pm_origin_checked = true;
-      }
-    } catch (e) {}
-    return origAdd.apply(this, arguments);
-  };
-  try {
-    const d = Object.getOwnPropertyDescriptor(window, "onmessage");
-    Object.defineProperty(window, "onmessage", {
-      configurable: true,
-      get() { return d && d.get ? d.get.call(this) : this.__apolaki_onmsg; },
-      set(v) {
-        try {
-          if (typeof v === "function") {
-            B.pm_handlers++;
-            if (/\borigin\b/.test(FTS.call(v))) B.pm_origin_checked = true;
-          }
-        } catch (e) {}
-        this.__apolaki_onmsg = v;
-        if (d && d.set) { d.set.call(this, v); } else { origAdd.call(this, "message", v); }
-      }
-    });
-  } catch (e) {}
-  const cap = (a, v) => { if (a.length < 40) a.push(v); };
-  // OUR OWN INSTRUMENTATION IS NOT THE PAGE'S BEHAVIOUR. Playwright delivers every
-  // `page.evaluate` through the page's own `eval`, so the eval hook recorded the scanner's
-  // function source as a sink hit -- including the probe string carrying the canary. On a page
-  // whose real sink was `innerHTML`, `message_sink()` returned "eval" and the evidence would have
-  // named the scanner's own call as the dangerous sink. Every script this engine injects carries
-  // the `__apolaki` marker, so the recorder can tell its own reflection from the application's.
   const MINE = /__apolaki/;
   const rec = (name, v) => { try { if (typeof v === "string" && v && !MINE.test(v))
       cap(B.sink_hits, { sink: name, value: v.slice(0, 400) }); } catch (e) {} };
@@ -755,8 +674,7 @@ DOM_SINK_HOOKS_JS = r"""
 #: Takes the canary, like `dom_trace.DOM_SCAN_JS`, and returns keys that merge straight into `sig`.
 DOM_SINK_SCAN_JS = r"""(c) => {
   const B = window.__apolaki_sinks || {};
-  const o = { pm_handlers: B.pm_handlers || 0, pm_origin_checked: !!B.pm_origin_checked,
-              sink_hits: B.sink_hits || [], json_keys: B.json_keys || [],
+  const o = { sink_hits: B.sink_hits || [], json_keys: B.json_keys || [],
               xpath_exprs: B.xpath_exprs || [], xpath_error: !!B.xpath_error,
               storage_writes: B.storage_writes || [], doc_domain_write: B.doc_domain_write || "",
               ws_url: "", ws_opened: !!B.ws_opened, form_action: "", form_password: false,
@@ -792,17 +710,3 @@ DOM_SINK_SCAN_JS = r"""(c) => {
 }"""
 
 
-def message_sink(sink_hits: list, pm_canary: str) -> str:
-    """PURE: which dangerous sink received the WEB MESSAGE payload, most dangerous first.
-
-    The message probe MUST carry a canary of its own, different from the URL canary. With one shared
-    canary a sink hit produced by the URL source would be attributed to the message source, and the
-    engine would report a postMessage bug on a page whose `message` handler never ran - the same
-    class of mistake as calling a server echo a DOM flow."""
-    hits = [h for h in (sink_hits or [])
-            if isinstance(h, dict) and pm_canary and pm_canary in str(h.get("value", ""))]
-    for name in DANGEROUS_SINKS:
-        for h in hits:
-            if str(h.get("sink")) == name:
-                return name
-    return str(hits[0].get("sink")) if hits else ""

@@ -73,14 +73,6 @@ _PM_OK = {"pm_canary": PM, "pm_cross_origin": True, "pm_sink": "innerHTML",
           "pm_origin_checked": False}
 
 
-def test_positive_a_cross_origin_message_reaching_a_sink_is_reported():
-    assert _page_fams(_PM_OK) == {"web_message_manipulation"}
-
-
-def test_positive_a_cross_origin_message_that_executes_is_web_message_xss():
-    got = ds.classify_page(URL, {**_PM_OK, "pm_sink": "eval", "pm_executed": True})
-    assert [h["family"] for h in got] == ["web_message_xss"]
-    assert "FOREIGN origin" in got[0]["evidence"] and PM in got[0]["evidence"]
 
 
 def test_negative_a_same_origin_probe_proves_nothing():
@@ -108,22 +100,7 @@ def test_negative_a_message_with_no_canary_is_not_a_finding():
     assert _page_fams({"pm_cross_origin": True, "pm_sink": "eval", "pm_executed": True}) == set()
 
 
-def test_an_origin_check_that_accepted_us_anyway_is_still_reported_and_said_so():
-    got = ds.classify_page(URL, {**_PM_OK, "pm_origin_checked": True})
-    assert got and "accepted the foreign origin anyway" in got[0]["evidence"]
 
-
-def test_message_sink_attributes_only_hits_carrying_the_message_canary():
-    """A single shared canary would attribute a URL-sourced sink hit to the message source and
-    report a postMessage bug on a page whose handler never ran."""
-    url_sourced = [{"sink": "eval", "value": "x=" + C}]
-    assert ds.message_sink(url_sourced, PM) == ""
-    assert ds.message_sink(url_sourced + [{"sink": "innerHTML", "value": PM}], PM) == "innerHTML"
-
-
-def test_message_sink_prefers_the_most_dangerous_sink():
-    hits = [{"sink": "innerHTML", "value": PM}, {"sink": "eval", "value": PM}]
-    assert ds.message_sink(hits, PM) == "eval"
 
 
 # ══════════════════════════════════════════════════════════════════════════════════════════════
@@ -509,8 +486,6 @@ _POSITIVE = {
     "dom_storage_manipulation": ({**_WROTE, "storage_replayed": True}, False),
     "local_file_path_manipulation": (_FILE, False),
     "form_action_hijack": ({"form_action": EVIL + "/h", "form_password": True}, False),
-    "web_message_xss": ({**_PM_OK, "pm_executed": True}, True),
-    "web_message_manipulation": (_PM_OK, True),
     "prssi": (_PRSSI, True),
 }
 
@@ -610,3 +585,14 @@ def test_the_js_collectors_are_present_and_shaped_for_their_call_sites():
     for key in ("doc_domain_write", "ws_url", "form_action", "file_urls", "prssi_quirks",
                 "storage_writes", "json_keys", "xpath_exprs", "sink_hits"):
         assert key in ds.DOM_SINK_SCAN_JS, key
+
+
+def test_web_messages_are_NOT_classified_here():
+    """dom_audit owns the web-message family: it delivers from a real bound harness origin and
+    applies a targeted-origin control. This module reaching the same verdict from its own hooks
+    would put two rows for one fact in the report, drifting apart on every edit. The duplicate was
+    built, proven in a browser, and then removed -- working is not the same as belonging here."""
+    sig = {"navigated": True, "pm_canary": C, "pm_cross_origin": True, "pm_executed": True,
+           "pm_sink": "innerHTML", "pm_origin_checked": False}
+    assert [h["family"] for h in ds.classify_page(URL, sig)] == []
+    assert not hasattr(ds, "message_sink")

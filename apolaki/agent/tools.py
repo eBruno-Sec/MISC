@@ -6600,7 +6600,7 @@ class ToolRegistry:
                             key = (hit["family"], hit["param"])
                             if key not in seen:
                                 seen.add(key)
-                                findings.append((ds if owner == "ds" else dt).finding(hit))
+                                findings.append(ds.finding(hit) if owner == "ds" else dt.finding(hit))
                     # 4) THE URL FRAGMENT as a source. Everything after '#' is never sent to the server,
                     #    so a fragment-sourced DOM bug is invisible to every request/response engine and
                     #    to the proxy log — only a render can see it. Bounded deliberately: the whole-hash
@@ -6644,78 +6644,36 @@ class ToolRegistry:
                             key = (hit["family"], hit["param"], src)
                             if key not in seen:
                                 seen.add(key)
-                                findings.append((ds if owner == "ds" else dt).finding(hit))
+                                findings.append(ds.finding(hit) if owner == "ds" else dt.finding(hit))
 
-                    # 5) PAGE-LEVEL SINKS. No URL parameter is involved, so nothing above can reach
-                    #    these. A web message must be delivered from a genuinely FOREIGN ORIGIN: a
-                    #    handler that correctly tests `event.origin === location.origin` ACCEPTS a
-                    #    same-origin probe and rejects the real attacker, so a same-origin shortcut
-                    #    would report every correctly-written handler as vulnerable. We therefore
-                    #    load an attacker origin for real and frame the target from it.
+                    # 5) PATH-RELATIVE STYLE SHEET IMPORT. The only page-level family here with
+                    #    no existing producer. WEB MESSAGES ARE NOT DONE HERE: `_run_dom_audit`
+                    #    already posts from a real bound harness origin with a targeted-origin
+                    #    control, and a second producer of one family means two rows for one fact
+                    #    drifting apart -- the same defect this cycle removed from code_injection.
+                    #
+                    #    A three-signal conjunction: the document imports a stylesheet by a
+                    #    path-relative reference, renders in quirks mode (so the browser accepts
+                    #    whatever comes back as CSS), and the SERVER returns this same page for a
+                    #    padded path. Only the third is invisible to the browser.
                     try:
-                        pmc = "apolakipm" + secrets.token_hex(4)
-                        evil = "http://evilc%s.example" % secrets.token_hex(4)
-                        psig = {"navigated": False, "pm_canary": pmc, "pm_cross_origin": False,
-                                "pm_executed": False, "pm_sink": "", "pm_origin_checked": False}
-                        pctx = await browser.new_context(ignore_https_errors=True)
-                        try:
-                            await pctx.add_init_script(ds.DOM_SINK_HOOKS_JS)
-                            await self._ctx_add_cookies(pctx)
-                            ppage = await pctx.new_page()
-                            ppage.on("dialog", lambda d: (
-                                psig.__setitem__("pm_executed",
-                                                 psig["pm_executed"] or (pmc in str(d.message))),
-                                asyncio.ensure_future(d.dismiss())))
-                            attacker = (
-                                "<!doctype html><body><iframe id=f src=" + json.dumps(url) + "></iframe>"
-                                "<script>/*__apolaki*/var P=[" 
-                                + json.dumps("<img src=x onerror=alert('" + pmc + "')>") + ","
-                                + json.dumps("javascript:alert('" + pmc + "')") + ","
-                                + json.dumps(pmc) + "];"
-                                "document.getElementById('f').onload=function(){"
-                                "  var w=document.getElementById('f').contentWindow;"
-                                "  P.forEach(function(p,i){setTimeout(function(){"
-                                "    try{w.postMessage(p,'*');}catch(e){}},60*i);});};"
-                                "</script></body>")
-
-                            async def _proute(route):
-                                if route.request.url.startswith(evil):
-                                    await route.fulfill(status=200, content_type="text/html",
-                                                        body=attacker)
-                                else:
-                                    await route.continue_()
-
-                            await ppage.route("**/*", _proute)
-                            await ppage.goto(evil + "/", wait_until="load")
-                            await ppage.wait_for_timeout(900)
-                            tgt = [f for f in ppage.frames if f != ppage.main_frame and f.url]
-                            if tgt:
-                                psig["navigated"] = True
-                                # The frame is on the target's origin and the message came from
-                                # `evil`. That is the cross-origin delivery the family requires.
-                                psig["pm_cross_origin"] = True
-                                ps = await tgt[0].evaluate(ds.DOM_SINK_SCAN_JS, pmc)
-                                if isinstance(ps, dict):
-                                    psig["pm_origin_checked"] = bool(ps.get("pm_origin_checked"))
-                                    psig["pm_sink"] = ds.message_sink(ps.get("sink_hits") or [], pmc)
-                                    psig.update({k: v for k, v in ps.items()
-                                                 if k.startswith("prssi_") and v})
-                        finally:
-                            await pctx.close()
-                        # PRSSI needs one server-side fact the browser cannot supply: whether the
-                        # server returns THIS page for a padded path.
-                        if psig.get("prssi_relative_css"):
+                        # One render of the page AS SERVED -- PRSSI is a property of the
+                        # unmodified document, so a parameter probe's render cannot answer it.
+                        psig = await _render(url, "domtr" + os.urandom(4).hex())
+                        if psig.get("prssi_relative_css") and psig.get("prssi_quirks"):
                             pad = url.split("?")[0].rstrip("/") + "/apolakiprssi/"
                             if self.scope.validate(pad)[0]:
                                 pr = await self._http(pad, "GET", capture=True)
-                                psig["prssi_path_tolerant"] = 200 <= pr.get("status", 0) < 300
-                        for hit in ds.classify_page(url, psig):
-                            key = (hit["family"], hit["param"])
-                            if key not in seen:
-                                seen.add(key)
-                                findings.append(ds.finding(hit))
-                    except Exception as _apolaki_pagesinks:
-                        self._swallow(_apolaki_pagesinks, 'tools:_run_dom_trace:page_sinks', url)
+                                psig["prssi_path_tolerant"] = (
+                                    200 <= pr.get("status", 0) < 300
+                                    and psig.get("prssi_relative_css", "") in (pr.get("body") or ""))
+                            for hit in ds.classify_page(url, psig):
+                                key = (hit["family"], hit["param"])
+                                if key not in seen:
+                                    seen.add(key)
+                                    findings.append(ds.finding(hit))
+                    except Exception as _apolaki_prssi:
+                        self._swallow(_apolaki_prssi, 'tools:_run_dom_trace:prssi', url)
                 finally:
                     await browser.close()
         except Exception as e:

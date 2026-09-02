@@ -224,22 +224,6 @@ class CodeProbe:
     eval_ambiguity: str
 
 
-@dataclass(frozen=True)
-class WebCodeProbe:
-    """A `CodeProbe` bound to a rewritten URL. Mirrors `web_security.WebProbe`."""
-    url: str
-    parameter: str
-    original_value: str
-    probe: CodeProbe
-
-    @property
-    def payload(self) -> str:
-        return self.probe.payload
-
-    @property
-    def family(self) -> str:
-        return "code_injection"
-
 
 # ---------------------------------------------------------------------------------------------
 # payload construction, one builder per language
@@ -425,33 +409,6 @@ def build_probes(value: str = "", languages=None, shapes_per_language: int = 1) 
 # ---------------------------------------------------------------------------------------------
 # URL binding -- pure string rewriting, kept local so this module imports no sibling engine
 # ---------------------------------------------------------------------------------------------
-
-def _replace_query_value(url: str, name: str, value: str) -> str:
-    parsed = urlparse(url)
-    pairs = parse_qsl(parsed.query, keep_blank_values=True)
-    return urlunparse(parsed._replace(
-        query=urlencode([(k, value if k == name else v) for k, v in pairs], doseq=True)))
-
-
-def build_url_probes(url: str, languages=None, shapes_per_language: int = 1,
-                     max_probes: int = 12) -> list:
-    """One probe per (parameter x language), bound to a rewritten URL.
-
-    Unlike `build_ssti_probes` there is NO parameter-name hint list. An eval sink is not
-    signalled by the parameter being called `name` or `template`; the repo has already learned
-    that a hint list used as a FILTER silently skips the interesting case (see the
-    `looks_pathlike` comment in `web_security.build_traversal_probes`). Every parameter is
-    probed, and `max_probes` -- not a guess about semantics -- is what bounds the work.
-    """
-    pairs = parse_qsl(urlparse(url).query, keep_blank_values=True)
-    out: list = []
-    for name, value in pairs:
-        for probe in build_probes(value, languages, shapes_per_language):
-            out.append(WebCodeProbe(url=_replace_query_value(url, name, probe.payload),
-                                    parameter=name, original_value=value, probe=probe))
-            if len(out) >= max_probes:
-                return out
-    return out
 
 
 # ---------------------------------------------------------------------------------------------
