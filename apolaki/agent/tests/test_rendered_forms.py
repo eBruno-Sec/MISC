@@ -248,6 +248,16 @@ def test_error_oracle_stays_silent_on_the_correctly_neutralised_field():
     assert v["confirmed"] is False and "signature" in v["reason"]
 
 
+def test_error_oracle_refuses_when_the_baseline_ALREADY_carries_the_error():
+    """The differential must be a real differential. An application that prints a SQL error on
+    every request (a broken debug build, a chatty 500 page) has told us nothing about our quote --
+    and an oracle that dropped the baseline from the comparison would confirm on all of them while
+    still passing every other test in this file, because juice-shop's benign baseline is clean."""
+    noisy_baseline = dict(BASELINE, status=500, body=PROBE_QUOTE["body"])
+    v = rf.judge_error(noisy_baseline, PROBE_QUOTE, CONTROL_QUOTE)
+    assert v["confirmed"] is False and "baseline lacked" in v["reason"]
+
+
 def test_error_oracle_refuses_when_the_escaped_quote_control_errors_too():
     """A 500 that survives ESCAPING the quote was not caused by the quote."""
     v = rf.judge_error(BASELINE, PROBE_QUOTE, PROBE_QUOTE)

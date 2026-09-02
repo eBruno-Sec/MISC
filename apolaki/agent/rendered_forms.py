@@ -682,7 +682,8 @@ def fill_and_submit(page, descriptor: dict, values: dict, needles, *,
     registered BEFORE the click so a fast answer cannot be missed (the `bie._goto_awaiting_object`
     pattern). Nothing here decides anything -- an unsubmittable form returns `observed: False` with
     a reason, and the pure oracle refuses to judge it."""
-    out = {"observed": False, "reason": "", "filled": [], "submitted_by": ""}
+    out = {"observed": False, "reason": "", "filled": [], "submitted_by": "",
+           "settle": "expect-response(payload-on-the-wire)"}
     for sel, val in (values or {}).items():
         try:
             page.fill(sel, val, timeout=min(3000, timeout_ms))
@@ -704,10 +705,15 @@ def fill_and_submit(page, descriptor: dict, values: dict, needles, *,
         except Exception:
             return False
 
+    # Only a control that LOOKS like a submit is worth a click budget. MEASURED: juice-shop's login
+    # form also contains a "Button to display the password" toggle, and clicking it costs a full
+    # timeout (6s) for a control that can never submit anything. rank 0/1 = type=submit / submit-ish
+    # text; anything else is tried only when the form offers nothing better.
     submits = [s for s in (descriptor.get("submits") or []) if s.get("selector")]
+    ranked = [s for s in submits if int(s.get("rank", 2)) <= 1] or submits[:1]
     last_field = (out["filled"] or [""])[-1]
     attempts = []
-    for sub in submits[:2]:
+    for sub in ranked[:2]:
         attempts.append(("click", sub["selector"]))
     attempts.append(("enter", last_field))       # many SPA forms submit on Enter and have no button
     for how, target in attempts:
