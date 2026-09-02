@@ -22,6 +22,7 @@
     "smb_null_session",
     "smb_signing_disabled",
     "snmp_default_community",
+    "ssi_injection",
     "surface_discovery",
     "technology_detection",
     "websocket_url_poisoning"

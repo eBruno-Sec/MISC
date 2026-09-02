@@ -108,6 +108,12 @@ CHECKS = (
     {"technique": "ajax_header_manipulation", "lab": "domsource", "kind": "tool",
      "tool": "_run_dom_trace", "input": {"url": "http://domsource:8080/ajaxhdr"},
      "family": "ajax_header_manipulation"},
+    # Q-151, first of the zero-histogram tools to get a lab. `run_ssi` had 1333 dispatches across
+    # every stored mission and NEVER ONE non-zero count -- which proves nothing on its own, because
+    # a modern target has no mod_include and 0 is the right answer there. This lab has the bug, so
+    # from here a zero means the engine, not the target.
+    {"technique": "ssi_injection", "lab": "domsource", "kind": "tool", "tool": "_run_ssi",
+     "input": {"url": "http://domsource:8080/ssi?q=hello"}, "family": "ssi_injection"},
     # Q-145. `security_misconfig` is shared by every header rule, so this case is pinned by TITLE.
     # Matching the family alone would pass with csp_audit dead -- the missing-frame-ancestors
     # finding from the plain header rules would satisfy it, and the case would prove nothing.

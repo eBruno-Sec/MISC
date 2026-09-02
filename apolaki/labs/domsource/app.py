@@ -36,6 +36,8 @@ import hashlib
 import io
 import contextlib
 import urllib.parse
+import re
+import time
 import http.server
 import socketserver
 
@@ -219,6 +221,34 @@ class Handler(http.server.BaseHTTPRequestHandler):
             except Exception as exc:
                 shown = "error: %s" % type(exc).__name__
             out = (_HEAD + "<h1>formula preview</h1><pre>" + shown + "</pre>" + _TAIL).encode()
+            self.send_response(200)
+            self.send_header("Content-Type", "text/html; charset=utf-8")
+            self.send_header("Content-Length", str(len(out)))
+            self.end_headers()
+            self.wfile.write(out)
+            return
+        # Q-151 LIVENESS. A page that reflects a parameter and is then SSI-PROCESSED, which is what
+        # Apache mod_include does when a directory has `Options +Includes`. Only the two directives
+        # the engine actually probes with are implemented, and they are the BENIGN pair: #config
+        # timefmt and #echo var="DATE_GMT". There is deliberately no #exec and no #include here --
+        # the engine never sends them, so a lab that honoured them would be modelling a bug nobody
+        # tests for and handing the lab network an execution primitive for nothing.
+        if path == "/ssi":
+            raw = ""
+            if "?" in self.path:
+                for pair in self.path.split("?", 1)[1].split("&"):
+                    k, _, v = pair.partition("=")
+                    if k == "q":
+                        raw = urllib.parse.unquote_plus(v)
+            page = "<h1>search</h1><p>You searched for: " + raw + "</p>"
+            fmt = "%A, %d-%b-%Y %H:%M:%S %Z"
+            m = re.search(r'<!--#config\s+timefmt="([^"]*)"\s*-->', page)
+            if m:
+                fmt = m.group(1)
+                page = page[:m.start()] + page[m.end():]
+            page = re.sub(r'<!--#echo\s+var="DATE_GMT"\s*-->',
+                          lambda _: time.strftime(fmt, time.gmtime()), page)
+            out = (_HEAD + page + _TAIL).encode()
             self.send_response(200)
             self.send_header("Content-Type", "text/html; charset=utf-8")
             self.send_header("Content-Length", str(len(out)))
