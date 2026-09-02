@@ -11,6 +11,7 @@
     "graphql_argument_injection",
     "graphql_introspection",
     "ipmi_rakp",
+    "jwt_signature_not_verified",
     "ldap_anonymous_read",
     "mass_assignment",
     "modbus_exposed",

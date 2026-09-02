@@ -108,6 +108,15 @@ CHECKS = (
     {"technique": "csp_allows_untrusted_script", "lab": "domsource", "kind": "tool",
      "tool": "_run_transport_posture", "input": {"url": "http://domsource:8080/"},
      "family": "security_misconfig", "title": "CSP allows untrusted script execution"},
+    # Q-149. The endpoint DECODES the token and never checks the signature, and it gates on the
+    # token's presence -- so the three legs are 401 without a token, 200 with ours, 200 with the
+    # signature mangled. That discrimination is the whole oracle: without it the honest verdict is
+    # `not_tested`, which the uncontrolled version this replaced could never say (it reported
+    # CRITICAL on any 2xx, and so fired on every unauthenticated endpoint in existence).
+    {"technique": "jwt_signature_not_verified", "lab": "domsource", "kind": "tool",
+     "tool": "_run_jwt",
+     "input": {"token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJhbGljZSIsInJvbGUiOiJ1c2VyIn0.c2ln", "url": "http://domsource:8080/api/me"},
+     "family": "jwt", "title": "JWT signature is not verified"},
     {"technique": "dom_link_manipulation", "lab": "domsource", "kind": "tool", "tool": "_run_dom_trace",
      "input": {"url": "http://domsource:8080/hashparam"}, "family": "dom_link_manipulation"},
     # ── browser-runtime access control (BIE) ──────────────────────────────────────────────────

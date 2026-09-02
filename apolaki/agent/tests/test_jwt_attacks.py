@@ -690,3 +690,64 @@ def test_not_tested_checks_are_surfaced_rather_than_dropped():
     rows = ja.coverage_rows(verdicts)
     assert len(rows) == 2
     assert all(r["verdict"] == ja.VERDICT_NOT_TESTED and r["reason"] for r in rows), rows
+
+
+# =================================================================================================
+# WIRING-LEVEL CONTROL. The tests above prove the ORACLE; this one proves the CALL SITE, which is
+# where the defect actually lived. `_run_jwt` reported CRITICAL "Forged JWT accepted" on any 2xx
+# with no control of any kind, so aimed at an unauthenticated endpoint it fired on every target in
+# existence. A pure-function test could never have caught that, because the pure functions were
+# not the thing that was wrong.
+# =================================================================================================
+
+import asyncio
+
+import scope as _S
+import tools as _tools
+
+
+_TOK = ("eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9."
+        "eyJzdWIiOiJhbGljZSIsInJvbGUiOiJ1c2VyIn0.c2ln")
+
+
+def _registry_answering(fn):
+    """A ToolRegistry whose every HTTP call is answered by `fn(url, headers)`."""
+    sc = _S.ScopeEngine()
+    sc.load_manual(["target.tld"], [], "T")
+    reg = _tools.ToolRegistry(sc, mission_id=None, lab_mode=True)
+
+    async def _http(url, method="GET", headers=None, body=None, capture=False, **kw):
+        return fn(url, headers or {})
+
+    reg._http = _http
+    return reg
+
+
+def _confirmed(res):
+    return [f for f in (getattr(res, "findings", []) or []) if f.get("confidence") != "lead"]
+
+
+def test_an_endpoint_that_answers_200_to_everyone_yields_NO_jwt_finding():
+    """THE FIELD FALSE POSITIVE, at the call site. Every request gets 200 -- with our token,
+    without any token, and with the signature mangled. Nothing here distinguishes an accepted
+    forgery from a page that never looked at the token, so the honest output is nothing at all."""
+    reg = _registry_answering(lambda url, h: {"status": 200, "body": "<html>welcome</html>"})
+    res = asyncio.get_event_loop().run_until_complete(
+        reg._run_jwt({"token": _TOK, "url": "https://target.tld/inert"}))
+    assert _confirmed(res) == [], [f.get("title") for f in _confirmed(res)]
+
+
+def test_a_token_gated_endpoint_that_ignores_the_signature_IS_reported():
+    """The positive control. 401 without a token, 200 with ours, 200 with the signature mangled:
+    the verifier honours a signature it never checked. A fix that silences the false positive by
+    silencing the family would pass the test above and fail this one."""
+    def answer(url, headers):
+        auth = str(headers.get("Authorization") or headers.get("authorization") or "")
+        if not auth.strip():
+            return {"status": 401, "body": '{"error":"authentication required"}'}
+        return {"status": 200, "body": '{"user":"alice","balance":4210}'}
+
+    res = asyncio.get_event_loop().run_until_complete(
+        _registry_answering(answer)._run_jwt({"token": _TOK, "url": "https://target.tld/api/me"}))
+    titles = [f.get("title") for f in _confirmed(res)]
+    assert any("signature is not verified" in str(t) for t in titles), titles

@@ -31,6 +31,7 @@ reached a sink", not "the FRAGMENT reached a sink" — and the engine's whole cl
 Standard library only; no build, no dependency.
 """
 import base64
+import json
 import hashlib
 import http.server
 import socketserver
@@ -147,6 +148,34 @@ class Handler(http.server.BaseHTTPRequestHandler):
             self.send_header("Content-Length", str(len(data)))
             self.end_headers()
             self.wfile.write(data)
+            return
+        # Q-149 LIVENESS. A JWT-gated endpoint that DECODES the token and never verifies the
+        # signature -- the single most common real JWT defect, and the one `_run_jwt` reports as
+        # `jwt_signature_not_verified`. It gates on the token's PRESENCE (401 without one), so the
+        # three-leg oracle has something to discriminate: authenticated 200, unauthenticated 401,
+        # signature-tampered 200. Without that discrimination the correct verdict is `not_tested`,
+        # which is exactly what the uncontrolled version could never say.
+        if path == "/api/me":
+            auth = self.headers.get("Authorization") or ""
+            tok = auth[7:].strip() if auth[:7].lower() == "bearer " else ""
+            sub = ""
+            if tok.count(".") == 2:
+                try:
+                    mid = tok.split(".")[1]
+                    mid += "=" * (-len(mid) % 4)
+                    sub = str(json.loads(base64.urlsafe_b64decode(mid.encode()).decode()).get("sub", ""))
+                except Exception:
+                    sub = ""
+            if not sub:
+                out = json.dumps({"error": "authentication required"}).encode()
+                self.send_response(401)
+            else:
+                out = json.dumps({"user": sub, "balance": 4210}).encode()
+                self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(out)))
+            self.end_headers()
+            self.wfile.write(out)
             return
         body = _ROUTES.get(path)
         if body is None:
