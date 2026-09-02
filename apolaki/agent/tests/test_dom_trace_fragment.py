@@ -190,3 +190,48 @@ def test_the_key_is_not_vacuously_unique():
         _agentmod._dom_sweep_key("http://h:3000/x?a=2")
     assert _agentmod._dom_sweep_key("http://h:3000/#/contact") == \
         _agentmod._dom_sweep_key("http://other:9/#/contact")
+
+
+# =================================================================================================
+# Q-161. THE LAST LINK. `build_inventory` groups by (host, path), and
+# `urlparse("http://h/#/contact").path` is "/" -- so every route of a hash-routed SPA collapsed
+# into the single bare-page entry and vanished before the planner could ever see it.
+#
+# This is why Q-153 (probe the source), Q-157 (discover the routes) and Q-159 (stop deduping them
+# together) each landed correct and each changed nothing: the routes were removed one layer below.
+# =================================================================================================
+
+import surface as _surface
+
+
+def _paths(urls):
+    return [i["path"] for i in _surface.build_inventory(urls)]
+
+
+def test_hash_routes_survive_the_inventory_as_separate_pages():
+    got = _paths(["http://h:3000/", "http://h:3000/#/contact", "http://h:3000/#/login"])
+    assert got == ["/", "#/contact", "#/login"], got
+
+
+def test_a_hash_route_with_a_query_is_parameterized():
+    """The point of the whole chain. The planner probes PARAMETERIZED endpoints, and juice-shop's
+    DOM XSS lives at `#/search?q=` -- so `q` has to arrive as a parameter of a real entry."""
+    inv = _surface.build_inventory(["http://h:3000/#/search?q=x"])[0]
+    assert inv["path"] == "#/search" and inv["params"] == ["q"] and inv["parameterized"] is True
+
+
+def test_the_route_is_the_identity_and_the_query_is_not():
+    """Two searches are ONE page. Keying on the value would make every search term its own
+    endpoint and exhaust the budget on a single route."""
+    assert _paths(["http://h:3000/#/search?q=a", "http://h:3000/#/search?q=b"]) == ["#/search"]
+
+
+def test_a_bare_anchor_is_NOT_a_page():
+    """NEGATIVE CONTROL, and the reason this checks for "#/" rather than any fragment. `#section`
+    is a position in the SAME document; treating those as pages would multiply the surface by every
+    in-page link on the site."""
+    assert _paths(["http://h:3000/page#section", "http://h:3000/page#other"]) == ["/page"]
+
+
+def test_ordinary_urls_are_grouped_exactly_as_before():
+    assert _paths(["http://h:3000/a?x=1", "http://h:3000/a?x=2", "http://h:3000/b"]) == ["/a", "/b"]

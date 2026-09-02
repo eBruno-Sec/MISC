@@ -69,8 +69,23 @@ def build_inventory(urls, cap: int = 1000) -> list:
         if not p.netloc:
             continue
         path = p.path or "/"
-        key = (p.netloc, path)
         params = [k for k, _ in parse_qsl(p.query, keep_blank_values=True)]
+        # Q-161. A HASH ROUTE IS A DISTINCT PAGE. On a hash-routed SPA the fragment IS the route,
+        # and `urlparse("http://h/#/contact").path` is "/" -- so #/contact, #/login and the bare
+        # page all collapsed into one inventory entry and every discovered route vanished before
+        # the planner could see it. Last link in the chain: the probe source (Q-153), the crawl
+        # discovery (Q-157) and the sweep key (Q-159) were all fixed and still nothing was probed.
+        #
+        # Only a ROUTE-SHAPED fragment ("#/...") counts. A bare "#section" anchor is a position in
+        # the SAME document, and treating those as pages would multiply the surface by every
+        # in-page link on the site.
+        if p.fragment.startswith("/"):
+            # The route is the identity; its query string is PARAMS, exactly as for a real path.
+            # Carrying `?q=x` into the key would make every search term a separate "page".
+            _route, _, _fq = p.fragment.partition("?")
+            path = (path.rstrip("/") + "#" + _route) if path != "/" else "#" + _route
+            params += [k for k, _ in parse_qsl(_fq, keep_blank_values=True)]
+        key = (p.netloc, path)
         if key not in by_key:
             by_key[key] = {"host": p.netloc, "path": path, "params": set(), "example": u}
             order.append(key)
