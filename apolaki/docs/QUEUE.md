@@ -1,5 +1,39 @@
 # QUEUE — the one canonical, dependency-ordered work queue
 
+## CYCLE 18 — 2026-09-01 — MINING BURP'S PUBLISHED ISSUE CATALOG. Ownership table, authoritative.
+
+Source: `portswigger.net/burp/documentation/scanner/vulnerabilities-list` — ~180 issue definitions,
+JS-rendered (WebFetch returns nothing; the browser tool renders it). This is Burp's actual scanner
+check list, published by PortSwigger. Mining the TECHNIQUE from public documentation, never their
+code.
+
+**The first diff was against the Academy taxonomy and said Apolaki covers everything. That was the
+wrong source.** The Academy teaches humans; the KB documents the scanner. Against the real catalog:
+
+| family | Burp checks | Apolaki | lane |
+|---|---|---|---|
+| Granular CSP | 7 | presence only | **DONE** (Q-145, `csp_audit.py`, 22 tests) |
+| Language-specific code injection | 7 | **7/7** | **DONE** (Q-146, wired) |
+| DOM sink variants | ~20 | **+11 families** | **DONE** (Q-147, wired) |
+| Passive disclosure | ~8 | **8/8** | **DONE** (Q-148, wired) |
+| JWT specifics (jku/x5u/weak HMAC/JWKS) | 6 | **6/6** | **DONE** (Q-149, `jwt_attacks.py`) |
+
+| Lane | Ticket | WRITES (exclusive) | Handoff |
+|---|---|---|---|
+| A | Q-146 language-specific code injection | `agent/code_injection.py`, `agent/tests/test_code_injection.py` | `docs/handoff/q146_code_injection.md` |
+| B | Q-147 DOM sink family | `agent/dom_sinks.py`, `agent/tests/test_dom_sinks.py` | `docs/handoff/q147_dom_sinks.md` |
+| C | Q-148 passive disclosure | `agent/passive_disclosure.py`, `agent/tests/test_passive_disclosure.py` | `docs/handoff/q148_passive_disclosure.md` |
+
+**NOBODY TOUCHES `tools.py`.** Every lane's wiring patch goes in its handoff and the Coordinator
+applies all three. That is what makes the write sets genuinely disjoint — last cycle four tickets all
+needed `tools.py` and the collision was only avoided by serialising.
+
+**THE STANDING RULE FOR THIS CYCLE, and it is why CSP went first:** a new detection ships only with a
+case whose correct answer was CONSTRUCTED BY HAND. This week deleted ~330 false positives from
+oracles that were technique-correct and reality-wrong — CRLF, host-header, SSTI, `.env`, DOM. None
+failed from ignorance. Adding checks without hand-built ground truth manufactures the next batch
+faster.
+
 ## CODEX CONSOLIDATED BRIEF — 2026-08-31 — the ApolakiCodex experiment + Airbnb field runs
 
 Second, stronger brief. It carries something the first one did not: **a controlled before/after with a
@@ -7003,3 +7037,68 @@ target.
 `dom_trace.py`/`tools.py`/`web_security.py`/`exposure_tool.py`). Q-021E's `tools._run_tech_probe`
 piece is written as an exact patch into the handoff file, not landed directly -- same pattern the
 ticket itself already specifies for a Builder-owned `tools.py`.
+
+
+## CYCLE 18 CLOSE-OUT — 2026-09-01
+
+All five lanes shipped AND ARE WIRED. Registration is not invocation, so "wired" here means a
+named call site in the live dispatch path, proven by the dead-code gate going green.
+
+| ticket | shipped | the defect worth remembering |
+|---|---|---|
+| Q-145 CSP | `csp_audit.py`, 22 tests | a nonce NEUTRALISES unsafe-inline; frame-ancestors does not inherit |
+| Q-146 code injection | 7 checks, 2 tokens per probe | the self-check tested SUBSTRING; `el_replace`'s token was its payload minus one hyphen |
+| Q-147 DOM sinks | 11 families + PRSSI | our own hooks lied about the page, twice (see below) |
+| Q-148 passive disclosure | 8 checks | a documented FP control with ZERO CALLERS |
+| Q-149 JWT | 6/6 Burp checks, 27/27 mutants | `_run_jwt` reported CRITICAL on ANY 2xx |
+
+### What this cycle actually cost, and what it caught
+
+Five FALSE CRITICALS/HIGHS were found and killed BEFORE any of them reached a report, three of
+them on a live bug-bounty target:
+
+* `partners.shopify.com` x3 (mission 9e8653b8) -- one "confirmed" HIGH whose entire evidence was
+  `429 -> 502 -> 429`, and two CRITICAL time-blind hits from single unrepeated observations on a
+  rate-limiting host. See the commit; the fixes are general.
+* a documentation page showing an example PEM -> `private_key_disclosed` CRITICAL.
+* a public `/.well-known/jwks.json` with any nested `d` -> `jwt_private_key_disclosed` CRITICAL.
+
+**The pattern, stated once.** In every case the measurement was correct and the DECISION on it was
+not. `429 < 500` is true; "the application answered" is what the code meant. A canary is in the
+WebSocket URL; "the payload chose the endpoint" is what the finding claimed. Docstrings were
+right and the code beneath them was not, three separate times in three separate modules
+(`quote_break_recovers`, `analyze_time`, `_CONN_KV_WINDOW`). Read the sentence the finding will
+print, then ask what the code actually established.
+
+### Two failures of instrumentation, which are new and worth keeping
+
+Found by running the hooks in a real browser instead of reading them:
+
+1. Playwright delivers every `page.evaluate` through the page's own `eval`, so the eval hook
+   recorded THE SCANNER'S OWN function source as a sink hit -- canary included. `message_sink()`
+   returned "eval" on a page whose real sink was `innerHTML`.
+2. The engine wraps `window.Function` as a dangerous sink. The wrapper has its own plain
+   `.prototype`, so `Function.prototype.toString` silently became `Object.prototype.toString` and
+   returned "[object Function]" for every handler -- the origin check read False on every page,
+   including pages that plainly inspect `event.origin`.
+
+Both are the same lesson: **the tool changes the thing it measures.** Neither was visible in the
+source; both were obvious in one browser run.
+
+### And one thing built, proven, then deleted
+
+A cross-origin `postMessage` probe was wired into `_run_dom_trace` and verified in a browser
+(vulnerable handler -> `web_message_xss` with the alert firing; origin-checking handler ->
+silent). `_run_dom_audit`, twenty lines further down, already did it -- from a real bound harness
+origin, with a targeted-origin control. It was a second producer of one family, so it was
+removed along with `message_sink` and the hooks feeding it. Working is not the same as belonging.
+
+### Open
+
+* `jku`/`x5u` can only reach the `jwt_jku_url_fetched` rung: `collaborator` RECORDS inbound hits
+  but nothing can SERVE `probe.side_channel` at `probe.side_channel_url` yet. Real CWE-918, but
+  the acceptance leg is unreachable until that lands.
+* `cmdi_tool.analyze_time` has the SAME signature and the same missing control-is-fast clause
+  that `sqli_tool.analyze_time` just had. Not yet measured against a live FP -- next ticket.
+* Mission 9e8653b8 ended `status=failed` in the report phase; the three findings above are
+  withdrawn, and the failure itself is untriaged.

@@ -146,9 +146,19 @@ def time_payloads(value: str, seconds: int) -> list:
     ]
 
 
-def analyze_time(control_elapsed: float, sleep_elapsed: float, seconds: int, margin: float = 0.6) -> bool:
+def analyze_time(control_elapsed: float, sleep_elapsed: float, seconds: int, margin: float = 0.8) -> bool:
+    """Confirmed when the sleep request is slower than its control by ~the injected delay, AND the
+    control itself was fast.
+
+    This was character-identical to `sqli_tool.analyze_time`, including the missing control clause
+    that let a 2.2s control and a 6.0s probe read as an injected 5s sleep. That one produced two
+    false CRITICALs against partners.shopify.com; this one produces CRITICAL REMOTE COMMAND
+    EXECUTION, so it is the more expensive place to be wrong. Fixed here before it was measured
+    wrong in the field rather than after.
+    """
     need = seconds * margin
-    return sleep_elapsed - control_elapsed >= need and sleep_elapsed >= need
+    delta = sleep_elapsed - control_elapsed
+    return delta >= need and sleep_elapsed >= need and control_elapsed < delta
 
 
 def oob_payloads(value: str, collab_url: str) -> list:

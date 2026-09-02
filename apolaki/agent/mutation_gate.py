@@ -139,6 +139,18 @@ MUTANTS = [
      r'return \{"severity": "info", "confidence": "lead", "oracle": "reflection",',
      'return {"severity": "high", "confidence": "confirmed", "oracle": "reflection",',
      "tests/test_traversal_oracle.py::test_reflected_traversal_payload_alone_is_not_a_confirmation"),
+    # Q-146/147/149. Three modules producing CONFIRMED findings arrived this cycle, and the gate
+    # is right that each owes a mutant. Every one below was run APPLIED and KILLED before being
+    # written here, and each names the exact negative control that dies with it.
+    ('code_injection.py', 'drop the subsequence check -- an echo behind a punctuation-stripping sanitizer satisfies the oracle again (el_replace: token == payload minus one hyphen, which the old SUBSTRING self-check called safe)',
+     '    rest = iter\\(payload\\)', '    return False\\n    rest = iter(payload)',
+     'tests/test_code_injection.py::test_the_structurally_echo_satisfiable_shape_never_ships'),
+    ('dom_sinks.py', 'websocket: compare the canary against the WHOLE URL again -- an app opening its own socket as wss://app/live?room=<canary> becomes attacker-controlled routing, which is what the original test REQUIRED',
+     'canary in _authority_host\\(wu\\)', 'canary in wu',
+     'tests/test_dom_sinks.py::test_negative_the_canary_merely_REACHING_the_socket_url_is_not_control'),
+    ('jwt_attacks.py', "drop the discriminating-controls gate -- an endpoint that answers identically with and without a token can then 'accept' a forged one",
+     '    if not _status_discriminates\\(controls\\) and not _body_discriminates\\(controls\\):', '    if False:',
+     'tests/test_jwt_attacks.py::test_fp1_an_endpoint_that_answers_identically_with_and_without_a_token_is_not_tested'),
 ]
 
 

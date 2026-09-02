@@ -9580,6 +9580,8 @@ class ToolRegistry:
         import httpx
         import collaborator as collab
         import cmdi_tool as cmdi
+        # for the shared timing-pair validity predicate; _run_cmdi did not import this
+        import sqli_tool as sqli
         from urllib.parse import parse_qsl
         url = inp["url"]
         params = (inp.get("params") or xt.params_of(url))[:self._ni(8, 16, 32)]
@@ -9662,8 +9664,20 @@ class ToolRegistry:
                     continue
                 # 2) time-based blind
                 for item in cmdi.time_payloads(orig, seconds):
-                    _, ctl = await get(c, xt.set_param(url, p, item["control"]))
-                    _, slp = await get(c, xt.set_param(url, p, item["payload"]))
+                    _rc, ctl = await get(c, xt.set_param(url, p, item["control"]))
+                    _rs, slp = await get(c, xt.set_param(url, p, item["payload"]))
+                    # Same two defects the SQLi timing lane had: the responses were discarded, so a
+                    # fast rate-limited control could be compared against a served page, and one
+                    # unrepeated outlier was enough. Here the claim is COMMAND EXECUTION.
+                    if not sqli.timing_pair_is_comparable(_rc, _rs):
+                        continue
+                    if cmdi.analyze_time(ctl, slp, seconds):
+                        _rc2, ctl2 = await get(c, xt.set_param(url, p, item["control"]))
+                        _rs2, slp2 = await get(c, xt.set_param(url, p, item["payload"]))
+                        if not (sqli.timing_pair_is_comparable(_rc2, _rs2)
+                                and cmdi.analyze_time(ctl2, slp2, seconds)):
+                            continue
+                        ctl, slp = max(ctl, ctl2), min(slp, slp2)
                     if cmdi.analyze_time(ctl, slp, seconds):
                         _req = xt.set_param(url, p, item["payload"])
                         findings.append(self._attach_poc(
