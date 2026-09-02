@@ -6496,6 +6496,31 @@ class ToolRegistry:
                         except Exception as _apolaki_swallowed_raw:
                             self._swallow(_apolaki_swallowed_raw, 'tools:_render:raw_body', u)
                     await page.wait_for_timeout(600)
+                    # Q-154. A FIXED SETTLE IS A RACE WITH THE FRAMEWORK, and on juice-shop the
+                    # engine lost it by ~50ms. MEASURED: the canary becomes visible at 0.49-0.59s
+                    # while this settle is 0.60s, so the reflection was there and the scan had
+                    # already looked. Every SPA render was a coin flip, and under mission load
+                    # (eight parameters rendering concurrently) it is a losing one.
+                    #
+                    # Not a bigger sleep: this settle dominates the engine's cost, and tripling it
+                    # for every probe to fix a framework-only case is the wrong trade. Wait for the
+                    # CANARY, bounded, and only when the document is SPA-shaped -- an ordinary
+                    # server-rendered page has already reflected by now and pays nothing extra.
+                    #
+                    # POLLED, not `wait_for_function`: a page that never reflects the canary is the
+                    # ORDINARY case here, and the timeout for it must be a return value rather than
+                    # an exception. Raising would need a handler on the hot path whose whole job is
+                    # to ignore the normal outcome, which is how silent-failure handlers breed.
+                    _seen_canary = await page.evaluate(
+                        "c => document.documentElement.innerHTML.includes(c)", canary)
+                    if not _seen_canary and await page.evaluate(
+                            "() => !!(document.querySelector('app-root,[ng-version],#root,#app')"
+                            " || window.__NEXT_DATA__)"):
+                        for _ in range(10):                     # <= 2.5s, 250ms slices
+                            await page.wait_for_timeout(250)
+                            if await page.evaluate(
+                                    "c => document.documentElement.innerHTML.includes(c)", canary):
+                                break
                 except Exception as _apolaki_swallowed_5663:
                     self._swallow(_apolaki_swallowed_5663, 'tools:_render:5663', "")
                     pass
@@ -6632,7 +6657,17 @@ class ToolRegistry:
                     # Concurrent like the query pass, and folded in the SAME order. It runs AFTER the
                     # query pass, not alongside it, because its dedup deliberately reads `seen`: a family
                     # already proven via the query source must not be re-reported here.
-                    _frag = [("(hash)", "fragment_raw")] + [(p, "fragment") for p in frag_params]
+                    # Q-153. HASH-ROUTE PARAMETERS. An Angular/Vue/React app routed on the hash
+                    # keeps its parameters INSIDE the fragment (`#/search?q=...`), where the server
+                    # never sees them and where none of the three sources above reaches: `fragment`
+                    # percent-encodes the route into a parameter NAME, `fragment_raw` replaces the
+                    # route outright, and `query` writes a server parameter the SPA ignores. So the
+                    # payload landed somewhere the application never reads, on every SPA.
+                    # MEASURED on juice-shop, whose DOM XSS is exactly `#/search?q=`.
+                    _route_params = [p for p in dt.fragment_route_params(url)][:3]
+                    _frag = ([("(hash)", "fragment_raw")]
+                             + [(p, "fragment") for p in frag_params]
+                             + [(p, "fragment_route") for p in _route_params])
                     for (p, src), hits in await bounded_map(_frag, _trace_fragment, browser_concurrency()):
                         if isinstance(hits, BaseException):
                             self._swallow(hits, "dom_trace.fragment", "%s#%s" % (url, p))

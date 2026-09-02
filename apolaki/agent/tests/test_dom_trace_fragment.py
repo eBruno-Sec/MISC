@@ -100,3 +100,60 @@ def test_every_declared_source_is_constructible():
     for src in dt.SOURCES:
         u = dt.probe_url(BASE, "p", "V", src)
         assert "V" in u and u.startswith("http://t/app")
+
+
+# =================================================================================================
+# Q-153. HASH-ROUTE PARAMETERS. A hash-routed SPA (Angular, Vue, React Router) keeps its parameters
+# INSIDE the fragment -- `#/search?q=...` -- where the server never sees them, so no
+# request/response engine can reach them and neither could this one.
+#
+# MEASURED on juice-shop, whose DOM XSS is exactly `#/search?q=`. All three existing sources miss
+# it, and two ACTIVELY DESTROY the route:
+#
+#   fragment      #%2Fsearch%3Fq=test&q=CANARY   the route is percent-encoded into a parameter NAME
+#   fragment_raw  #CANARY                        the route is replaced outright
+#   query         ?q=CANARY#/search?q=test       a server parameter the SPA never reads
+#
+# With the source added, `_run_dom_trace` reports juice-shop's DOM XSS. It had been invisible.
+# =================================================================================================
+
+def test_hash_route_parameters_are_discovered():
+    assert dt.fragment_route_params("http://h:3000/#/search?q=test") == ["q"]
+    assert dt.fragment_route_params("http://h:3000/#/r?a=1&b=2") == ["a", "b"]
+
+
+def test_a_url_with_no_hash_query_yields_no_route_params():
+    """The negative control: a bare hash route and a plain URL both offer nothing to probe, and
+    inventing a parameter for them would spend a browser render on nothing."""
+    assert dt.fragment_route_params("http://h:3000/#/account") == []
+    assert dt.fragment_route_params("http://h:3000/x?a=1") == []
+    assert dt.fragment_route_params("http://h:3000/") == []
+
+
+def test_the_probe_keeps_the_route_and_replaces_only_the_value():
+    """THE DEFECT, stated as an assertion. The payload has to land where the application reads it,
+    and that means the route must survive."""
+    got = dt.probe_url("http://h:3000/#/search?q=test", "q", "CANARY", "fragment_route")
+    assert got == "http://h:3000/#/search?q=CANARY"
+    assert "%2F" not in got and "%3F" not in got, "the route was percent-encoded again"
+
+
+def test_the_probe_preserves_sibling_hash_parameters():
+    assert dt.probe_url("http://h:3000/#/r?a=1&b=2", "b", "C", "fragment_route") == \
+        "http://h:3000/#/r?a=1&b=C"
+
+
+def test_the_old_sources_still_do_what_they_did():
+    """Non-vacuity from the other direction: this added a source, it did not change the three that
+    existed, so a regression in them cannot hide behind the new one."""
+    u = "http://h:3000/x"
+    assert dt.probe_url(u, "p", "C", "query") == "http://h:3000/x?p=C"
+    assert dt.probe_url(u, "(hash)", "C", "fragment_raw") == "http://h:3000/x#C"
+    assert dt.probe_url(u, "p", "C", "fragment") == "http://h:3000/x#p=C"
+
+
+def test_the_source_phrase_names_where_the_payload_actually_went():
+    """A reader who cannot tell WHICH source was injected cannot reproduce the bug -- and a
+    fragment-sourced finding described as a query parameter is not reproducible at all."""
+    phrase = dt.source_phrase("fragment_route", "q")
+    assert "q" in phrase and "fragment" in phrase.lower()

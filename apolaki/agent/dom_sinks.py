@@ -629,9 +629,22 @@ DOM_SINK_HOOKS_JS = r"""
   wrapFn(window, "setInterval", "setInterval");
   wrapFn(document, "write", "document.write");
   wrapFn(document, "writeln", "document.writeln");
+  // A PROXY, NOT A REPLACEMENT FUNCTION, and the difference is the whole page.
+  //
+  // The plain wrapper here brought its OWN `.prototype`, so `window.Function.prototype` stopped
+  // being the real one. MEASURED against juice-shop: with this hook installed Angular never
+  // rendered -- `in_text` went True -> False, silently, with no page error -- and every DOM engine
+  // downstream reported a clean SPA it had actually broken. Bisected to this single line: remove
+  // it and the app renders; install ONLY it and the app does not.
+  //
+  // A Proxy forwards `prototype`, the statics, `instanceof` and `Function.prototype.toString`
+  // untouched, so nothing about the page's own view of `Function` changes. It also makes the
+  // earlier `FTS` workaround unnecessary rather than merely survivable.
   try { const F = window.Function;
-    window.Function = function () { rec("Function", arguments[arguments.length - 1]);
-                                    return F.apply(this, arguments); }; } catch (e) {}
+    window.Function = new Proxy(F, {
+      apply(t, th, a) { rec("Function", a[a.length - 1]); return Reflect.apply(t, th, a); },
+      construct(t, a, nt) { rec("Function", a[a.length - 1]); return Reflect.construct(t, a, nt); }
+    }); } catch (e) {}
   for (const [proto, prop, label] of [[Element.prototype, "innerHTML", "innerHTML"],
                                       [Element.prototype, "outerHTML", "outerHTML"]]) {
     try { const d = Object.getOwnPropertyDescriptor(proto, prop); if (!d || !d.set) continue;

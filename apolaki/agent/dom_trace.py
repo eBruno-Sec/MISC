@@ -99,6 +99,38 @@ def set_raw_fragment(url: str, value: str) -> str:
     return urlunparse(urlparse(url)._replace(fragment=str(value)))
 
 
+def fragment_route_params(url: str) -> list:
+    """Parameter names carried INSIDE a hash route, e.g. `#/search?q=x` -> ["q"]. Pure.
+
+    Q-153. A hash-routed SPA keeps its parameters in the FRAGMENT'S OWN query string, and the
+    fragment is never sent to the server -- so no request/response engine can see them and neither
+    could this one. MEASURED on juice-shop, whose DOM XSS lives at `#/search?q=`: all three
+    existing sources miss it, and two of them actively destroy the route.
+    """
+    frag = urlparse(url).fragment
+    if "?" not in frag:
+        return []
+    return [k for k, _ in parse_qsl(frag.split("?", 1)[1], keep_blank_values=True) if k]
+
+
+def set_fragment_param(url: str, name: str, value: str) -> str:
+    """Set `name=value` inside the fragment's own query string, KEEPING the hash route. Pure.
+
+    `set_fragment` treats the whole fragment as a query string, so on `#/search?q=test` it
+    percent-encodes the route into a parameter NAME (`#%2Fsearch%3Fq=test&q=...`) and the app
+    routes nowhere. `set_raw_fragment` replaces the route outright. Both leave the payload
+    somewhere the application never reads.
+    """
+    p = urlparse(url)
+    route, _, q = p.fragment.partition("?")
+    pairs = parse_qsl(q, keep_blank_values=True)
+    if any(k == name for k, _ in pairs):
+        pairs = [(k, value if k == name else v) for k, v in pairs]
+    else:
+        pairs.append((name, value))
+    return urlunparse(p._replace(fragment=route + "?" + urlencode(pairs, doseq=True)))
+
+
 def probe_url(url: str, param: str, value: str, source: str = "query") -> str:
     """Build the probe URL for one client-side source. Pure.
 
@@ -109,11 +141,15 @@ def probe_url(url: str, param: str, value: str, source: str = "query") -> str:
         return set_fragment(url, param, value)
     if source == "fragment_raw":
         return set_raw_fragment(url, value)
+    if source == "fragment_route":
+        return set_fragment_param(url, param, value)
     return set_param(url, param, value)
 
 
 _SOURCE_PHRASE = {"query": "query parameter '%s'", "fragment": "URL fragment '#%s='",
-                  "fragment_raw": "URL fragment"}
+                  "fragment_raw": "URL fragment",
+                  "fragment_route": "hash-route parameter '%s' (inside the fragment, never sent "
+                                    "to the server)"}
 
 
 def source_phrase(source: str, param: str) -> str:
