@@ -96,6 +96,12 @@ CHECKS = (
     {"technique": "private_key_disclosed", "lab": "domsource", "kind": "tool",
      "tool": "_run_web_probes", "input": {"url": "http://domsource:8080/leak"},
      "family": "info_disclosure"},
+    # Q-147. The socket HOST comes from the fragment, so the payload chooses the endpoint. This is
+    # also the regression guard for the structural fix: the check used to accept the canary
+    # anywhere in the URL, which made an app's own `wss://app/live?room=<canary>` a finding.
+    {"technique": "websocket_url_poisoning", "lab": "domsource", "kind": "tool",
+     "tool": "_run_dom_trace", "input": {"url": "http://domsource:8080/wsock"},
+     "family": "websocket_url_poisoning"},
     {"technique": "dom_link_manipulation", "lab": "domsource", "kind": "tool", "tool": "_run_dom_trace",
      "input": {"url": "http://domsource:8080/hashparam"}, "family": "dom_link_manipulation"},
     # ── browser-runtime access control (BIE) ──────────────────────────────────────────────────

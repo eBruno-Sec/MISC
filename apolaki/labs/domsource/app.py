@@ -106,9 +106,21 @@ _FAKE_KEY_BODY = "\n".join(
 _LEAK = ("-----BEGIN RSA PRIVATE KEY-----\n" + _FAKE_KEY_BODY
          + "\n-----END RSA PRIVATE KEY-----\n")
 
+# Q-147 LIVENESS. The page opens a WebSocket whose HOST comes from the fragment, which is the
+# real shape of `websocket_url_poisoning`: the attacker chooses the endpoint, not merely a room
+# name inside the app's own socket URL. The fragment never reaches the server, so no
+# request/response engine can see this -- only a render can.
+_WSOCK = _HEAD + """<h1>live</h1><div id="s">idle</div>
+<script>
+  var h = location.hash.slice(1);
+  if (h) { try { new WebSocket("ws://" + h + "/live");
+                 document.getElementById("s").textContent = "connecting"; } catch (e) {} }
+</script>""" + _TAIL
+
 _ROUTES = {"/hash": _HASH, "/hashparam": _HASHPARAM, "/safehash": _SAFEHASH,
            "/noquery": _NOQUERY, "/inert": _INERT, "/account": _ACCOUNT,
-           "/leak": _LEAK}
+           "/leak": _LEAK,
+           "/wsock": _WSOCK}
 
 
 class Handler(http.server.BaseHTTPRequestHandler):

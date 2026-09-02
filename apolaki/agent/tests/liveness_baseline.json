@@ -19,7 +19,8 @@
     "smb_signing_disabled",
     "snmp_default_community",
     "surface_discovery",
-    "technology_detection"
+    "technology_detection",
+    "websocket_url_poisoning"
   ],
   "note": "Engines proven end-to-end against a standing lab. Add by running liveness_run.py --update; a REGRESSION fails before the file is written, so this can only ratchet up."
 }

@@ -606,6 +606,14 @@ DOM_SINK_HOOKS_JS = r"""
               storage_writes: [], doc_domain_write: "", ws_urls: [], ws_opened: false };
   window.__apolaki_sinks = B;
 
+  // RESTORED. Deleting the web-message hooks took `cap` out with them, because it sat between
+  // them and this line. Every recorder in this file calls it, each inside `try { } catch (e) {}`,
+  // so the ReferenceError was swallowed 100% of the time and EVERY sink went silently unrecorded:
+  // ws_urls, json_keys, xpath_exprs, storage_writes, and sink_hits via `rec`. The unit suite
+  // stayed green because it feeds `classify` a signal dict directly and never runs this JS. The
+  // liveness gate caught it in one run -- and I had already SEEN `storage_writes: []` on a page
+  // that writes to localStorage and read past it.
+  const cap = (a, v) => { if (a.length < 40) a.push(v); };
   const MINE = /__apolaki/;
   const rec = (name, v) => { try { if (typeof v === "string" && v && !MINE.test(v))
       cap(B.sink_hits, { sink: name, value: v.slice(0, 400) }); } catch (e) {} };

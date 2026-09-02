@@ -596,3 +596,33 @@ def test_web_messages_are_NOT_classified_here():
            "pm_sink": "innerHTML", "pm_origin_checked": False}
     assert [h["family"] for h in ds.classify_page(URL, sig)] == []
     assert not hasattr(ds, "message_sink")
+
+
+def test_every_helper_the_hooks_CALL_is_declared_before_it_is_used():
+    """THE DEFECT THIS EXISTS FOR, and it shipped for an hour.
+
+    Removing the web-message hooks took `const cap` out with them -- it happened to sit between
+    that block and the next line. Every recorder in the file calls `cap`, each inside its own
+    `try { } catch (e) {}`, so the ReferenceError was swallowed 100% of the time and EVERY sink
+    went silently unrecorded: ws_urls, json_keys, xpath_exprs, storage_writes, and sink_hits via
+    `rec`. Nothing raised, nothing logged, and the page looked fine.
+
+    The unit suite could not see it: every other test here hands `classify` a signal dict directly
+    and never executes this JavaScript. The liveness gate caught it in one run.
+
+    A silent catch turns a missing declaration into a permanent no-op, so the declaration is what
+    has to be asserted."""
+    js = ds.DOM_SINK_HOOKS_JS
+    for name in ("cap", "rec", "MINE", "wrapFn"):
+        decl = js.find("const %s " % name)
+        assert decl != -1, "%s is CALLED by the hooks and never declared" % name
+        first_use = min([i for i in (js.find("%s(" % name), js.find("%s." % name)) if i != -1]
+                        + [len(js)])
+        assert decl < first_use, "%s is used before it is declared" % name
+
+
+def test_the_declaration_guard_is_not_vacuous():
+    """NEGATIVE CONTROL. Delete the declaration and the guard above must fail -- otherwise it is
+    just asserting that a string contains some words."""
+    js = ds.DOM_SINK_HOOKS_JS.replace("const cap = ", "const notcap = ", 1)
+    assert js.find("const cap ") == -1

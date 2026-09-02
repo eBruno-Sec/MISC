@@ -216,9 +216,18 @@ def test_a_dispatched_zap_is_silent(tmp_path):
     assert mainmod._missing_zap_invocation(mid) is None
 
 
-def test_a_mission_that_never_reached_phase_f2_says_so(tmp_path, monkeypatch):
-    """THE FIELD CASE. Live hosts were found, the daemon is configured, and the run still ended
-    before the late phase that schedules ZAP."""
+def test_the_residual_case_does_NOT_claim_a_cause_it_cannot_establish(tmp_path, monkeypatch):
+    """THIS TEST USED TO REQUIRE THE WRONG ANSWER, which is why it is kept and renamed.
+
+    It asserted the guard say "phase F2 ... starves ZAP". Two things were wrong with that. ZAP was
+    HOISTED OUT of phase F2 into phase E, so the sentence named a phase that no longer schedules
+    it; and the branch was a residual `else` asserting a mechanism it never checked. On mission
+    9e8653b8 that reading sent me hunting a stale container image that did not exist -- the
+    container's planner matched the repo line for line.
+
+    An unverified cause stated as a determined one is worse than "unknown", because "unknown" does
+    not send anyone anywhere. What the guard owes the reader is what it RULED OUT and what it
+    cannot distinguish."""
     import main as mainmod
     monkeypatch.setattr(mainmod, "_zap_configured", lambda: True)
     mid = _zap_mission(tmp_path, "zap_starved", [
@@ -227,7 +236,13 @@ def test_a_mission_that_never_reached_phase_f2_says_so(tmp_path, monkeypatch):
         ("tool_call", {"tool": "run_sqli"}),
     ])
     err = (mainmod._missing_zap_invocation(mid) or {}).get("error", "")
-    assert "phase F2" in err and "starves ZAP" in err, err
+    assert "NOT DETERMINED" in err, err
+    # it must still say what it DID establish, or "not determined" is just a shrug
+    assert "Ruled out" in err and "ZAP_ADDR is configured" in err, err
+    # and it must name the candidate that had no branch at all and is likeliest in the field
+    assert "engage" in err, err
+    # the claim that caused the wasted hunt must not come back
+    assert "starves ZAP" not in err, err
 
 
 def test_an_unconfigured_daemon_is_named_as_the_cause(tmp_path, monkeypatch):
