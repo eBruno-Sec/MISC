@@ -771,6 +771,42 @@ twice -- and was re-run with a unique context). **12 killed, 13 survived.**
 
 ---
 
+# RE-VERIFICATION AGAINST A CONCURRENT EDIT (`scan_response` landed mid-audit)
+
+`passive_disclosure.py` changed under me while this audit ran: 356 -> 402 lines. The diff is
+APPEND-ONLY (lines 357-402); the four finder functions are byte-identical, so nothing above needed
+re-measuring. What was added is the public entry point `tools.py` will actually call, plus an
+honesty note that now records the 4-of-12 gap in the file itself:
+
+    SHIPPED_CHECKS = ('private_key_disclosed', 'jwt_private_key_disclosed', 'jwks_disclosed',
+                      'db_connection_string_disclosed')
+    def scan_response(body, *, url="") -> list
+
+That addresses the *documentation* half of PD-5. Still open from PD-5: `_META` declares 12 checks,
+and all four helpers remain dead (`display_spans`, `_inside`, `mask_tail`, `mask_ssn` -- 0 callers
+each, re-measured on the current file).
+
+**Every finding re-measured through `scan_response()`, i.e. through the shipping API:**
+
+    PD-1 developer docs page showing a key inside <pre><code>
+      -> private_key_disclosed          CRITICAL
+    PD-2 PUBLIC jwks with one nested metadata object
+      -> jwt_private_key_disclosed      CRITICAL
+    PD-3 redaction: password containing '@'
+      -> db_connection_string_disclosed HIGH   *** CLEARTEXT PASSWORD FRAGMENT IN detail ***
+    PD-4a settings panel, host= and password= on different lines
+      -> db_connection_string_disclosed HIGH
+    PD-4b one legacy login link
+      -> db_connection_string_disclosed HIGH
+
+    live-lab regression through scan_response(): wpreach/ , ?p=1, wp-login.php, juice-shop:3000/,
+    main.js, /api/Products, dvwa/login.php, mutillidae/   -> TOTAL: 0 findings
+
+All five findings are reachable from the entry point the wiring will use. The clean-page result is
+unaffected.
+
+---
+
 # RECOMMENDED ORDER OF WORK FOR THE COORDINATOR
 
 1. **Do not ship `el_replace`** (or ship it only with a token that is not a deletion-image of its
