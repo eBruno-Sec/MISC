@@ -117,6 +117,15 @@ CHECKS = (
      "tool": "_run_jwt",
      "input": {"token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJhbGljZSIsInJvbGUiOiJ1c2VyIn0.c2ln", "url": "http://domsource:8080/api/me"},
      "family": "jwt", "title": "JWT signature is not verified"},
+    # Q-146. The lab EXECUTES the formula and echoes what it printed, so both of the probe's
+    # independently-derived tokens can appear: the arithmetic product proves evaluation, and the
+    # language-exclusive construct (`[::-1]`) is what allows the language to be NAMED. An echo
+    # cannot produce either, which is the property the whole oracle rests on -- and the reason the
+    # Q-126 `{{7*7}}`/"49" check raised CVSS 9.8 on a page that merely contained two digits.
+    {"technique": "python_code_injection", "lab": "domsource", "kind": "tool",
+     "tool": "_run_injection_probes",
+     "input": {"url": "http://domsource:8080/calc?expr=1"},
+     "family": "code_injection", "title": "Python code injection"},
     {"technique": "dom_link_manipulation", "lab": "domsource", "kind": "tool", "tool": "_run_dom_trace",
      "input": {"url": "http://domsource:8080/hashparam"}, "family": "dom_link_manipulation"},
     # ── browser-runtime access control (BIE) ──────────────────────────────────────────────────

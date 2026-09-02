@@ -16,6 +16,7 @@
     "mass_assignment",
     "modbus_exposed",
     "private_key_disclosed",
+    "python_code_injection",
     "s7comm_exposed",
     "smb_null_session",
     "smb_signing_disabled",

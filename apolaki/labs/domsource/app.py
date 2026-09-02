@@ -33,6 +33,9 @@ Standard library only; no build, no dependency.
 import base64
 import json
 import hashlib
+import io
+import contextlib
+import urllib.parse
 import http.server
 import socketserver
 
@@ -173,6 +176,34 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 out = json.dumps({"user": sub, "balance": 4210}).encode()
                 self.send_response(200)
             self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(out)))
+            self.end_headers()
+            self.wfile.write(out)
+            return
+        # Q-146 LIVENESS. A "formula preview" field that EXECUTES what it is given and echoes what
+        # that printed -- a real server-side code-injection sink, and the shape `code_injection`
+        # probes for. The namespace is restricted to `print` and `str`: enough for the probe to
+        # evaluate, nothing to import or open with. That restriction is realistic (plenty of real
+        # sandboxes are exactly this, and exactly this bypassable) and it keeps the lab from being
+        # a general execution primitive on the lab network.
+        if path == "/calc":
+            expr = ""
+            if "?" in self.path:
+                for pair in self.path.split("?", 1)[1].split("&"):
+                    k, _, v = pair.partition("=")
+                    if k == "expr":
+                        expr = urllib.parse.unquote_plus(v)
+            printed = io.StringIO()
+            try:
+                with contextlib.redirect_stdout(printed):
+                    exec(compile(expr, "<formula>", "exec"),
+                         {"__builtins__": {"print": print, "str": str}}, {})
+                shown = printed.getvalue()
+            except Exception as exc:
+                shown = "error: %s" % type(exc).__name__
+            out = (_HEAD + "<h1>formula preview</h1><pre>" + shown + "</pre>" + _TAIL).encode()
+            self.send_response(200)
+            self.send_header("Content-Type", "text/html; charset=utf-8")
             self.send_header("Content-Length", str(len(out)))
             self.end_headers()
             self.wfile.write(out)

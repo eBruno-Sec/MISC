@@ -96,6 +96,64 @@ TECHNIQUES: dict[str, dict] = {t["id"]: t for t in [
        validated_on=["juiceshop"],
        maps_to={"juiceshop": ["Login Admin", "Login Bender", "Login Jim"]}),
 
+    # ── CYCLE 18: the five engines mined from Burp's published issue catalog. Each is declared
+    # here because a liveness entry must carry a TYPED CLAIM -- an id with no technique record is
+    # a green tick nothing can hold to account. Every `validated_on` below was earned by a
+    # liveness run against the named lab, not hand-written.
+
+    _t(id="private_key_disclosed", vuln_class="information_disclosure", cwe="CWE-522",
+       owasp="A02:2021", permission=PASSIVE, transferable=True,
+       summary="A private key is served in a response body.",
+       detect="PEM armour with real key material between the markers, outside any display element.",
+       exploit="Impersonate the service, decrypt captured traffic, or sign as the key holder.",
+       oracle="Armour plus >=100 chars of key material, with no placeholder text and not inside a "
+              "<pre>/<code> display span -- a documentation page SHOWING a PEM is not a leak.",
+       wstg="WSTG-CONF-04", mitre="T1552",
+       validated_on=["domsource"]),
+
+    _t(id="websocket_url_poisoning", vuln_class="client_side", cwe="CWE-918", owasp="A10:2021",
+       permission=ACTIVE, transferable=True,
+       summary="The page opens a WebSocket to an endpoint the attacker chooses.",
+       detect="Runtime hook on the WebSocket constructor during a browser render of a probed source.",
+       exploit="Point the socket at attacker infrastructure; own both directions of the channel.",
+       oracle="The canary is the AUTHORITY of the socket URL, not merely present in it -- a room "
+              "name echoed into the app's own socket URL is data flow, not endpoint control.",
+       wstg="WSTG-CLNT-10", mitre="T1190",
+       validated_on=["domsource"]),
+
+    _t(id="csp_allows_untrusted_script", vuln_class="security_misconfiguration", cwe="CWE-693",
+       owasp="A05:2021", permission=PASSIVE, transferable=True,
+       summary="The Content-Security-Policy permits untrusted script execution.",
+       detect="Parse the enforced policy's script-src, accounting for default-src inheritance.",
+       exploit="Any injection point becomes script execution; the policy stops nothing.",
+       oracle="script-src (or the default-src it inherits) allows unsafe-inline with NO nonce and "
+              "NO hash -- either would neutralise it -- and the policy is enforced, not Report-Only.",
+       wstg="WSTG-CONF-12", mitre="T1189",
+       validated_on=["domsource"]),
+
+    _t(id="jwt_signature_not_verified", vuln_class="broken_authentication", cwe="CWE-347",
+       owasp="A07:2021", permission=ACTIVE, transferable=True,
+       summary="The application honours a JWT whose signature it never verified.",
+       detect="Three controls -- authenticated, unauthenticated, signature-tampered -- then compare.",
+       exploit="Rewrite any claim (subject, role, expiry) and reattach the original signature.",
+       oracle="A signature-tampered token is honoured where a no-token request is REFUSED. Without "
+              "that discrimination the verdict is not_tested, never 'not vulnerable'.",
+       wstg="WSTG-SESS-10", mitre="T1550",
+       validated_on=["domsource"]),
+
+    _t(id="python_code_injection", vuln_class="code_injection", cwe="CWE-94", owasp="A03:2021",
+       permission=ACTIVE, transferable=True,
+       summary="A parameter is evaluated as server-side Python.",
+       detect="A probe carrying two independently-derived tokens: a random-operand arithmetic "
+              "product, and a language-exclusive construct in the same payload.",
+       exploit="Evaluate attacker code in the application's process.",
+       oracle="BOTH tokens appear in the response and neither is a subsequence of the payload, so "
+              "no echo -- and no punctuation-stripping sanitizer over an echo -- can produce them. "
+              "Arithmetic alone proves evaluation but not WHICH language, and is reported as "
+              "unidentified_code_injection with no language named.",
+       wstg="WSTG-INPV-11", mitre="T1059",
+       validated_on=["domsource"]),
+
     _t(id="sqli_union_extract", vuln_class="sql_injection", cwe="CWE-89", owasp="A03:2021",
        permission=ACTIVE, transferable=True,
        summary="Data exfiltration via UNION-based SQL injection.",
