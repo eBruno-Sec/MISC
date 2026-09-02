@@ -5104,10 +5104,20 @@ class ToolRegistry:
                 pg = await ctx.new_page()
                 await _browser_engine.rate_limited_goto(pg, base, wait_until="domcontentloaded",
                                                         timeout=12000)
-                await pg.wait_for_timeout(1500)
-                hrefs = await pg.evaluate(
-                    "() => [...new Set([...document.querySelectorAll('a[href]')]"
-                    ".map(a => a.getAttribute('href')))].filter(h => h && h[0] === '#')")
+                # POLL FOR THE ANCHORS, do not sleep a fixed amount and hope. Q-154 was this same
+                # mistake one layer up: 1500ms wins on an idle container and loses under mission
+                # load, where eight renders compete. MEASURED: standalone this harvested five
+                # routes every time; in-mission it returned zero, with no error, twice.
+                #
+                # Returns the moment routes appear, so a fast page costs ~200ms rather than 1500.
+                _js = ("() => [...new Set([...document.querySelectorAll('a[href]')]"
+                       ".map(a => a.getAttribute('href')))].filter(h => h && h[0] === '#')")
+                hrefs = []
+                for _ in range(24):                       # <= ~4.8s in 200ms slices
+                    hrefs = await pg.evaluate(_js)
+                    if hrefs:
+                        break
+                    await pg.wait_for_timeout(200)
                 out = [base + h for h in (hrefs or [])[:12]]
             finally:
                 await browser.close()
