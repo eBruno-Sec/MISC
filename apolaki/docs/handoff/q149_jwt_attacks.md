@@ -109,13 +109,23 @@ Four false positives, one negative-control test each:
 
 ## Checks shipped
 
-**1. `jwt_signature_not_verified`** (CWE-347, critical). Probe = `forge_payload_tamper()`: claims
-rewritten, ORIGINAL SIGNATURE REATTACHED. A different shape from `jwt_tool.tamper_signature`
-(which mangles the signature and leaves the claims alone) and both are needed -- one is the
-control, one is the probe.
-CONTROLS: positive = tampered honoured while no-token refused, CONFIRMED. Negative = tampered
-refused -> `rejected`, `finding_for` returns None. Third case = tampered honoured AND no-token
-honoured (a public endpoint) -> `not_tested`, because that is not a signature defect.
+**1. `jwt_signature_not_verified`** (CWE-347, critical), TWO shapes that fail independently:
+
+  * `signature_byte_flipped` -- the `tampered` control leg (`jwt_tool.tamper_signature`). Claims
+    untouched, one signature byte wrong. Catches a verifier that never looks at the signature.
+  * `payload_rewritten_signature_kept` -- `forge_payload_tamper()`. A REAL signature, just not over
+    these claims. Catches a verifier that checks the signature's SHAPE, or verifies it against a
+    stale signing input, or reads the claims from an unverified copy -- all of which PASS shape one.
+    This shape needs no tampered leg: a rewritten payload accepted while a no-token request is
+    refused is already the whole differential.
+
+CAUGHT DURING THE BUILD: `forge_payload_tamper()` initially built a probe no analyser could
+consume. Routing it through `analyze_forgery()` would have been wrong, because that function GATES
+on the signature oracle being SOUND and the premise of this check is that it is not.
+`analyze_signature_verification(controls, payload_tampered=...)` is the correct consumer.
+CONTROLS: positive = either shape honoured while no-token refused, CONFIRMED. Negative = both
+refused -> `rejected`, `finding_for` returns None. Third = honoured AND no-token honoured (a public
+endpoint) -> `not_tested`, because that is not a signature defect.
 
 **2. `jwt_none_algorithm_supported`** (CWE-347, critical). 12 variants: 4 casings
 (`none`/`None`/`NONE`/`nOnE`) x 3 signature shapes (empty / no third segment / original signature
@@ -220,12 +230,14 @@ Replace `tools.py:5282-5298` (the `for label, forged in (...)` loop shown above)
             ctrl = ja.Controls(authenticated=await _resp(token),
                                unauthenticated=await _resp(""),
                                tampered=await _resp(jt.tamper_signature(token)))
-            verdicts = [ja.analyze_signature_verification(ctrl)]
 
-            for probe in ([ja.forge_payload_tamper(token)]
-                          + ja.forge_none_variants(token, max_variants=6)):
-                if probe is None:
-                    continue
+            # `signature_not_verified` takes the payload-rewrite response DIRECTLY -- it must NOT
+            # go through analyze_forgery, which gates on the signature oracle being SOUND.
+            rewritten = ja.forge_payload_tamper(token)
+            verdicts = [ja.analyze_signature_verification(
+                ctrl, payload_tampered=(await _resp(rewritten.token)) if rewritten else None)]
+
+            for probe in ja.forge_none_variants(token, max_variants=6):
                 verdicts.append(ja.analyze_forgery(probe.check, ctrl, await _resp(probe.token),
                                                    shape=probe.shape, payload=probe.token))
 
@@ -304,17 +316,40 @@ correct code with no way to fire yet. That is a RESULT, recorded here rather tha
 ```
 $ docker run --rm --network apolaki_default -v ".../agent:/app" -w /app apolaki-agent \
     python -m pytest tests/test_jwt_attacks.py -p no:cacheprovider -q -rfE
-......................................................                   [100%]
-54 passed
+..........................................................               [100%]
+58 passed
 ```
+
+Adjacent JWT tests, unaffected:
+
+```
+$ ... python -m pytest tests/test_jwt_key_confusion.py tests/test_planner_jwt_gate.py \
+      tests/test_jwt_attacks.py -p no:cacheprovider -q
+63 passed
+```
+
+Repository gates, MEASURED with this module present:
+
+  * `tests/test_silent_failure_invariant.py` -- 11 of 12 pass. The one failure is the module
+    counter (`assert len(trees) == 181` -> `185 == 181`), see patch (a). **Both handler caps still
+    pass**, because this module contributes zero handlers.
+  * `tests/test_deadcode_gate.py` -- fails, and MEASURED NOT BECAUSE OF THIS MODULE:
+    `deadcode_gate.scan()` reports 4 unused functions and **0 of them are in `jwt_attacks`**
+    (`python -c "import deadcode_gate as dg; [x for x in dg.scan()['unused'] if 'jwt_attacks' in
+    str(x)]"` -> `[]`). Every public function in this module is referenced by
+    `tests/test_jwt_attacks.py`, so it is not an unreferenced island; it is an UNWIRED one, which
+    patch (b) resolves.
+  * `tests/test_island_soundness.py::test_external_surface_cannot_emit_a_finding_on_any_path` --
+    fails on `tools.ToolRegistry._run_external_surface`, a function this lane never touched.
+    Belongs to whoever is editing `tools.py` this cycle.
 
 Mutation run (`scratchpad/q149_mutate.py`, plants one mutant, runs the suite, restores and
 verifies the sha256):
 
 ```
-BASELINE GREEN  sha256=eaaedd45142f3f2d
-... 23 mutants ...
-23/23 killed, survivors: 0  (restore verified, sha256 unchanged)
+BASELINE GREEN
+... 25 mutants ...
+25/25 killed, survivors: 0  (restore verified, sha256 unchanged)
 ```
 
 MUTANT S2-9 CAUGHT ONE OF MY OWN TESTS BEING VACUOUS, which is the point of running them.
@@ -323,7 +358,7 @@ produce the same PEM. That stays true with `datetime.now()` as the default, beca
 default is evaluated ONCE at import -- the test could not fail. It now asserts against the literal
 pinned instant (`not_valid_before_utc == 2020-01-01Z`), and the mutant dies.
 
-The 23 mutants, all killed:
+The 25 mutants, all killed:
 
 | id | mutant | test that kills it |
 |---|---|---|
@@ -339,6 +374,8 @@ The 23 mutants, all killed:
 | S1-10 | a MISSING tampered leg is called SOUND | `test_signature_not_verified_without_a_tampered_leg_is_not_tested` |
 | S1-11 | the word-count bound is ignored | `test_the_wordlist_budget_is_a_real_bound` |
 | S1-12 | a confirmation with no evidence is emitted | `test_a_confirmation_with_no_evidence_is_refused` |
+| S1-13 | the payload-rewrite probe is ignored entirely | `test_the_payload_rewrite_shape_confirms_where_the_byte_flip_does_not` |
+| S1-14 | the payload-rewrite branch confirms regardless of the acceptance verdict | `test_the_payload_rewrite_shape_reports_nothing_against_a_sound_verifier` |
 | S2-1 | the forged header carries the SERVER's own kid forward | `test_the_forged_header_does_not_carry_the_servers_own_kid_forward` |
 | S2-2 | a fetch is UPGRADED to a forgery | `test_jku_fetched_but_refused_is_reported_as_a_FETCH_not_a_forgery` |
 | S2-3 | `correlated_interactions` ignores the token | `test_another_probes_callback_cannot_confirm_this_one` |
