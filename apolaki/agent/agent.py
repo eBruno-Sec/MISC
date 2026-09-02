@@ -373,6 +373,19 @@ _SWEEP_HTTP_ENGINES = ("run_sqli", "run_sqli_structural", "run_xpath", "run_ldap
 # So the score was right and the reason was wrong, which is why the condition was written down in
 # advance. See Q-047. Restoring this entry needs a traversal oracle that fails on 00187, not a better
 # number.
+def _dom_sweep_key(u: str) -> str:
+    """What counts as "the same page" for the DOM sweep's dedup.
+
+    Q-159. The path alone is wrong for a hash-routed SPA: every route shares the path "/", so one
+    render of the base page marks the whole application as swept. The fragment IS the route there,
+    so it belongs in the key -- and on an ordinary URL the fragment is empty and this is exactly
+    the old behaviour.
+    """
+    from urllib.parse import urlparse as _up          # imported per-function throughout this file
+    p = _up(u)
+    return p.path + ("#" + p.fragment if p.fragment else "")
+
+
 _SWEEP_BROWSER_ENGINES = ("run_xss", "run_dom_trace")
 
 _SHAPE_DIGITS = re.compile(r"\d+")
@@ -4249,7 +4262,12 @@ class BBHAgent:
         # report is where "we tested 40 of 465" has to survive to.
         self._sweep_budget = {"candidates": len(_candidates), "selected": len(targets),
                               "declined": _declined, "cap": SWEEP_TARGET_CAP}
-        swept_paths = {urlparse(t).path for t in targets}   # paths the param sweep already DOM-traced
+        # Q-159. THE DEDUP KEY MUST INCLUDE THE FRAGMENT, or every route of a single-page app is
+        # the same endpoint. `urlparse("http://h/#/contact").path` is "/", so #/contact, #/login,
+        # #/about and the bare page all collapse to one key -- the base page claims it and every
+        # discovered SPA route is then declared already swept. Q-157 put five routes on the surface
+        # and this line silently discarded four of them and the fifth as duplicates of "/".
+        swept_paths = {_dom_sweep_key(t) for t in targets}  # what the param sweep already DOM-traced
         if not targets:
             return
         # EXHAUSTION IS REPORTED, NEVER SILENT (Q-093, Q-110). The declined count is stated in the same
@@ -4416,7 +4434,7 @@ class BBHAgent:
                     + (["run_session_token"] if _sess_page else []) \
                     + (["run_username_enum"] if (_login_page and _have_known) else []) \
                     + (["run_session_fixation"] if (_login_page and _have_cred) else []) \
-                    + (["run_dom_trace"] if urlparse(u).path not in swept_paths else [])
+                    + (["run_dom_trace"] if _dom_sweep_key(u) not in swept_paths else [])
                 # web cache deception needs an authenticated session to have a private page to leak — only
                 # add it on an authed scan (it self-skips otherwise, but this avoids a pointless call/page).
                 if getattr(self.tools, "session_headers", None):

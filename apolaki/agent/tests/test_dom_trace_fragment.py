@@ -157,3 +157,36 @@ def test_the_source_phrase_names_where_the_payload_actually_went():
     fragment-sourced finding described as a query parameter is not reproducible at all."""
     phrase = dt.source_phrase("fragment_route", "q")
     assert "q" in phrase and "fragment" in phrase.lower()
+
+
+# =================================================================================================
+# Q-159. THE DOM SWEEP'S DEDUP KEY WAS THE PATH, and on a hash-routed SPA every route shares one.
+#
+# `urlparse("http://h/#/contact").path` is "/". So #/contact, #/login, #/about and the bare page
+# all collapsed to a single key: the base page claimed it, and every route discovered by Q-157 was
+# then declared "already swept". Two fixes had landed upstream and still nothing was probed.
+# =================================================================================================
+
+import agent as _agentmod
+
+
+def test_hash_routes_are_distinct_pages_to_the_sweep():
+    keys = {_agentmod._dom_sweep_key(u) for u in (
+        "http://h:3000/", "http://h:3000/#/contact", "http://h:3000/#/login")}
+    assert len(keys) == 3, keys
+
+
+def test_an_ordinary_url_keys_exactly_as_it_did_before():
+    """The fragment is empty on a normal URL, so this must be the OLD behaviour verbatim -- a
+    change that also re-keyed ordinary pages would quietly re-sweep the whole surface."""
+    assert _agentmod._dom_sweep_key("http://h:3000/x?a=1") == "/x"
+    assert _agentmod._dom_sweep_key("http://h:3000/") == "/"
+
+
+def test_the_key_is_not_vacuously_unique():
+    """NEGATIVE CONTROL. Two URLs that ARE the same page must still collapse, or the dedup stops
+    deduping and the sweep re-renders the same document until the budget is gone."""
+    assert _agentmod._dom_sweep_key("http://h:3000/x?a=1") == \
+        _agentmod._dom_sweep_key("http://h:3000/x?a=2")
+    assert _agentmod._dom_sweep_key("http://h:3000/#/contact") == \
+        _agentmod._dom_sweep_key("http://other:9/#/contact")
