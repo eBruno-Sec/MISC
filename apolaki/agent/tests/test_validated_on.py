@@ -33,6 +33,7 @@ import os
 
 import pytest
 
+import liveness as LV
 import techniques as T
 import technique_model as TM
 import technique_planner as TP
@@ -242,33 +243,81 @@ def test_one_rule_for_proven_across_every_module():
 # report_the_SAME_proven_number` below is the real replacement: it calls the shared predicate
 # (`T.is_proven`) on both sides and asserts the OLD rule still over-counts relative to it, which is
 # an assertion that can actually go stale and fail if the defect it names is no longer true.
+def _backed_by_something_that_runs() -> set:
+    """Techniques an end-to-end run RE-RUNS: a liveness CHECK whose technique the COMMITTED baseline
+    records as confirmed. Derived from the two artifacts, never scanned out of source text.
+
+    Both halves are load-bearing and neither is sufficient. A CHECKS entry alone proves only that
+    somebody wrote a check; the baseline is the artifact a RUN produced. A baseline row with no check
+    behind it is a row nothing re-runs any more."""
+    confirmed = set(T._liveness_verified())
+    return {c["technique"] for c in LV.CHECKS
+            if c.get("technique") in confirmed and c.get("technique") in T.TECHNIQUES}
+
+
+# Q-164 REPLACED THIS TEST'S NOTION OF "BACKED", and made it stricter. It used to grow `backed` by
+# SCANNING this directory's source text: any technique id appearing on any line of any test file that
+# also contained the string `validated_on`, plus any id appearing in a `for` loop whose dump contained
+# it. A mention is not a run. That heuristic credited
+#   `assert TECHNIQUES["exposed_credentials"]["validated_on"] == ["ginandjuice"]`
+# as evidence for `exposed_credentials`, when the line re-runs nothing and merely pins one literal
+# against another -- a guard accepting a declaration as proof of the thing it exists to check.
+# `test_a_mention_is_not_a_run` below drives the retired heuristic directly so that stays a fact.
+#
+# MEASURED, so the size of the change is on the record rather than assumed. The scan credited 17 ids;
+# only 4 of those were not already liveness-confirmed (graphql_batching_enabled,
+# graphql_field_suggestions, reflected_xss, ssrf) and only ONE of those four carries a badge at all:
+#
+#     claims 49 | backed 24 | unbacked WITH the scan 24 | unbacked WITHOUT it 25
+#     the entire difference the scan made: ['graphql_batching_enabled']
+#
+# and that one id's whole scanned backing was a membership assertion in test_local_import_guard.py.
+# So the text scan was buying exactly one technique, and buying it with the defect. Removing it moves
+# the measured gap the honest way, 24 -> 25, and cannot XPASS: the number rose.
 @pytest.mark.xfail(strict=True, reason=(
-    "Q-088 (owner: unassigned). MEASURED: 34 of 48 claims are named by no test assertion at all; widening 'backed' to include the "
-    "liveness ledger still leaves 30 of 48 with nothing behind them - all 24 juiceshop claims and both "
-    "dvwa claims among them. The beyond-web claims ARE backed by recorded replies; the web side is not."))
+    "Q-088 (owner: unassigned), re-measured at Q-164 after the badge audit withdrew 8 pairs and the "
+    "'backed' heuristic stopped counting mentions. MEASURED NOW: 25 of 49 claims have nothing that "
+    "re-runs them - every remaining juiceshop claim and both dvwa claims among them. The beyond-web "
+    "claims ARE backed, by liveness checks that drive a standing lab; the web side still is not. "
+    "graphql_batching_enabled gained a real CHECK at Q-164 and clears the day the baseline records "
+    "it (scripts/liveness.sh --update)."))
 def test_every_validated_on_claim_is_backed_by_a_recorded_artifact():
-    """Backed = confirmed by a liveness run, or replayed by a test that names the id on a
-    validated_on line. Anything else is a claim with nothing behind it."""
-    backed = set(T._liveness_verified())
-    for fn in os.listdir(_HERE):
-        if not fn.endswith(".py") or fn == os.path.basename(__file__):
-            continue
-        text = open(os.path.join(_HERE, fn), encoding="utf8", errors="replace").read()
-        if "validated_on" not in text:
-            continue
-        tree = ast.parse(text)
-        for node in ast.walk(tree):
-            if isinstance(node, ast.For) and "validated_on" in ast.dump(node):
-                for sub in ast.walk(node.iter):
-                    if isinstance(sub, ast.Constant) and sub.value in T.TECHNIQUES:
-                        backed.add(sub.value)
-        for line in text.splitlines():
-            if "validated_on" in line:
-                for tid in T.TECHNIQUES:
-                    if '"%s"' % tid in line or "'%s'" % tid in line:
-                        backed.add(tid)
-    unbacked = sorted(set(_claims()) - backed)
+    """Backed = something in this repository RE-RUNS the technique against a lab and it confirms.
+    Anything else is a claim with nothing behind it."""
+    unbacked = sorted(set(_claims()) - _backed_by_something_that_runs())
     assert unbacked == [], "%d claims with no recorded proof: %s" % (len(unbacked), unbacked[:6])
+
+
+def test_a_mention_is_not_a_run():
+    """THE NEGATIVE CONTROL for the heuristic Q-164 retired, kept executable rather than described.
+
+    The old rule is reconstructed here and driven against a line of the exact shape it used to
+    accept. If someone reintroduces a source-text scan, this states plainly what it would buy."""
+    tid = "exposed_credentials"
+    line = 'assert T.TECHNIQUES["%s"]["validated_on"] == ["ginandjuice"]' % tid
+
+    def old_rule_says_backed(text: str) -> bool:
+        return any("validated_on" in ln and ('"%s"' % tid in ln or "'%s'" % tid in ln)
+                   for ln in text.splitlines())
+
+    assert old_rule_says_backed(line), "reconstruction is wrong; it must reproduce the old rule"
+    # ...and that line invokes nothing. The current rule refuses it, which is the whole point.
+    assert tid not in _backed_by_something_that_runs(), (
+        "a technique with no liveness check is being counted as backed")
+
+
+def test_the_backed_predicate_needs_BOTH_a_check_and_a_baseline_row():
+    """A check nobody has seen pass, and a baseline row nothing re-runs, must each back nothing.
+    Driven by mutating the two inputs rather than by reading the function."""
+    backed = _backed_by_something_that_runs()
+    checked = {c.get("technique") for c in LV.CHECKS}
+    confirmed = set(T._liveness_verified())
+    # a CHECKS entry whose technique the baseline does not record -> not backed
+    for tid in sorted((checked & set(T.TECHNIQUES)) - confirmed):
+        assert tid not in backed, "%s has a check but no baseline row, and was counted anyway" % tid
+    # a baseline row with no check behind it -> not backed
+    for tid in sorted((confirmed & set(T.TECHNIQUES)) - checked):
+        assert tid not in backed, "%s is in the baseline with no check, and was counted anyway" % tid
 
 
 # FIXED. Was a strict xfail reading: "capability_matrix.py:63 states 'Cross-lab generalization' as
