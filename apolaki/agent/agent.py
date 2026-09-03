@@ -2163,10 +2163,41 @@ class BBHAgent:
             return events
         recon = getattr(self.tools, "recon", {}) or {}
         base = self._primary_base()
-        host = (_up(base).hostname if base else "") or recon.get("target") or recon.get("domain") or ""
-        if not host or not self.scope.validate(host)[0]:
+        # Q-182. SWEEP EVERY IN-SCOPE HOST, not just the web one.
+        #
+        # This derived ONE host from the primary web base, so every non-web service living on any
+        # OTHER in-scope host was never contacted -- which is every real engagement, and this whole
+        # bench. MEASURED by an audit lane that called the packs by hand across the bench: SMB
+        # null-session (high) and SMB signing not required (medium) on smb:445, unauthenticated
+        # DNP3 (high) on dnp3-outstation:20000, LDAP anonymous read (medium) on openldap:389 --
+        # four findings from engines with ZERO lifetime dispatches across 188 missions.
+        #
+        # 15 engines, 13.4% of the registry, were STARVED: not broken, not dispatched wrongly, just
+        # never handed a host they could act on. That is the same shape as the crawl gap that hid a
+        # command injection -- the engine was right every time it reported nothing.
+        #
+        # `live_hosts` carries either bare names or {"url": ...} records depending on the producer,
+        # so both are accepted. Every scope and HITL gate stays exactly where it was; this changes
+        # only WHICH in-scope hosts are swept.
+        def _hostname(v):
+            if isinstance(v, dict):
+                v = v.get("url") or v.get("host") or v.get("value") or ""
+            v = str(v or "")
+            return (_up(v).hostname or v.split("/")[0].split(":")[0]) if v else ""
+
+        hosts = []
+        for cand in ([_up(base).hostname if base else ""]
+                     + [_hostname(h) for h in (recon.get("live_hosts") or [])]
+                     + [recon.get("target"), recon.get("domain")]):
+            h = str(cand or "").strip()
+            if h and h not in hosts and self.scope.validate(h)[0]:
+                hosts.append(h)
+        if not hosts:
             return events
-        services = _sr.parse_nmap_ports((recon.get("nmap") or {}).get("open_ports") or [], host)
+        host = hosts[0]                      # the primary, for callers below that name one host
+        services = []
+        for _h in hosts:
+            services += _sr.parse_nmap_ports((recon.get("nmap") or {}).get("open_ports") or [], _h)
         known = {s["port"] for s in services}
         # ICS/OT PORTS BELONG HERE TOO. This sweep is documented as self-contained — it exists so the
         # service packs still run when nmap did not — but it omitted every industrial port, so
@@ -2178,17 +2209,26 @@ class BBHAgent:
                              2375, 3306, 3389, 5432, 5900, 5985, 6379, 9200, 11211, 20000, 27017,
                              44818, 47808) if p not in known]
 
-        async def _open(p):
-            try:
-                r, w = await _aio.wait_for(_aio.open_connection(host, p), timeout=1.5)
-                w.close()
-                return p
-            except Exception:
-                return None
-        for p in [x for x in await _aio.gather(*[_open(p) for p in probe]) if x]:
+        # Q-182: bounded across hosts x ports, so a wide scope cannot open thousands of sockets.
+        _sweep_sem = _aio.Semaphore(64)
+
+        async def _open(h, p):
+            async with _sweep_sem:
+                try:
+                    r, w = await _aio.wait_for(_aio.open_connection(h, p), timeout=1.5)
+                    w.close()
+                    return (h, p)
+                except Exception:
+                    return None
+        _pairs = [(h, p) for h in hosts for p in probe]
+        for hit in await _aio.gather(*[_open(h, p) for h, p in _pairs]):
+            if not hit:
+                continue
+            _h, p = hit
             svc = _sr.fingerprint(p)
-            services.append({"host": host, "port": p, "service": svc, "banner": ""})
-            self.tools.recon.setdefault("nmap", {}).setdefault("open_ports", []).append("%d/tcp open %s" % (p, svc))
+            services.append({"host": _h, "port": p, "service": svc, "banner": ""})
+            self.tools.recon.setdefault("nmap", {}).setdefault("open_ports", []).append(
+                "%d/tcp open %s" % (p, svc))
         # PARALLEL beyond-web execution (Strix-borrow #110, done the safe way): each non-web service pack is an
         # INDEPENDENT host:port probe (ssh/ldap/smb/snmp/modbus/vnc/rsync/ntp/ipmi/rdp), so run them CONCURRENTLY
         # under a bounded semaphore instead of one-at-a-time — a large wall-clock cut on multi-host engagements.
