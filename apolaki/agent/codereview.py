@@ -1315,11 +1315,19 @@ def scan_comments(text: str) -> list:
 # The `//` branch must NOT fire inside a URL: without the lookbehind, `href="http://host/..."` reads as a
 # line comment and the whole rest of the line becomes a "comment body". That produced a false positive on
 # the very first live page this was tested against.
+# Q-170. THE SINGLE-LINE BRANCHES MUST NOT USE `.` -- the `(?s)` below is DOTALL for the WHOLE
+# pattern, so `.` matched newlines there too and a greedy `.*` ran a line comment to the end of
+# the file before backtracking to the last `$`. MEASURED on jquery.js as served by mutillidae:
+# one `//` comment absorbed the next four lines INCLUDING CODE, and a token in that code was
+# reported as "Credential exposed in a source comment" -- HIGH, confidence=confirmed, against a
+# vendored third-party library. Three harms from one quantifier: a value in code attributed to a
+# comment, the wrong line number, and every later `//` comment never scanned as its own body.
+# The character class keeps DOTALL where it is wanted: HTML and block comments really do span lines.
 _ANY_COMMENT = re.compile(
     r"(?s)(?:<!--(.*?)-->"          # HTML
     r"|/\*(.*?)\*/"                 # block
-    r"|(?m:(?<![:/])//[ \t]*(.*)$)"  # line comment, not the // in a scheme
-    r"|(?m:^[ \t]*\#[ \t]*(.*)$))")  # shell/python comment at line start only
+    r"|(?m:(?<![:/])//[ \t]*([^\r\n]*)$)"  # line comment, not the // in a scheme
+    r"|(?m:^[ \t]*\#[ \t]*([^\r\n]*)$))")  # shell/python comment at line start only
 
 # Credential-shaped text a developer leaves in prose, which the structured _SECRET_PATTERNS miss because
 # it has no vendor prefix: "the password for X is <32 hex-ish chars>", "password: hunter2".
