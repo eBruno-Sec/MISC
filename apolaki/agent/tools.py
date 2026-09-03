@@ -2332,13 +2332,23 @@ class ToolRegistry:
                     "response_length": len(baseline.text or ""),
                     "result": "random sibling did not return the sensitive file content",
                 }
-            for d in exp.DIR_CANDIDATES[:20]:
+            # Q-180. A directory the crawler ALREADY WALKED is a fact; DIR_CANDIDATES is a
+            # guess list of 16 hand-typed names, and it was this engine's ONLY source of
+            # directories -- the crawler's own listings were never an input. MEASURED: the
+            # mission's exchanges table holds THREE rows for /passwords/, whose listing
+            # names accounts.txt (23 working logins), and the harvester never asked for it.
+            for d in exp.directory_candidates(origin, getattr(self, "urls", None))[:40]:
                 if harvested >= 60:
                     break
                 r = await get(origin + "/" + d)
                 if r is None or r.status_code != 200 or not exp.looks_like_listing(r.text):
                     continue
-                for fp in exp.parse_listing(r.text):
+                # Resolve against the listing's OWN final URL. Apache mod_autoindex emits
+                # BARE FILE NAMES, so joining them to the origin requested the web root --
+                # /accounts.txt, a 404. Every Apache autoindex this engine ever harvested
+                # fetched the wrong path; it appeared to work only because juice-shop emits
+                # root-relative hrefs.
+                for fp in exp.parse_listing(r.text, str(r.url)):
                     if harvested >= 60:
                         break
                     if not exp.is_harvestable(fp):
@@ -4331,7 +4341,29 @@ class ToolRegistry:
             if status is None and isinstance(resp, dict):
                 status, text = resp.get("status"), resp.get("body")
             if status is not None:
-                f["response"] = f"HTTP {status}\n" + str(text or "")[:1500]
+                _rbody = str(text or "")
+                # Q-181. A FINDING WHOSE CLAIM IS "THIS BODY CONTAINS CREDENTIALS" MUST NOT
+                # CARRY THAT BODY. MEASURED on the live harvester right after the recall gap was
+                # closed: `evidence` was correctly redacted to a structural summary, and this
+                # line still copied the raw dump -- 23 plaintext logins from
+                # http://mutillidae/passwords/accounts.txt -- into the finding, and from there
+                # into the mission database and every rendered report.
+                #
+                # A pentest tool that duplicates the client credentials into its own artifacts
+                # has made a second breach out of the first, and the operator must now handle our
+                # report at the same classification as the leak itself. `sarif_io.redact_snippet`
+                # does not help: it masks VENDOR-SHAPED tokens (AKIA..., AIza...), and a CSV row
+                # like `1,admin,adminpass,...` has no such shape.
+                #
+                # The withheld line keeps what a reader needs to act -- the size, the structural
+                # proof already in `evidence`, and the URL in `target` -- so the operator can
+                # retrieve it themselves under their own handling rules.
+                if any(w in str(f.get("family") or "").lower()
+                       for w in ("credential", "secret")):
+                    _rbody = ("<%d bytes withheld: this finding's own claim is that this body "
+                              "contains credentials; see `evidence` for the structural proof and "
+                              "`target` to retrieve it yourself>" % len(_rbody))
+                f["response"] = f"HTTP {status}\n" + _rbody[:1500]
         if timing:
             f["timing"] = timing
         return f

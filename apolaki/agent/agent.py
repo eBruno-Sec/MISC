@@ -3186,7 +3186,13 @@ class BBHAgent:
         try:
             if not self.scope.validate(url)[0]:
                 return False
-        except Exception:
+        except Exception as _apolaki_swallowed_3189:
+            # RECORDED, not silent. This handler's silence is read by the caller as "this URL is
+            # not a login surface", which is a verdict about the TARGET; a scope-engine fault is a
+            # fact about US. Unrecorded, the two are the same `return False`, and that is exactly
+            # what the silent-failure invariant counts -- it moved the partition 407 -> 408 and the
+            # gate went red. Its sibling twelve lines below already records; this one did not.
+            self.tools._swallow(_apolaki_swallowed_3189, 'agent:_login_surface:3189', url)
             return False
         import browser_engine as _browser_engine
         import httpx
