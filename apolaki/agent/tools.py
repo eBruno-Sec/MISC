@@ -5311,11 +5311,17 @@ class ToolRegistry:
         except Exception as _apolaki_swallowed_4423:
             self._swallow(_apolaki_swallowed_4423, 'tools:_gql_post:4423', endpoint)
             return None
-        try:
-            return r.json()
-        except ValueError:
-            # Not JSON -> not a GraphQL endpoint. An answer, not a malfunction.
+        # STRUCTURAL, not a caught exception -- deliberately. An `except ValueError: return None`
+        # here is a handler whose silence an oracle reads as a clean result ("no GraphQL"), which
+        # is exactly what the silent-failure invariant counts, and it failed the gate at 408 <= 407.
+        # Budgeting a seat would have been the lazy answer. A body that does not even BEGIN like
+        # JSON is not a parse failure at all -- it is an HTML page, and the shape alone answers the
+        # question without an exception. A body that DOES look like JSON and then fails to parse is
+        # genuinely anomalous for a GraphQL endpoint, so that one is left to raise and surface as a
+        # tool_error rather than being flattened into "no GraphQL here".
+        if not (r.text or "").lstrip()[:1] in ("{", "["):
             return None
+        return r.json()
 
     async def _run_graphql(self, inp: dict) -> ToolResult:
         import httpx
@@ -7529,6 +7535,7 @@ class ToolRegistry:
                 pass
 
     async def _run_js_review(self, inp: dict) -> ToolResult:
+        import codeintel as _codeintel
         import codereview as cr
         sources = []
         if inp.get("code"):
@@ -7554,7 +7561,42 @@ class ToolRegistry:
         seen_comp = set()
         for label, text in sources:
             res = cr.review(text, label)
-            findings += _mark_source_derived(res["findings"])
+            _reviewed = _mark_source_derived(res["findings"])
+            # Q-171. THE VENDOR CLASSIFIER ALREADY EXISTS AND THIS LANE NEVER CALLED IT.
+            #
+            # `codeintel.not_maintained_source` classifies a file as third-party or generated ON
+            # EVIDENCE, and `review_source_tree` has demoted its findings since Q-083. This lane --
+            # the LIVE one, which fetches .js over HTTP rather than walking a tree -- reviewed
+            # whatever it downloaded as if the operator had written it.
+            #
+            # MEASURED on a mutillidae mission: http://mutillidae/javascript/jQuery/jquery.js
+            # produced "Credential exposed in a source comment" (HIGH) and "Predictable randomness:
+            # Math.random()" (MEDIUM), both confidence=confirmed, against a vendored jQuery 1.8.3.
+            # The Math.random() call is jQuery's `expando`, whose own comment says "Unique for each
+            # copy of jQuery on the page" -- a collision-avoiding property name, not a security
+            # value. Handed that exact file, the classifier answers third-party immediately, citing
+            # the licence banner it can quote.
+            #
+            # The finding is DEMOTED, not dropped, and by the same function the tree lane uses so
+            # there is one definition of the policy: confidence -> lead, severity untouched,
+            # proof_gap saying the line is not in code the operator maintains. Dropping it would
+            # delete the only place an operator learns this host serves jQuery 1.8.3, which is
+            # itself worth knowing.
+            #
+            # NARROWING THE DETECTORS WAS THE WRONG FIX AND I TRIED IT FIRST: requiring
+            # Math.random() to reach a security-named identifier broke
+            # `test_negative_control_first_party_weak_randomness_is_still_confirmed`, a control
+            # written to catch exactly that over-correction. The noise was never in the rule -- it
+            # was in reviewing somebody else's library as if it were the application.
+            # NOT wrapped in try/except, and the silent-failure ratchet is why: both calls are
+            # pure functions over a string, so the only way they raise is a defect in the
+            # classifier itself -- which is a thing to SEE, not to swallow. Adding the defensive
+            # catch here moved the partition 407 -> 408 and the gate failed, correctly.
+            _kind, _evidence = _codeintel.not_maintained_source(label, text)
+            if _kind:
+                for _f in _reviewed:
+                    _codeintel._mark_not_maintained(_f, _kind, _evidence)
+            findings += _reviewed
             endpoints += res["endpoints"]
             # SCA: fingerprint library version from content + URL, map exact,
             # evidence-backed versions to known CVEs (guardrail: no version, no CVE).

@@ -11,6 +11,7 @@ when an engine's zero is untrustworthy; fill it with expected negatives and it s
 meaning. The distinction pinned here: NOT JSON is an answer, a TRANSPORT failure is not.
 """
 import asyncio
+import json
 
 import pytest
 
@@ -28,8 +29,12 @@ class _Recorder:
 
 
 class _Resp:
-    def __init__(self, exc=None, value=None):
-        self._exc, self._value = exc, value
+    """A response carries a BODY. The first version of this stub had only .json(), so it could not
+    represent the thing that actually happens -- a server returning an HTML page -- and it broke the
+    moment the engine started judging the body's shape instead of catching a parse exception."""
+
+    def __init__(self, text="", value=None, exc=None):
+        self.text, self._value, self._exc = text, value, exc
 
     def json(self):
         if self._exc:
@@ -57,8 +62,9 @@ def _post(client):
 def test_an_html_body_is_an_answer_not_a_degradation():
     """THE regression. Every candidate path on a non-GraphQL target lands here."""
     import json as _json
-    exc = _json.JSONDecodeError("Expecting value", "<html>nope</html>", 0)
-    out, swallowed = _post(_Client(resp=_Resp(exc=exc)))
+    html = "<!DOCTYPE html><html><body>Mutillidae</body></html>"
+    exc = _json.JSONDecodeError("Expecting value", html, 0)
+    out, swallowed = _post(_Client(resp=_Resp(text=html, exc=exc)))
     assert out is None, "a non-JSON body means no GraphQL endpoint here"
     assert swallowed == [], (
         "posting to a path that is not a GraphQL endpoint recorded a DEGRADED row: %r -- that is "
@@ -79,6 +85,26 @@ def test_a_transport_failure_is_still_recorded_as_degraded():
 
 
 def test_a_real_graphql_reply_is_returned_unchanged():
-    out, swallowed = _post(_Client(resp=_Resp(value={"data": {"__typename": "Query"}})))
+    body = {"data": {"__typename": "Query"}}
+    out, swallowed = _post(_Client(resp=_Resp(text=json.dumps(body), value=body)))
     assert out == {"data": {"__typename": "Query"}}
     assert swallowed == []
+
+
+def test_a_json_shaped_body_that_will_not_parse_is_left_to_surface():
+    """The third case, and the reason the fix is a SHAPE test rather than a caught exception.
+
+    A body that does not even begin like JSON is an HTML page and the shape answers the question.
+    A body that DOES look like JSON and then fails to parse is genuinely anomalous for a GraphQL
+    endpoint, so it must not be flattened into the clean negative "no GraphQL here" -- it is left
+    to raise and surface as a tool_error.
+    """
+    import json as _json
+    broken = '{"data": {'
+    exc = _json.JSONDecodeError("Expecting value", broken, 9)
+    try:
+        _post(_Client(resp=_Resp(text=broken, exc=exc)))
+    except ValueError:
+        return
+    raise AssertionError("a malformed JSON body from a JSON-shaped response was silently "
+                         "reported as 'not a GraphQL endpoint'")
