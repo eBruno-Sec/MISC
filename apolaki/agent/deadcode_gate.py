@@ -585,7 +585,7 @@ QUALIFIED_BASELINE_SET = frozenset({
     "ics_fingerprint.parse_modbus_device_id", "intel_connectors.reset", "intel_registry.advance",
     "intel_registry.reset", "mission_export.summary", "ot_context.declare_protocol_safety",
     "race_tool.best_round", "remediation_depth.families_covered", "report_integrity.cvss_version_of",
-    "security.expand_cidr", "service_router.known_services", "sqli_tool.looks_like_login",
+    "security.expand_cidr", "service_router.known_services",
     "stealth.describe", "technique_store.dedup_key", "technique_store.stats",
     "techniques.techniques_for_lab", "waf_bypass_tool.pad", "web_security.is_url_in_scope",
     "xxe_tool.looks_like_xml",
@@ -832,12 +832,6 @@ TESTS_ONLY = {
     "cloud_iam.collect_live": ("test_cloud_iam.py",),
     "codereview_graph.hypotheses": ("test_codereview_graph.py",),
     "codereview_graph.link_runtime_to_source": ("test_codereview_graph.py",),
-    # Q-158. `rendered_forms.field_identity` returns the label AND the attribute it came from;
-    # `identity_quality` grades that attribute (name > id > formcontrolname > placeholder). The
-    # production path consumes the LABEL and does not need the grade, so the grade is pinned by its
-    # test rather than deleted: it is the thing that would decide a tie if two controls ever produce
-    # the same label, and the test states the ordering explicitly.
-    "rendered_forms.identity_quality": ("test_rendered_forms.py",),
     "db.get_snapshot": ("test_bbh.py",),
     "fingerprint.fingerprint": ("test_bbh.py", "test_tech_fingerprint_facts.py"),
     "graph_model.neighbors": ("test_bbh.py",),
@@ -856,7 +850,11 @@ TESTS_ONLY = {
     "security.expand_cidr": ("test_bbh.py",),
     "service_router.known_services": ("test_service_router.py",),
     "service_router.plan": ("test_service_router.py",),
-    "sqli_tool.looks_like_login": ("test_bbh.py",),
+    # REMOVED, cycle 20: `sqli_tool.looks_like_login` is no longer dead. `rendered_forms` calls it
+    # at two sites to decide whether a driven form is a login form. A disposition for a function
+    # that is now WIRED is a statement about a tree that does not exist, which is exactly what
+    # `test_every_flagged_function_has_a_named_disposition` refuses -- and the right outcome here,
+    # since a lane retiring an entry is the direction this list is supposed to move.
     "ssrf_tool.bypass_payloads": ("test_bbh.py",),
     "stealth.describe": ("test_stealth.py",),
     "technique_store.dedup_key": ("test_technique_pipeline.py",),

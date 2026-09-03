@@ -125,9 +125,24 @@ def is_fillable(field: dict) -> bool:
     return str(f.get("tag") or "").lower() in ("input", "textarea", "select") and bool(f.get("selector"))
 
 
+#: How strongly a control is identified, worst to best. `identity_quality` returns these names.
+_IDENTITY_RANK = {"strong": 0, "medium": 1, "weak": 2, "none": 3}
+
+
 def fillable_fields(descriptor: dict) -> list:
-    """The controls of a descriptor that can carry a payload, in DOM order. Pure."""
-    return [f for f in ((descriptor or {}).get("fields") or []) if is_fillable(f)]
+    """The controls of a descriptor that can carry a payload, best-identified first. Pure.
+
+    STABLY sorted by identity strength, so DOM order is preserved within a band and only the
+    ordering BETWEEN bands changes. That matters because `max_fields` cuts this list: a form whose
+    first DOM control is an anonymous `<input>` and whose third carries `name="email"` would
+    otherwise spend the budget on the one whose parameter cannot be attributed on the wire.
+
+    Cycle 20: `identity_quality` was written for exactly this and left unused, so the dead-code
+    ratchet flagged it. Wiring it is the right resolution -- the alternative was to record a
+    justification for keeping a grader nothing graded with.
+    """
+    fields = [f for f in ((descriptor or {}).get("fields") or []) if is_fillable(f)]
+    return sorted(fields, key=lambda f: _IDENTITY_RANK.get(identity_quality(field_identity(f)[1]), 3))
 
 
 def shaped_value(field: dict, payload: str) -> str:
