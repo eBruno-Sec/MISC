@@ -5042,7 +5042,20 @@ class ToolRegistry:
         default_tags = ("cve,network,misconfiguration,exposure,default-login,exposed-panels,ssl,takeover"
                         if heavy else "tech,misconfig,exposed-panels")
         tags = inp.get("tags", default_tags)
-        severity = inp.get("severity", "low,medium,high,critical")
+        # Q-173. `info` was excluded, and MEASURED that is where nearly all of nuclei's yield is:
+        #   mutillidae, tags tech,misconfig, severity low..critical   ->  2 findings
+        #   the same run WITH info                                    -> 23 findings
+        #   every template, severity low..critical                    ->  0 findings
+        # The `tech` tag alone is 967 templates and is overwhelmingly info-severity, so the default
+        # tag set was asking for a body of templates the severity filter then threw away. Excluding
+        # info is defensible for a REPORT and was wrong for a SCAN: "this host runs WordPress with
+        # plugin X at version Y, and xmlrpc.php is reachable" is what makes the next probe targeted.
+        #
+        # They are graded as LEADS, never confirmed findings, by exactly the mechanism `heavy`
+        # already uses below -- so a detection cannot arrive in a report claiming to be a
+        # vulnerability. 21 extra leads is worth having; 21 extra confirmed findings would be a
+        # false-positive incident.
+        severity = inp.get("severity", "info,low,medium,high,critical")
         # insane throws more concurrency at it; heavy runs get a longer budget.
         conc = "50" if getattr(self, "intensity", "standard") == "insane" else "25"
         timeout = int(inp.get("timeout", 900 if heavy else 360))
@@ -5080,7 +5093,11 @@ class ToolRegistry:
                        "description": d.get("info", {}).get("description"),
                        "cvss": d.get("info", {}).get("classification", {}).get("cvss-score"),
                        "info": d.get("info", {}), "matched-at": d.get("matched-at")}
-                if heavy:
+                if str(rec.get("severity") or "").lower() == "info":
+                    # Q-173: a technology/exposure DETECTION, not a vulnerability claim.
+                    rec["confidence"] = "candidate"
+                    rec["family"] = "nuclei_info"
+                elif heavy:
                     rec["confidence"] = "candidate"   # heavy templates -> truth-first leads
                     rec["family"] = "nuclei_heavy"
                 findings.append(rec)
