@@ -837,6 +837,90 @@ def host_header_sinks(resp_headers=None, xfh_location=None) -> list:
     return sinks
 
 
+#: Apache's `ServerSignature On` footer, the default under `UseCanonicalName Off`. The web server
+#: builds it from the REQUEST Host, on documents the web server generated itself -- a 404 error page,
+#: a `mod_autoindex` directory listing. The application never ran.
+_SERVER_SIGNATURE = re.compile(
+    r"<address>[^<]*\bServer at\s+" + re.escape(_EVIL_HOST) + r"\s+Port\s+\d+[^<]*</address>", re.I)
+#: Corroborating markers that the document came from the web server rather than the application.
+_SERVER_GENERATED_MARKERS = (
+    (re.compile(r"<title>\s*\d{3}\s+[A-Za-z][^<]*</title>", re.I), "a web-server error page"),
+    (re.compile(r"<title>\s*Index of\s*/[^<]*</title>", re.I), "a mod_autoindex directory listing"),
+)
+#: The spoofed host in the AUTHORITY position of an absolute URL -- `//HOST/`, with or without a
+#: scheme, terminated by a URL delimiter so `//bbh-evil.example.attacker.tld/` does not match. This
+#: is what makes a reflection actionable: a client that resolves this URL goes to the attacker.
+_HOST_AS_URL_AUTHORITY = re.compile(
+    r"(?:https?:)?//" + re.escape(_EVIL_HOST) + r"(?=[/:?#\"'\s\\<>&]|$)", re.I)
+#: Named sinks, ONLY to make the evidence say WHERE. None of them decides the grade -- the authority
+#: match above does -- so a sink shape nobody enumerated is still graded actionable.
+_URL_SINK_NAMES = (
+    (re.compile(r"soap:address\s+location\s*=", re.I), "a WSDL soap:address service endpoint "
+                                                       "(every SOAP client that fetches this "
+                                                       "descriptor is redirected)"),
+    (re.compile(r"(?:https?:)?//" + re.escape(_EVIL_HOST)
+                + r"/[^\"'<>\s]*(?:reset|token|confirm|verify|activate)", re.I),
+     "a password-reset / token-bearing URL (the victim mails the secret to the attacker)"),
+    (re.compile(r"\baction\s*=\s*[\"']?(?:https?:)?//" + re.escape(_EVIL_HOST), re.I),
+     "a form action (credentials post to the attacker)"),
+    (re.compile(r"http-equiv\s*=\s*[\"']?refresh[^>]*" + re.escape(_EVIL_HOST), re.I),
+     "a meta refresh target"),
+    (re.compile(r"\bhref\s*=\s*[\"']?(?:https?:)?//" + re.escape(_EVIL_HOST), re.I), "a link href"),
+    (re.compile(r"\bsrc\s*=\s*[\"']?(?:https?:)?//" + re.escape(_EVIL_HOST), re.I),
+     "a script/resource src"),
+)
+#: Inert landing sites, again only for the evidence string.
+_INERT_SINK_NAMES = (
+    (re.compile(r"<title>[^<]*" + re.escape(_EVIL_HOST), re.I), "the page <title>"),
+    (re.compile(r"document\.title\s*=[^;]*" + re.escape(_EVIL_HOST), re.I),
+     "a JavaScript document.title assignment"),
+)
+
+
+def host_header_landing(body: str) -> dict:
+    """WHERE the spoofed Host landed in the body, which is what the grade is a claim about.
+
+    Q-176. Returns `{"class": ..., "detail": ...}` with class one of:
+
+      * `"none"`            -- the host is not in the body at all
+      * `"url_authority"`   -- it is the authority of an absolute URL, i.e. actionable
+      * `"server_signature"`-- EVERY occurrence is inside Apache's own `<address>` footer
+      * `"inert"`           -- reflected, but with no URL semantics
+
+    Order matters and is deliberate. `url_authority` is tested FIRST so a page that carries both a
+    ServerSignature footer and a real link keeps the actionable grade; `server_signature` then
+    requires that the footer accounts for ALL occurrences, so one extra reflection anywhere else
+    demotes the page out of the "the application never ran" claim rather than into it.
+    """
+    b = body or ""
+    if _EVIL_HOST not in b.lower():
+        return {"class": "none", "detail": ""}
+    if _HOST_AS_URL_AUTHORITY.search(b):
+        named = [name for rx, name in _URL_SINK_NAMES if rx.search(b)]
+        where = named[0] if named else "an absolute URL in the response body"
+        return {"class": "url_authority",
+                "detail": "the spoofed Host became the AUTHORITY of an absolute URL -- it landed in "
+                          "%s, so a client that follows it is directed to the attacker host" % where}
+    occ = len(re.findall(re.escape(_EVIL_HOST), b, re.I))
+    sig = len(_SERVER_SIGNATURE.findall(b))
+    if sig and sig == occ:
+        kind = next((name for rx, name in _SERVER_GENERATED_MARKERS if rx.search(b)),
+                    "a document the web server generated itself")
+        return {"class": "server_signature",
+                "detail": "the spoofed Host appears ONLY inside the web server's own ServerSignature "
+                          "footer (<address>...Server at HOST Port N</address>) on %s. This is a "
+                          "SERVER-GENERATED page: the application under test never ran and never saw "
+                          "the Host. It is Apache's `UseCanonicalName Off` + `ServerSignature On` "
+                          "default, one server-level configuration fact for the whole host, not a "
+                          "defect of the application and not one finding per URL" % kind}
+    named = [name for rx, name in _INERT_SINK_NAMES if rx.search(b)]
+    where = named[0] if named else "a body text node with no link semantics"
+    return {"class": "inert",
+            "detail": "the spoofed Host is reflected into %s -- no URL authority, no redirect "
+                      "target, nothing a client resolves or submits to, so there is no primitive "
+                      "to poison from here" % where}
+
+
 def analyze_host_header(body: str, location: str, resp_headers=None, xfh_location=None) -> dict | None:
     """Flag host-header injection: the spoofed Host BECAME the redirect target's host.
 
@@ -856,8 +940,35 @@ def analyze_host_header(body: str, location: str, resp_headers=None, xfh_locatio
     Location cannot carry a host at all and is now correctly silent, where the substring test would
     have matched `/redir?to=bbh-evil.example`.
 
-    The BODY branch stays a substring test on purpose. It is already LOW, it claims only reflection
-    rather than a redirect primitive, and a host string in HTML has no structure to parse.
+    Q-176 -- THE BODY BRANCH IS GRADED BY LANDING SITE. It used to be a bare substring test, and its
+    docstring defended that with "it is already LOW ... and a host string in HTML has no structure to
+    parse". Both halves were wrong, and a Breaker lane measured it: replaying all 65 Host-header rows
+    of mission `bed9ffcd` against the local mutillidae lab split them 40 / 18 / 4 / 3 by where the
+    injected host actually landed. I reproduced it independently, `Host` and `X-Forwarded-Host` sent
+    separately:
+
+        /javascript/jQuery/?C=N;O=D  Host 200  <address>Apache/2.4.7 (Ubuntu) Server at HOST Port 80</address>
+        /nope-404-page               Host 404  <address>...Server at HOST Port 80</address>
+        /webservices/soap/ws-user-account.php?wsdl  Host 200  <soap:address location="http://HOST/..."/>
+        /phpmyadmin/server_databases.php  Host 200  parent.document.title = 'HOST / 127.0.0.1 | ...'
+        /index.php  and  /              Host 200  the host does NOT appear -- occurrences: 0
+
+    The last line is the decisive negative control: the APPLICATION UNDER TEST never reflects the
+    Host. Only Apache's own generated documents do -- the 404 page and `mod_autoindex` listings -- in
+    an inert `<address>` text node, because `UseCanonicalName Off` + `ServerSignature On` is the
+    stock Ubuntu default. So on 40 of 65 rows the claim "the app trusts the Host header" was false,
+    and the 4 rows that carry a real primitive (a WSDL `soap:address` pointing every SOAP client at
+    the attacker) were graded identically to them and buried.
+
+    A host string in HTML DOES have structure: either it is the AUTHORITY of an absolute URL, which
+    is a client-redirection primitive, or it is text, which is not. That is the same reasoning as
+    Q-114 one layer in -- there the sink was a cache or a proxy, here it is a URL a client resolves
+    -- so the grade moves in the SAME vocabulary (LOW with a sink, INFORMATIONAL without) instead of
+    inventing a new one. Detection is unchanged: every reflection that fired before still fires.
+
+    See `host_header_landing`. The `server_signature` case additionally says SERVER-GENERATED in its
+    evidence, because a report that blames the application for Apache's error footer wastes the
+    reader's time and is closed N/A -- the Q-114 cost, again.
 
     Q-114 -- THE GRADE IS NOW MEASURED, NOT ASSERTED. The Shopify engagement raised 8 of these on
     linkpop.com and the operator reproduced one by hand:
@@ -900,9 +1011,16 @@ def analyze_host_header(body: str, location: str, resp_headers=None, xfh_locatio
                               "(Age/X-Cache/CF-Cache-Status/Via) and X-Forwarded-Host is not "
                               "honoured, so the poisoned redirect reaches nobody but the requester. "
                               "Reportable only if a cache or a proxy route is demonstrated"}
-    if _EVIL_HOST in (body or "").lower():
-        return {"severity": "LOW", "detail": "spoofed Host reflected in response body"}
-    return None
+    landed = host_header_landing(body)
+    if landed["class"] == "none":
+        return None
+    if landed["class"] == "url_authority":
+        return {"severity": "LOW", "landing": landed["class"],
+                "detail": "spoofed Host reflected in response body: " + landed["detail"]}
+    return {"severity": "INFORMATIONAL", "landing": landed["class"],
+            "server_generated": landed["class"] == "server_signature",
+            "detail": "spoofed Host reflected in response body, but into an INERT sink: "
+                      + landed["detail"]}
 
 
 def ssti_expected(payload: str) -> str:
