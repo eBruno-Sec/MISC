@@ -377,6 +377,18 @@ _VENDOR_PATH_SEG = {"node_modules", "bower_components", "jspm_packages", "webjar
 _MINIFIED_MAX_LINE = 2000
 _MINIFIED_MEAN_LINE = 200
 
+#: Q-175. The conjunction above is right for what it was written for -- ONE long line is a blob,
+#: not a minifier -- and it misses the inverse: a file where EVERY line is long but none is huge.
+#: MEASURED on mutillidae's phpMyAdmin copy of jQuery 1.6.2 (92,285 bytes): 180 lines, longest 567,
+#: MEAN 512.7. Minified and then wrapped at ~500 chars, which is an ordinary minifier setting. It
+#: failed the maxline test, was classified as maintained source, and produced
+#: "Predictable randomness: Math.random()" at confidence=confirmed against a vendored library.
+#: The mean is the discriminating signal and the file's own baseline above says so: first-party
+#: max observed meanline is 51 (juice-shop lib/insecurity.ts) and the Java benchmark ~45. 300 is
+#: six times the highest first-party mean ever measured here, and a file of 180 lines averaging
+#: 512 characters is not hand-written by anyone.
+_MINIFIED_MEAN_ONLY = 300
+
 
 def not_maintained_source(rel: str, text: str) -> tuple:
     """Classify a source file as a dependency or a build artifact, ON EVIDENCE.
@@ -385,7 +397,9 @@ def not_maintained_source(rel: str, text: str) -> tuple:
     `evidence` quotes what was actually observed, so a reader can overrule the call -- a
     medium-reliability signal is only safe when it shows its work. Pure; no I/O.
     """
-    name = (rel or "").rsplit("/", 1)[-1]
+    # Q-175: `rel` is a URL in the live lane, so a cache-busting query would otherwise be
+    # part of the "filename" and defeat every name-shaped rule below.
+    name = (rel or "").rsplit("/", 1)[-1].split("?", 1)[0].split("#", 1)[0]
     segs = set((rel or "").split("/")[:-1])
 
     # ── THIRD PARTY: the file, or the directory holding it, names its origin ──
@@ -414,6 +428,12 @@ def not_maintained_source(rel: str, text: str) -> tuple:
     if maxline >= _MINIFIED_MAX_LINE and meanline >= _MINIFIED_MEAN_LINE:
         return "generated", ("minified geometry: longest line %d chars, mean %d chars over %d "
                              "line(s)" % (maxline, meanline, len(lines)))
+    if meanline >= _MINIFIED_MEAN_ONLY and len(lines) > 5:
+        # Q-175: wrapped minifier output -- long EVERY line, none huge. The line-count floor keeps
+        # a two-line file with one embedded blob out of it.
+        return "generated", ("minified geometry: mean line %d chars over %d lines (no line exceeds "
+                             "%d, so this is wrapped minifier output)"
+                             % (meanline, len(lines), maxline))
     return "", ""
 
 
