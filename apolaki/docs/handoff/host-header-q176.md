@@ -165,3 +165,109 @@ UNACCOUNTED -- flagged in this tree and in NEITHER recorded measurement:
 `exposure_tool.py` belongs to another lane, which is mid-edit. Neither `web_security` nor
 `host_header_landing` appears anywhere in the flagged set - the new function is correctly seen as
 WIRED, not as an island. Not my defect, not my file; recorded and moved past.
+
+## 5. MEASURED - the reclassification census
+
+I could not read mission `bed9ffcd`'s 65 URLs (no ledger on disk), so I rebuilt an equivalent target
+set the way the mission's own content discovery did: crawl `mod_autoindex` listings from `/.git/`,
+`/javascript/`, `/documentation/`, `/passwords/`, `/images/`, plus the three SOAP WSDLs, the
+phpMyAdmin scripts, Apache 404s, and the application's own pages. 67 targets, of which 62 make the
+oracle fire - the same order as the mission's 65.
+
+```
+targets fetched: 67   rows where the oracle fires: 62
+X-Forwarded-Host alone honoured on: 0 of 67
+
+OLD grade distribution:                          NEW grade distribution:
+   LOW                                    56        INFORMATIONAL (server_signature)   40
+   MEDIUM/INFORMATIONAL (Location, Q-114)  6        INFORMATIONAL (inert)              10
+                                                    LOW (url_authority)                 6
+                                                    INFORMATIONAL (location)            6
+
+RECLASSIFIED LOW -> INFORMATIONAL: 50       LOW kept as LOW: 6
+```
+
+The six that KEPT the grade - the ones an over-correction would have silenced:
+
+```
+/webservices/soap/ws-hello-world.php?wsdl          LOW -> LOW (url_authority)
+/webservices/soap/ws-lookup-dns-record.php?wsdl    LOW -> LOW (url_authority)
+/webservices/soap/ws-user-account.php?wsdl         LOW -> LOW (url_authority)
+/phpmyadmin/ , /phpmyadmin/index.php               LOW -> LOW (url_authority)   pma_absolute_uri
+/phpmyadmin/main.php                               LOW -> LOW (url_authority)   <a href="http://HOST/...">
+```
+
+All 3 WSDLs survive. The `server_signature` count is **40, the same number the Breaker measured
+independently** - two different target sets, two different probe hosts, same figure, which is what
+makes it a property of the host rather than of either replay.
+
+**`X-Forwarded-Host` alone was honoured on 0 of 67 targets.** That is a producer defect, not an
+oracle one: the emitted `evidence` string names XFH as having come back when it did nothing.
+
+## 6. PRODUCER DIFF for the tools.py owner - NOT APPLIED BY ME
+
+`agent/tools.py` is another lane's file. The oracle now returns `landing` and `server_generated`, and
+nothing reads them yet. Three defects live in the producer, all of them wrong CLAIMS rather than
+wrong grades:
+
+1. `success_oracle` is a hardcoded constant that says "so the app trusts the Host header". MEASURED
+   false on 40 of 62 - the application never ran. It must come from the finding, not from a literal.
+2. `evidence` says "an attacker-supplied Host/X-Forwarded-Host came back". MEASURED: XFH was honoured
+   on 0 of 67 targets. It names a header that did nothing.
+3. One `ServerSignature On` produces one row PER URL. 40 rows, one fact.
+
+```diff
+--- a/agent/tools.py
++++ b/agent/tools.py
+@@ -8470,7 +8470,12 @@
+                     if v:
+-                        findings.append({"title": "Host header injection", "severity": v["severity"].lower(),
++                        # Q-176. The TITLE has to carry the landing class or a triager opens 40
++                        # identical rows before reaching the one that matters.
++                        _t = {"server_signature": "Host reflected in the web server's ServerSignature "
++                                                  "footer (server-generated page)",
++                              "inert": "Host reflected into an inert sink",
++                              "url_authority": "Host header injection into an absolute URL"}
++                        findings.append({"title": _t.get(v.get("landing"), "Host header injection"),
++                                         "severity": v["severity"].lower(),
+                                          "target": url, "description": v["detail"],
+                                          "confidence": "confirmed", "cwe": "CWE-644",
+-                                         "evidence": "an attacker-supplied Host/X-Forwarded-Host (%s) came "
+-                                                     "back in the response or its Location: %s"
+-                                                     % (ws._EVIL_HOST, v["detail"]),
+-                                         "success_oracle": "the injected host appears in the response body "
+-                                                           "or redirect target, so the app trusts the Host header",
++                                         # Name ONLY the header that was actually honoured. MEASURED on
++                                         # mutillidae: X-Forwarded-Host alone came back on 0 of 67 targets,
++                                         # so the old string credited a header that did nothing.
++                                         "evidence": "an attacker-supplied Host: %s came back in the "
++                                                     "response or its Location -- %s"
++                                                     % (ws._EVIL_HOST, v["detail"]),
++                                         "success_oracle": v["detail"],
++                                         "landing": v.get("landing"),
++                                         "server_generated": bool(v.get("server_generated")),
+                                          "family": "host_header", "tags": ["hostheader"]})
+```
+
+Plus a dedup rule wherever `family=host_header` rows are collapsed: key on
+`(host, landing, server_generated)` rather than the full URL, carrying the affected-URL list on the
+single surviving row. On this census that turns 62 rows into 4: one `server_signature`, one `inert`,
+one `url_authority`, one `location`.
+
+**A note for that lane on the gate at line 8464.** `if ws.analyze_host_header(hh.text, ...)` still
+guards the second XFH request, and my change keeps every previous reflection truthy, so that gate
+behaves exactly as before - no extra requests, no lost ones. I deliberately did NOT add an
+`xfh_body=` parameter: no caller could pass it until this diff lands, and an unwired parameter is an
+island wearing the costume of thoroughness.
+
+## 7. What I did NOT change, and why
+
+* **Detection.** Every body reflection that fired before still fires. The ticket is about the claim
+  attached to the finding, not about whether to look.
+* **The `Location` branch.** Q-114's MEDIUM-with-sink / INFORMATIONAL-without split was measured
+  CORRECT by the Breaker and my census reproduces it (6 rows, all INFORMATIONAL, no cache indicator
+  and XFH not honoured anywhere on this host).
+* **Upgrading the WSDL rows.** The Breaker called them "TRUE, under-graded". They may well be, but
+  the ticket said keep the current grade for actionable sinks, and moving a severity UP on the same
+  evidence that just proved severities were asserted rather than measured would repeat the defect
+  facing the other way. Left at LOW; the evidence now says why it matters.
