@@ -7429,3 +7429,58 @@ functions were not the thing that was wrong.
   browser context, since localStorage is per-context). Reachable code, unreachable verdicts.
 * Mission 9e8653b8 ended `status=failed` in the report phase; the three findings above are
   withdrawn, and the failure itself is untriaged.
+
+## Cycle 21 - the shakedown loop (2026-09-02/03)
+
+Operator's design, and it beat mine: scan something small, watch whether every tool works, fix,
+repeat, and only then aim at Shopify. Run against local labs, never a live programme.
+
+Closed, each with tests and a killed mutant:
+
+* DONE Q-166 - `judge_url_override` rejected only a BYTE-IDENTICAL body, so any rotating banner
+  "differed" and confirmed. Two false HIGH ACL-bypass findings on a live bug-bounty target,
+  withdrawn. The right guard (`_similarity`/`DIFFER_MAX`) was already 30 lines below.
+* DONE Q-167 - nuclei ran `-json`, removed in v3: exit 2 before loading any of its 13,619
+  templates. Every nuclei dispatch in the project's history. The defect was already NAMED in
+  `tests/test_external_tool_liveness.py` and never fixed at the instance.
+* DONE Q-168 - `run_cmdi` dispatched ZERO times in 175 missions; its gate was exact-match against
+  an 11-word list, selecting 1 of 792 endpoints. Token matching: same 0.1% cost, reaches
+  `target_host`.
+* DONE Q-169 - `run_graphql` filed 9 DEGRADED rows per mission for the correct answer "this is not
+  GraphQL". A degradation record means A RESULT MAY BE WRONG; filling it with expected negatives
+  devalues it exactly as a false positive devalues a finding. Also raised the run_xss nav budget
+  (8000ms lost 4 of 8 probes on a target that serves in 0.14s).
+* DONE Q-170 - `(?s)` made DOTALL apply to the `//` comment branch, so one line comment swallowed
+  the code beneath it and a token in that CODE became "Credential exposed in a source comment",
+  HIGH, confirmed.
+* DONE Q-171 - the LIVE js-review lane never called `codeintel.not_maintained_source`, so a
+  vendored jQuery was reviewed as if we wrote it. Narrowing the detector was the wrong fix and
+  broke a negative control written to catch that exact over-correction.
+* DONE Q-172 - `build_inventory` keyed on (host, path), collapsing 45 `index.php?page=<x>.php`
+  pages into ONE. 78% of the app discarded before any engine ran.
+* DONE Q-173 - nuclei's `info` severity was filtered out, and MEASURED that is where the yield is
+  (2 -> 23 on mutillidae). Graded as leads, never confirmed findings.
+* DONE Q-174 - two MORE collapses in the same call path: `_abs(u)` drops the query, and the step
+  KEY dropped it again. Fixing only the first changed nothing.
+* DONE Q-175 - the vendor classifier requires `maxline >= 2000 AND meanline >= 200`; phpMyAdmin's
+  jQuery is minified AND wrapped (mean 512, longest 567), so it read as maintained source.
+* WITHDRAWN Q-176 - I claimed the report rendered 35 duplicate host-header rows. It renders 2, with
+  an "Also observed on 34 further URL(s)" note. I had counted LINES, not finding sections.
+  `collapse_repeated_observations` works.
+
+Bench: `scripts/labs_health.py` - mutillidae was serving `Database Offline` and bwapp
+`Unknown database`, both as HTTP 200, so every injection engine aimed at them returned zero
+CORRECTLY. dalfox looked structurally broken at 207 runs / 0 results and returned verified XSS
+immediately against a revived mutillidae with its own unchanged argv.
+
+Instruments added: `scripts/tool_ledger.py` (across-all-missions census; PROVEN 43 -> 48 of 112),
+`scripts/labs_health.py`, `scripts/tool_census.py`.
+
+Open:
+
+* The dns-lookup.php command injection (`target_host=127.0.0.1;id` -> `uid=33(www-data)`) is
+  verified by hand and the engine confirms it when pointed at the page. The acceptance mission for
+  Q-174 is what proves the whole chain finds it unaided.
+* Q-164 still open: 32 techniques carry `validated_on` badges nothing re-checks.
+* `run_nosqli`'s zero on juice-shop is CORRECT - the endpoint answers 401. Proving that engine
+  needs an authenticated mission.
