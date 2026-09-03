@@ -41,10 +41,40 @@ blind to. `curl` sees 0 forms and 0 routes where a render sees the real surface.
 | adversarial review | Breaker pass over anything landed this cycle | every finding triaged, none open at HIGH |
 | image freshness | `docker exec apolaki-agent-1 grep -c <symbol> /app/<file>` | the running container carries the fixes, NOT just the repo |
 | scope | 15 in-scope, 7 out-of-scope, loaded and echoed back | matches the operator's Burp export exactly |
+| lab bench alive | `python scripts/labs_health.py` | 10/10 ALIVE before any shakedown is believed |
+| engine reachability | `python scripts/tool_ledger.py` | nothing we rely on sits in ZERO-ONLY or NEVER |
+
+### Added after the 2026-09-02 shakedown, because each of these had already produced a wrong belief
+
+**The bench must be alive before its zeros mean anything.** mutillidae was serving `Database
+Offline` and bwapp `Unknown database 'bWAPP'` -- both HTTP 200. Every injection engine aimed at them
+returned zero CORRECTLY, and the cross-mission ledger then reported those engines as never having
+produced anything. dalfox read as structurally broken at 207 runs / 0 results; against a revived
+mutillidae, with its own unchanged command line, it returned verified XSS immediately. A dead lab
+and a broken engine are the same observation.
+
+**Reachability is a separate measurement from accuracy.** `run_cmdi` claims RCE and was dispatched
+ZERO times in 175 missions -- its planner gate was exact-match against an 11-word parameter list,
+selecting 1 of 792 endpoints. Its false-positive oracle was hardened twice by someone who never
+checked that anything dispatches it. An engine's accuracy is worth nothing until its reachability
+is a number.
+
+**A tool can be installed, configured, and never have run.** nuclei passed `-json`, removed in v3;
+the binary exits 2 on the unknown flag before loading any of its 13,619 templates. Every nuclei
+dispatch in this platform's history was that. The defect was already named in this repo, in the
+opening paragraph of `tests/test_external_tool_liveness.py` -- diagnosed, guarded at the class
+level, never fixed at the instance. Root-causing and repairing are separate acts.
 
 **Image freshness is on this list because it has already burned a run.** Mission `9e8653b8` scanned
 Shopify from a container that predated every engine in section B, and nothing in the mission record
 said so.
+
+It burned a SECOND time on 2026-09-02, during the shakedown that was supposed to be checking for
+exactly this. `/app` is BAKED into the agent image -- only `/app/ui` is bind-mounted -- so three
+committed fixes were live in the throwaway test containers and absent from every mission. The
+census I was reading as evidence about the platform was measuring the previous build. Verify with a
+grep INSIDE the running container for a symbol only the new code contains; a green suite in a
+mounted container proves nothing about what the missions run.
 
 ## D. Rules for the run itself
 
