@@ -8,6 +8,7 @@ from __future__ import annotations
 import html
 import json
 import re
+import re as _re
 import secrets
 from html.parser import HTMLParser
 from urllib.parse import unquote_plus
@@ -141,14 +142,96 @@ def snapshot(body: str, payloads=()) -> dict:
     return {"auth": auth, "records": parser.records, "protected": parser.protected}
 
 
+#: Two responses to the same endpoint that share less than this are DIFFERENT PAGES, and a set
+#: difference between different pages is a fact about routing, not about the parameter. MEASURED:
+#: phpMyAdmin's `db_create.php` answers 1107 bytes to everything, while `main.php` carries a
+#: font-size dropdown (`<option value="102%">`); comparing one against the other yielded a "strict
+#: record-set superset (102%, 112%, 122%, 132%)" -- a CONFIRMED HIGH built out of a settings menu.
+#: Same-page agreement is measured as the JACCARD OVERLAP OF DISTINCT TAG NAMES, and the reason is
+#: a measurement, not taste. Sequence similarity -- on the bytes OR on the tag skeleton -- scales
+#: with how many rows a page happens to carry, so it conflates "a different page" with "the same
+#: view holding more rows". MEASURED, same template, N rows against 0:
+#:        rows:      2      8     20     40    200
+#:        raw:    0.495  0.197  0.089  0.047   ...     <- collapses
+#:        skeleton:0.727  0.400  0.211  0.118   ...     <- also collapses
+#:        jaccard: 0.800  0.800  0.800  0.800  0.800    <- constant, which is the point
+#: A gate on either sequence metric would have started REJECTING genuine record-set differentials
+#: as soon as the result set grew -- trading the false positive for a false negative that appears
+#: only on the biggest, most interesting result sets.
+#: Against the real pages that produced the false HIGH, jaccard separates cleanly:
+#:        main.php vs db_create.php (DIFFERENT)   0.346
+#:        same template, any row count (SAME)     0.800
+_SAME_PAGE_MIN = 0.55
+
+
+def _skeleton(body: str) -> str:
+    """The document's tag sequence, with text and attribute values discarded."""
+    return " ".join(_re.findall(r"<\s*([a-zA-Z][a-zA-Z0-9]*)", body or ""))
+
+
+def _tag_overlap(a: str, b: str) -> float:
+    """Jaccard overlap of the DISTINCT tag names in two documents.
+
+    Two renderings of one template use the same vocabulary of tags however many rows they carry;
+    two different templates do not. Distinctness is what makes it independent of result-set size,
+    which is exactly the property a same-page test needs and a sequence metric does not have."""
+    A = set(_skeleton(a).split())
+    B = set(_skeleton(b).split())
+    return (len(A & B) / len(A | B)) if (A | B) else 0.0
+
+
 def evaluate(true_body: str, false_body: str, true_payload: str = "", false_payload: str = "") -> dict:
-    """Confirm only a semantic true/contradiction split, never transport or presentation noise."""
+    """Confirm only a semantic true/contradiction split, never transport or presentation noise.
+
+    Q-179. TWO GUARDS THAT WERE MISSING, both found by replaying a `confirmed` HIGH by hand.
+
+    The engine reported "LDAP injection in form field `new_db`" at CVSS 8.2 against
+    `/phpmyadmin/db_create.php` -- a MySQL-only stack. MEASURED, three times each and stable: the
+    universally-true probe, the deliberately-impossible contradiction, AND the baseline carrying no
+    parameter at all return BYTE-IDENTICAL 1107-byte bodies. The application's own answer is
+    `Missing parameter: new_db`, so the field was never processed by anything.
+
+    1. IDENTICAL BODIES CANNOT CARRY A DIFFERENTIAL. If the true and false probes produced the same
+       bytes, the parameter changed nothing and there is no verdict to reach. This was previously
+       only implicit -- equal snapshots make each `>` comparison false -- and implicit is not a
+       guarantee: it depends on every future signal being written as a strict superset test.
+    2. THE TWO BODIES MUST BE THE SAME PAGE. This is the one that actually fired. Nothing checked
+       that the probes landed on the same document, so a redirect or a different template made the
+       whole page's contents look like records the true predicate "gained". The oracle's own words
+       -- "a strict record-set superset" -- describe a comparison it never established the terms of.
+
+    A differential oracle is only as good as its negative control, and this one never asked whether
+    its control was comparable. Same lesson as the byte-identical URL-override check (Q-166), one
+    layer deeper: there the guard existed and was not applied; here it did not exist at all.
+    """
     payloads = (true_payload, false_payload)
+    if (true_body or "") == (false_body or ""):
+        return {"confirmed": False, "signal": "",
+                "oracle": "the true predicate and the contradiction returned identical bodies, so "
+                          "the parameter changed nothing"}
     yes = snapshot(true_body, payloads)
     no = snapshot(false_body, payloads)
     if yes["auth"] == "authenticated" and no["auth"] == "unauthenticated":
         return {"confirmed": True, "signal": "auth_state",
                 "oracle": "the true predicate reached authenticated content while the contradiction remained at login"}
+    # THE SAME-PAGE GATE BELONGS HERE AND NOT ABOVE, and the test suite is what taught me that.
+    # `auth_state` is BY DESIGN a comparison of two different documents -- a login page against
+    # authenticated content -- so gating it on similarity would delete the strongest signal this
+    # oracle has. My first version did exactly that and four positive controls went red, including
+    # the vulnerable XPath and LDAP fixtures. A guard that silences the engine is a worse defect
+    # than the false positive it was written for.
+    #
+    # A SUPERSET CLAIM IS DIFFERENT. "The true predicate returned a strict record-set superset"
+    # asserts that the same view returned MORE ROWS; between two different documents the phrase is
+    # meaningless, and that is exactly how phpMyAdmin's font-size dropdown on `main.php` became
+    # four "gained records" against `db_create.php`'s 1107-byte error page.
+    _same_page = _tag_overlap(_without_payloads(true_body, payloads),
+                              _without_payloads(false_body, payloads))
+    if _same_page < _SAME_PAGE_MIN:
+        return {"confirmed": False, "signal": "",
+                "oracle": "the two probes landed on DIFFERENT pages (similarity %.3f), so a "
+                          "set-difference verdict would describe routing rather than the parameter"
+                          % _same_page}
     if yes["records"] and yes["records"] > no["records"]:
         gained = sorted(yes["records"] - no["records"])
         return {"confirmed": True, "signal": "record_set",
