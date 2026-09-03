@@ -425,9 +425,19 @@ They belong in `CHECKS`, where `scripts/liveness.sh` runs them and the ratchet p
     +               "fields": ["email", "password"]},
     +     "family": "auth_bypass"},
 
-and in `_LAB_ADDR`: `"juiceshop": ("juice-shop", 3000),`. Note `_run_service_pack`'s snmp branch
-must accept the non-default port -- verify before promoting; the direct
-`snmp_audit_tool.probe("conpot", 16100)` path is what was measured here.
+and in `_LAB_ADDR`: `"juiceshop": ("juice-shop", 3000), "conpot16100": ...` -- conpot's existing
+`("conpot", 5020)` entry already makes the host reachable, so no `_LAB_ADDR` change is needed for
+the SNMP one.
+
+MEASURED, so the first diff can be applied as written rather than trusted:
+`_run_service_pack` forwards `int(port)` straight to `snmp_audit_tool.probe`, and driving it
+through the real dispatch gives
+
+    title="SNMP accepts a default community string ('public') at conpot:16100"
+    family='snmp_default_community'  confidence='confirmed'
+    evidence="The SNMP agent at conpot:16100 answered a GET with the documented default community..."
+
+which is exactly what `liveness._match` requires (confirmed + family + >= 12 chars of evidence).
 
 Once these are in `CHECKS` and the baseline is updated with `scripts/liveness.sh --update`, delete
 the three live tests from `test_technique_badges.py` and its `_REEARN_DECLARED` set: they exist
