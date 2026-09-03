@@ -486,7 +486,12 @@ TECHNIQUES: dict[str, dict] = {t["id"]: t for t in [
               "on uniform-200 targets, a body differential: the two refusals match each other while the "
               "valid value yields a materially different page. The stability requirement doubles as the "
               "FP guard — a dynamic page fails it and the oracle declines.",
-       validated_on=["natas"],
+       # Q-164: the badge said "natas". Nothing re-ran it: no liveness CHECK, no recorded reply, and
+       # natas is an OverTheWire target on the public internet that this bench is not authorized to
+       # touch, so nothing here ever could. `known_labs()` never resolved the id either. The claim is
+       # withdrawn rather than left standing -- `run_header_trust` is real and the technique is sound;
+       # what was never evidence is the string. maps_to keeps the provenance of where it was first seen.
+       validated_on=[],
        maps_to={"natas": ["Level 4 (Referer-gated access)"]}),
     _t(id="url_override_acl_bypass", vuln_class="access_control", cwe="CWE-807", owasp="A01:2021",
        permission=ACTIVE, transferable=True, wstg="WSTG-ATHZ-02",
@@ -753,7 +758,12 @@ TECHNIQUES: dict[str, dict] = {t["id"]: t for t in [
        detect="User-controlled value flows into a DOM sink (dom_tool + rendered browser).",
        exploit="Deliver a payload that a client-side sink executes in the rendered DOM.",
        oracle="Browser confirms script execution originating from the injected value (host-matched).",
-       validated_on=["juiceshop"],
+       # Q-164 CORRECTED: the badge read ["juiceshop"] and the only thing that re-runs this technique
+       # is the liveness CHECK against `domsource` (http://domsource:8080/hash). Nothing has ever
+       # re-run dom_xss against Juice Shop. The technique IS proven -- on the lab now named. A badge
+       # that names the wrong lab is not a smaller lie than one that names no lab: it survives every
+       # technique-granular gate, because the id is genuinely liveness-confirmed.
+       validated_on=["domsource"],
        maps_to={"juiceshop": ["DOM XSS"]}),
 
     _t(id="reflected_xss", vuln_class="xss", cwe="CWE-79", owasp="A03:2021",
@@ -869,7 +879,11 @@ TECHNIQUES: dict[str, dict] = {t["id"]: t for t in [
        detect="Error path returns a stack trace / internal detail.",
        exploit="Trigger an unhandled condition and capture the leaked internals.",
        oracle="Response body exposes framework/DB internals not intended for clients.",
-       validated_on=["juiceshop"],
+       # Q-164 WITHDRAWN. engine_descriptor.build() binds NO engine to this id (routable=False,
+       # engines=[]) and tools.py has no `_run_*` for the class, so no run by the PRODUCT could have
+       # produced the confirmation this badge claimed -- what fired on the board was juiceshop_solvers.
+       # Same shape as weak_password_reset in this module's own docstring.
+       validated_on=[],
        maps_to={"juiceshop": ["Error Handling"]}),
 
     _t(id="vulnerable_component", vuln_class="vuln_component", cwe="CWE-1035", owasp="A06:2021",
@@ -878,7 +892,11 @@ TECHNIQUES: dict[str, dict] = {t["id"]: t for t in [
        detect="Exact version -> CVE mapping (dependency_intel), severity capped pending reachability.",
        exploit="Advisory lead; escalated only if a reachable sink is confirmed.",
        oracle="Version-pinned CVE match; NOT a confirmed exploit unless reachability proven.",
-       validated_on=["juiceshop", "ginandjuice"],
+       # Q-164 WITHDRAWN (both labs). No engine is bound to this id and no `_run_*` implements the
+       # class. `run_js_review` / dependency_intel.py DO surface outdated libraries, so a producer may
+       # exist that the descriptor does not join -- that is why this is a withdrawal, not a deletion of
+       # the technique: re-add a lab here the moment a check re-runs it end to end.
+       validated_on=[],
        maps_to={"juiceshop": ["Vulnerable Library", "Legacy Typosquatting"],
                 "ginandjuice": ["Vulnerable JavaScript dependency (angular@1.7.7 / CVE-2023-26118)"]}),
 
@@ -913,7 +931,7 @@ TECHNIQUES: dict[str, dict] = {t["id"]: t for t in [
        detect="A signed value with a guessable scheme: default/known salt, no salt, short key, published algorithm.",
        exploit="Reproduce the signing offline (e.g. hashids default salt, salt-less base85) to mint a valid artifact.",
        oracle="Server accepts the forged artifact as authentic.",
-       validated_on=["juiceshop"],
+       validated_on=[],          # Q-164 WITHDRAWN: no engine bound, no `_run_*`; the solver proved it, not us
        maps_to={"juiceshop": ["Imaginary Challenge", "Forged Coupon"]}),
 
     _t(id="weak_2fa_bypass", vuln_class="broken_auth", cwe="CWE-308", owasp="A07:2021",
@@ -923,7 +941,7 @@ TECHNIQUES: dict[str, dict] = {t["id"]: t for t in [
        exploit="Compute the current TOTP from the seed (HMAC-SHA1) and complete the second factor.",
        oracle="The second-factor step accepts the computed code and issues a full session.",
        needs_fixture=["totp_seed"], fixture_source="harvest",
-       validated_on=["juiceshop"],
+       validated_on=[],          # Q-164 WITHDRAWN: no engine bound, no `_run_*`; the solver proved it, not us
        maps_to={"juiceshop": ["Two Factor Authentication"]}),
 
     _t(id="business_logic_abuse", vuln_class="business_logic", cwe="CWE-840", owasp="A04:2021",
@@ -932,7 +950,7 @@ TECHNIQUES: dict[str, dict] = {t["id"]: t for t in [
        detect="A workflow trusts a client-controlled quantity, price, coupon, or step ordering.",
        exploit="Submit out-of-policy values: negative quantity, unpaid upgrade, expired/greedy coupon.",
        oracle="The transaction completes in a state the business policy should have forbidden.",
-       validated_on=["juiceshop"],
+       validated_on=[],          # Q-164 WITHDRAWN: no engine bound, no `_run_*`; the solver proved it, not us
        maps_to={"juiceshop": ["Payback Time", "Deluxe Fraud", "Expired Coupon"]}),
 
     _t(id="csrf", vuln_class="csrf", cwe="CWE-352", owasp="A01:2021",
@@ -1002,7 +1020,7 @@ TECHNIQUES: dict[str, dict] = {t["id"]: t for t in [
        detect="Account deletion / 'right to be forgotten' leaves the user row; the login path never filters the deleted flag.",
        exploit="Authenticate as the soft-deleted user with its known credentials or an SQLi email+comment that returns the retained row.",
        oracle="A valid session token is issued for an account that should no longer exist.",
-       validated_on=["juiceshop"],
+       validated_on=[],          # Q-164 WITHDRAWN: no engine bound, no `_run_*`; the solver proved it, not us
        maps_to={"juiceshop": ["GDPR Data Erasure"]}),
 
     # --- lab-local: counts toward a CTF % but NOT claimed as transferable capability ---
