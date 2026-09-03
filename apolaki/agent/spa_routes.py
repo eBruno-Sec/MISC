@@ -430,10 +430,20 @@ def discover(base: str, *, scope_ok=None, marker: str = MARKER,
                     ignore_https_errors=True,
                     extra_http_headers={str(k): str(v) for k, v in (headers or {}).items()})
                 page = ctx.new_page()
-                out["pages"].append({"url": base, "settle": _goto(page, base, timeout_ms)})
-                # Registered AFTER the first navigation so the app boots normally; from here on the
-                # drive is mechanically read-only.
+                # BREAKER F2. Installed BEFORE the first navigation, not after it.
+                #
+                # This was registered after the boot navigation had completed AND settled, "so the
+                # app boots normally" -- which left the entire settle window (bounded by
+                # timeout_ms, default 15s) with NO interception at all. MEASURED by the Breaker:
+                # two POSTs reached a fixture server through that window, and one real POST reached
+                # juice-shop. The module's own docstring promises "a login POST or a comment POST
+                # cannot leave the browser", and for that window it could.
+                #
+                # Booting behind the gate is the correct trade: an application that needs to WRITE
+                # in order to render is one this module must not drive anyway, and a lost render is
+                # a false negative while an escaped write is a change to someone else's system.
                 page.route("**/*", _read_only_gate)
+                out["pages"].append({"url": base, "settle": _goto(page, base, timeout_ms)})
                 targets = [base]
                 if max_pages > 1:
                     try:

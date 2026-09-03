@@ -9670,6 +9670,17 @@ class ToolRegistry:
             return ToolResult("nosqli_body", "", False, "", [], "need url")
         if not self.scope.validate(url)[0]:
             return ToolResult("nosqli_body", url, False, "", [], "SCOPE BLOCK")
+        # BREAKER F8. "OBSERVED, NEVER INVENTED" WAS NOT IN FORCE, and the fault was here, not in
+        # the module. `db.get_exchanges` rows are composed by `_http` -- i.e. by Apolaki -- and the
+        # house convention captures CONFIRMING payloads while leaving benign baselines uncaptured,
+        # so the stored rows skew towards other engines' injection strings. MEASURED by the Breaker
+        # end to end: all 10 requests on a juice-shop run carried another engine's `' OR 1=1--`,
+        # and the "baseline" the oracle measured against was that payload's response.
+        #
+        # Probing a body we ourselves poisoned is the invented-value failure wearing a disguise, so
+        # a row that carries any probe fingerprint is refused rather than used.
+        _PROBE_FINGERPRINTS = ("' or ", "1=1", "$ne", "$regex", "$gt", "$where", "sleep(",
+                               "apolaki", "bbh", "<script", "../", "|| ", "-- ")
         rows = []
         if self.mission_id:
             for ex in (db.get_exchanges(self.mission_id) or []):
@@ -9677,6 +9688,15 @@ class ToolRegistry:
                 if not b or not b.startswith(("{", "[")):
                     continue
                 if str(ex.get("url") or "").split("?")[0] != url.split("?")[0]:
+                    continue
+                low = b.lower()
+                if any(fp in low for fp in _PROBE_FINGERPRINTS):
+                    continue                       # our own probe, not the application's request
+                # BREAKER F9. A creating POST replayed ten times creates ten objects. POST is the
+                # standard carrier for a JSON QUERY as well, so this is decided on EVIDENCE rather
+                # than by verb: a POST that answered 200 with a body is read-shaped; a 201, or any
+                # other status, is not something to replay against a third party's system.
+                if str(ex.get("method") or "").upper() == "POST" and int(ex.get("status_code") or 0) != 200:
                     continue
                 rows.append(ex)
         if not rows:

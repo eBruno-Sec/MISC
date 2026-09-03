@@ -608,7 +608,21 @@ async def probe_json_body(send, url: str, method: str, raw_body, *, headers: dic
         out["fields"].append(label)
 
         ctl_r = await _send(probe["control"])
-        ctl_body = _text(ctl_r) if _ok(ctl_r) else ""
+        # BREAKER F1. A DROPPED REQUEST IS NOT A CONTROL THAT FOUND NOTHING. `"" ` is exactly what
+        # `analyze_boolean` reads as "the control did not match", so folding a timeout into it does
+        # not degrade the verdict -- it DELETES the control and the engine then confirms. Measured
+        # by the Breaker on this module's own clean-app fixtures: one dropped request, one confirmed
+        # HIGH, on an application with no injection at all.
+        #
+        # `_http` returns {"status": 0, "body": ""} on a transport failure, which is the shape
+        # `_ok` rejects, so this is reachable on any rate-limited or flaky target -- which is to say
+        # on every real one.
+        if not _ok(ctl_r):
+            out.setdefault("skipped_fields", []).append(
+                "%s: control request did not complete (status=%s) - NOT TESTED"
+                % (label, (ctl_r or {}).get("status")))
+            continue
+        ctl_body = _text(ctl_r)
         # The error oracle gets a negative control too. If the PLAIN non-matching value already
         # provokes the same driver signature, that error is about the VALUE (a cast/validation
         # failure on an id the store does not hold) and not about the OPERATOR, and reporting it
@@ -618,7 +632,15 @@ async def probe_json_body(send, url: str, method: str, raw_body, *, headers: dic
         omit_body = None
         if probe["omit"] is not None:
             omit_r = await _send(probe["omit"])
-            omit_body = _text(omit_r) if _ok(omit_r) else None
+            # BREAKER F1, second instance. `None` is what the analyser reads as "no omit control was
+            # supplied", so a timeout here silently removes the control rather than degrading the
+            # verdict. Same fix: a control that did not run means this field is NOT TESTED.
+            if not _ok(omit_r):
+                out.setdefault("skipped_fields", []).append(
+                    "%s: omit control did not complete (status=%s) - NOT TESTED"
+                    % (label, (omit_r or {}).get("status")))
+                continue
+            omit_body = _text(omit_r)
 
         confirmed = False
         for spec in probe["operators"]:
