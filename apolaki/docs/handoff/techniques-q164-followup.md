@@ -90,4 +90,67 @@ holds. The three re-earn targets are all routable, so diff 2's targets are still
 
 ## Work log
 
-(filled in below as each slice lands)
+### Slice 1 -- LANDED (309becd). `test_authscan.py`, the blocking equality assertion
+
+Removed `assert TECHNIQUES["exposed_credentials"]["validated_on"] == ["ginandjuice"]` and replaced
+it with the reason. The test's two real assertions (REGISTERED, and autonomously PLANNED once recon
+exposes a credential) are untouched -- nothing was weakened to make anything pass, and nothing was
+failing. `pytest tests/test_authscan.py` -> `..... [100%]`, 5 passed.
+
+Still outstanding for the owner of `agent/techniques.py`: set `exposed_credentials`
+`validated_on=[]`, and delete `("exposed_credentials", "ginandjuice")` from `DEBT` in
+`agent/tests/test_technique_badges.py`. Re-issued as a diff at the bottom. Until both land the
+badge stands and the debt entry stays correct, so the tree is consistent at every point.
+
+### Slice 2 -- the `session_lifecycle` / `sessionlife` verdict: STAYS ON DEBT
+
+The audit left this one UNRESOLVED because the lab was mid-landing in another lane's uncommitted
+tree and it would not guess. Re-checked now.
+
+**The other lane has NOT settled.** MEASURED:
+
+    $ git show HEAD:apolaki/docker-compose.yml | grep -n sessionlife
+    (absent at HEAD)
+    $ git ls-files apolaki/labs/ | grep -i session
+    (no tracked sessionlife source)
+    $ git status --short apolaki/docker-compose.yml apolaki/labs/
+     M apolaki/docker-compose.yml
+    ?? apolaki/labs/sessionlife/          # one file: app.py
+
+Byte-for-byte the same situation the audit recorded. The compose service and `labs/sessionlife/app.py`
+are still uncommitted working-tree state.
+
+But "unresolved" is not the best answer available now, because two DIFFERENT questions were being
+run together. I separated them and measured both.
+
+**Question 1 -- is the badge's claim TRUE?** Yes, and strongly. The engine is bound
+(`engine_descriptor`: `engines=['run_session_lifecycle']`, `routable=True`), the lab answers on
+`sessionlife:8080`, and driving the SHIPPING executor `_run_session_lifecycle` against all four
+mounts gives the paired discrimination the lab was built for:
+
+    /vuln           2 findings   confirmed CWE-613  session not invalidated on logout
+                                 confirmed CWE-613  sessions survive a password change
+    /secure         0 findings
+    /expire-vuln    1 finding    confirmed CWE-613  declared expiry not enforced server-side
+    /expire-secure  0 findings
+
+Three confirmations on the vulnerable halves and ZERO on both secure halves. The engine declines
+the safe case, so this is a discrimination and not an engine that fires at any session cookie.
+
+**Question 2 -- does anything IN THE REPOSITORY re-run it?** No, and it cannot yet. That is the
+question the badge answers to, and it is the one that decides the verdict.
+
+**Verdict: STALE, stays on `DEBT`.** Not "cannot classify" -- the measured reason is that
+`sessionlife` is not a repository artifact. A `CHECKS` entry naming it would be an ISLAND: on this
+machine it confirms, and on every fresh clone `_reachable("sessionlife")` returns False and the
+check is SKIPPED forever. It would also race the other lane, who can still change the port or the
+mount before they commit.
+
+It is decided by construction as well as by judgment, which is the part worth stating:
+`test_technique_badges.liveness_pairs()` requires BOTH a `CHECKS` entry AND the technique in the
+COMMITTED baseline. `agent/tests/liveness_baseline.json` is not in this lane's write set, so
+`session_lifecycle` could not become a backed pair here even if I added the check. The debt entry
+stays correct either way.
+
+What clears it is one commit by the lab's owner, and the exact `CHECKS` entry to apply at that
+moment is measured and handed over below -- ready, not guessed.

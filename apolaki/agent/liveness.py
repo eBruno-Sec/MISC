@@ -68,8 +68,30 @@ CHECKS = (
      "input": {"host": "dnp3-outstation", "port": 20000, "service": "dnp3"}, "family": "ics_ot",
      "title": "DNP3"},
     # ── beyond-web network services ───────────────────────────────────────────────────────────
+    # Titled since Q-164, when this family gained a second check: `test_liveness.py`'s table guard
+    # requires any two checks sharing a family to be distinguishable, and it is right to. The engine
+    # names the host it questioned in the finding title, so pinning that fragment makes each check
+    # demand a finding from ITS OWN lab — a check that would otherwise be satisfied by its sibling's
+    # answer now fails when pointed anywhere else.
     {"technique": "snmp_default_community", "lab": "snmpd", "kind": "tool", "tool": "_run_service_pack",
-     "input": {"host": "snmpd", "port": 161, "service": "snmp"}, "family": "snmp_default_community"},
+     "input": {"host": "snmpd", "port": 161, "service": "snmp"}, "family": "snmp_default_community",
+     "title": "snmpd:161"},
+    # Q-164. This technique's badge named TWO labs, conpot and snmpd, and only the snmpd half had a
+    # check. The conpot half's entire backing was a membership assertion in test_ics_real_stack.py --
+    # `assert "conpot" in ... validated_on` -- a literal pinned against a literal, replaying not one
+    # SNMP byte, while its four neighbours in that same loop each have a recorded reply above them.
+    #
+    # THE REASON NOBODY NOTICED is a port. conpot's SNMP is published as `127.0.0.1:42162:16100/udp`
+    # (docker-compose.yml), so the container listens on 16100, not the well-known 161. MEASURED
+    # through this exact dispatch: `conpot:161` -> 0 findings, `conpot:16100` -> confirmed, family
+    # snmp_default_community, sysDescr "Siemens, SIMATIC, S7-200". Anyone who had tried to re-earn
+    # this badge at the obvious port would have concluded the engine was dead.
+    #
+    # This is also the first technique in the table with two checks; `evaluate()` groups per technique
+    # for that reason, and the docstring there records what the ungrouped version did.
+    {"technique": "snmp_default_community", "lab": "conpot", "kind": "tool", "tool": "_run_service_pack",
+     "input": {"host": "conpot", "port": 16100, "service": "snmp"}, "family": "snmp_default_community",
+     "title": "conpot:16100"},
     {"technique": "ldap_anonymous_read", "lab": "openldap", "kind": "tool", "tool": "_run_service_pack",
      "input": {"host": "openldap", "port": 389, "service": "ldap"}, "family": "ldap_anonymous_read"},
     {"technique": "smb_null_session", "lab": "smb", "kind": "tool", "tool": "_run_service_pack",
@@ -84,6 +106,18 @@ CHECKS = (
      "title": "introspection enabled"},
     {"technique": "graphql_argument_injection", "lab": "dvga", "kind": "tool", "tool": "_run_graphql",
      "input": {"url": "http://dvga:5013/graphql"}, "family": "sqli"},
+    # Q-164. DVGA is this badge's own lab and `_run_graphql` is its shipping engine, but the only
+    # thing pinning the claim was `assert "dvga" in ... validated_on` in test_local_import_guard.py.
+    # test_validated_on.py had already demonstrated that this shape cannot fail on an addition.
+    #
+    # PINNED BY TITLE, and the trap runs both ways. MEASURED at this endpoint: introspection,
+    # batching and argument-injection all come back from one call, and the first two share
+    # `family: "graphql"`. The introspection entry above carries a title for exactly this reason --
+    # matching on family alone let the BATCHING finding satisfy the INTROSPECTION check while
+    # introspection emitted no evidence at all. Without a title here the reverse holds and this
+    # check would report green on an engine that had stopped batching entirely.
+    {"technique": "graphql_batching_enabled", "lab": "dvga", "kind": "tool", "tool": "_run_graphql",
+     "input": {"url": "http://dvga:5013/graphql"}, "family": "graphql", "title": "batching"},
     # ── runtime DOM source→sink: the families the dead sink scan silently retired ──────────────
     {"technique": "dom_data_manipulation", "lab": "domsource", "kind": "tool", "tool": "_run_dom_trace",
      "input": {"url": "http://domsource:8080/hash"}, "family": "dom_data_manipulation"},
@@ -273,17 +307,46 @@ def evaluate(results, baseline) -> dict:
     A technique the baseline records as live, which is not confirmed now, is a REGRESSION and fails the
     gate. SKIPPED does not clear a regression and does not count as a pass — a lab that is not running
     means the question was not asked, which is the one thing this gate must never confuse with an answer.
+
+    ONE TECHNIQUE MAY NOW CARRY SEVERAL CHECKS, and that is why the grouping below exists. Q-164 added a
+    second `snmp_default_community` check because conpot publishes SNMP on 16100/udp while the original
+    check drove snmpd:161 — so the first badge with two labs also became the first technique with two
+    checks. This function used to read `by = {r["technique"]: r for r in results}`, which keeps only the
+    LAST result per technique. MEASURED against that version, with hand-built results:
+
+        CONFIRMED(snmpd) + SKIPPED(conpot)  ->  ok False, regressions ['snmp_default_community']
+        the SAME two results, order reversed ->  ok True,  regressions []
+        DEAD(conpot)     + CONFIRMED(snmpd) ->  ok True,  dead []
+
+    The verdict depended on where a line was pasted into CHECKS, and a CONFIRMED sibling silently
+    ERASED a dead engine — this module's own founding defect, moved up one layer into the scorer.
     """
     base = set(baseline or [])
-    by = {r["technique"]: r for r in (results or [])}
-    confirmed = sorted(t for t, r in by.items() if r["verdict"] == CONFIRMED)
-    dead = sorted(t for t, r in by.items() if r["verdict"] == DEAD)
-    skipped = sorted(t for t, r in by.items() if r["verdict"] == SKIPPED)
-    errored = sorted(t for t, r in by.items() if r["verdict"] == ERROR)
+    by: dict = {}
+    for r in (results or []):
+        by.setdefault(r["technique"], []).append(r)
+
+    def _any(t: str, v: str) -> bool:
+        return any(r["verdict"] == v for r in by[t])
+
+    # A technique counts as live only if some check ANSWERED YES and no check ANSWERED NO. The
+    # asymmetry between SKIPPED and DEAD is `verdict()`'s rule, applied here: an absent lab means the
+    # question was never asked, so it cannot subtract from a confirmation made elsewhere; a DEAD check
+    # means the question WAS asked and the engine did not confirm, so it must.
+    confirmed = sorted(t for t in by if _any(t, CONFIRMED) and not _any(t, DEAD))
+    dead = sorted(t for t in by if _any(t, DEAD))
+    skipped = sorted(t for t in by if _any(t, SKIPPED) and t not in confirmed)
+    errored = sorted(t for t in by if _any(t, ERROR))
+    # Every check that did not run, named by the LAB it would have driven. Without this a technique
+    # confirmed on one lab and skipped on another reports as a plain pass, and the fact that nobody
+    # asked about the second lab disappears — which is the exact shape Q-164 was filed about.
+    unasked = sorted("%s@%s" % (r["technique"], r["lab"]) for rs in by.values() for r in rs
+                     if r["verdict"] == SKIPPED)
     regressions = sorted(t for t in base if t not in confirmed)
     gained = sorted(t for t in confirmed if t not in base)
     return {
-        "checked": len(by), "confirmed": confirmed, "dead": dead, "skipped": skipped, "errors": errored,
+        "checked": len(results or []), "confirmed": confirmed, "dead": dead, "skipped": skipped,
+        "errors": errored, "unasked": unasked,
         "regressions": regressions, "gained": gained,
         "baseline_size": len(base), "new_baseline": sorted(base | set(confirmed)),
         "ok": not regressions and not errored,
@@ -299,7 +362,8 @@ def report(ev: dict) -> str:
     lines = ["engine liveness: %d checked, %d confirmed, %d dead, %d skipped, %d error"
              % (ev["checked"], len(ev["confirmed"]), len(ev["dead"]), len(ev["skipped"]), len(ev["errors"]))]
     for key, label in (("regressions", "REGRESSION"), ("dead", "dead"), ("errors", "error"),
-                       ("skipped", "skipped (lab down — NOT a pass)"), ("gained", "newly live")):
+                       ("skipped", "skipped (lab down — NOT a pass)"),
+                       ("unasked", "not asked (this lab's check did not run)"), ("gained", "newly live")):
         for t in ev.get(key) or []:
             lines.append("  %-32s %s" % (label, t))
     lines.append(ev["statement"])
