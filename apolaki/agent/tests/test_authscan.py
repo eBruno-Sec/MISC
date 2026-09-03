@@ -46,8 +46,16 @@ def test_login_form_fallback_picks_login_csrf_not_register():
 
 
 def test_exposed_credentials_is_a_registered_planned_technique():
+    # Q-164 removed an equality assertion on this record's lab-badge field from here.
+    # It pinned one literal against another and re-checked nothing -- no run, no lab, no oracle --
+    # while blocking the withdrawal of a badge the audit measured as unearned: the id has NO engine
+    # bound to it (engine_descriptor reports routable=False, engines=[]), so no run BY THE PRODUCT
+    # could have produced the confirmation the badge claims. It also fed a false positive to
+    # test_validated_on.py's `backed` heuristic, which counts any mention of an id on a line naming
+    # that field as evidence the id is backed.
+    # What this test is actually for is the two assertions below: the technique is REGISTERED, and
+    # it is autonomously PLANNED once recon exposes a credential. Neither of those was weakened.
     assert "exposed_credentials" in T.TECHNIQUES
-    assert T.TECHNIQUES["exposed_credentials"]["validated_on"] == ["ginandjuice"]
     # autonomously planned the moment recon has exposed a credential
     plan = TP.plan({"credentials_exposed"}, TP.registry_seed())
     assert any(a["id"] == "exposed_credentials" for a in plan)
