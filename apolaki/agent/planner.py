@@ -119,7 +119,38 @@ def _is_json_ct(ct) -> bool:
 _URLISH_PARAM = ("url", "uri", "link", "fetch", "redirect", "next", "return", "dest",
                  "target", "proxy", "image", "img", "callback", "webhook", "u", "r")
 _FILE_PARAM = ("file", "path", "page", "doc", "document", "template", "include", "load", "read", "dir", "folder")
-_CMD_PARAM = ("cmd", "command", "exec", "run", "ping", "host", "ip", "dns", "query", "shell", "code")
+import re as _re
+
+_CMD_PARAM = ("cmd", "command", "exec", "run", "ping", "host", "hostname", "ip", "dns",
+              "query", "shell", "code", "nslookup", "traceroute")
+
+
+def cmd_param_hit(params) -> bool:
+    """Q-168. Does any parameter NAME carry a command-execution token?
+
+    THE DEFECT. This gate was `name in _CMD_PARAM` -- exact equality against an 11-word list. Over
+    the whole recorded corpus (6,193 query-string requests, 792 distinct param-bearing endpoints,
+    557 distinct parameter names) it selected ONE endpoint, on the name "code", once. `run_cmdi`
+    was never dispatched in 175 missions. An engine that claims RCE could not run.
+
+    Real applications do not name a parameter `cmd`. They name it `target_host`. Exact equality
+    misses that; a raw substring test is worse, because "ip" is inside "recipient" and "description"
+    and "run" is inside almost everything -- MEASURED, a substring rule on the path selected 35% of
+    all endpoints, and anchored to whole path segments it selected zero. Neither is a rule.
+
+    Tokenising the NAME is: split on non-alphanumerics and match whole tokens. MEASURED on the same
+    corpus it still selects 0.1% -- no dispatch explosion -- while selecting `target_host`
+    (host, target) and rejecting `description`, `recipient`, `zipcode`, `page`, `username`,
+    `product_id`. Same cost, strictly more reach.
+
+    The corpus understates this, and the reason matters: it contains no mutillidae traffic at all,
+    because that lab's database was offline and nothing ever crawled it. The endpoints this rule
+    exists to catch were missing from the evidence used to judge the rule.
+    """
+    for name in params or ():
+        if {t for t in _re.split(r"[^a-z0-9]+", str(name).lower()) if t} & set(_CMD_PARAM):
+            return True
+    return False
 # Path signals for endpoints that likely parse an XML/SOAP request body — the XXE
 # sinks the GET-param probes never reach (e.g. ginandjuice /catalog/product/stock).
 import re as _re
@@ -989,7 +1020,7 @@ def next_batch(state: dict) -> list:
         e_steps.append(_step("run_web_probes", {"url": u}, f"run_web_probes:{tag}"))   # LFI/traversal + IDOR
         if any(p in _URLISH_PARAM for p in params_l):
             e_steps.append(_step("run_ssrf", {"url": u}, f"run_ssrf:{tag}"))
-        if any(p in _CMD_PARAM for p in params_l):
+        if cmd_param_hit(params_l):
             e_steps.append(_step("run_cmdi", {"url": u}, f"run_cmdi:{tag}"))
         # heavy sqlmap on the same endpoint — bounded to injection-prone endpoints at deep,
         # full fan-out at insane. HEAVY -> _allowed() gates to Full on COST, not on tier
