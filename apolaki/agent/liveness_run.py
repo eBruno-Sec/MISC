@@ -34,6 +34,15 @@ _LAB_ADDR = {
     "dvwa": ("dvwa", 80),
     # Q-011: the mass-assignment liveness check's fixture.
     "vampi": ("vampi", 5000),
+    # Q-183. The two labs the badge registry names most and this map never carried, so any CHECKS
+    # entry for them resolved to the default `(lab, 80)` -- `juiceshop:80`, which nothing serves,
+    # so the check SKIPPED forever and a badge could never be re-earned through it. The badge
+    # vocabulary says `juiceshop`; the container is `juice-shop`. Translating between the two is
+    # exactly what this map is for, and its absence is why `sqli_auth_bypass@juiceshop` stayed
+    # unbacked while the vulnerability itself is confirmed by hand (`' OR 1=1--` on
+    # /rest/user/login returns a 717-byte JWT where the baseline returns 401).
+    "juiceshop": ("juice-shop", 3000),
+    "mutillidae": ("mutillidae", 80),
 }
 
 
