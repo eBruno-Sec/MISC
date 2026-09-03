@@ -215,6 +215,29 @@ def _cmd_failure(result, parsed=None) -> str:
     return ""
 
 
+def nuclei_argv(target: str, tags: str, severity: str, conc: str,
+                oob: bool, iserver: str = "") -> list:
+    """The nuclei command line, as a VALUE a test can inspect.  Q-167.
+
+    Extracted for one reason: the argv was the defect, and an argv built inline inside an async
+    dispatcher cannot be asserted on without a network, a target and a subprocess.  `-json` was
+    removed in nuclei v3 and the binary exits 2 on it, so every nuclei run in this platform's
+    history ended before a single template loaded.  A whole engine -- 13,619 templates -- was
+    dark, and no test could see it because no test could see the command.
+
+    The companion test does not merely pin the string `-jsonl`; pinning a string only catches the
+    flag I already fixed.  It asks the INSTALLED BINARY whether it accepts every flag emitted
+    here, which is the general form of this defect and catches the next rename too.
+    """
+    argv = ["nuclei", "-u", target, "-tags", tags, "-severity", severity,
+            "-c", str(conc), "-silent", "-jsonl"]
+    if not oob:
+        argv.append("-no-interactsh")
+    elif iserver:
+        argv += ["-iserver", iserver]
+    return argv
+
+
 def _dalfox_rows(out: str):
     """Parse `dalfox --format json` output.  Returns `(rows, parse_error_or_None)`.
 
@@ -5028,14 +5051,19 @@ class ToolRegistry:
         # SSTI callbacks) can actually confirm out-of-band. A self-hosted interactsh
         # server (INTERACTSH_SERVER) is used when set; otherwise nuclei's default.
         oob = getattr(self, "intensity", "standard") in ("deep", "insane")
-        ncmd = ["nuclei", "-u", target, "-tags", tags, "-severity", severity,
-                "-c", conc, "-silent", "-json"]
-        if not oob:
-            ncmd.append("-no-interactsh")
-        else:
-            _iserver = os.getenv("INTERACTSH_SERVER", "").strip()
-            if _iserver:
-                ncmd += ["-iserver", _iserver]
+        # Q-167. `-json` was REMOVED in nuclei v3; the flag is `-jsonl` (`-j`). With `-json` the
+        # binary never scans at all -- it exits 2 on the unknown flag, before loading a single one
+        # of the 13,619 installed templates. MEASURED: `nuclei -u ... -json` -> exit 2, and the
+        # engine's own tool_error now reads "external tool failed (exit 2)". Every nuclei dispatch
+        # in this platform's history was that, so nuclei has contributed nothing, ever.
+        #
+        # It stayed invisible because for most of that history a non-zero exit did not cross the
+        # return edge (Q-092), so "nuclei never started" and "the target is clean" were the same
+        # record. Q-092 is what made this findable: the flag was wrong the whole time, but only
+        # now does it SAY so. Keeping the tags/severity filters exactly as they were -- the defect
+        # is the output flag, and widening coverage in the same change would confound the proof.
+        ncmd = nuclei_argv(target, tags, severity, conc, oob,
+                           os.getenv("INTERACTSH_SERVER", "").strip())
         out, err = _cmd_r = await self._cmd(ncmd, timeout=timeout)
         _failed = _cmd_failure(_cmd_r)
         if _failed:
