@@ -911,13 +911,29 @@ def next_batch(state: dict) -> list:
         raw = u.split("?")[0]
         if _is_static(raw):
             continue
-        pg = _abs(u)                            # normalize to the scope's real base
+        # Q-185. THE SAME QUERY-DROPPING IDENTITY AS Q-174, in the loop that captures FORMS.
+        #
+        # `_abs` is `base + _path(u)` and `_path` discards the query -- correct for its own job, and
+        # wrong as an identity. Every `index.php?page=<x>.php` normalized to the same
+        # `.../index.php`, so of 38 route pages exactly ONE was http_probed, and `recon["forms"]`
+        # never received the others' form actions.
+        #
+        # That is why mutillidae's command injection survived Q-172, Q-174, Q-177 and Q-178. The
+        # page was crawled, the planner's form-action dispatch works, and `_http_probe` captures
+        # that form perfectly when called by hand:
+        #     {"action": ".../index.php?page=dns-lookup.php", "method": "POST",
+        #      "fields": ["target_host", "dns-lookup-php-submit-button"]}
+        # The form engines were never told the form existed, because the page that declares it was
+        # deduplicated away before anything fetched it.
+        pg = _abs_route(u)                      # normalize to the scope's real base, KEEP the route
         if not pg or pg in seen_pg:
             continue
         seen_pg.add(pg)
         page_urls.append(pg)
-    for u in _rank_urls(page_urls)[:CAP_FORM_PAGES]:
-        d.append(_step("http_probe", {"url": u}, f"http_probe:page:{_host(u)}{_path(u)}"))
+    for u in _rank_urls(page_urls)[:CAP_FORM_PAGES + CAP_ROUTE_FORM_PAGES]:
+        # The step key carries the whole normalized URL for the same reason: a distinct page on a
+        # shared key is one step, and the URL being right does not help if the step exists once.
+        d.append(_step("http_probe", {"url": u}, "http_probe:page:%s" % u.split("://", 1)[-1]))
     # http_probe high-value NON-parameterized REST/sensitive endpoints (basket, ftp,
     # users, security-questions, 2fa, …). The parameterized filter above skips them, so
     # without this the entire REST access-control + exposure surface is discovered but
