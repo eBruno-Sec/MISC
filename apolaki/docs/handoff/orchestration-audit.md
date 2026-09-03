@@ -574,3 +574,51 @@ that they are nmap-only and make sure nmap runs. Three engines, currently double
 LAB -- mutillidae's upload directory is unwritable, so CWE-434 has no positive control on
 this bench (section 2.3). Fixing the lab is what makes `run_upload_test`'s 408 zeros
 interpretable. Same class as the dalfox/sqlmap database outage already fixed today.
+
+---
+
+## COORDINATOR RE-VERIFICATION (2026-09-03, at HEAD after Q-182..Q-186)
+
+I re-measured this audit's three ranked defects against a REBUILT image. Rank 1 held and is fixed.
+The other two do not reproduce, and the reason is the one this audit itself flagged at 0.3.1:
+`/app` is baked, not bind-mounted, and lagged HEAD while the audit ran. The warning was right and
+it applied to the audit's own measurements.
+
+RANK 1 -- same-host service sweep. CONFIRMED and FIXED (Q-182). The four findings it predicted by
+hand are the four the fixed sweep produces: SMB null-session (high), SMB signing not required
+(medium), LDAP anonymous read (medium), unauthenticated DNP3 (high). Same four, not a different
+four, which is what makes the diagnosis a transferable one.
+
+RANK 2 -- "the investigative tier has no executor". DOES NOT HOLD. `cross_user_test` is mapped in
+`agent.BBHAgent._GRAPH_ACTION_TOOLS`:
+
+    "cross_user_test": ("run_bfla", "url"),   # object endpoint, never compared across personas
+
+so untested `object` nodes DO reach an executor, and `run_bfla` has produced in 29 missions. The
+narrower true statement survives: `confirm_idor` -- a stronger two-identity oracle -- has never
+executed and is not wired. That is a real gap and a much smaller one, and it cannot be closed
+without two authenticated personas, which an unauthenticated engagement does not have.
+
+RANK 3 -- "operations_from_openapi drops the requestBody schema". DOES NOT HOLD. MEASURED against
+VAmPI's live spec at HEAD:
+
+    POST /users/v1/register    ct=application/json   body_params=3
+    POST /users/v1/login       ct=application/json   body_params=2
+    PUT  /users/v1/{username}/email                  body_params=1
+
+and the whole chain executes: the planner emits 4 `run_mass_assign` steps including
+`/users/v1/register`, and the engine confirms against it --
+
+    high  confirmed  Mass assignment -- the request body binds the privileged attribute
+    evidence: POST /users/v1/register accepted an attribute 'admin' it does not offer
+    fields_tried [role, isAdmin, admin, userRole]  offered [email, password, username]
+
+One correction against MYSELF while checking Rank 3: my first attempt passed `body_params` as the
+input key and got "no base body -- ... no typed OpenAPI body parameters were supplied". The planner
+sends `params` and the engine reads `params`; they agree. My test was wrong, not the code, and a
+tool that refuses to invent a body it was not given is behaving correctly.
+
+WHAT THIS DOES NOT CHANGE: the audit's method and its five buckets are the right instrument, and its
+refusal to fold 29 unresolved zeros into "clean" is still the most valuable judgement in the file.
+A stale measurement is a measurement problem, not a reasoning problem -- and the audit is the reason
+Rank 1 was found at all.
