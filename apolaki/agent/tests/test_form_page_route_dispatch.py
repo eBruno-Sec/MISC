@@ -93,3 +93,51 @@ def test_a_flat_page_is_still_reached():
     """Negative control: the ordinary path must not be starved by the new one."""
     got = _targets(_drive(ROUTED_URLS + ["http://t.local/about.php"]), "run_form_cmdi")
     assert any(u.endswith("/about.php") for u in got), got
+
+
+# --- Q-177: the canonical entry point ----------------------------------------------------------
+# The acceptance mission DID dispatch dns-lookup.php and still found nothing, because it dispatched
+# `/includes/index.php?page=dns-lookup.php` -- an include directory Apache also indexes, where the
+# form does not exist. run_form_cmdi answered "no body command injection in the page's forms",
+# correctly, about a page that was not the one with the bug.
+#
+# MEASURED on that mission, 30 route slots spent:
+#     /includes/index.php 22 | / 5 | /documentation/index.php 2 | /index.php 1
+# The wrong entry point took 73% of the budget and the application's own router got ONE slot, and
+# 25 distinct route values consumed 30 slots because two were tested twice.
+
+DECOY = "http://t.local/includes/index.php?page=%s"
+REAL = "http://t.local/index.php?page=%s"
+
+
+def _both(pages):
+    """The decoy discovered FIRST, which is the order that broke the mission."""
+    out = []
+    for p in pages:
+        out.append(DECOY % p)
+        out.append(REAL % p)
+    return out
+
+
+def test_the_shallowest_entry_point_wins():
+    got = _targets(_drive(_both(ROUTES)), "run_form_cmdi")
+    routed = [u for u in got if "?page=" in u]
+    assert routed, got
+    assert all("/includes/" not in u for u in routed), (
+        "the budget was spent on a deeper path to the same logical page: %r" % routed)
+    assert any("dns-lookup" in u for u in routed)
+
+
+def test_one_logical_page_is_tested_once():
+    """25 distinct values must not consume 30 slots."""
+    routed = [u for u in _targets(_drive(_both(ROUTES)), "run_form_cmdi") if "?page=" in u]
+    values = [u.split("?page=", 1)[1] for u in routed]
+    assert len(values) == len(set(values)), "the same route value was tested twice: %r" % values
+
+
+def test_a_deeper_path_is_still_used_when_it_is_the_only_one():
+    """Negative control: preferring the canonical entry must not DROP a page reachable one way."""
+    only_deep = [DECOY % "dns-lookup.php", REAL % "home.php"]
+    routed = [u for u in _targets(_drive(only_deep), "run_form_cmdi") if "?page=" in u]
+    assert any("dns-lookup" in u for u in routed), (
+        "a route value reachable ONLY through a deeper path was dropped entirely: %r" % routed)

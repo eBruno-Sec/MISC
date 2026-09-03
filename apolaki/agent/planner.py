@@ -124,7 +124,7 @@ _URLISH_PARAM = ("url", "uri", "link", "fetch", "redirect", "next", "return", "d
 _FILE_PARAM = ("file", "path", "page", "doc", "document", "template", "include", "load", "read", "dir", "folder")
 import re as _re
 import surface as _surface
-from urllib.parse import parse_qsl as _parse_qsl, urlsplit as _urlsplit
+from urllib.parse import parse_qsl as _parse_qsl
 
 _CMD_PARAM = ("cmd", "command", "exec", "run", "ping", "host", "hostname", "ip", "dns",
               "query", "shell", "code", "nslookup", "traceroute")
@@ -714,10 +714,11 @@ def next_batch(state: dict) -> list:
         base = _abs(u)
         if not base:
             return ""
-        try:
-            _q = _urlsplit(u).query
-        except Exception:
-            return base
+        # A plain split, NOT a guarded urlsplit. The defensive `try/except` I first wrote here
+        # is a handler whose silence an oracle reads as "no route selector", which is what the
+        # silent-failure invariant counts -- it went 407 -> 408 and the gate failed, correctly.
+        # Extracting the query by string split cannot raise, so there is nothing to swallow.
+        _q = u.split("?", 1)[1].split("#", 1)[0] if "?" in u else ""
         for k, v in _parse_qsl(_q, keep_blank_values=True):
             if _surface._ROUTE_VALUE.match(v or ""):
                 return "%s?%s=%s" % (base, k, v)
@@ -1109,6 +1110,39 @@ def next_batch(state: dict) -> list:
     # (run_form_cmdi fetches + parses the page's forms itself).
     seen_page = set()
     _route_pages = set()
+    # Q-177. ONE LOGICAL PAGE, ONE TEST, AT ITS CANONICAL ENTRY POINT.
+    #
+    # A router-style app is usually reachable through more than one script -- mutillidae serves
+    # `/index.php?page=<x>` (the application) and `/includes/index.php?page=<x>` (an include
+    # directory Apache also indexes, which renders nothing). Both are real URLs and the crawler
+    # finds both, so the route budget was spent on whichever ranked higher.
+    #
+    # MEASURED on the acceptance mission, 30 route slots:
+    #     /includes/index.php  22      /  5      /documentation/index.php  2      /index.php  1
+    # The wrong entry point took 73% of the budget and the application's own router got ONE slot.
+    # `dns-lookup.php` was dispatched -- through `/includes/`, where the form does not exist -- so
+    # run_form_cmdi answered "no body command injection in the page's forms", correctly, about a
+    # page that was not the one with the bug. 25 distinct route values consumed 30 slots.
+    #
+    # Canonical = fewest path segments, then shortest, then lexicographic for determinism. A router
+    # at the site root is the entry point; the same value reachable under `includes/` or
+    # `documentation/` is a secondary path to the same logical page. Choosing on SHAPE, not on a
+    # list of directory names, because the next app will nest its copy somewhere else.
+    _route_best = {}
+    for _u in urls:
+        _rb = _abs(_u)          # NOT `_b`: that name is the scope-base helper in this closure
+        if not _rb:
+            continue
+        _uq = _u.split("?", 1)[1].split("#", 1)[0] if "?" in _u else ""
+        for _k, _v in _parse_qsl(_uq, keep_blank_values=True):
+            if not _surface._ROUTE_VALUE.match(_v or ""):
+                continue
+            _key = (_host(_u), _k, _v)
+            _rank = (_rb.count("/"), len(_rb), _rb)
+            if _key not in _route_best or _rank < _route_best[_key][0]:
+                _route_best[_key] = (_rank, _abs_route(_u))
+            break
+    _route_canonical = {v[1] for v in _route_best.values()}
     for u in _rank_urls(urls):
         raw = u.split("?")[0].split("#")[0]
         if _is_static(raw):
@@ -1125,6 +1159,8 @@ def next_batch(state: dict) -> list:
         # never meant to decide that 45 pages are one page. Both budgets stay bounded.
         _is_route = "?" in pg
         if _is_route:
+            if _route_canonical and pg not in _route_canonical:
+                continue          # Q-177: the same logical page, reached by a longer path
             _route_pages.add(pg)
             if len(_route_pages) > CAP_ROUTE_FORM_PAGES:
                 continue
