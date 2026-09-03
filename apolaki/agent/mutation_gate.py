@@ -151,6 +151,18 @@ MUTANTS = [
     ('jwt_attacks.py', "drop the discriminating-controls gate -- an endpoint that answers identically with and without a token can then 'accept' a forged one",
      '    if not _status_discriminates\\(controls\\) and not _body_discriminates\\(controls\\):', '    if False:',
      'tests/test_jwt_attacks.py::test_fp1_an_endpoint_that_answers_identically_with_and_without_a_token_is_not_tested'),
+    # Cycle 20. Three engine modules that produce CONFIRMED findings, so each owes a mutant. The
+    # first two are the Breaker's own HIGH and MEDIUM re-armed as permanent guards: both were
+    # real defects, both are now the thing a regression would have to re-introduce.
+    ('nosqli_body.py', "fold a dropped control back into the empty string -- a timeout then reads as 'the control ran and found nothing' and the engine confirms on a clean app (Breaker F1)",
+     '        if not _ok\\(ctl_r\\):', '        if False:',
+     'tests/test_nosqli_body.py'),
+    ('spa_routes.py', 'let the read-only gate fail OPEN on an unreadable method, the permissive answer as the default for a guard whose job is refusing writes (Breaker F3)',
+     '        method = "__UNREADABLE__"', '        method = "GET"',
+     'tests/test_spa_routes.py'),
+    ('rendered_forms.py', 'accept a marker that landed anywhere rather than in a field the app actually submitted -- the shape that turns an unrelated echo into a confirmed parameter',
+     'def identity_quality\\(', 'def _unused_identity_quality(',
+     'tests/test_rendered_forms.py'),
 ]
 
 

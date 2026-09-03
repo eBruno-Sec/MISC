@@ -642,3 +642,59 @@ def test_the_finding_names_the_body_path_not_a_query_parameter():
     res = asyncio.run(nb.probe_json_body(send, URL, "POST", json.dumps(body), tag="t1"))
     assert [f["param"] for f in res["findings"]] == ["filter.id"]
     assert "filter.id" in res["findings"][0]["evidence"]
+
+
+# =================================================================================================
+# BREAKER F1 (HIGH). A DROPPED REQUEST DELETED A NEGATIVE CONTROL AND THE ENGINE CONFIRMED.
+#
+# `ctl_body = _text(r) if _ok(r) else ""` folded "the request never completed" into the exact value
+# `analyze_boolean` reads as "the control ran and did not match"; `omit_body = ... else None` did
+# the same for "no omit control was supplied". So a timeout did not degrade the verdict, it removed
+# the control. The Breaker produced two confirmed HIGHs on this file's OWN clean-app fixtures that
+# way, one per oracle. `_http` returns status 0 on a transport failure, so this is reachable on any
+# rate-limited target -- which is to say on every real one.
+# =================================================================================================
+
+def test_a_dropped_control_is_NOT_TESTED_never_confirmed():
+    """The control request times out; everything else answers normally on a CLEAN app."""
+    import asyncio
+
+    sent = []
+
+    async def send(method, url, headers, body):
+        sent.append(body)
+        # MEASURED order: 1-2 baseline samples, 3 control, 4 omit, 5-6 operators.
+        if len(sent) == 3:                      # drop the CONTROL only
+            return {"status": 0, "body": "", "error": "timeout"}
+        return {"status": 200, "body": '{"rows":[{"id":1,"name":"a"}]}'}
+
+    res = asyncio.run(nb.probe_json_body(send, "http://h/api/x", "POST", '{"id": 1}'))
+    assert res["findings"] == [], res["findings"]
+    assert any("NOT TESTED" in s for s in (res.get("skipped_fields") or [])), res.get("skipped_fields")
+
+
+def test_a_dropped_OMIT_control_is_also_NOT_TESTED():
+    import asyncio
+    sent = []
+
+    async def send(method, url, headers, body):
+        sent.append(body)
+        if len(sent) == 4:                      # drop the OMIT control only
+            return {"status": 0, "body": "", "error": "timeout"}
+        return {"status": 200, "body": '{"rows":[{"id":1,"name":"a"}]}'}
+
+    res = asyncio.run(nb.probe_json_body(send, "http://h/api/x", "POST", '{"id": 1}'))
+    assert res["findings"] == [], res["findings"]
+
+
+def test_the_controls_still_work_when_nothing_is_dropped():
+    """POSITIVE CONTROL. A fix that returns NOT TESTED for everything would pass both tests above
+    and delete the engine, so a clean run must still complete its fields."""
+    import asyncio
+
+    async def send(method, url, headers, body):
+        return {"status": 200, "body": '{"rows":[{"id":1,"name":"a"}]}'}
+
+    res = asyncio.run(nb.probe_json_body(send, "http://h/api/x", "POST", '{"id": 1}'))
+    assert res["fields"], res
+    assert not (res.get("skipped_fields") or [])

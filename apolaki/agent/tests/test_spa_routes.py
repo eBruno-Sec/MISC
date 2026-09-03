@@ -431,3 +431,53 @@ def test_scope_gate_is_honoured_on_every_discovered_url():
     res = SR.discover(JUICE, max_pages=1, scope_ok=lambda u: u.rstrip("/") == JUICE.rstrip("/"))
     assert res["ran"] is True
     assert res["routes"] == [] and res["urls"] == []
+
+
+# =================================================================================================
+# BREAKER F3. THE READ-ONLY GATE FAILED OPEN when the request method could not be read:
+# `except Exception: method = "GET"` put the PERMISSIVE answer as the default, in the one place
+# this module promises a mechanical guarantee.
+# =================================================================================================
+
+class _RaisingRequest:
+    @property
+    def method(self):
+        raise RuntimeError("method unreadable")
+
+
+class _BreakerRoute:
+    def __init__(self, request):
+        self.request, self.aborted, self.continued = request, False, False
+
+    def abort(self):
+        self.aborted = True
+
+    def continue_(self):
+        self.continued = True
+
+
+class _BreakerReq:
+    def __init__(self, m):
+        self.method = m
+
+
+def test_the_gate_refuses_when_the_method_cannot_be_read():
+    """Unreadable must mean REFUSED. A lost request is a false negative; an escaped write is a
+    change to someone else's system, and only one of those is recoverable."""
+    r = _BreakerRoute(_RaisingRequest())
+    SR._read_only_gate(r)
+    assert r.aborted is True and r.continued is False
+
+
+def test_the_gate_still_allows_a_readable_GET():
+    """POSITIVE CONTROL. A gate that aborts everything would pass the test above and silently
+    stop the module from loading any page at all."""
+    r = _BreakerRoute(_BreakerReq("GET"))
+    SR._read_only_gate(r)
+    assert r.aborted is False
+
+
+def test_the_gate_refuses_a_readable_POST():
+    r = _BreakerRoute(_BreakerReq("POST"))
+    SR._read_only_gate(r)
+    assert r.aborted is True
