@@ -216,3 +216,174 @@ input.
 STRING instead of on what the response actually contains. The fix is symmetric - verify the
 candidate is a real login surface (reachable AND carrying a password input) before probing it, and
 if none is, report NOT TESTED.
+
+---
+
+## 3. WHAT CHANGED
+
+### 3.1 Defect 1 - `agent/exposure_tool.py` (three defects, any one sufficient)
+
+1. **Discovery.** New `observed_directories()` / `directory_candidates()`. Candidates now come
+   from the URL surface the engagement actually walked (facts) before `DIR_CANDIDATES` (guesses).
+   Same-origin only; a path without a trailing slash contributes only its parents, so
+   `/.git/logs/HEAD` yields `.git` and `.git/logs` and never a `HEAD/` request. With no observed
+   surface it returns exactly today's list, so it cannot make an existing run worse.
+2. **Resolution.** `parse_listing(html, base_url="")`. Hrefs now resolve against the listing's own
+   final URL. Omitting `base_url` preserves the old contract exactly.
+3. **Judgement.** `classify_content()` replaces the substring oracle with structural detectors:
+   key material, SQL dump, credential-table shape, secret assignment, documentary marker.
+   `_SENSITIVE_SIG` is now a duck-typed object exposing `.search()`, so the corrected judgement
+   reaches the live harvest path through the existing call site in `tools.py` **without editing a
+   file this lane does not own**. `harvest_finding()` grades, titles and CWEs from what was proven,
+   and evidence is the redacted STRUCTURE - it used to be `snippet[:300]`, i.e. the raw body, which
+   for a credential dump copies every plaintext password into the finding, the report and the DB.
+
+### 3.2 Defect 2 - `agent/agent.py`
+
+- `_discover_login_url(base, allow_guess=True)`. Default unchanged, so the two other callers keep
+  their behaviour; the credential probe passes `allow_guess=False`.
+- New `_login_surface(url)`. Excludes only on POSITIVE evidence: a 404/410, or a page that
+  rendered fine (2xx/3xx HTML) and is not a login form. An error status is not evidence of
+  absence, because a GET is not the method an API login answers - MEASURED, juice-shop's real
+  login answers a GET with `HTTP 500 Error: Unexpected path: /rest/user/login`.
+- With no such URL, no probe is fired. The finding records
+  `credential_verification="not_tested"`, its text claims nothing about the credential, and
+  `target` is a URL that was actually used rather than a guess.
+
+### 3.3 THE WIRING I DO NOT OWN - `agent/tools.py::_run_dir_harvest`
+
+The judgement half lands through the existing `_SENSITIVE_SIG.search()` call. The DISCOVERY and
+RESOLUTION halves need two lines in `tools.py`, which another lane owns. Until this is applied the
+recall gap stays open in production, because `accounts.txt` is never fetched:
+
+```diff
+--- a/agent/tools.py
++++ b/agent/tools.py
+@@ async def _run_dir_harvest(self, inp: dict) -> ToolResult:
+-            for d in exp.DIR_CANDIDATES[:20]:
++            # A directory the crawler already walked is a FACT; DIR_CANDIDATES is a guess list.
++            for d in exp.directory_candidates(origin, getattr(self, "urls", None))[:40]:
+                 if harvested >= 60:
+                     break
+                 r = await get(origin + "/" + d)
+                 if r is None or r.status_code != 200 or not exp.looks_like_listing(r.text):
+                     continue
+-                for fp in exp.parse_listing(r.text):
++                # Resolve against the listing's OWN final URL: Apache mod_autoindex emits bare
++                # file names, and joining those to the origin requests the web root.
++                for fp in exp.parse_listing(r.text, str(r.url)):
+```
+
+Both new signatures are backward compatible, so this diff is safe to apply at any time.
+
+### 3.4 MEASURED end-to-end, replaying the real harvest loop against the live labs
+
+```
+=== BEFORE: shipping behaviour (guessed dirs, origin-join) ===
+### DIR_CANDIDATES + parse_listing(html)             -> 0 finding(s)
+
+=== AFTER: observed dirs first + listing-relative resolution ===
+### directory_candidates + parse_listing(html,url)   -> 1 finding(s)
+      Exposed credential store: accounts.txt | high | credential_exposure | CWE-522
+      target  : http://mutillidae/passwords/accounts.txt
+      evidence: credential-table shape: 23 rows, ','-delimited, column 1 is a near-unique
+                identifier (distinct ratio 0.957) and column 2 an adjacent whitespace-free token
+      plaintext secrets in evidence: NONE
+
+RECALL GAP CLOSED: True
+
+=== NO REGRESSION on juice-shop (the one target that already worked) ===
+### juice-shop BEFORE -> 1 finding(s)      ### juice-shop AFTER -> 1 finding(s)
+```
+
+Classification across 4 labs on live bodies: **11/11 correct, 0 false positives.**
+`_login_surface` across 4 labs: **7/7 correct** - rejects the guessed `/login` (404) and both
+unprobeable crawled URLs, accepts mutillidae's real login, juice-shop's API login, dvwa and bwapp.
+
+---
+
+## 4. MUTATION RESULTS - all four mutants KILLED
+
+Run against a COPY of the tree in a throwaway container (`cp -r /app /work`), never the shared
+tree. Baseline green before and after every mutant.
+
+| # | Mutant | Result | Test that killed it (the INTENDED assertion) |
+|---|---|---|---|
+| M1 | defect-1 core: "ignore files named by a directory listing" (`observed_directories` returns `[]`) | **KILLED** | `test_observed_directory_becomes_a_harvest_candidate` (+2 more) |
+| M2 | defect-2 core: "restore the falsy default" (`cands.append(base + "/login")` unconditionally) | **KILLED** | `test_discovery_without_a_guess_returns_nothing_when_nothing_was_seen` |
+| M3 | over-correction 1: "treat every .txt as a credential exposure" | **KILLED** | `test_robots_txt_is_not_a_credential_exposure` (+3 more) |
+| M4 | over-correction 2: "probe anything even without a real login URL" | **KILLED** | `test_over_correction_probe_anything_is_rejected` (+5 more) |
+
+Verbatim, per mutant:
+
+```
+M1 ignore listing-named files:
+      FAILED test_observed_directory_becomes_a_harvest_candidate
+      FAILED test_a_url_without_a_trailing_slash_does_not_invent_a_directory
+      FAILED test_another_hosts_directory_is_not_this_hosts_surface
+
+M3 every file is a credential exposure:
+      FAILED test_robots_txt_is_not_a_credential_exposure
+      FAILED test_a_plain_text_file_is_not_sensitive_by_virtue_of_being_text
+      FAILED test_documentation_of_a_default_password_is_not_a_leaked_config
+      FAILED test_a_decode_artefact_never_reaches_the_evidence_string
+
+M2 restore the falsy default:
+      FAILED test_discovery_without_a_guess_returns_nothing_when_nothing_was_seen
+
+M4 probe anything:
+      FAILED test_an_empty_url_is_never_a_login_surface
+      FAILED test_an_out_of_scope_url_is_never_probed
+      FAILED test_a_transport_failure_is_not_treated_as_a_login_surface
+      FAILED test_over_correction_probe_anything_is_rejected
+```
+
+### 4.1 The flood M3 would have caused, QUANTIFIED across 4 labs
+
+A fix that floods the report is a different defect, so this was measured rather than asserted:
+
+```
+=== FIX ===                        === M3 OVER-CORRECTION ===
+  mutillidae        2                mutillidae        3
+  juice-shop        1                juice-shop        5
+  dvwa              0                dvwa              0
+  bwapp             0                bwapp             0
+  TOTAL:            3                TOTAL:            8
+```
+
+2.7x the volume, and every M3 row is MIS-TITLED "Exposed credential store" - including
+`legal.md` (lorem ipsum), `announcement_encrypted.md` and `premium.key`. That is the Host-header
+failure mode from breaker-v16.md section 3.1 repeating in a new engine.
+
+---
+
+## 5. HONEST LIMITS / open items
+
+1. **The recall gap is not closed in production until the `tools.py` diff in 3.3 is applied.** The
+   judgement half is live now; the discovery and resolution halves are not.
+2. **`premium.key` is still missed** (`http://juice-shop:3000/encryptionkeys/premium.key`, body
+   `1337133713371337.EA99A61D92D2955B1E9285B55BF2AD42`). MEASURED: the OLD oracle missed it too,
+   so this is not a regression. A "whole file is one high-entropy hex/base64 token" detector would
+   catch it, but it would also fire on every checksum file, so I did not add one under time
+   pressure. Recorded as a known gap rather than guessed at.
+3. **New true positive found by the fix:** `http://mutillidae/documentation/Mutillidae-Test-Scripts.txt`
+   classifies as `secret_assignment` on a documented `--password=samurai` command line. Real, but
+   it is documentation rather than config - a reviewer may want it graded below a leaked config.
+4. **The mangled `root<U+FFFD>` username itself is NOT fixed.** Its cause is in
+   `agent/intel.py::harvest_credentials`, which this lane does not own; breaker-v16.md 8.2 records
+   it as UNVERIFIED. Defect 2's fix removes the false TARGET, not the false username. I did fix
+   the same U+FFFD shape where it was about to reappear in my own evidence builder.
+
+## 6. Commits
+
+```
+98f4def  Q-173 reproduction: the listing was fetched three times and never harvested
+23f5545  Q-174 reproduction: the falsy default is not where the report said it was
+07ae496  Q-173 fix: a directory listing we already fetched is a list of real files
+8e25e3e  Q-174 fix: an absent login URL means NOT TESTED, not a probe against a 404
+3379dd2  Q-173: a decode artefact must never reach a report as observed text
+```
+
+STATUS: COMPLETE. 31 new tests; scoped suite 266 passed, 1 opt-in skip
+(`test_whole_product_reach.py`, run separately with `APOLAKI_LIVE_LAB=1`: 7 passed).
+No filename, path or lab id is hardcoded in either fix.
