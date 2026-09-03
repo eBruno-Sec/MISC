@@ -166,6 +166,13 @@ UNACCOUNTED -- flagged in this tree and in NEITHER recorded measurement:
 `host_header_landing` appears anywhere in the flagged set - the new function is correctly seen as
 WIRED, not as an island. Not my defect, not my file; recorded and moved past.
 
+A second shared-tree artefact, recorded so nobody chases it: one scoped run hit
+`Interrupted: 5 errors during collection` on `test_auto_store_reach.py`, `test_autonomy_loop.py`,
+`test_backoff_ledger.py` and two others. Re-running the same command minutes later collected and
+passed all of them with no change from me. That is a torn read of a tree another lane is writing,
+not a failure - which is exactly why the full unscoped suite is the wrong instrument here. My three
+host-header files plus `test_bbh.py` (290 tests) were green throughout.
+
 ## 5. MEASURED - the reclassification census
 
 I could not read mission `bed9ffcd`'s 65 URLs (no ledger on disk), so I rebuilt an equivalent target
