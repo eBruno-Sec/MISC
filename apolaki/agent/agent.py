@@ -1925,26 +1925,45 @@ class BBHAgent:
         if not creds:
             return events
         user, pw = creds[0].split(":", 1)
-        login_url = prior_login or self._discover_login_url(base) or base.rstrip("/") + "/login"
+        # Q-174. FALSY DEFAULT. This used to end in `or base.rstrip("/") + "/login"`, and
+        # `_discover_login_url` manufactured the same guess internally, so a target whose login
+        # lives anywhere else got a credential probe fired at a URL that does not exist. On
+        # mutillidae that meant a POST to a 278-byte Apache 404, reported as
+        # "a single verification login did not yield a session (form/flow mismatch)" -- a claim
+        # about the credential, when the fact was about the URL. A probe that cannot succeed
+        # reports clean and is indistinguishable from a correct negative.
+        #
+        # Now: discovery only (no guess), and the candidate must be shown to be a real login
+        # surface before anything is fired at it. If neither holds, the credential is NOT
+        # TESTED and says so. Discovery of the exposed credential is still reported -- that
+        # finding never depended on the login URL.
+        login_url = prior_login or self._discover_login_url(base, allow_guess=False)
+        if login_url and not await self._login_surface(login_url):
+            login_url = None
+        login_tested = bool(login_url)
         # 2) DISCOVERY is unconditional: exposed creds are a FINDING (password redacted) and are stashed to
         #    target memory so the NEXT scan can OFFER an authenticated run. Authenticating is a separate,
         #    opted-in step (HITL) -- a scan never silently logs in.
         self._scan_credential = "%s:%s" % (user, pw)     # reuse channel (persisted to target memory; redacted in reports)
-        self._scan_login_url = login_url
+        self._scan_login_url = login_url or ""
         self.tools._enum_known_username = user            # ground truth for the username-enumeration differential
         self.tools._fixation_credential = (user, pw)      # known-good login for the session-fixation rotation check (never emitted)
         # 2) VERIFY the discovered credential ACTUALLY WORKS with a single login (anti-brute capped) --
         #    a found credential is only a real finding once it authenticates. This does NOT run the scan
         #    authenticated; it just confirms validity + obtains a session. The FULL authenticated scan
         #    stays opt-in (the rescan prompt).
-        try:
-            await self.tools.execute("acquire_session",
-                                     {"login_url": login_url, "username": user, "password": pw,
-                                      "role": "__scan__"}, session_id)
-        except Exception as _apolaki_swallowed_1747:
-            self.tools._swallow(_apolaki_swallowed_1747, 'agent:_do_scan_auth:1747', "")
-            pass
-        sess = (getattr(self.tools, "_sessions", None) or {}).get("__scan__")
+        # Q-174. The probe runs ONLY against a login surface that was discovered and shown to
+        # exist. With no such URL there is nothing to verify against, and firing at a guess
+        # would manufacture a negative result that reads exactly like a real one.
+        if login_tested:
+            try:
+                await self.tools.execute("acquire_session",
+                                         {"login_url": login_url, "username": user, "password": pw,
+                                          "role": "__scan__"}, session_id)
+            except Exception as _apolaki_swallowed_1747:
+                self.tools._swallow(_apolaki_swallowed_1747, 'agent:_do_scan_auth:1747', "")
+                pass
+        sess = (getattr(self.tools, "_sessions", None) or {}).get("__scan__") if login_tested else None
         verified = bool(sess)
         self._creds_verified = verified
         _src = "inherited from a prior scan of this target" if from_prior else "harvested from the target's own client-reachable surface"
@@ -1971,10 +1990,17 @@ class BBHAgent:
                 "# 2) Replay the issued session on an authenticated-only resource (expect 200 as '%s', not the login view)" % user,
                 "curl -i -sS -k %s '%s'" % (_replay, base.rstrip("/") + "/my-account"),
             ])
-        f = {"title": "%s application credentials for '%s'" % ("Confirmed working" if verified else "Exposed", user),
+        # Q-174. NEVER record a URL that was not actually used. `target` used to be the guessed
+        # `/login`, so the finding pointed a triager at a 404.
+        _probe_target = login_url or base
+        f = {"title": "%s application credentials for '%s'"
+                      % ("Confirmed working" if verified else "Exposed", user),
              "severity": "high" if verified else "medium",
-             "family": "broken_auth", "confidence": "confirmed" if verified else "candidate",
-             "target": login_url, "method": "POST", "curl": _auth_curl,
+             "family": "broken_auth",
+             "confidence": "confirmed" if verified else "candidate",
+             "target": _probe_target, "method": "POST", "curl": _auth_curl,
+             "credential_verification": ("verified" if verified
+                                         else "failed" if login_tested else "not_tested"),
              # mappings supported by the actual evidence: a real, usable credential exposed to attackers
              "cwe": "CWE-522", "capec": "CAPEC-560", "owasp": "A07:2021",
              # CVSS reflects single-user-account compromise via a no-effort known credential (network,
@@ -1986,7 +2012,12 @@ class BBHAgent:
                              "reads the target's own surface obtains it — no guessing or brute force. Apolaki verified "
                              "the credential authenticates and issues a live session." % (user, _src)) if verified else
                             ("A candidate login for '%s' was %s, but a single verification login did not yield a "
-                             "session (form/flow mismatch) — treat as an unconfirmed lead." % (user, _src)),
+                             "session (form/flow mismatch) — treat as an unconfirmed lead." % (user, _src)
+                             if login_tested else
+                             "A candidate login for '%s' was %s. It was NOT TESTED: no login endpoint was "
+                             "discovered on this target, so there was nothing to verify the credential "
+                             "against. This says nothing about whether the credential is valid — treat as "
+                             "an untested lead and confirm the login surface by hand." % (user, _src)),
              "impact": ("An attacker logs in as '%s' and gains that user's full account access — reads and modifies "
                         "the account's data and can invoke every function that account is authorised for, and pivot "
                         "from there. Because the credential is exposed on the target itself, exploitation needs no "
@@ -1996,12 +2027,20 @@ class BBHAgent:
                           "authenticated session (session cookie/token issued). Raw credential stored redacted in "
                           "the vault, never in this report." % (login_url, user)) if verified else
                          ("Discovered '%s:<redacted>' for the login at %s; a verification login did not return a "
-                          "session." % (user, login_url)),
+                          "session." % (user, login_url) if login_tested else
+                          "Discovered '%s:<redacted>' on the target's own surface. No login endpoint was "
+                          "discovered, so NO verification login was attempted and no conclusion about the "
+                          "credential's validity is claimed." % user),
              "reproduction_steps": [
                  "POST %s  (form/JSON) with username='%s' and password=<the redacted discovered value>" % (login_url, user),
                  "Success oracle: the response issues a session cookie or bearer token; then a GET to an "
                  "authenticated-only page/identity endpoint returns 200 as '%s' (not the anonymous/login view)." % user,
-             ] if verified else ["POST %s with '%s' and the discovered value; observe whether a session is issued." % (login_url, user)],
+             ] if verified else (
+                 ["POST %s with '%s' and the discovered value; observe whether a session is issued."
+                  % (login_url, user)] if login_tested else
+                 ["Locate the application's login endpoint by hand (automated discovery found none "
+                  "on this target)",
+                  "POST it with '%s' and the discovered value; observe whether a session is issued." % user]),
              "success_oracle": ("A session cookie/token is issued AND a subsequent authenticated-only request "
                                 "loads as '%s'." % user) if verified else "A session is issued for the account.",
              "remediation": "Rotate/disable the '%s' account credential immediately and remove the exposed value from "
@@ -3083,8 +3122,25 @@ class BBHAgent:
                 out.append(p)
         return out[:limit]
 
-    def _discover_login_url(self, base: str):
-        """Pick an in-scope login endpoint from the harvested surface, else a common default."""
+    def _discover_login_url(self, base: str, allow_guess: bool = True):
+        """Pick an in-scope login endpoint from the harvested surface, else a common default.
+
+        Q-174. `allow_guess=False` returns ONLY endpoints actually seen on this target. The
+        default is unchanged, so every existing caller keeps its behaviour.
+
+        This is where the falsy default really lives. A triage report placed it at the call
+        site (`prior_login or self._discover_login_url(base) or base + "/login"`), but MEASURED
+        with an empty URL surface this function returns `'http://mutillidae/login'` itself --
+        it appends the guess to its own candidate list -- so it is never falsy for an in-scope
+        base and that trailing `or` is dead code. Removing the `or` would have changed nothing.
+        The guess has to stop being manufactured HERE.
+
+        The distinction matters because a guessed URL is indistinguishable downstream from a
+        discovered one: `http://mutillidae/login` is a 278-byte Apache 404 with zero forms,
+        while the real login is `/index.php?page=login.php` with a password input. A credential
+        probe fired at the guess reports "the credential did not authenticate" when the truth
+        is "there was nothing there to authenticate against".
+        """
         import re as _re
         cands = []
         try:
@@ -3101,7 +3157,8 @@ class BBHAgent:
                         cands.append(s if s.startswith("http") else base.rstrip("/") + "/" + s.lstrip("/"))
             except Exception:
                 pass
-        cands.append(base.rstrip("/") + "/login")
+        if allow_guess:
+            cands.append(base.rstrip("/") + "/login")
         for u in cands:
             try:
                 if self.scope.validate(u)[0]:
@@ -3109,6 +3166,53 @@ class BBHAgent:
             except Exception:
                 pass
         return None
+
+    async def _login_surface(self, url: str) -> bool:
+        """Is this URL something that could actually authenticate a credential?
+
+        Q-174. A name-shaped login URL is not a login endpoint, in exactly the way a
+        name-shaped `accounts.txt` is not a credential file: both decisions were being made on
+        the string instead of on what the response contains. MEASURED on the three login-ish
+        URLs the mission actually crawled -- one is a 404 and another renders with zero
+        password inputs -- so recognising more URL shapes would only have produced a different
+        unprobeable target.
+
+        Deliberately permissive about JSON/API logins, which answer a GET with 401/405 and
+        carry no HTML form; the only thing being excluded is a URL that demonstrably cannot
+        accept a login.
+        """
+        if not url:
+            return False
+        try:
+            if not self.scope.validate(url)[0]:
+                return False
+        except Exception:
+            return False
+        import browser_engine as _browser_engine
+        import httpx
+        try:
+            async with _browser_engine.rate_limited_async_client(
+                    httpx, verify=False, follow_redirects=True, timeout=12,
+                    headers={"User-Agent": "apolaki-recon"}) as c:
+                r = await c.get(url)
+        except Exception as _apolaki_swallowed_2174:
+            self.tools._swallow(_apolaki_swallowed_2174, 'agent:_login_surface:2174', url)
+            return False
+        # EXCLUDE ONLY ON POSITIVE EVIDENCE THAT THIS CANNOT AUTHENTICATE. A GET is not the
+        # method a login endpoint answers, so an error status is not evidence of absence.
+        # MEASURED: juice-shop's real API login answers a GET with
+        #   HTTP 500  <title>Error: Unexpected path: /rest/user/login</title>
+        # Treating a 500 or a non-form body as "not a login" would refuse a genuine endpoint.
+        # The two things that ARE evidence: nothing is served here at all, or a page rendered
+        # perfectly well and is not a login form.
+        if r.status_code in (404, 410):
+            return False
+        ct = (r.headers.get("content-type") or "").lower()
+        if "html" in ct and r.status_code < 400:
+            body = (r.text or "").lower()
+            return ('type="password"' in body or "type='password'" in body
+                    or "type=password" in body)
+        return True
 
     def _login_candidates(self, base: str) -> list:
         """Ordered login-endpoint candidates for logging in a freshly-created account. API/JSON login
