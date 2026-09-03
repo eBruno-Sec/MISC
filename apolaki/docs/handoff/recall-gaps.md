@@ -121,3 +121,98 @@ So "add `passwords` to the wordlist" is not only a benchmark-specific signature 
 would also have been wrong. The file has to be judged on the STRUCTURE of its content.
 
 (fix + mutation results below)
+
+---
+
+## 2. DEFECT 2 - REPRODUCED, and the stated mechanism is DISPROVED
+
+The Breaker's hypothesis (breaker-v16.md 4.1b) was:
+
+> `_discover_login_url` returned falsy for mutillidae [...] and the `or` fell through to a guessed
+> `/login`.
+
+**That is not what happens.** MEASURED:
+
+```
+MSYS_NO_PATHCONV=1 docker exec -i apolaki-agent-1 python - <<'PY'
+import sys; sys.path.insert(0,'/app')
+import agent as A, httpx
+class FakeIntel:
+    def get(self, kind): return []
+class FakeTools:
+    urls = []                      # the mutillidae case: nothing login-ish was harvested
+    intel = FakeIntel()
+class FakeScope:
+    def validate(self, u): return (True, "")
+o = object.__new__(A.BBHAgent); o.tools = FakeTools(); o.scope = FakeScope()
+d = A.BBHAgent._discover_login_url(o, "http://mutillidae")
+print("  _discover_login_url ->", repr(d))
+print("  is it falsy? ->", not bool(d))
+print("  did the trailing `or base+'/login'` fire? ->", d is None)
+c = httpx.Client(timeout=20, follow_redirects=False)
+for u in ["http://mutillidae/login", "http://mutillidae/index.php?page=login.php"]:
+    r = c.get(u); b = r.text or ""
+    print("  %-46s HTTP %s len=%-6d <form=%d password-input=%d"
+          % (u, r.status_code, len(b), b.lower().count("<form"), b.lower().count('type="password"')))
+PY
+```
+
+Real output:
+
+```
+  _discover_login_url -> 'http://mutillidae/login'
+  is it falsy? -> False
+  did the trailing `or base+'/login'` fire? -> False
+
+  http://mutillidae/login                        HTTP 404 len=278    <form=0 password-input=0
+  http://mutillidae/index.php?page=login.php     HTTP 200 len=54989  <form=2 password-input=1
+```
+
+**`_discover_login_url` returned the guessed `/login` itself.** The falsy default lives INSIDE that
+function (`agent.py:3110`, `cands.append(base.rstrip("/") + "/login")`, docstring: "else a common
+default"), not at line 1928. The `or base.rstrip("/") + "/login"` at 1928 is DEAD CODE on this path -
+it can only fire if the base is out of scope, in which case nothing runs anyway.
+
+This matters: the patch proposed in breaker-v16.md (delete the trailing `or` at 1928 and
+`return events`) **would have changed nothing.** Both halves of the fix have to be checked.
+
+### 2.1 WHY discovery came up empty - a second, general defect
+
+The mission DID see the real login. MEASURED from its own exchanges:
+
+```
+distinct URLs in mission exchanges: 534
+login-ish URLs the mission ACTUALLY saw: 3
+    http://mutillidae/includes/index.php?page=login.php
+    http://mutillidae/includes/pop-up-help-context-generator.php?pagename=login.php
+    http://mutillidae/index.php?page=login.php?do&popUpNotificationCode
+
+would the CURRENT regex r"/(login|signin|sign-in|session|auth)\b" match them?
+   match=False http://mutillidae/includes/index.php?page=login.php
+   match=False http://mutillidae/includes/pop-up-help-context-generator.php?pagename=login.php
+   match=False http://mutillidae/index.php?page=login.php?do&popUpNotificationCode
+```
+
+The discovery regex requires a `/` immediately before the keyword, so a **query-routed** login
+(`?page=login.php`, `?action=login`) is invisible to it. That is general: query-routed pages are the
+normal shape for a large family of PHP applications.
+
+### 2.2 But broadening the regex is NOT sufficient either - MEASURED
+
+I checked whether the three URLs the crawler actually recorded are usable login surfaces:
+
+```
+http://mutillidae/index.php?page=login.php?do&popUpNotificationC  HTTP 200 len=44935 <form=1 password-input=0
+http://mutillidae/includes/index.php?page=login.php               HTTP 404 len=291   <form=0 password-input=0
+```
+
+Neither is. The first has a doubled `?` so `page` resolves to `login.php?do`, which renders a page
+with no password input; the second is a 404. Only the clean
+`http://mutillidae/index.php?page=login.php` (which the crawler never recorded) carries the password
+input.
+
+**So a name-shaped login URL is not a login endpoint, in exactly the same way a name-shaped
+`accounts.txt` is not a credential file.** Both defects have the same shape: a decision made on the
+STRING instead of on what the response actually contains. The fix is symmetric - verify the
+candidate is a real login surface (reachable AND carrying a password input) before probing it, and
+if none is, report NOT TESTED.
