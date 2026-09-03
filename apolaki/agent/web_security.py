@@ -750,14 +750,43 @@ def analyze_cors(origin: str, resp_headers: dict) -> dict | None:
     return None
 
 
+def _authority_of(u: str) -> str:
+    """The HOST of a URL, scheme/userinfo/port/path/query removed. Pure.
+
+    The attacker host appearing ANYWHERE in a string is not a redirect to it -- our own probe URL
+    carries it as a query VALUE, which is how this oracle confirmed itself.
+    """
+    rest = str(u or "").split("://", 1)[-1]
+    for sep in ("/", "?", "#"):
+        rest = rest.split(sep, 1)[0]
+    rest = rest.rsplit("@", 1)[-1]
+    return rest.rsplit(":", 1)[0] if rest.count(":") == 1 else rest
+
+
 def analyze_open_redirect(status: int, location: str, final_url: str) -> dict | None:
-    """Flag an open redirect: a 3xx Location (or followed final URL) lands on the
-    attacker host we injected."""
-    target = (location or final_url or "")
-    tl = target.lower()
-    if _EVIL_HOST in tl and (300 <= (status or 0) < 400 or _EVIL_HOST in (final_url or "").lower()):
-        return {"severity": "MEDIUM", "detail": f"redirect follows attacker host: {target[:120]}",
-                "location": target}
+    """Flag an open redirect: a 3xx Location, or a followed final URL, whose HOST is the attacker
+    host we injected.
+
+    THE TOOL'S OWN PROBE WAS THE EVIDENCE. This read `target = location or final_url` and then
+    tested `_EVIL_HOST in target`. With no redirect at all, `location` is empty, so it fell back to
+    the probe URL -- which carries the attacker host as a query VALUE by construction -- and the
+    substring matched every time.
+
+    MEASURED on juice-shop: `//api.ipinfodb.com/v3/ip-country/?callback=https://bbh-evil.example`
+    was reported `confidence=confirmed, MEDIUM, "redirect follows attacker host"`. That URL returns
+    HTTP 500 and issues ZERO redirects. It appeared in every mission of this cycle.
+
+    The claim is structural -- the browser ends up at the attacker's host -- so the test is now
+    structural too: the attacker host must be the AUTHORITY, not a substring.
+    """
+    loc, fin = str(location or ""), str(final_url or "")
+    if 300 <= (status or 0) < 400 and _authority_of(loc) == _EVIL_HOST:
+        return {"severity": "MEDIUM", "detail": f"redirect follows attacker host: {loc[:120]}",
+                "location": loc}
+    # a FOLLOWED redirect: the request ended on the attacker's host, whatever the final status
+    if _authority_of(fin) == _EVIL_HOST:
+        return {"severity": "MEDIUM", "detail": f"redirect follows attacker host: {fin[:120]}",
+                "location": fin}
     return None
 
 

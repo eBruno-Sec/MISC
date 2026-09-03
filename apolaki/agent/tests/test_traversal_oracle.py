@@ -207,3 +207,57 @@ def test_unexplained_divergence_ignores_pure_echo_and_catches_real_text():
     assert ws.unexplained_divergence("opened /var/data/etc/passwd", "opened /var/data/q7x9a1/b2c3d4",
                                      ["../etc/passwd", "../q7x9a1/b2c3d4"]) is None
     assert ws.unexplained_divergence("file exists", "file missing", ["../a/b", "../c/d"])
+
+
+# =================================================================================================
+# Q-165. THE OPEN-REDIRECT ORACLE CONFIRMED ITSELF FROM ITS OWN PROBE URL.
+#
+# `target = location or final_url` then `_EVIL_HOST in target`. With NO redirect, `location` is
+# empty, so it fell back to the probe URL -- which carries the attacker host as a query VALUE by
+# construction -- and the substring matched every time.
+#
+# MEASURED on juice-shop: `//api.ipinfodb.com/v3/ip-country/?callback=https://<evil>` was reported
+# confidence=confirmed, MEDIUM, "redirect follows attacker host". That URL returns HTTP 500 and
+# issues ZERO redirects (curl -L: num_redirects=0). It appeared in EVERY mission this cycle.
+#
+# Same class as the WebSocket substring and the eval hook recording page.evaluate: the tool's own
+# probe became the evidence for a claim about the application.
+# =================================================================================================
+
+import web_security as _ws
+
+
+def _probe_url():
+    return "http://juice-shop:3000//api.ipinfodb.com/v3/ip-country/?callback=https%3A%2F%2F" + _ws._EVIL_HOST
+
+
+def test_our_own_probe_url_is_not_a_redirect():
+    """THE FIELD FALSE POSITIVE. 500, no Location, attacker host present only as our query value."""
+    assert _ws.analyze_open_redirect(500, "", _probe_url()) is None
+
+
+def test_a_200_with_no_location_is_not_a_redirect():
+    assert _ws.analyze_open_redirect(200, "", _probe_url()) is None
+
+
+def test_a_real_3xx_to_the_attacker_host_still_confirms():
+    """POSITIVE CONTROL. A fix that silenced the family would pass the two tests above and delete
+    the engine."""
+    got = _ws.analyze_open_redirect(302, "https://%s/x" % _ws._EVIL_HOST, _probe_url())
+    assert got and got["severity"] == "MEDIUM"
+
+
+def test_a_followed_redirect_that_LANDED_on_the_attacker_host_still_confirms():
+    got = _ws.analyze_open_redirect(200, "", "https://%s/landed" % _ws._EVIL_HOST)
+    assert got is not None
+
+
+def test_a_same_origin_redirect_stays_silent():
+    """NEGATIVE CONTROL. A 3xx is not by itself a finding; the destination is the whole claim."""
+    assert _ws.analyze_open_redirect(302, "http://juice-shop:3000/home", _probe_url()) is None
+
+
+def test_the_attacker_host_as_a_PATH_segment_is_not_a_destination():
+    """`http://target/https://evil.example/` never leaves the target, whatever the path says."""
+    assert _ws.analyze_open_redirect(302, "http://juice-shop:3000/https://%s/" % _ws._EVIL_HOST,
+                                     _probe_url()) is None
