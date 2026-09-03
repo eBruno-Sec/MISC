@@ -155,10 +155,23 @@ def judge_url_override(direct, permitted, overridden) -> dict:
     if _status(overridden) != 200:
         return {"verdict": "rejected",
                 "reason": "the override header did not yield access (status %s)" % _status(overridden)}
-    if _body(overridden) == _body(permitted):
+    # Q-166. BYTE-IDENTICAL IS THE WRONG TEST FOR A LIVE PAGE, and this file already knew that: the
+    # body-signalled oracle below carries a stability guard whose comment says a page with a
+    # timestamp, CSRF token or rotating banner "makes baseline and control differ too ... so dynamic
+    # content cannot manufacture a finding". That guard was never applied to this path.
+    #
+    # MEASURED against a real storefront in Shopify's scope: `/admin` is 403, and `/` returns 200 at
+    # 43128 bytes with NO header, 43128 with `X-Original-URL: /admin`, and 43128 with
+    # `X-Original-URL: /zzz-nonexistent`. The header changes nothing. Across repeats the size
+    # alternates 43128/44331 INDEPENDENTLY of the header -- including on the no-header baseline --
+    # so a byte comparison finds a difference on nearly every sample and calls it a bypass. Two
+    # HIGHs on a live bug-bounty programme came from exactly this.
+    _sim = _similarity(_body(overridden), _body(permitted))
+    if _sim >= DIFFER_MAX:
         return {"verdict": "rejected",
-                "reason": "the response is byte-identical to the permitted path, so the header was ignored "
-                          "and nothing was bypassed"}
+                "reason": "the response is %.3f similar to the permitted path, so the header was ignored "
+                          "and nothing was bypassed (a byte comparison here confirms on a rotating "
+                          "banner)" % _sim}
     if len(_body(overridden).strip()) < _MIN_BODY:
         return {"verdict": "rejected", "reason": "empty response; nothing was served"}
     return {"verdict": "confirmed",

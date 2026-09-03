@@ -55,7 +55,11 @@ def test_confirms_url_override_only_when_content_differs():
 def test_rejects_when_the_server_ignored_the_override():
     """THE trap: an ignored header serves the permitted page, which is a 200 and looks like success."""
     v = ht.judge_url_override(ex(403), ex(200, OTHER), ex(200, OTHER))
-    assert v["verdict"] == "rejected" and "byte-identical" in v["reason"]
+    # Q-166: the reason now says "similar", not "byte-identical". The INTENT is unchanged and is
+    # what this test is for -- an ignored header serves the permitted page and must be rejected --
+    # but the wording had to change with the oracle: byte-equality was the defect, because a page
+    # with a rotating nonce is never byte-identical to itself and was therefore "a bypass".
+    assert v["verdict"] == "rejected" and "the header was ignored" in v["reason"]
 
 
 def test_url_override_needs_a_denied_path_to_begin_with():
@@ -178,3 +182,63 @@ def test_harvest_is_bounded_and_deduped():
     body = " ".join('"http://h%d.example/"' % i for i in range(20))
     v = ht.expected_values_from_denial(body)
     assert 0 < len(v) <= 3 and len(set(v)) == len(v)
+
+
+# =================================================================================================
+# Q-166. TWO HIGHs ON A LIVE BUG-BOUNTY PROGRAMME FROM A ROTATING BANNER.
+#
+# `judge_url_override` rejected only a BYTE-IDENTICAL body, so any page that varies between
+# requests -- a nonce, a CSRF token, an A/B banner -- differed from the permitted page and the
+# oracle called that a front-end ACL bypass.
+#
+# MEASURED against a real storefront in Shopify's authorized scope:
+#     GET /admin                        403,  9377 bytes
+#     GET /   (no header, baseline)     200, 43128
+#     GET /   + X-Original-URL: /admin  200, 43128   <- identical to the baseline
+#     GET /   + X-Original-URL: /zzz    200, 43128   <- identical again, nonsense path
+# and across repeats the size alternates 43128/44331 INDEPENDENTLY of the header, including with no
+# header at all. The header changed nothing; the page simply is not deterministic.
+#
+# This module already had the right guard 30 lines below, for the body-signalled oracle, whose own
+# comment says dynamic content "cannot manufacture a finding". It was never applied here.
+# =================================================================================================
+
+import header_trust_tool as _ht
+
+
+def _p(status, body):
+    return {"status": status, "body": body}
+
+
+_PAGE = "<html>" + "x" * 40000 + "<nonce>abc123</nonce></html>"
+_PAGE_ROTATED = "<html>" + "x" * 40000 + "<nonce>zzz999</nonce></html>"
+_ADMIN = "<html><h1>Admin panel</h1>" + "y" * 3000 + "</html>"
+
+
+def test_a_rotating_nonce_is_not_an_ACL_bypass():
+    """THE FIELD FALSE POSITIVE. Same page, one changed token, and the old test said 'differs'."""
+    v = _ht.judge_url_override(_p(403, "denied"), _p(200, _PAGE), _p(200, _PAGE_ROTATED))
+    assert v["verdict"] == "rejected", v
+
+
+def test_a_genuinely_different_page_still_confirms():
+    """POSITIVE CONTROL. A fix that rejected everything would pass the test above and delete the
+    engine -- and this family is one the sealed blind benchmark missed twice, so losing it matters."""
+    v = _ht.judge_url_override(_p(403, "denied"), _p(200, _PAGE), _p(200, _ADMIN))
+    assert v["verdict"] == "confirmed", v
+
+
+def test_an_ignored_header_returning_the_same_page_is_rejected():
+    v = _ht.judge_url_override(_p(403, "denied"), _p(200, _PAGE), _p(200, _PAGE))
+    assert v["verdict"] == "rejected", v
+
+
+def test_a_path_that_is_not_denied_directly_is_not_applicable():
+    """No denial means no ACL to bypass, whatever the header does."""
+    v = _ht.judge_url_override(_p(200, "ok"), _p(200, _PAGE), _p(200, _ADMIN))
+    assert v["verdict"] == "not_applicable", v
+
+
+def test_a_non_200_override_is_rejected():
+    v = _ht.judge_url_override(_p(403, "denied"), _p(200, _PAGE), _p(403, _ADMIN))
+    assert v["verdict"] == "rejected", v
