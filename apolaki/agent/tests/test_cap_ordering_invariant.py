@@ -247,6 +247,10 @@ def test_raw_production_work_caps_have_an_explicit_ordering_contract():
             "same ordered field list as the output oracle; this is the expensive blind fallback",
         ("tools.py", "_run_ws_hijack", "cands", "self._WS_MAX_ENDPOINTS"):
             "explicit observations precede advertised endpoints, which precede opt-in defaults",
+        ("spa_routes.py", "discover", "targets", "max(1, int(max_pages))"):
+            "the BASE page is always targets[0] and the rest are anchors it rendered, so the cut "
+            "keeps the origin the operator actually named and drops only app-supplied siblings; "
+            "each target is a full browser render, which is why the cap exists at all",
     }
     assert measured == set(contracted), "raw first-N work caps without the measured contract: %r" % sorted(
         measured - set(contracted))

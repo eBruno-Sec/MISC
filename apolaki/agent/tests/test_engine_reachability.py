@@ -150,8 +150,16 @@ def test_every_unscheduled_advertised_method_has_an_explicit_manual_contract():
     satisfy this scheduler census.
     """
     unscheduled = _dispatch_method_names() - _deterministic_scheduler_names()
-    assert len(_spec_names()) == 75, "measured denominator moved; review the manual-only partition"
-    assert len(_deterministic_scheduler_names()) == 69
+    # 75 -> 77: cycle 20 advertises `run_rendered_forms` (Q-158) and `run_nosqli_body` (Q-155).
+    # Both are SCHEDULED by the planner, so neither joins the manual-only partition -- which is
+    # the distinction this denominator exists to keep visible. A new spec that arrived without
+    # a planner step would show up as unscheduled and fail the assertion below instead.
+    assert len(_spec_names()) == 77, "measured denominator moved; review the manual-only partition"
+    # 69 -> 71, the same two engines seen from the scheduler side. Both numbers must move
+    # TOGETHER: a spec that gained a planner step raises both, while a spec advertised without
+    # one raises only the first and lands in the unscheduled set below. That is the whole
+    # mechanism -- registration is not invocation, and this pair is what says so numerically.
+    assert len(_deterministic_scheduler_names()) == 71
     assert unscheduled == set(dg.MANUAL_ONLY_TOOL_CONTRACTS), (
         "advertised dispatch methods without a deterministic scheduler need an explicit verdict: %s"
         % sorted(unscheduled ^ set(dg.MANUAL_ONLY_TOOL_CONTRACTS)))

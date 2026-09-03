@@ -832,6 +832,12 @@ TESTS_ONLY = {
     "cloud_iam.collect_live": ("test_cloud_iam.py",),
     "codereview_graph.hypotheses": ("test_codereview_graph.py",),
     "codereview_graph.link_runtime_to_source": ("test_codereview_graph.py",),
+    # Q-158. `rendered_forms.field_identity` returns the label AND the attribute it came from;
+    # `identity_quality` grades that attribute (name > id > formcontrolname > placeholder). The
+    # production path consumes the LABEL and does not need the grade, so the grade is pinned by its
+    # test rather than deleted: it is the thing that would decide a tie if two controls ever produce
+    # the same label, and the test states the ordering explicitly.
+    "rendered_forms.identity_quality": ("test_rendered_forms.py",),
     "db.get_snapshot": ("test_bbh.py",),
     "fingerprint.fingerprint": ("test_bbh.py", "test_tech_fingerprint_facts.py"),
     "graph_model.neighbors": ("test_bbh.py",),

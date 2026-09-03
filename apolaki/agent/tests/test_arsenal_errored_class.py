@@ -155,7 +155,12 @@ def test_the_classes_still_sum_to_the_REGISTRY_DENOMINATOR():
         "classes sum to %d, registry denominator is %d" % (total, len(registered)))
     # the measured split on this mission, so a silent drift in any one class is visible
     assert (len(blocked), len(never), len(silent), len(errored), len(skipped), len(productive)) == \
-           (13, 52, 30, 1, 2, 12)
+           (13, 54, 30, 1, 2, 12)
+    # never 52 -> 54: cycle 20 registers two engines that did not exist on the recorded
+    # mission, `run_rendered_forms` (Q-158) and `run_nosqli_body` (Q-155). They land in
+    # `never` because that mission predates them, which is the honest class for an engine
+    # the run never had. Every other class is unchanged, which is the point of pinning the
+    # split rather than only the sum.
     # Q-052 moved 25 engines INTRUSIVE -> ACTIVE, so 18 of them left `blocked` and arrived in
     # `never` on this mission: 31->13 and 35->53. THE SUM IS THE INVARIANT this test exists for --
     # the split is pinned underneath it so a silent drift in any one class stays visible, and

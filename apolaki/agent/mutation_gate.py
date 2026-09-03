@@ -156,13 +156,13 @@ MUTANTS = [
     # real defects, both are now the thing a regression would have to re-introduce.
     ('nosqli_body.py', "fold a dropped control back into the empty string -- a timeout then reads as 'the control ran and found nothing' and the engine confirms on a clean app (Breaker F1)",
      '        if not _ok\\(ctl_r\\):', '        if False:',
-     'tests/test_nosqli_body.py'),
+     'tests/test_nosqli_body.py::test_a_dropped_control_is_NOT_TESTED_never_confirmed'),
     ('spa_routes.py', 'let the read-only gate fail OPEN on an unreadable method, the permissive answer as the default for a guard whose job is refusing writes (Breaker F3)',
      '        method = "__UNREADABLE__"', '        method = "GET"',
-     'tests/test_spa_routes.py'),
+     'tests/test_spa_routes.py::test_the_gate_refuses_when_the_method_cannot_be_read'),
     ('rendered_forms.py', 'accept a marker that landed anywhere rather than in a field the app actually submitted -- the shape that turns an unrelated echo into a confirmed parameter',
      'def identity_quality\\(', 'def _unused_identity_quality(',
-     'tests/test_rendered_forms.py'),
+     'tests/test_rendered_forms.py::test_field_identity_prefers_the_strongest_attribute_and_reports_which'),
 ]
 
 
