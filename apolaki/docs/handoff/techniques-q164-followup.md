@@ -154,3 +154,254 @@ stays correct either way.
 
 What clears it is one commit by the lab's owner, and the exact `CHECKS` entry to apply at that
 moment is measured and handed over below -- ready, not guessed.
+
+### Slice 3 -- LANDED (412ab98). `liveness.py`: `evaluate()` regrouped, two checks promoted
+
+Two of the audit's three re-earns are now `CHECKS` entries, where `scripts/liveness.sh` runs them
+and the ratchet protects them. Driven through the REAL runner (`liveness_run._run_one`), not a
+re-implementation:
+
+    [confirmed] snmp_default_community   lab=snmpd    ...default community ('public') at snmpd:161
+    [confirmed] snmp_default_community   lab=conpot   ...default community ('public') at conpot:16100
+    [confirmed] graphql_introspection    lab=dvga     GraphQL introspection enabled
+    [confirmed] graphql_batching_enabled lab=dvga     GraphQL request batching enabled
+
+    engine liveness: 4 checked, 3 confirmed, 0 dead, 0 skipped, 0 error
+      newly live      graphql_batching_enabled
+
+`evaluate()` was fixed FIRST, in the same commit, because FINDING 0 above makes the diff
+unapplicable without it.
+
+**An existing guard caught the first version of this change, and it was right to.**
+`test_liveness.py:test_checks_sharing_a_family_must_disambiguate_by_title` went red:
+
+    AssertionError: family 'snmp_default_community' is claimed by 2 checks with no title
+    to tell them apart: ['snmp_default_community', 'snmp_default_community']
+
+Answered by making both checks STRICTER, not by exempting them. The engine names the host it
+questioned in its own finding title, so each check now pins its own host fragment
+(`"snmpd:161"`, `"conpot:16100"`). Either check now fails if pointed at the other's lab -- which is
+the property the ticket asks for, arrived at by a guard rather than by me.
+
+### The third re-earn is NOT landed, and shipping it would have been an island
+
+`sqli_auth_bypass`/`juiceshop` drives correctly -- MEASURED, confirmed, CWE-89, evidence
+`email="' OR 1=1--" -> session/JWT token issued for an invalid credential`. It is still not in
+`CHECKS`, for a reason that is structural rather than a judgment call:
+
+    $ grep -n juice agent/liveness_run.py
+    (NO juiceshop entry in _LAB_ADDR)
+
+`_reachable()` falls back to `(lab, 80)`, so a `"lab": "juiceshop"` check resolves `juiceshop:80`,
+which is neither the container's hostname (`juice-shop`) nor its port (3000). It would report
+SKIPPED on every run, forever. `agent/liveness_run.py` is outside this lane's write set, so the
+one-line `_LAB_ADDR` addition it needs cannot be made here, and landing the check without it would
+ship a declaration that can never become a fact. Diff below. The badge stays backed meanwhile by
+the live re-run already in `test_technique_badges.py`, so nothing regresses.
+
+## On-disk mutants (MEASURED)
+
+Every mutant was edited into `agent/liveness.py` ON DISK -- never monkeypatched -- driven through
+the real runner against the real labs, then reverted with `git checkout` and the tree confirmed
+clean between runs.
+
+| # | mutant | what it tests | result |
+|---|---|---|---|
+| M1 | conpot check `port 16100 -> 161` (+ its title) | does the check DRIVE the named lab | **RED** `[dead] conpot`, `REGRESSION`, `ok=False` |
+| M2a | batching check url `dvga:5013 -> domsource:8080` | does the check drive the named lab | **RED** `[dead]`, `regressions=['graphql_batching_enabled']` |
+| M2b | batching check: `"title": "batching"` removed | is the title pin load-bearing | **FALSE PASS** -- see below |
+| M3 | `evaluate()` grouping reverted to the pre-Q-164 one-liner, M1 still applied | is my `evaluate` fix load-bearing | **RED** in table order, **GREEN** when the entries are swapped -- see below |
+
+**M1** is the one the ticket asks for. Pointed at the port the badge implied for the life of the
+file, the check goes DEAD and the gate goes red. The badge cannot be re-earned by accident.
+
+**M2b is the sharpest result, and it is not about my code.** With the title removed the check
+reported:
+
+    verdict: confirmed
+    the finding it accepted as proof of BATCHING: GraphQL introspection enabled
+
+A false pass: the check would report an engine live while that engine emitted nothing, because
+introspection and batching share `family: "graphql"` and both come back from one call. That is why
+the entry is pinned by title.
+
+But the guard that is supposed to prevent this PASSED on M2b (`pytest -k family` -> 4 passed).
+`test_checks_sharing_a_family_must_disambiguate_by_title` asserts `len(untitled) <= 1`, so it
+permits exactly ONE untitled check per family -- and when a family has two or more checks sharing a
+tool and input, that one untitled check is precisely the one any sibling's finding can satisfy.
+The guard's own docstring says "if two checks share a family and NEITHER names a title"; the
+measured failure needs only ONE to be untitled. A guard scoped to the case its author pictured.
+Diff below; `test_liveness.py` is not in this lane's write set.
+
+**M3 is the negative control for FINDING 0**, and it needed two runs because the defect is
+order-dependent by nature. With the pre-Q-164 `evaluate` restored and M1's dead conpot check in
+place:
+
+    conpot check AFTER snmpd  (committed order)  ->  ok=False   the dead engine is caught by luck
+    conpot check BEFORE snpd  (a plausible paste) ->  ok=True, dead=[]   A DEAD ENGINE, REPORTED GREEN
+
+Then the same mutant and the same masking order with my grouping fix restored:
+
+    conpot check BEFORE snmpd, fix intact -> ok=False, dead=['snmp_default_community']
+
+Identical inputs, identical order, opposite verdicts. The fix is what catches it, and without it
+this ticket would have shipped a gate that reports green on an engine it measured dead.
+
+## Count: EARNED is 26, against the audit's 25
+
+MEASURED through the audit's own predicate, `test_technique_badges.liveness_pairs()`:
+
+    EARNED (a CHECK drives the named lab AND the committed baseline confirms it): 26
+      snmp_default_community@conpot in EARNED: True
+      graphql_batching_enabled@dvga  in EARNED: False
+    claimed badge pairs: 51      DEBT size: 24      unbacked == DEBT: True
+
++1, and only +1, which is the honest number. `snmp_default_community`/`conpot` is genuinely
+re-earned: a real check drives conpot:16100 and the committed baseline already records the
+technique confirmed.
+
+`graphql_batching_enabled`/`dvga` is NOT counted, deliberately. Its check exists and confirms live
+(the runner reports it `newly live`), but `agent/tests/liveness_baseline.json` does not yet list the
+technique, and that file is outside this lane's write set. `liveness_pairs()` requires BOTH halves
+on purpose -- a check alone proves only that somebody wrote a check. It becomes the 27th the moment
+anyone runs `scripts/liveness.sh --update`; claiming it now would be the same declaration-as-fact
+error the ticket exists to remove.
+
+### Slice 4 -- LANDED (a4aaad4). `test_validated_on.py`: a mention was counted as a run
+
+Diff 3 from the audit, which it could not apply because it did not own the file.
+
+`test_every_validated_on_claim_is_backed_by_a_recorded_artifact` grew its `backed` set by SCANNING
+this directory's source text: any technique id on any line of any test file that also contained the
+string `validated_on`, plus any id inside a `for` loop whose AST dump contained it. It therefore
+credited the very line slice 1 deleted as evidence for `exposed_credentials`.
+
+`backed` is now DERIVED from the two artifacts -- a liveness `CHECK` whose technique the committed
+baseline records as confirmed -- and both halves are required.
+
+MEASURED before changing it, because "the scan is worthless" was a hypothesis and it turned out to
+be nearly, but not exactly, true:
+
+    claims 49 | backed 24 | unbacked WITH the scan 24 | unbacked WITHOUT it 25
+    scan credited 17 ids; only 4 were not already liveness-confirmed
+      (graphql_batching_enabled, graphql_field_suggestions, reflected_xss, ssrf)
+    of those 4, only ONE carries a badge at all
+    the entire difference the scan made: ['graphql_batching_enabled']
+
+So the whole text scan was buying exactly one technique, and buying it with the defect: that id's
+scanned backing was a membership assertion in `test_local_import_guard.py`. The gap moves 24 -> 25,
+UP, so the strict xfail cannot XPASS -- confirmed in the run, both xfails still xfail. The stale
+reason string ("30 of 48", written before Q-164 withdrew 8 pairs) is re-measured to 25 of 49.
+
+Two controls added, both in the write set:
+
+| # | mutant | result |
+|---|---|---|
+| M4 | `_backed_by_something_that_runs` drops the baseline half (a CHECK alone backs a claim) | **RED**: `graphql_batching_enabled has a check but no baseline row, and was counted anyway` |
+
+`test_a_mention_is_not_a_run` reconstructs the retired rule and drives it against a line of the
+exact shape it accepted, so what a source-text scan buys stays an executable fact rather than a
+comment in a handoff.
+
+## A mistake I made, recorded because the recovery is the useful part
+
+I ran mutant M4 against slice 4 BEFORE committing slice 4, then reverted it with
+`git checkout apolaki/agent/tests/test_validated_on.py`. That discards the whole file, not the
+mutant, so it took my uncommitted work with it and I had to re-apply the slice from scratch.
+
+The house rule "land each green slice as its own commit" is not only about surviving a kill: an
+uncommitted slice has no clean state to revert a mutant TO, so mutation testing and uncommitted work
+cannot safely share a file. Commit first, then mutate, then `git checkout` -- which is what slices 1
+and 3 did, and why their mutants cost nothing. The re-applied slice 4 was re-verified green and
+committed before anything else touched it.
+
+## Final state
+
+    $ docker run --rm --network apolaki_default -v ".../apolaki/agent:/app" -w /app \
+        apolaki-agent python -m pytest tests/ -p no:cacheprovider -q -p no:warnings -rs \
+        -k "liveness or validated_on or authscan or technique or badge"
+    ........................................................................ [ 46%]
+    ........................................................................ [ 92%]
+    ..x..x.....                                                              [100%]
+
+155 passed, 2 xfailed, ZERO skipped (up from 153/2/0 -- the two new controls). Both strict xfails
+still xfail, so nothing was laundered into an XPASS. Scoped with `-k` on purpose: other lanes are
+editing `agent.py`, `planner.py`, `tools.py` and `semantic_differential.py` in this same tree, and
+an unscoped run goes red on a torn read that is not this lane's.
+
+## Patches for files this lane does not own
+
+Each is measured, not proposed. In priority order.
+
+### 1. `agent/liveness_run.py` + `agent/liveness.py` -- the third re-earn
+
+One line unblocks it. `_LAB_ADDR`:
+
+    +    # Q-164: sqli_auth_bypass's lab. The badge spells `juiceshop`; the container is `juice-shop`
+    +    # on 3000, so without this the check resolves juiceshop:80 and SKIPS on every run forever.
+    +    "juiceshop": ("juice-shop", 3000),
+
+Then in `agent/liveness.py:CHECKS` (this lane will land it on request, once the line above exists):
+
+    {"technique": "sqli_auth_bypass", "lab": "juiceshop", "kind": "tool",
+     "tool": "_run_auth_sqli",
+     "input": {"url": "http://juice-shop:3000/rest/user/login",
+               "fields": ["email", "password"]},
+     "family": "auth_bypass"},
+
+MEASURED through the real dispatch, so it can be applied rather than trusted:
+
+    confirmed  family=auth_bypass  cwe=CWE-89  "SQL injection (auth-bypass) in 'email'"
+    evidence: POST http://juice-shop:3000/rest/user/login  email="' OR 1=1--"
+              ->  session/JWT token issued for an invalid credential
+
+### 2. `agent/tests/test_liveness.py` -- the table guard permits the case it exists to stop
+
+`test_checks_sharing_a_family_must_disambiguate_by_title` asserts `len(untitled) <= 1`. MEASURED
+(mutant M2b): with a family of two checks sharing a tool and input, the ONE untitled check the guard
+permits is satisfied by its sibling's finding -- the batching check reported `confirmed` on the
+introspection finding, and this guard passed.
+
+    -            untitled = [c["technique"] for c in checks if not c.get("title")]
+    -            assert len(untitled) <= 1, (
+    +            # Q-164: `<= 1` was unsound. With two checks in a family the single permitted
+    +            # untitled one is provable by the other's finding -- MEASURED, the untitled batching
+    +            # check accepted "GraphQL introspection enabled" as its proof while this guard passed.
+    +            untitled = [c["technique"] for c in checks if not c.get("title")]
+    +            assert not untitled, (
+
+Verified non-breaking against the table as committed: every multi-check family (`ics_ot`,
+`graphql`, `snmp_default_community`) now titles all of its members.
+
+### 3. `agent/techniques.py` + `agent/tests/test_technique_badges.py` -- finish the withdrawal
+
+Slice 1 removed the blocker. The other half is still owed:
+
+    exposed_credentials:  validated_on=["ginandjuice"]  ->  []
+    and delete ("exposed_credentials", "ginandjuice") from DEBT in test_technique_badges.py
+
+Both must land in the SAME commit: `DEBT` is asserted exactly in both directions, so withdrawing the
+badge alone turns the gate red with "1 debt entr(ies) are no longer unbacked".
+
+### 4. `agent/tests/liveness_baseline.json` -- bank the new confirmation
+
+`scripts/liveness.sh --update`. `graphql_batching_enabled` is reported `newly live` and becomes the
+27th EARNED pair. Note `scripts/liveness.sh` brings up only clientauthz, domsource, conpot, dvga,
+openldap, smb and snmpd -- juice-shop, vampi, dvwa, dnp3-outstation and owaspbench must already be
+running or their checks SKIP, and a skip banks nothing.
+
+### 5. `agent/techniques.py` -- `session_lifecycle`, the day the lab lands
+
+Apply nothing until `labs/sessionlife/` and the compose service are committed. At that moment the
+badge is re-earnable and this entry is measured and ready:
+
+    {"technique": "session_lifecycle", "lab": "sessionlife", "kind": "tool",
+     "tool": "_run_session_lifecycle",
+     "input": {"url": "http://sessionlife:8080/vuln/"},
+     "family": "session_lifecycle", "cwe": "CWE-613",
+     "title": "not invalidated on logout"},
+
+plus `_LAB_ADDR`: `"sessionlife": ("sessionlife", 8080)`. The paired secure mounts
+(`/secure`, `/expire-secure`) both return ZERO findings, measured above, so the negative control the
+liveness table would want already exists in the lab. If the lab is abandoned instead, the badge must
+be withdrawn and the `DEBT` entry deleted in the same commit.
