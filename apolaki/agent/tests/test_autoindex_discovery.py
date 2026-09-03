@@ -195,3 +195,15 @@ def test_the_finding_never_copies_the_secrets_into_the_report():
     for secret in ("hunter2", "s3cr3t!", "correcthorse", "tr0ub4dor"):
         assert secret not in f["evidence"], "leaked %r into the finding evidence" % secret
     assert "rows" in f["evidence"], "the evidence must describe the structure it claims"
+
+
+def test_a_decode_artefact_never_reaches_the_evidence_string():
+    """U+FFFD appears only when a decoder hit bytes it could not decode, so it is an artefact
+    of our own reading, never content. MEASURED on a real harvested doc whose
+    `--user=root --password=samurai` is mis-decoded, the evidence came out as
+    "\ufffdpassword: <redacted>". This project already shipped a finding titled
+    `Exposed application credentials for 'root\ufffd'`."""
+    c = exp.classify_content("mysql \ufffduser=root \ufffdpassword=samurai \ufffdexecute=drop\n")
+    assert c and c["kind"] == "secret_assignment"
+    assert "\ufffd" not in c["evidence"], c["evidence"]
+    assert "samurai" not in c["evidence"], "the secret's value must never be emitted"

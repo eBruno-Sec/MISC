@@ -552,9 +552,17 @@ def classify_content(body: str, content_type: str = "") -> dict | None:
 
 
 def _redact(s: str) -> str:
-    """Keep the SHAPE of a secret, never its value."""
-    s = (s or "").strip()
-    head = re.split(r"[:=]", s, 1)[0]
+    """Keep the SHAPE of a secret, never its value.
+
+    U+FFFD is stripped: it is emitted only by a decoder that hit bytes it could not decode, so
+    it is an artefact of our own reading, never content. MEASURED on a real harvested file --
+    a doc whose `--user=root --password=samurai` is mis-decoded -- the evidence string came out
+    as "�password: <redacted>". This project has already shipped one finding titled
+    `Exposed application credentials for 'root�'`; a decode artefact must never reach a
+    report as if it were observed text.
+    """
+    s = (s or "").replace("�", "").strip()
+    head = re.split(r"[:=]", s, 1)[0].strip()
     return (head[:40] + ": <redacted>") if len(s) > len(head) else (s[:24] + "<redacted>")
 
 
