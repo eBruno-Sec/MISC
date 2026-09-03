@@ -67,21 +67,90 @@ def evaluate(baseline_body: str, probe_body: str) -> dict:
     baseline. A generic 500 or a SQL/XPath error does NOT confirm (that would collide with those engines)."""
     sig = ldap_error(probe_body)
     if sig and not ldap_error(baseline_body):
-        return {"confirmed": True, "oracle": "an LDAP directory error signature appeared after an unbalanced "
+        # PROTOCOL EVIDENCE: a directory error string the baseline did not carry. This is what
+        # entitles the finding to name LDAP and to be graded `confirmed` (Q-187).
+        return {"confirmed": True, "protocol_evidence": True,
+                "oracle": "an LDAP directory error signature appeared after an unbalanced "
                 "filter break ('%s') — the input is concatenated into an LDAP search filter" % sig}
-    return {"confirmed": False, "oracle": ""}
+    return {"confirmed": False, "oracle": "", "protocol_evidence": False}
 
 
 def evaluate_boolean(true_body: str, false_body: str, true_payload: str, false_payload: str) -> dict:
+    """Q-187. A BOOLEAN DIFFERENTIAL IS PROTOCOL-AGNOSTIC, so it cannot name LDAP on its own.
+
+    `sd.evaluate` proves one thing: the parameter CHANGED the application's answer. That is real and
+    worth reporting. It says nothing about the value being concatenated into an LDAP filter, and
+    this function used to wrap that protocol-agnostic verdict in LDAP prose and hand it to
+    `finding()`, which hardcodes `confidence: confirmed`, CWE-90 and CVSS 8.2.
+
+    MEASURED: that produced "LDAP injection in form field 'new_db'", HIGH, confirmed, against
+    `/phpmyadmin/db_create.php` -- a MySQL-only stack with no directory server anywhere near it. It
+    recurred in five consecutive acceptance missions with byte-identical evidence.
+
+    An endpoint that CREATES an object is the worst case for this oracle: any accepted value adds a
+    record, so a record-set superset is guaranteed and means only "the write succeeded".
+
+    `evaluate` above is different and keeps its confirmation, because it HAS protocol evidence: an
+    LDAP directory error signature that is absent from the baseline. The rule is the general one --
+    a protocol-specific claim needs protocol-specific evidence -- and it is the reason the two
+    functions now return different `protocol_evidence`.
+    """
     ev = sd.evaluate(true_body, false_body, true_payload, false_payload)
     if not ev["confirmed"]:
-        return {"confirmed": False, "oracle": ""}
-    return {"confirmed": True,
-            "oracle": ("an LDAP boolean differential changed only one filter assertion from universally true "
-                       "to an impossible value; %s" % ev["oracle"])}
+        return {"confirmed": False, "oracle": "", "protocol_evidence": False}
+    return {"confirmed": True, "protocol_evidence": False, "signal": ev.get("signal", ""),
+            "oracle": ("an LDAP boolean differential changed only one filter assertion from universally "
+                       "true to an impossible value; %s" % ev["oracle"])}
 
 
-def finding(url: str, param: str, where: str, oracle: str) -> dict:
+def may_claim_ldap(ev: dict, where: str) -> bool:
+    """Q-187. Is this verdict entitled to NAME LDAP, or has it only shown a differential?
+
+    The decision lives HERE, not spelled out at each call site, because three mutation tests proved
+    an inline expression is unpinnable: a test that re-derives the caller's expression passes while
+    the caller does something else entirely. One function, one rule, one place to test.
+
+      * protocol evidence (an LDAP directory error the baseline lacked) -> always entitled
+      * a record-set superset on a FORM BODY -> NOT entitled. That path POSTs to a write endpoint,
+        and an endpoint that CREATES an object gains a record for ANY value it accepts, so the
+        superset means the write succeeded. MEASURED: this produced "LDAP injection in form field
+        'new_db'" HIGH/confirmed against /phpmyadmin/db_create.php -- a MySQL-only stack -- in five
+        consecutive missions, citing phpMyAdmin's own font-size dropdown as the gained records.
+      * anything else (auth_state on a form, any signal on a query parameter) -> entitled. A silent
+        LDAP server suppresses its errors and is detectable ONLY by the record differential on a
+        search, which is the whole reason `boolean_pairs` exists; refusing that would trade a false
+        positive for a false negative on the real bug.
+    """
+    if ev.get("protocol_evidence"):
+        return True
+    return not (where == "form field" and ev.get("signal") == "record_set")
+
+
+def finding(url: str, param: str, where: str, oracle: str, protocol_evidence: bool = True) -> dict:
+    """Q-187. `protocol_evidence` decides whether this may CLAIM LDAP and be graded `confirmed`.
+
+    Default True so every existing caller keeps its behaviour; the boolean-differential path passes
+    False and gets a lead that describes what was actually observed. A finding that names a protocol
+    it has no evidence for is the false-positive shape this whole cycle has been removing.
+    """
+    if not protocol_evidence:
+        return {
+            "title": "Parameter reaches a server-side decision in %s '%s'" % (where, param),
+            "param": param, "severity": "medium", "family": "boolean_differential",
+            "confidence": "candidate", "target": url, "cwe": "CWE-20",
+            "evidence": "The %s '%s' changed the application's answer between a universally-true and "
+                        "an impossible assertion. %s" % (where, param, oracle),
+            "success_oracle": oracle,
+            "proof_gap": ["no protocol evidence: nothing observed identifies the sink as an LDAP "
+                          "filter, so the sink could equally be SQL, XPath, a template, or ordinary "
+                          "application branching"],
+            "reproduction_steps": ["Send the true/false assertion pair in '%s'" % param,
+                                   "Compare the two responses on the same page",
+                                   "Identify the sink before claiming a protocol"],
+            "impact": "A parameter that changes a server-side decision may reach an injectable sink; "
+                      "which sink is not yet established.",
+            "remediation": "Identify the sink, then apply the encoder for that sink.",
+            "tags": ["differential"]}
     return {
         "title": "LDAP injection in %s '%s'" % (where, param),
         # Q-046: carry the parameter as DATA. This builder is the one that proved why -- `where`

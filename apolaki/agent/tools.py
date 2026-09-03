@@ -6181,7 +6181,8 @@ class ToolRegistry:
                             ev = lp.evaluate(base, await _pbody(act, field, p[key]))
                             if ev["confirmed"]:
                                 findings.append(self._attach_poc(
-                                    lp.finding(act, field, "form field", ev["oracle"]), act, None, method="POST"))
+                                    lp.finding(act, field, "form field", ev["oracle"],
+                                               protocol_evidence=lp.may_claim_ldap(ev, "form field")), act, None, method="POST"))
                                 hit = True
                                 break
                         if hit:
@@ -6194,7 +6195,8 @@ class ToolRegistry:
                                 bodies["true"], bodies["false"], pair["true"], pair["false"])
                             if ev["confirmed"]:
                                 findings.append(self._attach_poc(
-                                    lp.finding(act, field, "form field", ev["oracle"]),
+                                    lp.finding(act, field, "form field", ev["oracle"],
+                                               protocol_evidence=lp.may_claim_ldap(ev, "form field")),
                                     act, None, method="POST"))
                                 break
         except Exception as _apolaki_swallowed_5155:
