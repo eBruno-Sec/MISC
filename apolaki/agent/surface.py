@@ -52,6 +52,27 @@ def clean_url(u) -> bool:
     return True
 
 
+# Q-172. A QUERY PARAMETER WHOSE VALUE NAMES A PAGE IS A ROUTE SELECTOR, and each value it takes is
+# a distinct page -- the server-side twin of the hash-route rule below.
+#
+# MEASURED on mutillidae: 45 distinct `index.php?page=<x>.php` targets are linked directly from the
+# home page, one hop from the root. All 45 collapsed into the single inventory key
+# ("mutillidae", "/index.php") with params {"page"}, and a mission reached only 10 of them.
+# `dns-lookup.php` was never among them -- so its `target_host` command injection, which returns
+# `uid=33(www-data)` to `127.0.0.1;id`, was never seen. 78% of the application's surface was
+# discarded, and every engine's zero on it was correct and meaningless.
+#
+# Detected by the VALUE's shape, never by the parameter's name: `page`, `file`, `view`, `module`,
+# `do` and friends are all the same construct, and a name list would catch whichever ones somebody
+# thought of. A search term is not normally spelled `something.php`, which is what keeps `?q=` out.
+#
+# ADDITIVE ON PURPOSE. The collapsed entry SURVIVES, carrying the selector as a param, so the
+# traversal/LFI probe on `page` itself runs exactly as it does today; the derived per-route entries
+# drop the selector from their params so that one probe is not repeated 45 times. New surface, no
+# behaviour removed, no extra cost on the parameter that was already covered.
+_ROUTE_VALUE = re.compile(r"^[A-Za-z0-9_\-./]{1,80}\.(?:php|asp|aspx|jsp|jspx|cfm|cgi|pl|do|action|html?)$", re.I)
+
+
 def build_inventory(urls, cap: int = 1000) -> list:
     """Group URLs by (host, path); union the query params seen for each.
 
@@ -85,6 +106,19 @@ def build_inventory(urls, cap: int = 1000) -> list:
             _route, _, _fq = p.fragment.partition("?")
             path = (path.rstrip("/") + "#" + _route) if path != "/" else "#" + _route
             params += [k for k, _ in parse_qsl(_fq, keep_blank_values=True)]
+        # Q-172: a route-selector value earns its own identity, in addition to the collapsed
+        # entry that keeps the selector itself under test.
+        _route_kv = next(((k, v) for k, v in parse_qsl(p.query, keep_blank_values=True)
+                          if _ROUTE_VALUE.match(v or "")), None)
+        if _route_kv:
+            _rk, _rv = _route_kv
+            _rpath = "%s?%s=%s" % (path, _rk, _rv)
+            _rkey = (p.netloc, _rpath)
+            if _rkey not in by_key:
+                by_key[_rkey] = {"host": p.netloc, "path": _rpath,
+                                 "params": set(), "example": u}
+                order.append(_rkey)
+            by_key[_rkey]["params"].update(k for k in params if k != _rk)
         key = (p.netloc, path)
         if key not in by_key:
             by_key[key] = {"host": p.netloc, "path": path, "params": set(), "example": u}
