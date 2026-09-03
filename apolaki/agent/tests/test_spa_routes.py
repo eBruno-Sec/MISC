@@ -181,11 +181,23 @@ def test_module_issues_no_fixed_sleep():
     import ast
     path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "spa_routes.py")
     tree = ast.parse(open(path, encoding="utf-8").read())
+    # BREAKER F5. This matched only `ast.Attribute` calls, so it caught `time.sleep()` and missed
+    # a BARE `sleep()` (ast.Name) entirely -- and the getattr form its own docstring names was
+    # never checked either. A guard that misses two of the three ways to write the banned thing is
+    # the "guard scoped to its author's attention" shape. All three are covered now.
     banned = {"wait_for_timeout", "sleep"}
-    calls = [n for n in ast.walk(tree)
-             if isinstance(n, ast.Call) and isinstance(n.func, ast.Attribute)
-             and n.func.attr in banned]
-    assert calls == [], [n.func.attr for n in calls]
+    calls = []
+    for n in ast.walk(tree):
+        if not isinstance(n, ast.Call):
+            continue
+        f = n.func
+        if isinstance(f, ast.Attribute) and f.attr in banned:
+            calls.append(f.attr)
+        elif isinstance(f, ast.Name) and f.id in banned:          # bare sleep(...)
+            calls.append(f.id)
+        elif isinstance(f, ast.Call) and isinstance(f.func, ast.Name) and f.func.id == "getattr":
+            calls.append("getattr-built call")                    # getattr(page, "wait_for_" + x)()
+    assert calls == [], calls
     # positive control: the same walk DOES find the bounded condition waits, so an empty result
     # above means "no sleeps", not "the walk found nothing at all".
     waits = {n.func.attr for n in ast.walk(tree)

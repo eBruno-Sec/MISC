@@ -242,7 +242,12 @@ def _read_only_gate(route):
     try:
         method = (route.request.method or "GET").upper()
     except Exception:
-        method = "GET"
+        # BREAKER F3. A GUARD WHOSE JOB IS REFUSING WRITES MUST NOT FAIL OPEN. This defaulted to
+        # "GET", so a request whose method could not be read was ALLOWED -- the permissive answer
+        # as the default, in the one place the module promises a mechanical guarantee. Unreadable
+        # now means refused: a lost request is a false negative, an escaped write is a change to
+        # someone else's system, and only one of those is recoverable.
+        method = "__UNREADABLE__"
     try:
         if method in ("GET", "HEAD"):
             fallback = getattr(route, "fallback", None)

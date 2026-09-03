@@ -566,13 +566,23 @@ def test_only_declared_wildcards_are_ungrounded():
     for observed in ("YxAfD6AN5Bk3h3Zeo", 42, 3.5):
         ctl = nb.nonmatching_value(observed, tag="t1")
         for spec in nb.operator_payloads(observed, ctl):
-            if spec["payload"] in nb.WILDCARD_PAYLOADS:
+            # BREAKER F11/F6. This filtered with `nb.WILDCARD_PAYLOADS` itself, so WIDENING the
+            # list widened the exemption: appending a third entry and EMITTING it shipped
+            # `{"$ne": "zz-invented-sentinel"}` -- an argument with no relationship to the observed
+            # value -- with all 52 tests green. A bound that tracks the thing it bounds is not a
+            # bound. The exemption is now a LITERAL written here, so a third wildcard turns this
+            # test red rather than quietly excusing itself.
+            if spec["payload"] in ({"$regex": ".*"}, {"$gt": ""}):
                 continue
             arg = list(spec["payload"].values())[0]
             assert str(observed) in str(arg) or isinstance(arg, (int, float)), spec
     # and the wildcards really are match-everything, not just labelled as such
     assert re.search(nb.WILDCARD_PAYLOADS[0]["$regex"], "anything at all")
     assert "" < "a" and nb.WILDCARD_PAYLOADS[1]["$gt"] == ""
+    # and the module's own list must still BE those two, checked against the literal: without this
+    # the module could add a wildcard the loop above now rejects, and the failure would read as a
+    # mystery instead of "somebody added a third ungrounded payload".
+    assert tuple(nb.WILDCARD_PAYLOADS) == ({"$regex": ".*"}, {"$gt": ""}), nb.WILDCARD_PAYLOADS
 
 
 def test_the_carrier_sends_a_json_content_type_and_keeps_the_callers_headers():
