@@ -245,15 +245,50 @@ def directory_candidates(origin: str = "", observed_urls=None, limit: int = 40) 
     `tools.py` that is `self.urls`). Passing nothing degrades to exactly the old
     behaviour, so this can never make an existing run worse.
     """
-    out, seen = [], set()
+    # Q-184. ROUND-ROBIN BY TOP-LEVEL SEGMENT, so one deep tree cannot eat the budget.
+    #
+    # MEASURED on a real mission's 549-URL surface: this returned 40 candidates of which 21 were
+    # `.git` internals -- `.git/objects/09`, `.git/objects/15`, `.git/refs/tags` and so on -- which
+    # hold binary blobs and nothing harvestable. They sort early, so `passwords` was not merely
+    # ranked low, it was ABSENT from the list, and `/passwords/accounts.txt` (23 working logins)
+    # went unharvested on a mission that had already fetched that very listing.
+    #
+    # One exposed `.git` tree crowded out the entire rest of the application. Taking breadth first
+    # is the general answer: every distinct top-level area contributes one directory before any
+    # area contributes a second, so depth costs a tree its own slots rather than everyone else's.
+    # Order WITHIN an area is preserved, and observed facts still precede guesses.
+    def _area(d):
+        return (d.strip("/").split("/", 1)[0] or "").lower()
+
+    groups, order = {}, []
     for d in list(observed_directories(observed_urls, origin)) + list(DIR_CANDIDATES):
-        k = d.strip("/").lower()
-        if not k or k in seen:
+        k = d.strip("/")
+        if not k:
             continue
-        seen.add(k)
-        out.append(d.strip("/"))
-        if len(out) >= max(1, limit):
+        a = _area(k)
+        if a not in groups:
+            groups[a] = []
+            order.append(a)
+        groups[a].append(k)
+
+    out, seen = [], set()
+    depth = 0
+    while len(out) < max(1, limit):
+        added = False
+        for a in order:
+            if depth >= len(groups[a]):
+                continue
+            d = groups[a][depth]
+            added = True
+            if d.lower() in seen:
+                continue
+            seen.add(d.lower())
+            out.append(d)
+            if len(out) >= max(1, limit):
+                break
+        if not added:
             break
+        depth += 1
     return out
 
 # Extensions that usually indicate a raw/backup/secret file worth harvesting.
