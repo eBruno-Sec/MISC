@@ -184,6 +184,78 @@ DIR_CANDIDATES = ["ftp", "uploads", "upload", "files", "file", "backup", "backup
                   "download", "downloads", "data", "public", "static", "encryptionkeys",
                   "attachments", "documents", "media"]
 
+
+def observed_directories(observed_urls, origin: str = "") -> list:
+    """Directory paths that the engagement has ALREADY WALKED, newest-evidence-first.
+
+    Q-173. DIR_CANDIDATES is a list of GUESSES -- 16 names somebody typed. Every directory
+    derived here is a FACT: the crawler fetched a URL underneath it, so the directory exists
+    on this host. A directory listing we already fetched is a list of real files, and the
+    harvester never got to see one.
+
+    MEASURED on mission bed9ffcd (target mutillidae): the mission fetched
+    `http://mutillidae/passwords/?C=N;O=D` three times -- three rows in its own `exchanges`
+    table -- and `looks_like_listing` / `parse_listing` / `is_harvestable` all say YES when
+    handed that body by hand. Nothing downstream was broken. The directory simply never
+    reached the engine, because `passwords` is not one of the 16 guessed names, and a
+    published, working 23-account credential file went unreported.
+
+    The rule is deliberately about SHAPE, not names: a URL ending in `/` names a directory,
+    and every parent segment of any observed URL names a directory. A trailing segment
+    without a `/` is NOT assumed to be a directory (that would turn `.git/logs/HEAD` into a
+    `HEAD/` request), so this generates strictly fewer bogus requests than the guess list it
+    supplements.
+    """
+    out, seen = [], set()
+    host = ""
+    m = re.match(r"https?://([^/]+)", origin or "")
+    if m:
+        host = m.group(1).lower()
+    for raw in (observed_urls or []):
+        u = str(raw or "").strip()
+        if not u:
+            continue
+        um = re.match(r"https?://([^/]+)(/[^?#]*)?", u)
+        if um:
+            if host and um.group(1).lower() != host:
+                continue          # a directory on another host is not this host's surface
+            path = um.group(2) or "/"
+        elif u.startswith("/"):
+            path = u.split("?", 1)[0].split("#", 1)[0]
+        else:
+            continue
+        # A path ending in "/" IS a directory; otherwise only its parents are.
+        segs = [s for s in path.split("/") if s and s not in (".", "..")]
+        if not path.endswith("/") and segs:
+            segs = segs[:-1]
+        for i in range(1, len(segs) + 1):
+            d = "/".join(segs[:i])
+            if len(d) > 200:
+                break
+            if d not in seen:
+                seen.add(d)
+                out.append(d)
+    return out
+
+
+def directory_candidates(origin: str = "", observed_urls=None, limit: int = 40) -> list:
+    """Directories to check for a browsable index: OBSERVED FACTS FIRST, then guesses.
+
+    Pure and side-effect free -- the caller passes whatever URL surface it has (in
+    `tools.py` that is `self.urls`). Passing nothing degrades to exactly the old
+    behaviour, so this can never make an existing run worse.
+    """
+    out, seen = [], set()
+    for d in list(observed_directories(observed_urls, origin)) + list(DIR_CANDIDATES):
+        k = d.strip("/").lower()
+        if not k or k in seen:
+            continue
+        seen.add(k)
+        out.append(d.strip("/"))
+        if len(out) >= max(1, limit):
+            break
+    return out
+
 # Extensions that usually indicate a raw/backup/secret file worth harvesting.
 _HARVEST_EXT = (".bak", ".old", ".backup", ".zip", ".tar", ".gz", ".sql", ".db", ".sqlite",
                 ".kdbx", ".pyc", ".key", ".pem", ".p12", ".pfx", ".yml", ".yaml", ".md",
@@ -203,18 +275,56 @@ def looks_like_listing(html: str) -> bool:
     return len(files) >= 3
 
 
-def parse_listing(html: str) -> list:
-    """Extract file paths (with extensions) from a directory-index page."""
+def parse_listing(html: str, base_url: str = "") -> list:
+    """Extract root-relative file paths from a directory-index page.
+
+    Q-173. `base_url` is new and it fixes a defect that made this engine structurally unable
+    to read the most common directory listing on the internet.
+
+    A listing's hrefs are RELATIVE TO THE PAGE THEY ARE ON, and the two common listing styles
+    differ in exactly that respect:
+
+        http://juice-shop:3000/ftp   -> href="ftp/acquisitions.md"   (resolves to /ftp/...)
+        http://mutillidae/passwords/ -> href="accounts.txt"          (resolves to /passwords/...)
+
+    The old signature could not tell them apart, so it returned the raw href and the caller
+    joined it to the ORIGIN. MEASURED, that is right for one style and wrong for the other:
+
+        caller joins to     : http://juice-shop:3000/ftp/acquisitions.md -> 200
+        caller joins to     : http://mutillidae/accounts.txt            -> 404
+        correct URL would be: http://mutillidae/passwords/accounts.txt  -> 200
+
+    Apache `mod_autoindex` emits bare file names, so EVERY Apache autoindex harvested by this
+    engine has been requesting files from the web root and getting 404s. It appeared to work
+    only because juice-shop's listing happens to emit root-relative hrefs. Resolving against
+    the page's own URL handles both styles by construction.
+
+    `base_url` should be the FINAL response URL (after redirects), because `/passwords` and
+    `/passwords/` resolve relative hrefs differently. Omitting it preserves the old behaviour
+    exactly, so no existing caller changes meaning.
+    """
+    from urllib.parse import urljoin, urlsplit
     out, seen = [], set()
+    origin = ""
+    if base_url:
+        sp = urlsplit(base_url)
+        origin = "%s://%s" % (sp.scheme, sp.netloc)
     for h in _HREF.findall(html or ""):
         h = h.strip()
         if h.startswith(("http://", "https://", "mailto:", "#", "?", "..")):
             continue
-        leaf = h.rsplit("/", 1)[-1]
+        leaf = h.split("?", 1)[0].split("#", 1)[0].rsplit("/", 1)[-1]
         if "." not in leaf or leaf in (".", ".."):
             continue
-        p = h.lstrip("/")
-        if p not in seen:
+        if base_url:
+            resolved = urljoin(base_url, h)
+            sp = urlsplit(resolved)
+            if "%s://%s" % (sp.scheme, sp.netloc) != origin:
+                continue            # a listing may link offsite; that is not this host's surface
+            p = sp.path.lstrip("/")
+        else:
+            p = h.lstrip("/")
+        if p and p not in seen:
             seen.add(p)
             out.append(p)
     return out[:100]
@@ -236,30 +346,287 @@ def is_harvestable(path: str) -> bool:
     return leaf.endswith(_HARVEST_EXT)
 
 
-_SENSITIVE_SIG = re.compile(
-    r"confidential|do not distribute|BEGIN (?:RSA|EC|OPENSSH|PRIVATE)|password|passwd|"
-    r"secret|api[_-]?key|\"name\":\s*\"|coupon|salary|acquisition|kdbx|private key|"
-    r"aws_access_key|-----BEGIN", re.I)
+# ── Is this file's CONTENT sensitive? (Q-173: judged on structure, never on its name) ──
+#
+# The old oracle here was one substring regex whose alternatives included a bare `password`,
+# `passwd` and `secret`. MEASURED, it is unsound in BOTH directions:
+#
+#   mutillidae/passwords/accounts.txt   SENSITIVE=True  match='password'
+#   mutillidae/robots.txt               SENSITIVE=True  match='password'   <- FALSE POSITIVE
+#   bwapp/robots.txt                    SENSITIVE=True  match='password'   <- FALSE POSITIVE
+#   dvwa/robots.txt                     SENSITIVE=False
+#
+# Both robots files match only because they say `Disallow: /passwords/`. And the one TRUE
+# positive is luck: `accounts.txt` matches only because ten of its rows use the literal
+# password "password" (`4,jeremy,password,d1373 1337 speak,Admin`). A credential dump whose
+# passwords were real secrets contains the substring nowhere and would be dropped in silence.
+#
+# So the bare secret WORDS now require an ASSIGNMENT (`password=v`, `"api_key": "v"`), which
+# is what a leaked config actually looks like and what a robots directive never is, and three
+# STRUCTURAL detectors are added below. MEASURED against juice-shop's /ftp harvest before
+# changing anything: no existing true positive there depends on a bare secret word
+# (`acquisitions.md` fires on `confidential` / `do not distribute` / `acquisition`), so this
+# tightening regresses nothing observed.
+
+# Documentary markers: a human deliberately labelled the file. Low FP, kept as-is.
+_DOC_SENSITIVE = re.compile(
+    r"confidential|do not distribute|private key|kdbx|coupon|salary|acquisition|"
+    r"\"name\":\s*\"", re.I)
+
+# Unambiguous secret MATERIAL. Every one of these is a structural artefact -- an armoured key
+# block, a vendor-formatted key id, a crypt hash in a passwd row, or an inline-credential URI.
+# Compiled SEPARATELY on purpose: case sensitivity carries meaning per pattern (`AKIA` and
+# `-----BEGIN` are case-BEARING; the AWS config key is not), and Python rejects an inline
+# `(?i)`/`(?m)` that is not at the start of the expression.
+_KEY_MATERIAL_PATTERNS = [
+    re.compile(r"-----BEGIN (?:[A-Z ]+ )?PRIVATE KEY-----"),
+    re.compile(r"-----BEGIN (?:RSA|EC|OPENSSH|PGP|DSA)"),
+    re.compile(r"\bAKIA[0-9A-Z]{16}\b"),
+    re.compile(r"^[^:\s]{1,64}:\$(?:apr1|2[aby]|1|5|6)\$", re.M),
+    re.compile(r"\b[a-z][a-z0-9+.\-]{1,20}://[^/\s:@]{1,64}:[^/\s:@]{1,128}@"),
+    re.compile(r"aws_secret_access_key\s*[=:]\s*\S", re.I),
+]
+
+
+def _key_material(body: str):
+    for p in _KEY_MATERIAL_PATTERNS:
+        m = p.search(body or "")
+        if m:
+            return m
+    return None
+
+# A secret WORD only counts when something is assigned to it.
+#
+# The value charset excludes ` and * deliberately. MEASURED on dvwa's own README.md, which
+# reported as an "Exposed configuration secret" on the line
+#     **Default password = `password`**
+# That is the application's published documentation describing its default login, formatted
+# as markdown emphasis around a code span -- not a leaked config value. A config assignment's
+# value is a BARE token; a documentation example's value is wrapped in formatting. Excluding
+# the two markdown delimiters separates them without needing to know the file is a README.
+# The leading `[A-Za-z0-9_.-]*` matters: `\bpassword` cannot match inside `DB_PASSWORD`, because
+# `_` is a word character and there is no boundary before `PASSWORD`. The single most common
+# shape of a leaked config key was therefore invisible to this pattern.
+_SECRET_ASSIGNMENT = re.compile(
+    r"(?i)(?:^|[^A-Za-z0-9])[A-Za-z0-9_.\-]*"
+    r"(?:password|passwd|pwd|secret|api[_-]?key|access[_-]?token|client[_-]?secret)\b"
+    r"\s*[:=]\s*[\"']?[^\s\"',;<>`*]{3,}")
+
+# A database dump states its own structure.
+_DB_DUMP = re.compile(r"(?i)\bCREATE\s+TABLE\b")
+_DB_ROWS = re.compile(r"(?i)\bINSERT\s+INTO\b")
+
+_IDENT_FIELD = re.compile(r"[A-Za-z0-9._@+-]{1,64}")
+# A single field: no whitespace, any length. The minimum used to be 3 characters and that
+# ALONE suppressed the whole mutillidae credential dump -- one of its 23 accounts has the
+# two-character password `42`, so the column failed an all()-quantified length test and the
+# file classified as not-sensitive. A per-VALUE length floor is the wrong instrument: real
+# passwords can be short, and it is the COLUMN that has to look like secrets. The median
+# length check in credential_table() describes the column instead of vetoing on one outlier.
+_TOKEN_FIELD = re.compile(r"\S{1,128}")
+# Column shapes that are emphatically NOT secrets. If EVERY value in the candidate secret
+# column is one of these, the table is a directory/log/inventory, not a credential store.
+_NOT_SECRET = re.compile(
+    r"^(?:[^@\s]+@[^@\s]+\.[A-Za-z]{2,}"          # email
+    r"|https?://\S+"                               # url
+    r"|\d{1,4}[-/]\d{1,2}[-/]\d{1,4}"              # date
+    r"|\d{1,3}(?:\.\d{1,3}){3}"                    # ipv4
+    r"|[+-]?\d+(?:\.\d+)?"                         # bare number
+    r"|true|false|null|none|yes|no|n/a|-)$", re.I)
+_MARKUP = re.compile(r"<(?:!doctype|html|head|body|div|table|script|a\s)", re.I)
+
+
+def credential_table(body: str) -> dict | None:
+    """Does this body READ AS a table of login records? Structural, name-free.
+
+    A credential store has a shape no prose has: many rows, one consistent delimiter, a
+    near-unique identifier column, and an adjacent opaque token column with no whitespace.
+    The near-uniqueness requirement is what separates a login table (usernames are unique)
+    from a robots.txt (`Disallow` repeats on every row) -- MEASURED, that single ratio is
+    what rejects robots.txt on all three labs while accepting a real 23-account dump.
+    """
+    if not body or _MARKUP.search(body[:4000]):
+        return None
+    lines = [ln.strip() for ln in body.splitlines()[:2000]]
+    lines = [ln for ln in lines if ln and not ln.startswith(("#", "//", ";", "--"))]
+    if len(lines) < 3:
+        return None
+    for delim in (",", ":", ";", "\t", "|"):
+        rows = [[f.strip() for f in ln.split(delim)] for ln in lines]
+        rows = [r for r in rows if len(r) >= 2]
+        if len(rows) < 3:
+            continue
+        counts = {}
+        for r in rows:
+            counts[len(r)] = counts.get(len(r), 0) + 1
+        width, n = max(counts.items(), key=lambda kv: kv[1])
+        if n < 3 or n < 0.8 * len(rows):
+            continue                       # ragged: prose, not a table
+        rows = [r for r in rows if len(r) == width]
+        for i in range(width - 1):
+            ident = [r[i] for r in rows]
+            secret = [r[i + 1] for r in rows]
+            if not all(_IDENT_FIELD.fullmatch(v or "") for v in ident):
+                continue
+            if all(re.fullmatch(r"[+-]?\d+", v or "") for v in ident):
+                continue                   # a row number is not a username
+            if not all(_TOKEN_FIELD.fullmatch(v or "") for v in secret):
+                continue
+            if all(_NOT_SECRET.match(v or "") for v in secret):
+                continue                   # an email/date/number column is not a secret column
+            uniq = len({v.lower() for v in ident}) / float(len(ident))
+            if uniq < 0.7:
+                continue                   # a repeated key ("Disallow") is a directive, not a login
+            if len({v for v in secret}) < 2:
+                continue                   # a constant column is a flag, not a secret
+            lens = sorted(len(v) for v in secret)
+            if lens[len(lens) // 2] < 3:
+                continue                   # a column of 1-2 char values is a code, not a secret
+            # A SECRET COLUMN LOOKS DIFFERENT FROM A NAME COLUMN. Without this, the plain CSV
+            #     id,name,city / 1,alice,Boston / 2,bob,Denver
+            # satisfies every other rule -- unique ids, adjacent whitespace-free tokens -- and
+            # classifies as a credential store. That is the flood failure mode: an inventory,
+            # a contact export or a log would each raise a HIGH. Secrets carry a digit or a
+            # symbol, or they are long; dictionary words in title case are a name column.
+            secretish = sum(1 for v in secret
+                            if len(v) >= 8 or re.search(r"\d|[^A-Za-z0-9]", v))
+            if secretish < 0.5 * len(secret):
+                continue
+            if sum(1 for a, b in zip(ident, secret) if a == b) > len(rows) / 2:
+                continue
+            sample = ", ".join(sorted({v for v in ident})[:3])
+            return {"rows": len(rows), "delimiter": delim, "ident_col": i,
+                    "secret_col": i + 1, "identifiers": sample, "distinct_ratio": round(uniq, 3)}
+    return None
+
+
+def classify_content(body: str, content_type: str = "") -> dict | None:
+    """What KIND of sensitive thing is this, judged only on what the bytes contain?
+
+    Returns None for anything not shown to be sensitive. Ordered strongest-evidence-first so
+    the reported claim is the one actually proven.
+    """
+    b = body or ""
+    if len(b.strip()) < 8:
+        return None
+    m = _key_material(b)
+    if m:
+        return {"kind": "key_material", "family": "credential_exposure", "severity": "high",
+                "cwe": "CWE-522",
+                "evidence": "armoured key material / vendor key id present (value redacted)",
+                "detail": "the file contains structural secret material (%s)" % _redact(m.group(0))}
+    if _DB_DUMP.search(b) and _DB_ROWS.search(b):
+        return {"kind": "db_dump", "family": "backup_exposure", "severity": "high",
+                "cwe": "CWE-530",
+                "evidence": "SQL dump: CREATE TABLE + INSERT INTO both present",
+                "detail": "the file is a database dump (schema and row data)"}
+    # A DIRECTORY INDEX IS A TABLE OF CONTENTS, NOT CONTENT. MEASURED: juice-shop's /ftp
+    # listing classified as a sensitive document purely because it prints the file name
+    # `acquisitions.md`. That is the same "judge it by its name" error this whole change
+    # exists to remove -- an index naming a sensitive file is not itself a sensitive file.
+    # Placed after the two unambiguous material checks, which no index page can satisfy.
+    if looks_like_listing(b):
+        return None
+    t = credential_table(b)
+    if t:
+        return {"kind": "credential_table", "family": "credential_exposure", "severity": "high",
+                "cwe": "CWE-522",
+                "evidence": ("credential-table shape: %d rows, %r-delimited, column %d is a "
+                             "near-unique identifier (distinct ratio %s) and column %d an adjacent "
+                             "whitespace-free token; identifiers include %s (secrets redacted)"
+                             % (t["rows"], t["delimiter"], t["ident_col"], t["distinct_ratio"],
+                                t["secret_col"], t["identifiers"])),
+                "detail": "the file is structurally a table of login records", "table": t}
+    m = _SECRET_ASSIGNMENT.search(b)
+    if m:
+        return {"kind": "secret_assignment", "family": "config_exposure", "severity": "high",
+                "cwe": "CWE-538",
+                "evidence": "a secret is assigned a value (%s)" % _redact(m.group(0)),
+                "detail": "the file assigns a value to a secret-bearing key"}
+    m = _DOC_SENSITIVE.search(b)
+    if m:
+        return {"kind": "sensitive_document", "family": "backup_exposure", "severity": "high",
+                "cwe": "CWE-552", "evidence": "sensitive-document marker: %r" % m.group(0),
+                "detail": "the file carries a documentary sensitivity marker"}
+    return None
+
+
+def _redact(s: str) -> str:
+    """Keep the SHAPE of a secret, never its value."""
+    s = (s or "").strip()
+    head = re.split(r"[:=]", s, 1)[0]
+    return (head[:40] + ": <redacted>") if len(s) > len(head) else (s[:24] + "<redacted>")
+
+
+class _SensitiveContent:
+    """Duck-typed stand-in for the old `_SENSITIVE_SIG` regex.
+
+    `tools.py::_run_dir_harvest` calls `exp._SENSITIVE_SIG.search(body)` and only tests the
+    result for truthiness. Keeping that exact surface lets the corrected, structural judgement
+    reach the live harvest path without editing a file this lane does not own.
+    """
+
+    def search(self, body, *_a, **_kw):
+        c = classify_content(body or "")
+        return _SensitiveHit(c) if c else None
+
+
+class _SensitiveHit:
+    def __init__(self, c):
+        self.classification = c
+
+    def group(self, *_a):
+        return self.classification.get("evidence", "")
+
+    def __bool__(self):
+        return True
+
+
+_SENSITIVE_SIG = _SensitiveContent()
 
 
 def harvest_finding(url: str, path: str, via_nullbyte: bool, snippet: str,
                     *, negative_control: dict = None) -> dict:
     how = "a poison-null-byte extension bypass" if via_nullbyte else "direct request"
+    leaf = path.rsplit("/", 1)[-1]
+    # Q-173. The grade and the evidence now come from WHAT THE BYTES ARE, not from the fact
+    # that a request succeeded. Two things this fixes:
+    #   1. the claim matches the observation -- a credential table is reported as a credential
+    #      table (CWE-522), not as a generic "backup_exposure" (CWE-552);
+    #   2. the raw body no longer becomes the evidence string. It used to be `snippet[:300]`,
+    #      which for a published credential dump means the plaintext passwords are copied into
+    #      the finding, the report and the database. Evidence is now a redacted description of
+    #      the STRUCTURE, which is what the claim rests on anyway.
+    c = classify_content(snippet or "") or {}
+    kind = c.get("kind", "")
+    title = {
+        "credential_table": f"Exposed credential store: {leaf}",
+        "key_material": f"Exposed secret key material: {leaf}",
+        "db_dump": f"Exposed database dump: {leaf}",
+        "secret_assignment": f"Exposed configuration secret: {leaf}",
+    }.get(kind, f"Exposed sensitive file: {leaf}")
+    fam = c.get("family", "backup_exposure")
     finding = {
-        "title": f"Exposed sensitive file: {path.rsplit('/', 1)[-1]}"
-                 + (" (null-byte bypass)" if via_nullbyte else ""),
-        "severity": "high", "target": url, "family": "backup_exposure",
-        "description": (f"A sensitive file in a browsable directory was retrieved via {how}. "
-                        "Exposed backup/source/key/document files leak confidential data and "
-                        "often credentials or source history."),
-        "impact": "Disclosure of confidential documents, source backups, or secret keys.",
+        "title": title + (" (null-byte bypass)" if via_nullbyte else ""),
+        "severity": c.get("severity", "high"), "target": url, "family": fam,
+        "description": (f"A sensitive file in a browsable directory was retrieved via {how}: "
+                        + c.get("detail", "the file carries sensitive content") + ". "
+                        + ("The directory index that names this file was itself fetched during this "
+                           "engagement, so the file is discovered surface, not a guess.")),
+        "impact": ("Anyone who can read this file obtains working logins for the listed accounts, "
+                   "with no guessing or brute force." if kind == "credential_table" else
+                   "Disclosure of secret key material usable to impersonate or decrypt." if kind == "key_material" else
+                   "Disclosure of stored application data, including any secrets held in it." if kind == "db_dump" else
+                   "Disclosure of confidential documents, source backups, or secret keys."),
         "reproduction_steps": [f"Request {url}",
                                "Observe the sensitive file content is served"]
                               + (["(the plain path is blocked; the null byte defeats the extension allowlist)"]
                                  if via_nullbyte else []),
-        "evidence": (snippet or "")[:300], "cwe": "CWE-552",
-        "family": "backup_exposure", "tags": ["information-disclosure", "exposed-file"]
-                  + (["poison-null-byte"] if via_nullbyte else []),
+        "evidence": c.get("evidence") or "content matched a sensitive-content classifier",
+        "cwe": c.get("cwe", "CWE-552"),
+        "tags": ["information-disclosure", "exposed-file"]
+                + ([kind.replace("_", "-")] if kind else [])
+                + (["poison-null-byte"] if via_nullbyte else []),
         "confidence": "confirmed",
     }
     if negative_control:
