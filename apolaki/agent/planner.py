@@ -85,6 +85,9 @@ CAP_RECON_ROOTS = 25    # roots handed the 7-tool PASSIVE recon fan-out in phase
 CAP_HOSTS = 30          # hosts we http_probe / fingerprint
 CAP_ENDPOINTS = 25      # parameterized endpoints we actively probe
 CAP_REST = 30           # high-value NON-parameterized REST/sensitive endpoints we fetch
+CAP_ROUTE_FORM_PAGES = 30   # Q-174: route-selector pages (index.php?page=<x>) are DISTINCT pages
+                            # and previously shared one slot between all of them. Bounded, and
+                            # separate so a router app is not penalised for its URL shape.
 CAP_FORM_PAGES = 10     # non-parameterized pages we fetch for form discovery (bounded:
                         # each is a remote round-trip, so keep the amplification small)
 CAP_JS = 40             # js urls handed to js_review
@@ -120,6 +123,8 @@ _URLISH_PARAM = ("url", "uri", "link", "fetch", "redirect", "next", "return", "d
                  "target", "proxy", "image", "img", "callback", "webhook", "u", "r")
 _FILE_PARAM = ("file", "path", "page", "doc", "document", "template", "include", "load", "read", "dir", "folder")
 import re as _re
+import surface as _surface
+from urllib.parse import parse_qsl as _parse_qsl, urlsplit as _urlsplit
 
 _CMD_PARAM = ("cmd", "command", "exec", "run", "ping", "host", "hostname", "ip", "dns",
               "query", "shell", "code", "nslookup", "traceroute")
@@ -690,6 +695,34 @@ def next_batch(state: dict) -> list:
         base = urlparse(b)
         return urlunparse((base.scheme, base.netloc, p.path, p.params, p.query, p.fragment))
 
+    def _abs_route(u):
+        """`_abs`, but PRESERVING a route-selector query. Q-174.
+
+        `_abs` is `base + _path(u)`, and `_path` drops the query -- correct for its job. The
+        form-discovery loop below used it as a dedup key, so on a router-style app every
+        `index.php?page=<x>.php` normalized to the SAME `…/index.php`: 55 distinct pages collapsed
+        to one, and `CAP_FORM_PAGES` then bounded what was left of them.
+
+        MEASURED. Q-172 taught `build_inventory` that a route selector makes a distinct page, and
+        the acceptance mission still never reached `dns-lookup.php` -- because THIS loop does not
+        read the inventory at all. It iterates raw `urls`. A fix at one layer did nothing at the
+        layer that actually dispatches, which is the whole reason acceptance is run in a mission
+        and not in a unit test.
+
+        The rule itself is imported, not restated: `surface._ROUTE_VALUE` is the single definition.
+        """
+        base = _abs(u)
+        if not base:
+            return ""
+        try:
+            _q = _urlsplit(u).query
+        except Exception:
+            return base
+        for k, v in _parse_qsl(_q, keep_blank_values=True):
+            if _surface._ROUTE_VALUE.match(v or ""):
+                return "%s?%s=%s" % (base, k, v)
+        return base
+
     def _abs(u):
         """A discovered URL normalized onto the scope's KNOWN base for its host, or "" when it
         carries no host. Q-019: `_b(_host(u)) + _path(u)` written inline at five call sites was what
@@ -1075,22 +1108,39 @@ def next_batch(state: dict) -> list:
     # form on a plain page that http_probe never happened to fetch is still tested
     # (run_form_cmdi fetches + parses the page's forms itself).
     seen_page = set()
+    _route_pages = set()
     for u in _rank_urls(urls):
         raw = u.split("?")[0].split("#")[0]
         if _is_static(raw):
             continue
         # normalize back to the scope's known base so a wrong-scheme/no-port junk URL
         # (https://host/path with the app really on http://host:port) is corrected
-        pg = _abs(u)
+        pg = _abs_route(u)
         if not pg or pg in seen_page or pg in form_seen:
             continue
         seen_page.add(pg)
-        if len(seen_page) > CAP_FORM_PAGES:
+        # Q-174. Route pages get their own budget. A router-style app expresses its ENTIRE surface
+        # through one script, so under a single shared cap it spent one slot for all of it while a
+        # flat-file app of the same size spent ten. The cap bounds cost on a large site; it was
+        # never meant to decide that 45 pages are one page. Both budgets stay bounded.
+        _is_route = "?" in pg
+        if _is_route:
+            _route_pages.add(pg)
+            if len(_route_pages) > CAP_ROUTE_FORM_PAGES:
+                continue
+        elif len(seen_page) - len(_route_pages) > CAP_FORM_PAGES:
             break
-        e_steps.append(_step("run_form_cmdi", {"url": pg}, f"run_form_cmdi:page:{_host(pg)}{_path(pg)}"))
+        # Q-174. THE KEY, NOT JUST THE URL. `_path(pg)` drops the query, so every
+        # `index.php?page=<x>` produced the IDENTICAL step key and the planner's own dedup
+        # collapsed 45 pages into one step -- after `pg` had already been fixed to carry the
+        # selector. Two collapses in series, and fixing only the first changed nothing: the URL was
+        # right and the step still existed once. The identity has to be the thing that was made
+        # distinct.
+        _pgid = pg.split("://", 1)[-1]
+        e_steps.append(_step("run_form_cmdi", {"url": pg}, f"run_form_cmdi:page:{_pgid}"))
         # same bounded page set: self-discover a file-upload form and test its
         # extension filter (run_upload_test fetches + parses the page itself).
-        e_steps.append(_step("run_upload_test", {"url": pg}, f"run_upload_test:page:{_host(pg)}{_path(pg)}"))
+        e_steps.append(_step("run_upload_test", {"url": pg}, f"run_upload_test:page:{_pgid}"))
     # prompt-injection probe on any discovered URL that looks like a chat/AI
     # endpoint — narrow path match, so this never fires on unrelated endpoints.
     chat_seen = set()
