@@ -5284,12 +5284,37 @@ class ToolRegistry:
                           [{"url": u} for u in urls[:50]])
 
     async def _gql_post(self, c, endpoint: str, payload):
-        """POST a GraphQL query/batch; return parsed JSON or None."""
+        """POST a GraphQL query/batch; return parsed JSON, or None.
+
+        Q-169. A BODY THAT IS NOT JSON IS A NORMAL ANSWER HERE, not a degradation. This helper
+        carries endpoint DISCOVERY -- it posts `{__typename}` to every candidate path (/graphql,
+        /api/graphql, ...) and the caller asks `looks_like_graphql(resp)`. On any target without a
+        GraphQL endpoint, EVERY candidate answers with HTML, so `r.json()` raises on every one.
+
+        Those raises were swallowed, and `_swallow` writes a `tool_error` row reading
+        "DEGRADED: swallowed exception". MEASURED on a mutillidae mission: 9 DEGRADED rows, all of
+        them the correct answer "this PHP app has no GraphQL". The engine returned "No GraphQL
+        endpoint found", which was right, while the mission record said it had malfunctioned nine
+        times.
+
+        That is not cosmetic. A DEGRADED row is how this platform says A RESULT MAY BE WRONG, and
+        it is read that way by the census and by me. Filling it with expected negatives devalues it
+        exactly as a false positive devalues a finding -- once every clean mission carries DEGRADED
+        rows, nobody can use them to spot a real degradation. `fetch_openapi` already draws this
+        line correctly ("NOT PRESENT: response is not JSON").
+
+        A TRANSPORT failure is still swallowed, because a connect error or timeout means we do not
+        KNOW whether a GraphQL endpoint is there -- which is the thing a degradation record is for.
+        """
         try:
             r = await c.post(endpoint, json=payload)
-            return r.json()
         except Exception as _apolaki_swallowed_4423:
-            self._swallow(_apolaki_swallowed_4423, 'tools:_gql_post:4423', "")
+            self._swallow(_apolaki_swallowed_4423, 'tools:_gql_post:4423', endpoint)
+            return None
+        try:
+            return r.json()
+        except ValueError:
+            # Not JSON -> not a GraphQL endpoint. An answer, not a malfunction.
             return None
 
     async def _run_graphql(self, inp: dict) -> ToolResult:
@@ -5780,11 +5805,29 @@ class ToolRegistry:
                     try:
                         st["msg"] = None
                         try:
+                            # Q-169. Was 8000ms, the tightest navigation budget in this file, and
+                            # the only `load` wait paired with one. MEASURED: 4 of 8 run_xss
+                            # dispatches on a mutillidae mission died on
+                            # "Page.goto: Timeout 8000ms exceeded", while that same page served in
+                            # 0.04-0.14s standalone with its first 12 subresources costing 0.41s
+                            # serially. So the target is not slow -- the budget is too tight under
+                            # the CONCURRENT browser load a mission generates, which is invisible
+                            # when the engine is exercised alone. 12000ms is what four other
+                            # navigations in this file already use.
+                            #
+                            # `load` is kept deliberately. `domcontentloaded` fires before
+                            # subresources resolve, and an `<img src=x onerror=...>` payload
+                            # executes on the image FAILING -- moving the wait earlier would trade
+                            # a visible timeout for a silent false negative in the exact payload
+                            # family this engine exists to catch.
                             await _browser_engine.rate_limited_goto(
-                                pg, tu, wait_until="load", timeout=8000)
+                                pg, tu, wait_until="load", timeout=12000)
                             await pg.wait_for_timeout(350)
                         except Exception as _apolaki_swallowed_4844:
-                            self._swallow(_apolaki_swallowed_4844, 'tools:probe:4844', "")
+                            # The target was "" -- the record said a probe timed out without
+                            # saying WHICH url was lost, so the finding could not be re-attempted
+                            # or judged. A swallow has to name what it was doing.
+                            self._swallow(_apolaki_swallowed_4844, 'tools:probe:4844', tu)
                             pass
                         msg = st["msg"]
                     finally:
