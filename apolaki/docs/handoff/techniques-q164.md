@@ -375,6 +375,50 @@ Falsification, run from OUTSIDE the file (the only kind that counts):
 The skip coupling was also exercised: running a subset of the file (`-k test_every_badge_is_backed`)
 goes red naming all three live re-earns, because a check that did not run backs nothing.
 
+### Re-verification after the session-limit kill (MEASURED)
+
+The lane was killed by a server-side 500 after the commits landed, so the gate was re-driven from a
+clean tree. Replaying the SAME mutant would only show the recorded run was transcribed correctly, so
+three FRESH mutants were edited into `agent/techniques.py` ON DISK -- not monkeypatched -- one at a
+time, each reverted with `git checkout` and the tree confirmed clean between runs.
+
+| # | mutant | shape being tested | result |
+|---|---|---|---|
+| A | `ssti` `["juiceshop"]` -> `["juiceshop", "bwapp"]` | new claim on a lab that RESOLVES | RED: `[('ssti', 'bwapp')]` |
+| B | `graphql_introspection` `["dvga"]` -> `["dvga", "juiceshop"]` | wrong lab on a LIVENESS-PROVEN technique | RED: `[('graphql_introspection', 'juiceshop')]` |
+| C | `archive_slip` `["juiceshop"]` -> `[]` | ratchet direction: a debt entry silently cleared | RED: `1 debt entr(ies) are no longer unbacked: [('archive_slip', 'juiceshop')]` |
+
+Why these three and not the recorded one:
+
+- **A uses `bwapp`, a lab that is real, running, and in `known_labs()`.** The recorded mutant used
+  `mutillidae`, also real, but the stronger reading was never written down: the gate is not merely
+  rejecting an unknown lab string, it demands a RE-RUNNER. A resolvable lab with no check still fails.
+- **B is the one that decides whether this file was worth writing.** `graphql_introspection` IS
+  liveness-confirmed, so every technique-granular gate in the repo -- including
+  `test_validated_on.py`'s `backed` heuristic -- calls it backed and cannot see the added lab. This is
+  precisely the `dom_xss` defect this audit found by hand. Pair granularity catches it; technique
+  granularity provably cannot.
+- **C fires the OTHER direction.** A known-exceptions list that only ever has to be read is how the
+  dead-code ratchet reported green while it rose. Withdrawing a debt-listed badge turns the suite red
+  demanding `DEBT` shrink, so the list cannot go stale in silence.
+
+Green state after reverting all three (exit 0, and the count matters):
+
+    $ ... pytest tests/test_technique_badges.py -q -p no:warnings -rs
+    ......... [100%]      EXIT=0
+
+Nine dots, no `s`. That is the assertion worth making: a SKIPPED live re-earn is not a pass here, and
+`test_the_three_live_reearns_actually_ran` would have gone red had conpot, dvga or juice-shop been
+down. The badges re-earned in this run were re-earned against labs that actually answered.
+
+Scoped suite (`-k "technique or badge"`, 92 tests): all passed, no skips, exit 0.
+
+NOT run: a full `pytest tests/`. One was started before the coordinator's scope note arrived and
+finished with 4 failures, all in `tests/test_deadcode_gate.py` and all naming
+`semantic_differential._similarity` -- a file another lane is mid-edit on. That is a torn read of a
+shared tree, not a regression, and it is recorded here rather than dropped so nobody re-derives it.
+Nothing in it touches this lane's three files.
+
 MEASURED, that this file does not corrupt the neighbouring gate: I re-implemented
 `test_validated_on.py`'s `backed` heuristic and ran it with and without
 `test_technique_badges.py` present. Both give `claims=49 backed=26 unbacked=23`, byte-identical
@@ -468,5 +512,30 @@ One, and only one:
   be a guess about work I cannot see. It is on the debt list with that reason attached, so whichever
   way the other lane goes, the gate forces the question to be answered: if the lab lands and a check
   re-runs the technique, the debt entry must be deleted; if it does not, the badge must be.
+
+  RE-CHECKED at the end of the lane, in case the other lane had landed in the meantime. It has not:
+
+      $ git show HEAD:apolaki/docker-compose.yml | grep -n sessionlife   -> (absent at HEAD)
+      $ git status --short apolaki/docker-compose.yml apolaki/labs/
+       M apolaki/docker-compose.yml
+      ?? apolaki/labs/sessionlife/
+      $ docker ps --format '{{.Names}}' | grep sessionlife -> apolaki-sessionlife-1
+
+  Identical to the first measurement, so the verdict stands unchanged and the badge was again left
+  alone. This is the one item in the audit I am deliberately NOT resolving; resolving it would mean
+  guessing at another lane's uncommitted work.
+
+## State of the remaining open items
+
+All of them are outside this lane's three-file write set, so they are handed over rather than left
+undone. Nothing inside the write set is unfinished.
+
+| item | owner file | status |
+|---|---|---|
+| withdraw `exposed_credentials`(ginandjuice) | `agent/tests/test_authscan.py` | blocked on an equality assertion this lane does not own; diff above |
+| promote the 3 live re-earns into `CHECKS` | `agent/liveness.py` | diff above, MEASURED against the real dispatch |
+| `command_injection`/`path_traversal` on dvwa | `agent/liveness.py` | needs an authenticated-lab shape in `CHECKS`, which does not exist yet; recommendation only |
+| the mention heuristic counts a declaration as backing | `agent/tests/test_validated_on.py` | diagnosed above; not touched, because widening another lane's strict xfail without owning it is the worse error |
+| `session_lifecycle`(sessionlife) | `agent/techniques.py` (mine) | deliberately not acted on -- another lane's lab is mid-landing; on the debt list with the reason attached |
 
 
