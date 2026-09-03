@@ -270,3 +270,193 @@ Note `graphql_batching_enabled` (dvga): its badge's only backing is
 `agent/tests/test_local_import_guard.py:193`, a membership assertion. DVGA is up and answers
 introspection through the liveness check, so batching is re-earnable -- nothing re-runs it today.
 
+## Verdict tally
+
+59 badge pairs across 56 technique records, audited one at a time.
+
+| verdict | pairs | techniques |
+|---|---|---|
+| EARNED (a liveness check re-runs it against the lab named, and the committed baseline records it confirmed) | 25 | 23 |
+| WRONG -- badge names a lab the re-runner does not drive | 1 | 1 (`dom_xss`) |
+| WRONG -- badge credits the technique for a lab solver's result; no engine is bound to the id | 8 | 7 |
+| STALE -- nothing re-runs it | 25 | 25 |
+
+The EARNED row is 25 pairs over 23 techniques because `snmp_default_community` carries two labs and
+only one of them (`snmpd`) had a check. `dnp3_exposed`'s `openfmb` is counted EARNED as an alias of
+the check's `dnp3` lab key -- same container, recorded rather than silently accepted.
+
+## What was actually changed
+
+Ordered by how confident I am in it.
+
+### Re-earned, 3 pairs (`agent/tests/test_technique_badges.py`)
+
+Each drives the shipping executor against a standing local lab and requires the real oracle to fire.
+
+1. **`snmp_default_community` / `conpot`.** MEASURED above: conpot answers on 16100/udp with
+   community `public` and sysDescr `Siemens, SIMATIC, S7-200`; `conpot:161` answers nothing.
+   Carries a NEGATIVE CONTROL -- `probe(..., communities=("apolaki-q164-not-a-community",))`
+   returns `{'reachable': False}`, so accepting `public` is a discrimination, not a honeypot
+   answering anything sent at it.
+2. **`graphql_batching_enabled` / `dvga`.** `_run_graphql` against `http://dvga:5013/graphql`
+   returns `GraphQL request batching enabled`, `confidence=confirmed`, `CWE-770`, evidence
+   `a JSON array of 5 operations POSTed to ... returned 5 results`. Matched by TITLE, not family:
+   `agent/liveness.py` records that family matching let the BATCHING finding satisfy the
+   INTROSPECTION check, and the same trap runs in reverse here.
+3. **`sqli_auth_bypass` / `juiceshop`.** `_run_auth_sqli` against `/rest/user/login` returns
+   `SQL injection (auth-bypass) in 'email'`, `confirmed`, `CWE-89`, evidence
+   `email="' OR 1=1--" -> session/JWT token issued`. The engine baselines with a fresh random
+   benign credential on every call, so this is a differential and not a page that 200s at anything.
+
+### Corrected, 1 pair
+
+`dom_xss`: `["juiceshop"]` -> `["domsource"]`. `maps_to` is untouched, so the Juice Shop challenge
+mapping survives; only the proof claim moved to the lab that actually carries it.
+
+### Withdrawn, 8 pairs over 7 records
+
+`header_trust_authz`(natas), `security_misconfig_errors`(juiceshop),
+`vulnerable_component`(juiceshop, ginandjuice), `weak_secret_forgery`(juiceshop),
+`weak_2fa_bypass`(juiceshop), `business_logic_abuse`(juiceshop), `soft_deleted_login`(juiceshop).
+
+Set to `[]` with an in-place comment rather than deleted: the empty list keeps the record visible as
+a deliberate withdrawal, and it also keeps `test_validated_on.py`'s producer census (`>= 50` literal
+producers) measuring the same population.
+
+### Deliberately NOT changed
+
+- **`exposed_credentials`(ginandjuice)** -- belongs in the withdrawn set by the same evidence (no
+  engine bound, `routable=False`), but `agent/tests/test_authscan.py:50` pins the value with an
+  EQUALITY assertion and that file is not mine. Diff below.
+- **`session_lifecycle`(sessionlife)** -- another lane has the lab in flight in the working tree.
+  Diff below, to apply after that lands or is abandoned.
+- **`command_injection`/`path_traversal` on dvwa** -- genuinely re-earnable, but DVWA needs a login
+  plus a `security=low` cookie, and the two candidate engines are `_run_cmdi` (a timing sweep,
+  hundreds of requests) and `_run_web_probes` (INTRUSIVE; its own docstring records 28 POSTs and 28
+  persisted rows against a write-observing lab). Neither belongs in a suite that runs on every
+  change. They want a `liveness.py` CHECKS entry instead. Diff below.
+
+## Numbers before and after
+
+MEASURED via `techniques.taxonomy_view("owasp")`:
+
+| | before | after |
+|---|---|---|
+| records carrying a badge (`claimed`) | 56 | 49 |
+| badge pairs | 59 | 51 |
+| `proven` (liveness-earned) | 24 | 24 |
+| `unresolved_labs` | natas, sessionlife | sessionlife |
+| `generalized` | 1 | 1 |
+
+`proven` did not move, and that is the correct result: this ticket was not about raising it.
+`generalized` was already gated on a liveness artifact (`techniques.generalized()`), so
+`csti` and `vulnerable_component` were never counted there despite each naming two resolvable labs
+-- that gate was already right, and this audit did not have to fix it.
+
+## The gate, and its own negative control
+
+`agent/tests/test_technique_badges.py`. It accepts exactly two things as backing for a
+(technique, lab) pair: a `liveness.CHECKS` entry whose technique the COMMITTED baseline records as
+confirmed, or a live re-run in that file that PASSED IN THIS SESSION. `DEBT` freezes the 24 pairs
+that have neither, and the assertion is exact in both directions -- a debt entry that becomes backed
+also fails, so the list cannot rot into a permanently-readable exemption.
+
+Falsification, run from OUTSIDE the file (the only kind that counts):
+
+    # temporarily: race_condition validated_on=["juiceshop", "mutillidae"]
+    $ ... pytest tests/test_technique_badges.py -q
+    E   AssertionError: 1 badge(s) claim a lab that nothing re-runs and that this audit never
+        accepted: [('race_condition', 'mutillidae')].
+    FAILED test_every_badge_is_backed_by_something_that_RUNS
+    FAILED test_a_badge_on_a_lab_nothing_checks_is_reported
+    FAILED test_the_gate_goes_red_when_a_REAL_record_gains_an_unchecked_lab
+    # reverted; 9 passed
+
+The skip coupling was also exercised: running a subset of the file (`-k test_every_badge_is_backed`)
+goes red naming all three live re-earns, because a check that did not run backs nothing.
+
+MEASURED, that this file does not corrupt the neighbouring gate: I re-implemented
+`test_validated_on.py`'s `backed` heuristic and ran it with and without
+`test_technique_badges.py` present. Both give `claims=49 backed=26 unbacked=23`, byte-identical
+lists. That is by construction -- the new file never puts a technique id on a line that also names
+the registry field, and never names that field inside a loop over technique ids, because the
+neighbouring heuristic scans this directory's source text and would otherwise have marked ~24
+unproven techniques as backed simply because the audit file mentions them.
+
+Both strict xfails in `test_validated_on.py` still xfail after this change (verified in the run
+below), so nothing was laundered into an XPASS.
+
+## Patches for files this lane does not own
+
+Hand these to the main thread. Each is small and each is the completion of something recorded above.
+
+### 1. `agent/tests/test_authscan.py` -- unblock withdrawing `exposed_credentials`
+
+    -    assert T.TECHNIQUES["exposed_credentials"]["validated_on"] == ["ginandjuice"]
+    +    # Q-164: the badge was withdrawn -- no engine is bound to this id (engine_descriptor
+    +    # reports routable=False) so no product run could have earned it. What this test is
+    +    # really for is that the technique is REGISTERED and PLANNED, which the two assertions
+    +    # around it already say. Pinning a proof claim here re-checked nothing.
+
+Then in `agent/techniques.py`, `exposed_credentials`: `validated_on=[]`, and delete
+`("exposed_credentials", "ginandjuice")` from `DEBT` in `agent/tests/test_technique_badges.py`.
+
+### 2. `agent/liveness.py` -- promote the three live re-earns into the real gate
+
+The re-runs currently live in a test file because `liveness.py` is not in this lane's write set.
+They belong in `CHECKS`, where `scripts/liveness.sh` runs them and the ratchet protects them:
+
+    +    # Q-164. The conpot half of snmp_default_community had no check -- liveness only drove
+    +    # snmpd:161, and conpot publishes SNMP on 16100/udp (docker-compose.yml:343), so
+    +    # conpot:161 answers nothing at all.
+    +    {"technique": "snmp_default_community", "lab": "conpot", "kind": "tool",
+    +     "tool": "_run_service_pack",
+    +     "input": {"host": "conpot", "port": 16100, "service": "snmp"},
+    +     "family": "snmp_default_community"},
+    +    # Q-164. Pinned by TITLE: introspection and batching share family "graphql", which is the
+    +    # exact confusion the graphql_introspection entry above already documents.
+    +    {"technique": "graphql_batching_enabled", "lab": "dvga", "kind": "tool",
+    +     "tool": "_run_graphql", "input": {"url": "http://dvga:5013/graphql"},
+    +     "family": "graphql", "title": "batching"},
+    +    # Q-164. The registry's first record, and nothing re-ran it for the whole life of the file.
+    +    {"technique": "sqli_auth_bypass", "lab": "juiceshop", "kind": "tool",
+    +     "tool": "_run_auth_sqli",
+    +     "input": {"url": "http://juice-shop:3000/rest/user/login",
+    +               "fields": ["email", "password"]},
+    +     "family": "auth_bypass"},
+
+and in `_LAB_ADDR`: `"juiceshop": ("juice-shop", 3000),`. Note `_run_service_pack`'s snmp branch
+must accept the non-default port -- verify before promoting; the direct
+`snmp_audit_tool.probe("conpot", 16100)` path is what was measured here.
+
+Once these are in `CHECKS` and the baseline is updated with `scripts/liveness.sh --update`, delete
+the three live tests from `test_technique_badges.py` and its `_REEARN_DECLARED` set: they exist
+only because the gate could not be reached from this lane.
+
+DVWA (`command_injection`, `path_traversal`) wants the same treatment plus a login step; there is no
+authenticated-lab shape in `CHECKS` today, which is why it is a recommendation and not a diff.
+
+### 3. `agent/tests/test_validated_on.py` -- the mention heuristic
+
+`test_every_validated_on_claim_is_backed_by_a_recorded_artifact` counts a technique as backed when
+its id appears on any line of any test file that also contains the field name. Two of the ids it
+currently calls backed are backed by nothing but an equality assertion. The heuristic should require
+the id to appear in a test that INVOKES something -- or simply defer to
+`test_technique_badges.liveness_pairs()`, which is derived rather than scanned. Not changed here:
+the file is another lane's, and the xfail is a measurement, so weakening or widening it without
+owning it would be the worse error.
+
+## Could not classify
+
+One, and only one:
+
+- **`session_lifecycle` / `sessionlife`.** I can say what is true -- no compose service, no lab
+  source and no registry entry at HEAD, a container running on this machine, and nothing anywhere
+  that re-runs the technique -- but I cannot say whether the badge is STALE or about to become
+  EARNED, because the lab is mid-landing in another lane's uncommitted working tree
+  (`docker-compose.yml` modified, `labs/sessionlife/` untracked). Classifying it either way would
+  be a guess about work I cannot see. It is on the debt list with that reason attached, so whichever
+  way the other lane goes, the gate forces the question to be answered: if the lab lands and a check
+  re-runs the technique, the debt entry must be deleted; if it does not, the badge must be.
+
+
