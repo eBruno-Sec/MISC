@@ -5307,6 +5307,42 @@ The engine correctly did NOT report a source-map disclosure for a 200 that is no
 That is the right answer, and a zero here is the engine working. Kept because a future reader
 looking only at the histogram would see "8 runs, never a result" and go hunting.
 
+### Q-164 · 32 techniques wear a "Proven" badge that nothing re-checks · **READY** · **CRITICAL**
+
+*Filed 2026-09-02 in answer to a direct operator question: are the automated techniques actually
+being verified, including the browser-driven ones? Measured answer: 24 of 56.*
+
+```
+techniques declared                 94
+claim validated_on ("Proven")       56
+re-checked by a liveness CHECK      24
+CLAIMED PROVEN, NEVER RE-CHECKED    32
+tools in TOOL_PERMISSIONS          112   (82 ACTIVE)
+```
+
+`liveness.py` states the problem in its own opening docstring: "`techniques.validated_on` records
+that an engine was once proven. Nothing re-checks it." That field is what the UI renders as a green
+Proven badge, so 32 badges rest on an observation nobody has repeated.
+
+**THIS IS NOT THEORETICAL, and cycle 19 is the proof.** In one session: the DOM engine was silently
+dead behind a live call site (a deleted `cap` helper, every recorder a no-op, 4000+ tests green);
+`run_ssi` had 1333 field dispatches and had never once produced a result; and the SPA families
+could not fire at all because four separate layers each deleted the input. Every one of those would
+have kept its badge.
+
+Unverified sample, all `validated_on: ['juiceshop']` or similar: `csrf`, `csti`,
+`command_injection`, `browser_persona_bola`, `business_logic_abuse`, `excessive_data_exposure`,
+`exposed_files_harvest`, `find_hidden_route`, `graphql_batching_enabled`, `archive_slip`,
+`base64_param`, `exposed_credentials`.
+
+**Definition of done:** every technique carrying `validated_on` either has a liveness CHECK that
+re-earns it, or loses the badge. A claim that cannot be re-earned is not a capability, and the
+honest move for one that fails is to DROP the badge rather than delete the check.
+
+**Do NOT chase the count.** 24 -> 56 by writing 32 thin checks would reproduce the exact failure
+this ticket describes one layer up. Each check needs a lab case whose correct answer was
+constructed by hand, which is the standing rule for this project.
+
 ### Q-151 · 101 of 110 tools have never been proven to work · **READY** · **CRITICAL**
 
 *Filed 2026-09-02 in answer to "are you sure all the tools will work now?" The honest answer was
