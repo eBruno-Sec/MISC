@@ -272,6 +272,26 @@ def _seed_url(value: str, bases: dict) -> str:
     unchanged and only a declared non-https base behaves differently.
     """
     v = str(value or "")
+    # Q-178. A GRAPH KEY IS AN IDENTITY, NOT AN ADDRESS, and one leaked into the address space.
+    #
+    # `asset_graph.observe_param` mints a query parameter's node key as `{endpoint}?{name}` -- a
+    # documented, deliberate identity. Those keys are stored in `memory_assets` under kind
+    # `endpoints`, and warm start rebuilds every endpoint asset into a seed URL. So the scanner
+    # requested node identities as if they were pages.
+    #
+    # MEASURED on mutillidae: 63 stored "endpoints" of that shape, e.g.
+    #     mutillidae/index.php?page=credits.php?do
+    #     mutillidae/includes/index.php?page=document-viewer.php?PathToDocument
+    # 52 of them were actually requested in one mission. The damage is not the wasted requests: the
+    # malformed variants OUTNUMBERED the well-formed root-router URLs, so `/index.php?page=<x>.php`
+    # -- the application's real entry point -- was crowded out of the form-discovery budget by
+    # `/includes/index.php?page=<x>.php`, and mutillidae's dns-lookup command injection was never
+    # handed to an engine. A key in the wrong namespace cost a CRITICAL finding.
+    #
+    # A URL has ONE query string. Two `?` is not a URL, whatever produced it, so the boundary is
+    # the honest place to say no -- rejecting here fixes every future writer as well as this one.
+    if v.count("?") > 1:
+        return ""
     if "://" in v:
         return v
     netloc = v.split("/", 1)[0]
