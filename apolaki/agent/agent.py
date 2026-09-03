@@ -3612,7 +3612,32 @@ class BBHAgent:
                 continue
             if not p.netloc:
                 continue
+            # Q-186. A ROUTE SELECTOR IS PART OF THE FORM'S ADDRESS, and dropping it merged every
+            # form on a router-style app into ONE node.
+            #
+            # MEASURED on a mutillidae mission: 47 route pages were probed and their forms captured
+            # correctly, then every one collapsed onto `mutillidae/index.php`. `_project_form_params`
+            # rebuilds recon["forms"] by grouping on this key, so the planner received a SINGLE form
+            # whose fields were the union of all 47 -- 52 field names, from `blog_entry` and
+            # `background_color` to `target_host` and `xml` -- with the bare router as its action.
+            # run_form_cmdi then POSTed 52 fields to `/index.php` with no `page` parameter, got the
+            # home page, and reported "no body command injection in the page's forms". Correctly.
+            #
+            # That is the FIFTH place this same query-dropping identity has appeared (Q-172, Q-174
+            # twice, Q-185, here), and it is the one that kept mutillidae's command injection hidden
+            # after the other four were fixed: the form was found, captured, and then dissolved into
+            # an aggregate that describes no page that exists.
+            #
+            # `surface._ROUTE_VALUE` is the single definition of "this value names a page", imported
+            # rather than restated. Only a route-shaped value earns identity, so an ordinary
+            # `?q=shoes` search form still merges by path exactly as before.
+            import surface as _surface_mod
+            from urllib.parse import parse_qsl as _pq
             ep_key = p.netloc + (p.path or "/")
+            for _k, _v in _pq(p.query or "", keep_blank_values=True):
+                if _surface_mod._ROUTE_VALUE.match(_v or ""):
+                    ep_key = "%s?%s=%s" % (ep_key, _k, _v)
+                    break
             eid = g.observe("endpoint", ep_key, label=(p.path or "/"), source="form-capture")
             hid = self._graph_host_node(g, act)
             if hid:
